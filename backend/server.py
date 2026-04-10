@@ -1688,8 +1688,10 @@ async def get_work_orders(request: Request, status: Optional[str] = None, produc
     for wo in work_orders:
         routing = await db.routings.find_one({"id": wo.get("routing_id")}, {"_id": 0})
         wo["routing"] = routing
-        if routing:
-            item = await db.items.find_one({"id": routing.get("item_id")}, {"_id": 0})
+        # Get item either from wo.item_id or from routing
+        item_id = wo.get("item_id") or (routing.get("item_id") if routing else None)
+        if item_id:
+            item = await db.items.find_one({"id": item_id}, {"_id": 0})
             wo["item"] = item
         prod_order = await db.production_orders.find_one({"id": wo.get("production_order_id")}, {"_id": 0})
         wo["production_order"] = prod_order
@@ -1729,39 +1731,232 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
     if not routing:
         raise HTTPException(status_code=404, detail="Routing not found")
     
-    # Generate WO number
-    count = await db.work_orders.count_documents({})
-    wo_number = f"WO-{str(count + 1).zfill(6)}"
+    # Get the item for this routing
+    item = await db.items.find_one({"id": routing.get("item_id")})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found for routing")
     
-    # Create operation statuses
-    operations_status = []
-    for op in routing.get("operations", []):
-        operations_status.append({
-            "sequence": op.get("sequence"),
-            "operation_name": op.get("operation_name"),
-            "work_center_id": op.get("work_center_id"),
+    created_work_orders = []
+    
+    # Helper function to create work order for an item
+    async def create_wo_for_item(item_id: str, qty: int, parent_wo_id: str = None):
+        # Find routing for this item
+        item_routing = await db.routings.find_one({"item_id": item_id, "status": "active"})
+        if not item_routing:
+            return None  # No routing, skip
+        
+        # Check current stock
+        item_doc = await db.items.find_one({"id": item_id})
+        if not item_doc:
+            return None
+        
+        current_stock = item_doc.get("current_stock", 0)
+        
+        # If sufficient stock available, don't create work order
+        if current_stock >= qty:
+            logger.info(f"Item {item_doc.get('part_number')} has sufficient stock ({current_stock} >= {qty}), skipping WO creation")
+            return None
+        
+        # Calculate quantity needed (total needed - available stock)
+        qty_to_manufacture = qty - current_stock
+        if qty_to_manufacture <= 0:
+            return None
+        
+        # Generate WO number
+        count = await db.work_orders.count_documents({})
+        wo_number = f"WO-{str(count + 1).zfill(6)}"
+        
+        # Create operation statuses
+        operations_status = []
+        for op in item_routing.get("operations", []):
+            operations_status.append({
+                "sequence": op.get("sequence"),
+                "operation_name": op.get("operation_name"),
+                "work_center_id": op.get("work_center_id"),
+                "status": "pending",
+                "quantity_completed": 0
+            })
+        
+        wo_doc = {
+            "id": str(uuid.uuid4()),
+            "wo_number": wo_number,
+            "production_order_id": wo_data.production_order_id,
+            "routing_id": item_routing.get("id"),
+            "item_id": item_id,
+            "quantity": qty_to_manufacture,
+            "quantity_completed": 0,
+            "scheduled_start": wo_data.scheduled_start,
+            "scheduled_end": wo_data.scheduled_end,
             "status": "pending",
-            "quantity_completed": 0
-        })
+            "operations_status": operations_status,
+            "parent_wo_id": parent_wo_id,
+            "notes": wo_data.notes if not parent_wo_id else f"Auto-created for sub-assembly",
+            "materials_consumed": False,
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"]
+        }
+        await db.work_orders.insert_one(wo_doc)
+        wo_doc.pop("_id", None)
+        
+        return wo_doc
     
-    wo_doc = {
-        "id": str(uuid.uuid4()),
-        "wo_number": wo_number,
-        "production_order_id": wo_data.production_order_id,
-        "routing_id": wo_data.routing_id,
-        "quantity": wo_data.quantity,
-        "quantity_completed": 0,
-        "scheduled_start": wo_data.scheduled_start,
-        "scheduled_end": wo_data.scheduled_end,
-        "status": "pending",  # pending, in_progress, completed, cancelled
-        "operations_status": operations_status,
-        "notes": wo_data.notes,
-        "created_at": datetime.now(timezone.utc),
-        "created_by": user["id"]
+    # Helper function to recursively create work orders for child items
+    async def create_child_work_orders(parent_item_id: str, parent_qty: int, parent_wo_id: str):
+        # Find BOM for this item
+        bom = await db.boms.find_one({"parent_item_id": parent_item_id, "status": "active"})
+        if not bom:
+            return
+        
+        for component in bom.get("components", []):
+            if component.get("is_alternate"):
+                continue  # Skip alternate components
+            
+            child_item_id = component.get("item_id")
+            child_qty = int(component.get("quantity", 1) * parent_qty)
+            
+            child_item = await db.items.find_one({"id": child_item_id})
+            if not child_item:
+                continue
+            
+            # Only create work orders for sub-assemblies or finished goods (items that can be manufactured)
+            if child_item.get("category") in ["sub_assembly", "finished_good"]:
+                # Check if this item has a routing (can be manufactured)
+                child_routing = await db.routings.find_one({"item_id": child_item_id, "status": "active"})
+                if child_routing:
+                    child_wo = await create_wo_for_item(child_item_id, child_qty, parent_wo_id)
+                    if child_wo:
+                        created_work_orders.append(child_wo)
+                        # Recursively create work orders for this child's children
+                        await create_child_work_orders(child_item_id, child_qty, child_wo["id"])
+    
+    # Create main work order for the FG/SA item
+    main_wo = await create_wo_for_item(routing.get("item_id"), wo_data.quantity, None)
+    if main_wo:
+        created_work_orders.insert(0, main_wo)
+        # Create work orders for child items
+        await create_child_work_orders(routing.get("item_id"), wo_data.quantity, main_wo["id"])
+    else:
+        # If main item has sufficient stock, just return message
+        return {"message": "Sufficient stock available, no work order needed", "work_orders": []}
+    
+    return {"message": f"Created {len(created_work_orders)} work order(s)", "work_orders": created_work_orders}
+
+@work_orders_router.post("/{wo_id}/start")
+async def start_work_order(wo_id: str, request: Request):
+    """Start a work order - consumes required materials from inventory"""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    wo = await db.work_orders.find_one({"id": wo_id})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    
+    if wo.get("status") != "pending":
+        raise HTTPException(status_code=400, detail="Work order is not in pending status")
+    
+    if wo.get("materials_consumed"):
+        raise HTTPException(status_code=400, detail="Materials already consumed for this work order")
+    
+    # Get the routing and item
+    routing = await db.routings.find_one({"id": wo.get("routing_id")})
+    if not routing:
+        raise HTTPException(status_code=404, detail="Routing not found")
+    
+    item_id = routing.get("item_id")
+    
+    # Find BOM for this item to get required materials
+    bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"})
+    
+    consumed_materials = []
+    insufficient_materials = []
+    
+    if bom:
+        wo_qty = wo.get("quantity", 1)
+        
+        for component in bom.get("components", []):
+            if component.get("is_alternate"):
+                continue
+            
+            comp_item_id = component.get("item_id")
+            comp_item = await db.items.find_one({"id": comp_item_id})
+            if not comp_item:
+                continue
+            
+            # Only consume raw materials and components (not sub-assemblies that have their own WO)
+            if comp_item.get("category") in ["raw_material", "component"]:
+                required_qty = int(component.get("quantity", 1) * wo_qty)
+                current_stock = comp_item.get("current_stock", 0)
+                
+                if current_stock < required_qty:
+                    insufficient_materials.append({
+                        "item": comp_item.get("part_number"),
+                        "name": comp_item.get("name"),
+                        "required": required_qty,
+                        "available": current_stock
+                    })
+                else:
+                    # Consume the material
+                    new_stock = current_stock - required_qty
+                    
+                    # Create inventory transaction
+                    tx_doc = {
+                        "id": str(uuid.uuid4()),
+                        "item_id": comp_item_id,
+                        "transaction_type": "issue",
+                        "quantity": required_qty,
+                        "reference_type": "work_order",
+                        "reference_id": wo_id,
+                        "previous_stock": current_stock,
+                        "new_stock": new_stock,
+                        "notes": f"Consumed for WO {wo.get('wo_number')}",
+                        "created_at": datetime.now(timezone.utc),
+                        "created_by": user["id"]
+                    }
+                    await db.inventory_transactions.insert_one(tx_doc)
+                    
+                    # Update item stock
+                    await db.items.update_one(
+                        {"id": comp_item_id},
+                        {"$set": {"current_stock": new_stock}}
+                    )
+                    
+                    consumed_materials.append({
+                        "item": comp_item.get("part_number"),
+                        "name": comp_item.get("name"),
+                        "quantity": required_qty
+                    })
+    
+    if insufficient_materials:
+        return {
+            "success": False,
+            "message": "Insufficient materials to start work order",
+            "insufficient_materials": insufficient_materials
+        }
+    
+    # Update work order status to in_progress
+    operations = wo.get("operations_status", [])
+    if operations:
+        operations[0]["status"] = "in_progress"
+        operations[0]["actual_start"] = datetime.now(timezone.utc)
+    
+    await db.work_orders.update_one(
+        {"id": wo_id},
+        {"$set": {
+            "status": "in_progress",
+            "actual_start": datetime.now(timezone.utc),
+            "materials_consumed": True,
+            "operations_status": operations,
+            "updated_at": datetime.now(timezone.utc)
+        }}
+    )
+    
+    return {
+        "success": True,
+        "message": "Work order started, materials consumed",
+        "consumed_materials": consumed_materials,
+        "wo_number": wo.get("wo_number")
     }
-    await db.work_orders.insert_one(wo_doc)
-    wo_doc.pop("_id", None)
-    return wo_doc
 
 @work_orders_router.put("/{wo_id}")
 async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Request):
@@ -1769,17 +1964,62 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
     if user["role"] not in ["admin", "production_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
+    wo = await db.work_orders.find_one({"id": wo_id})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    
     update_data = {k: v for k, v in wo_data.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
     
-    update_data["updated_at"] = datetime.now(timezone.utc)
-    result = await db.work_orders.update_one({"id": wo_id}, {"$set": update_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Work order not found")
+    # If trying to change status to in_progress, redirect to start endpoint
+    if update_data.get("status") == "in_progress" and wo.get("status") == "pending":
+        raise HTTPException(
+            status_code=400, 
+            detail="Use POST /api/work-orders/{wo_id}/start to start a work order (this will consume materials)"
+        )
     
-    wo = await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
-    return wo
+    # If completing the work order, update finished goods stock
+    if update_data.get("status") == "completed" and wo.get("status") == "in_progress":
+        routing = await db.routings.find_one({"id": wo.get("routing_id")})
+        if routing:
+            item_id = routing.get("item_id")
+            item = await db.items.find_one({"id": item_id})
+            if item:
+                current_stock = item.get("current_stock", 0)
+                produced_qty = wo.get("quantity", 0)
+                new_stock = current_stock + produced_qty
+                
+                # Create inventory transaction for produced items
+                tx_doc = {
+                    "id": str(uuid.uuid4()),
+                    "item_id": item_id,
+                    "transaction_type": "receive",
+                    "quantity": produced_qty,
+                    "reference_type": "work_order",
+                    "reference_id": wo_id,
+                    "previous_stock": current_stock,
+                    "new_stock": new_stock,
+                    "notes": f"Produced from WO {wo.get('wo_number')}",
+                    "created_at": datetime.now(timezone.utc),
+                    "created_by": user["id"]
+                }
+                await db.inventory_transactions.insert_one(tx_doc)
+                
+                # Update item stock
+                await db.items.update_one(
+                    {"id": item_id},
+                    {"$set": {"current_stock": new_stock}}
+                )
+        
+        update_data["actual_end"] = datetime.now(timezone.utc)
+        update_data["quantity_completed"] = wo.get("quantity", 0)
+    
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    await db.work_orders.update_one({"id": wo_id}, {"$set": update_data})
+    
+    updated_wo = await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
+    return updated_wo
 
 @work_orders_router.put("/{wo_id}/operations/{sequence}")
 async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOrderOperationUpdate, request: Request):

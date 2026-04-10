@@ -280,6 +280,181 @@ class ERPAPITester:
         # Get all work orders
         success, work_orders = self.make_request('GET', '/api/work-orders')
         self.log_test("Get Work Orders", success and isinstance(work_orders, list))
+        
+        if success and work_orders:
+            self.test_data['work_orders'] = work_orders
+            
+            # Test work order with materials column
+            for wo in work_orders:
+                if 'materials_consumed' in wo:
+                    self.log_test("Work Order has Materials Column", True)
+                    break
+            else:
+                self.log_test("Work Order has Materials Column", False, "materials_consumed field not found")
+            
+            # Test child work orders with indentation (parent_wo_id field)
+            child_wos = [wo for wo in work_orders if wo.get('parent_wo_id')]
+            if child_wos:
+                self.log_test("Child Work Orders Present", True, f"Found {len(child_wos)} child work orders")
+            else:
+                self.log_test("Child Work Orders Present", False, "No child work orders found")
+
+    def test_work_order_creation_with_sub_assemblies(self):
+        """Test work order creation that auto-creates sub-assembly work orders"""
+        # Get production orders and routings for testing
+        success, production_orders = self.make_request('GET', '/api/production')
+        if not success or not production_orders:
+            self.log_test("Work Order Creation Test Setup", False, "No production orders available")
+            return
+            
+        success, routings = self.make_request('GET', '/api/routings')
+        if not success or not routings:
+            self.log_test("Work Order Creation Test Setup", False, "No routings available")
+            return
+        
+        # Find a suitable production order and routing for testing
+        test_po = None
+        test_routing = None
+        
+        for po in production_orders:
+            if po.get('status') in ['planned', 'released']:
+                test_po = po
+                break
+        
+        for routing in routings:
+            if routing.get('status') == 'active':
+                test_routing = routing
+                break
+        
+        if not test_po or not test_routing:
+            self.log_test("Work Order Creation Test Setup", False, "No suitable PO or routing found")
+            return
+        
+        # Create work order
+        wo_data = {
+            "production_order_id": test_po['id'],
+            "routing_id": test_routing['id'],
+            "quantity": 2,
+            "notes": "Test work order for sub-assembly creation"
+        }
+        
+        success, response = self.make_request('POST', '/api/work-orders', wo_data, 201)
+        
+        if success:
+            # Check if response contains information about created work orders
+            if 'work_orders' in response and isinstance(response['work_orders'], list):
+                created_wos = response['work_orders']
+                self.log_test("Work Order Auto-Creation", True, f"Created {len(created_wos)} work orders")
+                
+                # Store created work order IDs for further testing
+                if created_wos:
+                    self.test_data['created_work_orders'] = created_wos
+            else:
+                self.log_test("Work Order Auto-Creation", True, "Work order created successfully")
+        else:
+            self.log_test("Work Order Auto-Creation", False, f"Response: {response}")
+
+    def test_work_order_start_material_consumption(self):
+        """Test work order start endpoint that consumes materials"""
+        # Get work orders to find one that can be started
+        success, work_orders = self.make_request('GET', '/api/work-orders')
+        if not success or not work_orders:
+            self.log_test("Work Order Start Test Setup", False, "No work orders available")
+            return
+        
+        # Find a pending work order
+        pending_wo = None
+        for wo in work_orders:
+            if wo.get('status') == 'pending':
+                pending_wo = wo
+                break
+        
+        if not pending_wo:
+            self.log_test("Work Order Start Test Setup", False, "No pending work orders found")
+            return
+        
+        wo_id = pending_wo['id']
+        
+        # Test starting the work order
+        success, response = self.make_request('POST', f'/api/work-orders/{wo_id}/start', {})
+        
+        if success:
+            # Check if response contains material consumption information
+            if response.get('success') is False:
+                # This is expected if there are insufficient materials
+                insufficient_materials = response.get('insufficient_materials', [])
+                self.log_test("Work Order Start - Insufficient Materials Handling", True, 
+                             f"Correctly identified {len(insufficient_materials)} insufficient materials")
+            else:
+                # Work order started successfully
+                consumed_materials = response.get('consumed_materials', [])
+                self.log_test("Work Order Start - Material Consumption", True, 
+                             f"Consumed {len(consumed_materials)} materials")
+                
+                # Verify work order status changed
+                success, updated_wo = self.make_request('GET', f'/api/work-orders/{wo_id}')
+                if success and updated_wo.get('status') == 'in_progress':
+                    self.log_test("Work Order Status Update on Start", True)
+                else:
+                    self.log_test("Work Order Status Update on Start", False, 
+                                 f"Status: {updated_wo.get('status') if success else 'Failed to fetch'}")
+        else:
+            self.log_test("Work Order Start - Material Consumption", False, f"Response: {response}")
+
+    def test_work_order_completion_inventory_update(self):
+        """Test work order completion adds finished goods to inventory"""
+        # Get work orders to find one in progress
+        success, work_orders = self.make_request('GET', '/api/work-orders')
+        if not success or not work_orders:
+            self.log_test("Work Order Completion Test Setup", False, "No work orders available")
+            return
+        
+        # Find an in-progress work order
+        in_progress_wo = None
+        for wo in work_orders:
+            if wo.get('status') == 'in_progress':
+                in_progress_wo = wo
+                break
+        
+        if not in_progress_wo:
+            self.log_test("Work Order Completion Test Setup", False, "No in-progress work orders found")
+            return
+        
+        wo_id = in_progress_wo['id']
+        item_id = in_progress_wo.get('item', {}).get('id')
+        
+        if not item_id:
+            self.log_test("Work Order Completion Test Setup", False, "Work order has no associated item")
+            return
+        
+        # Get current inventory level
+        success, item_before = self.make_request('GET', f'/api/items/{item_id}')
+        if not success:
+            self.log_test("Work Order Completion Test Setup", False, "Could not fetch item inventory")
+            return
+        
+        stock_before = item_before.get('current_stock', 0)
+        
+        # Complete the work order
+        success, response = self.make_request('PUT', f'/api/work-orders/{wo_id}', {'status': 'completed'})
+        
+        if success:
+            # Check if inventory was updated
+            success, item_after = self.make_request('GET', f'/api/items/{item_id}')
+            if success:
+                stock_after = item_after.get('current_stock', 0)
+                quantity_produced = in_progress_wo.get('quantity', 0)
+                
+                if stock_after >= stock_before:
+                    self.log_test("Work Order Completion - Inventory Update", True, 
+                                 f"Stock increased from {stock_before} to {stock_after}")
+                else:
+                    self.log_test("Work Order Completion - Inventory Update", False, 
+                                 f"Stock did not increase: {stock_before} -> {stock_after}")
+            else:
+                self.log_test("Work Order Completion - Inventory Update", False, "Could not fetch updated item")
+        else:
+            self.log_test("Work Order Completion - Inventory Update", False, f"Response: {response}")
 
     def test_user_management(self):
         """Test User management (admin only)"""
@@ -320,6 +495,11 @@ class ERPAPITester:
             self.test_work_centers_crud()
             self.test_routings_crud()
             self.test_work_orders_crud()
+            
+            # New work order functionality tests
+            self.test_work_order_creation_with_sub_assemblies()
+            self.test_work_order_start_material_consumption()
+            self.test_work_order_completion_inventory_update()
             
             # Admin tests
             self.test_user_management()

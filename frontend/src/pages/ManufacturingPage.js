@@ -123,9 +123,18 @@ export default function ManufacturingPage() {
         scheduled_start: workOrderForm.scheduled_start ? new Date(workOrderForm.scheduled_start).toISOString() : null,
         scheduled_end: workOrderForm.scheduled_end ? new Date(workOrderForm.scheduled_end).toISOString() : null,
       };
-      await api.post('/api/work-orders', payload);
+      const { data } = await api.post('/api/work-orders', payload);
       setIsWorkOrderDialogOpen(false);
       resetWorkOrderForm();
+      
+      // Show message about created work orders
+      if (data.work_orders && data.work_orders.length > 0) {
+        const woList = data.work_orders.map(wo => `- ${wo.wo_number}`).join('\n');
+        alert(`${data.message}\n\nWork Orders Created:\n${woList}`);
+      } else {
+        alert(data.message || 'Work order processing complete');
+      }
+      
       fetchData();
     } catch (error) {
       console.error('Failed to save work order:', error);
@@ -135,7 +144,20 @@ export default function ManufacturingPage() {
 
   const handleUpdateWorkOrderStatus = async (woId, newStatus) => {
     try {
-      await api.put(`/api/work-orders/${woId}`, { status: newStatus });
+      if (newStatus === 'in_progress') {
+        // Use the start endpoint which consumes materials
+        const { data } = await api.post(`/api/work-orders/${woId}/start`);
+        if (data.success === false) {
+          alert(`Cannot start work order: ${data.message}\n\nInsufficient materials:\n${data.insufficient_materials?.map(m => `- ${m.item}: need ${m.required}, have ${m.available}`).join('\n')}`);
+          return;
+        }
+        alert(`Work order started!\n\nMaterials consumed:\n${data.consumed_materials?.map(m => `- ${m.item}: ${m.quantity}`).join('\n') || 'None'}`);
+      } else {
+        await api.put(`/api/work-orders/${woId}`, { status: newStatus });
+        if (newStatus === 'completed') {
+          alert('Work order completed! Finished goods added to inventory.');
+        }
+      }
       fetchData();
     } catch (error) {
       console.error('Failed to update work order:', error);
@@ -399,6 +421,7 @@ export default function ManufacturingPage() {
                       <th>Product</th>
                       <th>Routing</th>
                       <th className="text-right">Qty</th>
+                      <th>Materials</th>
                       <th>Status</th>
                       <th>Scheduled</th>
                       <th>Actions</th>
@@ -406,8 +429,11 @@ export default function ManufacturingPage() {
                   </thead>
                   <tbody>
                     {workOrders.map((wo) => (
-                      <tr key={wo.id} data-testid={`wo-row-${wo.id}`}>
-                        <td className="mono font-medium">{wo.wo_number}</td>
+                      <tr key={wo.id} className={wo.parent_wo_id ? 'bg-[#F9FAFB]' : ''} data-testid={`wo-row-${wo.id}`}>
+                        <td className="mono font-medium">
+                          {wo.parent_wo_id && <span className="text-[#9CA3AF] mr-1">└</span>}
+                          {wo.wo_number}
+                        </td>
                         <td>
                           <span className="mono text-sm">{wo.item?.part_number || '-'}</span>
                           <p className="text-xs text-[#4B5563]">{wo.item?.name || '-'}</p>
@@ -415,6 +441,11 @@ export default function ManufacturingPage() {
                         <td className="text-sm">{wo.routing?.name || '-'}</td>
                         <td className="text-right mono">
                           {wo.quantity_completed || 0}/{wo.quantity}
+                        </td>
+                        <td>
+                          <span className={`status-badge ${wo.materials_consumed ? 'bg-[#DEF7EC] text-[#03543F]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>
+                            {wo.materials_consumed ? 'Consumed' : 'Pending'}
+                          </span>
                         </td>
                         <td>
                           <div className="flex items-center space-x-1">
