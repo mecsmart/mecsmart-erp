@@ -2096,6 +2096,10 @@ api_router.include_router(work_centers_router)
 api_router.include_router(routings_router)
 api_router.include_router(work_orders_router)
 
+@api_router.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": "machinery-erp"}
+
 app.include_router(api_router)
 
 # CORS
@@ -2106,7 +2110,3 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@api_router.get("/health")
-async def health_check():
-    return {"status": "healthy", "service": "machinery-erp"}
