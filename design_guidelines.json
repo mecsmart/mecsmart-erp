@@ -1,0 +1,157 @@
+{
+  "theme": "Light",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "domain": "Manufacturing, Enterprise ERP",
+  "emotional_tone": "Authority, clarity, function-first, precision",
+  "typography": {
+    "fonts": {
+      "headings": "Chivo, sans-serif",
+      "body": "'IBM Plex Sans', sans-serif",
+      "mono": "'IBM Plex Mono', monospace",
+      "install_command": "Add these from Google Fonts in index.html or import them in css."
+    },
+    "hierarchy": {
+      "h1": "text-3xl sm:text-4xl font-bold tracking-tight",
+      "h2": "text-xl sm:text-2xl font-semibold tracking-tight",
+      "h3": "text-lg sm:text-xl font-semibold",
+      "h4": "text-base font-semibold",
+      "body": "text-sm leading-relaxed",
+      "labels": "text-xs font-semibold uppercase tracking-[0.2em]",
+      "data_values": "font-mono text-sm"
+    }
+  },
+  "colors": {
+    "background": {
+      "primary": "#FFFFFF",
+      "secondary": "#F3F4F6",
+      "tertiary": "#E5E7EB"
+    },
+    "text": {
+      "primary": "#111827",
+      "secondary": "#4B5563",
+      "tertiary": "#9CA3AF",
+      "inverse": "#FFFFFF"
+    },
+    "border": {
+      "default": "#E5E7EB",
+      "focus": "#1D3557"
+    },
+    "brand": {
+      "primary": "#1D3557",
+      "primary_hover": "#2A4B7C",
+      "secondary": "#457B9D"
+    },
+    "semantic": {
+      "success": {
+        "bg": "#DEF7EC",
+        "text": "#03543F",
+        "border": "#31C48D"
+      },
+      "warning": {
+        "bg": "#FDF6B2",
+        "text": "#723B13",
+        "border": "#E3A008"
+      },
+      "danger": {
+        "bg": "#FDE8E8",
+        "text": "#9B1C1C",
+        "border": "#F98080"
+      },
+      "info": {
+        "bg": "#E1EFFE",
+        "text": "#1E429F",
+        "border": "#76A9FA"
+      }
+    }
+  },
+  "spacing_and_layout": {
+    "philosophy": "Control Room Grid. High density but high legibility through strict alignment.",
+    "grid": {
+      "base": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4",
+      "gap": "gap-4 md:gap-6",
+      "widget_spans": {
+        "summary": "col-span-1",
+        "primary_data": "col-span-2 row-span-2 lg:col-span-3",
+        "feed_list": "col-span-1 row-span-2"
+      }
+    },
+    "container": "w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8",
+    "padding": {
+      "section": "py-6 md:py-8",
+      "card": "p-4 md:p-6"
+    },
+    "surfaces": "Grid Borders: Containers have 1px solid border (border-gray-200), flat background (bg-white), sharp corners (rounded-sm or rounded-none), NO heavy shadows (shadow-none or shadow-sm maximum).",
+    "alignment": "Left-align all data for scanability. Right-align numeric values in tables."
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#1D3557] text-white hover:bg-[#2A4B7C] font-semibold text-sm rounded-sm px-4 py-2 transition-colors",
+      "secondary": "bg-white text-[#111827] border border-[#E5E7EB] hover:bg-[#F3F4F6] font-semibold text-sm rounded-sm px-4 py-2 transition-colors",
+      "danger": "bg-[#9B1C1C] text-white hover:bg-[#771515] font-semibold text-sm rounded-sm px-4 py-2 transition-colors"
+    },
+    "cards": {
+      "base": "bg-white border border-[#E5E7EB] rounded-sm flex flex-col",
+      "header": "border-b border-[#E5E7EB] px-5 py-3",
+      "content": "px-5 py-4 flex-grow"
+    },
+    "tables": {
+      "container": "w-full overflow-x-auto border border-[#E5E7EB] rounded-sm",
+      "header": "bg-[#F3F4F6] text-[#4B5563] text-xs font-semibold uppercase tracking-wider text-left py-2 px-3 border-b border-[#E5E7EB]",
+      "row": "border-b border-[#E5E7EB] hover:bg-[#F9FAFB] transition-colors",
+      "cell": "py-2 px-3 text-sm text-[#111827]"
+    },
+    "forms": {
+      "input": "w-full border border-[#E5E7EB] rounded-sm px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#1D3557] focus:border-[#1D3557]",
+      "label": "block text-sm font-semibold text-[#111827] mb-1"
+    },
+    "navigation": {
+      "sidebar": "w-64 bg-[#111827] text-white h-screen fixed flex flex-col border-r border-[#1F2937]",
+      "sidebar_link": "flex items-center space-x-3 px-3 py-2 text-sm text-[#9CA3AF] hover:text-white hover:bg-[#1F2937] rounded-sm mx-2 transition-colors",
+      "sidebar_link_active": "flex items-center space-x-3 px-3 py-2 text-sm text-white bg-[#1F2937] rounded-sm mx-2",
+      "header": "h-14 bg-white border-b border-[#E5E7EB] flex items-center justify-between px-6 sticky top-0 z-50 ml-64"
+    },
+    "badges": {
+      "base": "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+    },
+    "testing_attributes": "All interactive elements MUST have data-testid attributes (e.g., data-testid='login-submit-btn', data-testid='bom-row-expand')."
+  },
+  "motion_and_interactions": {
+    "hover": "Subtle color transitions (duration-150 ease-in-out). Rows slightly darken on hover. No floating/lifting effects for cards (keep it flat/industrial).",
+    "focus": "High contrast focus rings required on all inputs (focus:ring-2 focus:ring-[#1D3557] focus:outline-none).",
+    "transitions": "Use transform, opacity for modals/dialogs. 200ms ease."
+  },
+  "icons_and_assets": {
+    "library": "lucide-react",
+    "sizing": "w-5 h-5 for sidebar, w-4 h-4 for buttons/inline",
+    "images": {
+      "login_background": {
+        "url": "https://images.unsplash.com/photo-1755377205428-ec47fcc8b9d2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHwzfHxpbmR1c3RyaWFsJTIwbWFjaGluZXJ5JTIwbWFudWZhY3R1cmluZyUyMGNsZWFufGVufDB8fHx8MTc3NTg1MzU4NHww&ixlib=rb-4.1.0&q=85",
+        "description": "Old industrial machinery with pipes, suitable for login page background overlay"
+      },
+      "avatar_admin": {
+        "url": "https://images.unsplash.com/photo-1758876204244-930299843f07?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMG9mZmljZSUyMHdvcmtlcnxlbnwwfHx8fDE3NzU4NTM1ODR8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Admin/Manager user profile image"
+      },
+      "avatar_quality_inspector": {
+        "url": "https://images.unsplash.com/photo-1758876017903-89981565c00b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwzfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMG9mZmljZSUyMHdvcmtlcnxlbnwwfHx8fDE3NzU4NTM1ODR8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Quality Inspector profile image"
+      },
+      "avatar_inventory_manager": {
+         "url": "https://images.unsplash.com/photo-1568585105565-e372998a195d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwyfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMG9mZmljZSUyMHdvcmtlcnxlbnwwfHx8fDE3NzU4NTM1ODR8MA&ixlib=rb-4.1.0&q=85",
+         "description": "Inventory Manager profile image"
+      }
+    }
+  },
+  "instructions_to_main_agent": [
+    "Use Shadcn UI extensively (Tables, Select, Dialogs, Badges, Tabs, Dropdowns).",
+    "Keep the design extremely flat and utilitarian. Do not use border-radius larger than 4px (rounded or rounded-sm).",
+    "Never use soft shadows for depth. Rely on 1px solid borders (border-[#E5E7EB]) to define structure.",
+    "Implement a persistent left sidebar layout for navigation and a top header for breadcrumbs/user actions.",
+    "For multi-level BOM, use indentation or a tree-table structure with Lucide ChevronRight/ChevronDown icons. Add mono font for part numbers.",
+    "MRP and BOM tables should be data-dense. Reduce standard padding in Shadcn Table cells (e.g., use py-2 px-3 instead of standard).",
+    "Quality checklists should visually stand out. Use strict Green (Pass) / Red (Fail) semantic colors.",
+    "Ensure all fonts are imported into index.css or tailwind config (Chivo, IBM Plex Sans, IBM Plex Mono).",
+    "Create realistic mock data for BOMs (e.g., 'Hydraulic Pump Assembly', 'O-Rings', 'Steel Casing') to showcase multi-level depth.",
+    "Do NOT use glassmorphism anywhere. Solid white or solid grey backgrounds only."
+  ]
+}
