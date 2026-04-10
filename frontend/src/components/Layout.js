@@ -14,7 +14,10 @@ import {
   Menu,
   X,
   User,
-  ChevronDown
+  ChevronDown,
+  Truck,
+  ShoppingCart,
+  Settings2
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -29,9 +32,13 @@ const navigation = [
   { name: 'Items & Parts', href: '/items', icon: Package },
   { name: 'Bill of Materials', href: '/bom', icon: FileStack },
   { name: 'MRP', href: '/mrp', icon: Calculator },
-  { name: 'Production', href: '/production', icon: Factory },
+  { name: 'Production Orders', href: '/production', icon: Factory },
+  { name: 'Manufacturing', href: '/manufacturing', icon: Settings2 },
   { name: 'Quality', href: '/quality', icon: ClipboardCheck },
   { name: 'Inventory', href: '/inventory', icon: Warehouse },
+  { name: 'Suppliers', href: '/suppliers', icon: Truck },
+  { name: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart },
+  { name: 'Stores', href: '/warehouses', icon: Warehouse },
 ];
 
 export default function Layout() {
@@ -143,19 +150,25 @@ export default function Layout() {
             </span>
 
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex items-center space-x-2 p-2 rounded-sm hover:bg-[#F3F4F6] transition-colors" data-testid="user-menu-btn">
-                <div className="w-8 h-8 rounded-full bg-[#1D3557] flex items-center justify-center">
-                  <User className="w-4 h-4 text-white" />
-                </div>
-                <ChevronDown className="w-4 h-4 text-[#4B5563]" />
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center space-x-2 p-2 rounded-sm hover:bg-[#F3F4F6] transition-colors" data-testid="user-menu-btn">
+                  <div className="w-8 h-8 rounded-full bg-[#1D3557] flex items-center justify-center">
+                    <User className="w-4 h-4 text-white" />
+                  </div>
+                  <ChevronDown className="w-4 h-4 text-[#4B5563]" />
+                </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 <div className="px-3 py-2">
-                  <p className="text-sm font-medium text-[#111827]">{user?.name}</p>
-                  <p className="text-xs text-[#4B5563]">{user?.email}</p>
+                  <p className="text-sm font-medium text-[#111827]" data-testid="user-name-display">{user?.name}</p>
+                  <p className="text-xs text-[#4B5563]" data-testid="user-email-display">{user?.email}</p>
                 </div>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="text-[#9B1C1C] cursor-pointer" data-testid="logout-btn">
+                <DropdownMenuItem 
+                  onClick={handleLogout} 
+                  className="text-[#9B1C1C] cursor-pointer" 
+                  data-testid="logout-menu-item"
+                >
                   <LogOut className="w-4 h-4 mr-2" />
                   Sign Out
                 </DropdownMenuItem>

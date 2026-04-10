@@ -1,0 +1,846 @@
+import React, { useState, useEffect } from 'react';
+import { api } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
+import { 
+  Plus, 
+  Settings2, 
+  Edit2, 
+  Play,
+  CheckCircle2,
+  Clock,
+  AlertCircle
+} from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+
+export default function ManufacturingPage() {
+  const { user } = useAuth();
+  const [workCenters, setWorkCenters] = useState([]);
+  const [routings, setRoutings] = useState([]);
+  const [workOrders, setWorkOrders] = useState([]);
+  const [productionOrders, setProductionOrders] = useState([]);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('work-orders');
+  
+  const [isWorkCenterDialogOpen, setIsWorkCenterDialogOpen] = useState(false);
+  const [isRoutingDialogOpen, setIsRoutingDialogOpen] = useState(false);
+  const [isWorkOrderDialogOpen, setIsWorkOrderDialogOpen] = useState(false);
+  const [editingWorkCenter, setEditingWorkCenter] = useState(null);
+  
+  const [workCenterForm, setWorkCenterForm] = useState({
+    code: '',
+    name: '',
+    description: '',
+    hourly_rate: 0,
+    capacity_per_hour: 1,
+    status: 'active',
+  });
+  
+  const [routingForm, setRoutingForm] = useState({
+    item_id: '',
+    name: '',
+    description: '',
+    revision: 'A',
+    status: 'active',
+    operations: [],
+  });
+  
+  const [workOrderForm, setWorkOrderForm] = useState({
+    production_order_id: '',
+    routing_id: '',
+    quantity: 1,
+    scheduled_start: '',
+    scheduled_end: '',
+    notes: '',
+  });
+
+  const canEdit = ['admin', 'production_manager'].includes(user?.role);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [wcRes, routingsRes, woRes, poRes, itemsRes] = await Promise.all([
+        api.get('/api/work-centers'),
+        api.get('/api/routings'),
+        api.get('/api/work-orders'),
+        api.get('/api/production'),
+        api.get('/api/items'),
+      ]);
+      setWorkCenters(wcRes.data);
+      setRoutings(routingsRes.data);
+      setWorkOrders(woRes.data);
+      setProductionOrders(poRes.data);
+      setItems(itemsRes.data);
+    } catch (error) {
+      console.error('Failed to fetch data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleWorkCenterSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingWorkCenter) {
+        await api.put(`/api/work-centers/${editingWorkCenter.id}`, workCenterForm);
+      } else {
+        await api.post('/api/work-centers', workCenterForm);
+      }
+      setIsWorkCenterDialogOpen(false);
+      setEditingWorkCenter(null);
+      resetWorkCenterForm();
+      fetchData();
+    } catch (error) {
+      console.error('Failed to save work center:', error);
+      alert(error.response?.data?.detail || 'Failed to save work center');
+    }
+  };
+
+  const handleRoutingSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await api.post('/api/routings', routingForm);
+      setIsRoutingDialogOpen(false);
+      resetRoutingForm();
+      fetchData();
+    } catch (error) {
+      console.error('Failed to save routing:', error);
+      alert(error.response?.data?.detail || 'Failed to save routing');
+    }
+  };
+
+  const handleWorkOrderSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        ...workOrderForm,
+        scheduled_start: workOrderForm.scheduled_start ? new Date(workOrderForm.scheduled_start).toISOString() : null,
+        scheduled_end: workOrderForm.scheduled_end ? new Date(workOrderForm.scheduled_end).toISOString() : null,
+      };
+      await api.post('/api/work-orders', payload);
+      setIsWorkOrderDialogOpen(false);
+      resetWorkOrderForm();
+      fetchData();
+    } catch (error) {
+      console.error('Failed to save work order:', error);
+      alert(error.response?.data?.detail || 'Failed to save work order');
+    }
+  };
+
+  const handleUpdateWorkOrderStatus = async (woId, newStatus) => {
+    try {
+      await api.put(`/api/work-orders/${woId}`, { status: newStatus });
+      fetchData();
+    } catch (error) {
+      console.error('Failed to update work order:', error);
+      alert(error.response?.data?.detail || 'Failed to update work order');
+    }
+  };
+
+  const handleEditWorkCenter = (wc) => {
+    setEditingWorkCenter(wc);
+    setWorkCenterForm({
+      code: wc.code,
+      name: wc.name,
+      description: wc.description || '',
+      hourly_rate: wc.hourly_rate || 0,
+      capacity_per_hour: wc.capacity_per_hour || 1,
+      status: wc.status || 'active',
+    });
+    setIsWorkCenterDialogOpen(true);
+  };
+
+  const addOperation = () => {
+    setRoutingForm({
+      ...routingForm,
+      operations: [...routingForm.operations, {
+        sequence: (routingForm.operations.length + 1) * 10,
+        work_center_id: '',
+        operation_name: '',
+        description: '',
+        setup_time_minutes: 0,
+        run_time_minutes: 0,
+      }],
+    });
+  };
+
+  const removeOperation = (index) => {
+    setRoutingForm({
+      ...routingForm,
+      operations: routingForm.operations.filter((_, i) => i !== index),
+    });
+  };
+
+  const updateOperation = (index, field, value) => {
+    const newOps = [...routingForm.operations];
+    newOps[index] = { ...newOps[index], [field]: value };
+    setRoutingForm({ ...routingForm, operations: newOps });
+  };
+
+  const resetWorkCenterForm = () => {
+    setWorkCenterForm({
+      code: '',
+      name: '',
+      description: '',
+      hourly_rate: 0,
+      capacity_per_hour: 1,
+      status: 'active',
+    });
+  };
+
+  const resetRoutingForm = () => {
+    setRoutingForm({
+      item_id: '',
+      name: '',
+      description: '',
+      revision: 'A',
+      status: 'active',
+      operations: [],
+    });
+  };
+
+  const resetWorkOrderForm = () => {
+    setWorkOrderForm({
+      production_order_id: '',
+      routing_id: '',
+      quantity: 1,
+      scheduled_start: '',
+      scheduled_end: '',
+      notes: '',
+    });
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'completed': return <CheckCircle2 className="w-4 h-4 text-[#03543F]" />;
+      case 'in_progress': return <Play className="w-4 h-4 text-[#1E429F]" />;
+      case 'pending': return <Clock className="w-4 h-4 text-[#723B13]" />;
+      default: return <AlertCircle className="w-4 h-4 text-[#4B5563]" />;
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'completed': return 'bg-[#DEF7EC] text-[#03543F]';
+      case 'in_progress': return 'bg-[#E1EFFE] text-[#1E429F]';
+      case 'pending': return 'bg-[#FDF6B2] text-[#723B13]';
+      case 'cancelled': return 'bg-[#FDE8E8] text-[#9B1C1C]';
+      default: return 'bg-[#F3F4F6] text-[#4B5563]';
+    }
+  };
+
+  return (
+    <div className="space-y-6" data-testid="manufacturing-page">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Manufacturing</h1>
+          <p className="text-sm text-[#4B5563]">Work centers, routings, and work order tracking</p>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <TabsList className="bg-[#F3F4F6] p-1 rounded-sm">
+          <TabsTrigger 
+            value="work-orders" 
+            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
+            data-testid="tab-work-orders"
+          >
+            Work Orders
+          </TabsTrigger>
+          <TabsTrigger 
+            value="routings" 
+            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
+            data-testid="tab-routings"
+          >
+            Routings
+          </TabsTrigger>
+          <TabsTrigger 
+            value="work-centers" 
+            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
+            data-testid="tab-work-centers"
+          >
+            Work Centers
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Work Orders Tab */}
+        <TabsContent value="work-orders" className="mt-4">
+          <div className="flex justify-end mb-4">
+            {canEdit && (
+              <Dialog open={isWorkOrderDialogOpen} onOpenChange={setIsWorkOrderDialogOpen}>
+                <DialogTrigger asChild>
+                  <button className="btn-primary flex items-center space-x-2" data-testid="create-work-order-btn">
+                    <Plus className="w-4 h-4" />
+                    <span>Create Work Order</span>
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle className="font-[Chivo]">Create Work Order</DialogTitle>
+                  </DialogHeader>
+                  <form onSubmit={handleWorkOrderSubmit} className="space-y-4 mt-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Production Order *</label>
+                      <Select value={workOrderForm.production_order_id} onValueChange={(v) => setWorkOrderForm({ ...workOrderForm, production_order_id: v })}>
+                        <SelectTrigger data-testid="wo-production-order-select">
+                          <SelectValue placeholder="Select production order" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {productionOrders.filter(po => po.status !== 'completed' && po.status !== 'cancelled').map((po) => (
+                            <SelectItem key={po.id} value={po.id}>
+                              {po.order_number} - {po.item?.name || 'Unknown'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Routing *</label>
+                      <Select value={workOrderForm.routing_id} onValueChange={(v) => setWorkOrderForm({ ...workOrderForm, routing_id: v })}>
+                        <SelectTrigger data-testid="wo-routing-select">
+                          <SelectValue placeholder="Select routing" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {routings.filter(r => r.status === 'active').map((routing) => (
+                            <SelectItem key={routing.id} value={routing.id}>
+                              {routing.item?.part_number} - {routing.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={workOrderForm.quantity}
+                        onChange={(e) => setWorkOrderForm({ ...workOrderForm, quantity: parseInt(e.target.value) || 1 })}
+                        className="input-field mono"
+                        required
+                        data-testid="wo-quantity-input"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-[#111827] mb-1">Scheduled Start</label>
+                        <input
+                          type="datetime-local"
+                          value={workOrderForm.scheduled_start}
+                          onChange={(e) => setWorkOrderForm({ ...workOrderForm, scheduled_start: e.target.value })}
+                          className="input-field"
+                          data-testid="wo-start-input"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-[#111827] mb-1">Scheduled End</label>
+                        <input
+                          type="datetime-local"
+                          value={workOrderForm.scheduled_end}
+                          onChange={(e) => setWorkOrderForm({ ...workOrderForm, scheduled_end: e.target.value })}
+                          className="input-field"
+                          data-testid="wo-end-input"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Notes</label>
+                      <textarea
+                        value={workOrderForm.notes}
+                        onChange={(e) => setWorkOrderForm({ ...workOrderForm, notes: e.target.value })}
+                        className="input-field"
+                        rows={2}
+                        placeholder="Work order notes..."
+                        data-testid="wo-notes-input"
+                      />
+                    </div>
+
+                    <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
+                      <button type="button" onClick={() => setIsWorkOrderDialogOpen(false)} className="btn-secondary">
+                        Cancel
+                      </button>
+                      <button type="submit" className="btn-primary" data-testid="wo-save-btn">
+                        Create Work Order
+                      </button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            )}
+          </div>
+
+          <div className="card-flat overflow-hidden">
+            {loading ? (
+              <div className="flex items-center justify-center h-48">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div>
+              </div>
+            ) : workOrders.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
+                <Settings2 className="w-12 h-12 mb-2 text-[#9CA3AF]" />
+                <p>No work orders found</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full data-table" data-testid="work-orders-table">
+                  <thead>
+                    <tr>
+                      <th>WO Number</th>
+                      <th>Product</th>
+                      <th>Routing</th>
+                      <th className="text-right">Qty</th>
+                      <th>Status</th>
+                      <th>Scheduled</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {workOrders.map((wo) => (
+                      <tr key={wo.id} data-testid={`wo-row-${wo.id}`}>
+                        <td className="mono font-medium">{wo.wo_number}</td>
+                        <td>
+                          <span className="mono text-sm">{wo.item?.part_number || '-'}</span>
+                          <p className="text-xs text-[#4B5563]">{wo.item?.name || '-'}</p>
+                        </td>
+                        <td className="text-sm">{wo.routing?.name || '-'}</td>
+                        <td className="text-right mono">
+                          {wo.quantity_completed || 0}/{wo.quantity}
+                        </td>
+                        <td>
+                          <div className="flex items-center space-x-1">
+                            {getStatusIcon(wo.status)}
+                            <span className={`status-badge ${getStatusColor(wo.status)}`}>
+                              {wo.status?.replace('_', ' ')}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="text-sm text-[#4B5563]">
+                          {wo.scheduled_start ? new Date(wo.scheduled_start).toLocaleDateString() : '-'}
+                        </td>
+                        <td>
+                          {canEdit && wo.status === 'pending' && (
+                            <button
+                              onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')}
+                              className="btn-secondary text-xs flex items-center space-x-1"
+                              data-testid={`start-wo-${wo.id}`}
+                            >
+                              <Play className="w-3 h-3" />
+                              <span>Start</span>
+                            </button>
+                          )}
+                          {canEdit && wo.status === 'in_progress' && (
+                            <button
+                              onClick={() => handleUpdateWorkOrderStatus(wo.id, 'completed')}
+                              className="btn-secondary text-xs flex items-center space-x-1"
+                              data-testid={`complete-wo-${wo.id}`}
+                            >
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Complete</span>
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Routings Tab */}
+        <TabsContent value="routings" className="mt-4">
+          <div className="flex justify-end mb-4">
+            {canEdit && (
+              <Dialog open={isRoutingDialogOpen} onOpenChange={setIsRoutingDialogOpen}>
+                <DialogTrigger asChild>
+                  <button className="btn-primary flex items-center space-x-2" data-testid="create-routing-btn">
+                    <Plus className="w-4 h-4" />
+                    <span>Create Routing</span>
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle className="font-[Chivo]">Create Routing</DialogTitle>
+                  </DialogHeader>
+                  <form onSubmit={handleRoutingSubmit} className="space-y-4 mt-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-[#111827] mb-1">Item *</label>
+                        <Select value={routingForm.item_id} onValueChange={(v) => setRoutingForm({ ...routingForm, item_id: v })}>
+                          <SelectTrigger data-testid="routing-item-select">
+                            <SelectValue placeholder="Select item" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {items.filter(i => ['sub_assembly', 'finished_good'].includes(i.category)).map((item) => (
+                              <SelectItem key={item.id} value={item.id}>
+                                {item.part_number} - {item.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-[#111827] mb-1">Name *</label>
+                        <input
+                          type="text"
+                          value={routingForm.name}
+                          onChange={(e) => setRoutingForm({ ...routingForm, name: e.target.value })}
+                          className="input-field"
+                          placeholder="Product Assembly Routing"
+                          required
+                          data-testid="routing-name-input"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-[#111827] mb-1">Revision</label>
+                        <input
+                          type="text"
+                          value={routingForm.revision}
+                          onChange={(e) => setRoutingForm({ ...routingForm, revision: e.target.value })}
+                          className="input-field mono"
+                          placeholder="A"
+                          data-testid="routing-revision-input"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-[#111827] mb-1">Status</label>
+                        <Select value={routingForm.status} onValueChange={(v) => setRoutingForm({ ...routingForm, status: v })}>
+                          <SelectTrigger data-testid="routing-status-select">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="active">Active</SelectItem>
+                            <SelectItem value="draft">Draft</SelectItem>
+                            <SelectItem value="obsolete">Obsolete</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* Operations */}
+                    <div className="border-t border-[#E5E7EB] pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <label className="text-sm font-semibold text-[#111827]">Operations</label>
+                        <button
+                          type="button"
+                          onClick={addOperation}
+                          className="btn-secondary text-xs flex items-center space-x-1"
+                          data-testid="add-operation-btn"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Add Operation</span>
+                        </button>
+                      </div>
+
+                      {routingForm.operations.length === 0 ? (
+                        <div className="text-center py-6 text-[#4B5563] bg-[#F3F4F6] rounded-sm">
+                          <Settings2 className="w-8 h-8 mx-auto mb-2 text-[#9CA3AF]" />
+                          <p className="text-sm">No operations added yet</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {routingForm.operations.map((op, index) => (
+                            <div key={index} className="p-3 bg-[#F3F4F6] rounded-sm space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-medium">Operation {op.sequence}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeOperation(index)}
+                                  className="text-[#9B1C1C] text-xs"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <Select value={op.work_center_id} onValueChange={(v) => updateOperation(index, 'work_center_id', v)}>
+                                  <SelectTrigger className="bg-white">
+                                    <SelectValue placeholder="Work Center" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {workCenters.map((wc) => (
+                                      <SelectItem key={wc.id} value={wc.id}>{wc.code} - {wc.name}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <input
+                                  type="text"
+                                  value={op.operation_name}
+                                  onChange={(e) => updateOperation(index, 'operation_name', e.target.value)}
+                                  className="input-field bg-white"
+                                  placeholder="Operation name"
+                                />
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={op.setup_time_minutes}
+                                  onChange={(e) => updateOperation(index, 'setup_time_minutes', parseInt(e.target.value) || 0)}
+                                  className="input-field bg-white mono"
+                                  placeholder="Setup (min)"
+                                />
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={op.run_time_minutes}
+                                  onChange={(e) => updateOperation(index, 'run_time_minutes', parseInt(e.target.value) || 0)}
+                                  className="input-field bg-white mono"
+                                  placeholder="Run time (min)"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
+                      <button type="button" onClick={() => setIsRoutingDialogOpen(false)} className="btn-secondary">
+                        Cancel
+                      </button>
+                      <button type="submit" className="btn-primary" data-testid="routing-save-btn">
+                        Create Routing
+                      </button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            )}
+          </div>
+
+          <div className="card-flat overflow-hidden">
+            {loading ? (
+              <div className="flex items-center justify-center h-48">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div>
+              </div>
+            ) : routings.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
+                <Settings2 className="w-12 h-12 mb-2 text-[#9CA3AF]" />
+                <p>No routings found</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full data-table" data-testid="routings-table">
+                  <thead>
+                    <tr>
+                      <th>Item</th>
+                      <th>Routing Name</th>
+                      <th>Revision</th>
+                      <th>Operations</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {routings.map((routing) => (
+                      <tr key={routing.id} data-testid={`routing-row-${routing.id}`}>
+                        <td>
+                          <span className="mono text-sm">{routing.item?.part_number || '-'}</span>
+                          <p className="text-xs text-[#4B5563]">{routing.item?.name || '-'}</p>
+                        </td>
+                        <td className="font-medium">{routing.name}</td>
+                        <td className="mono">{routing.revision}</td>
+                        <td className="mono">{routing.operations?.length || 0}</td>
+                        <td>
+                          <span className={`status-badge status-${routing.status}`}>
+                            {routing.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Work Centers Tab */}
+        <TabsContent value="work-centers" className="mt-4">
+          <div className="flex justify-end mb-4">
+            {canEdit && (
+              <Dialog open={isWorkCenterDialogOpen} onOpenChange={(open) => {
+                setIsWorkCenterDialogOpen(open);
+                if (!open) {
+                  setEditingWorkCenter(null);
+                  resetWorkCenterForm();
+                }
+              }}>
+                <DialogTrigger asChild>
+                  <button className="btn-primary flex items-center space-x-2" data-testid="add-work-center-btn">
+                    <Plus className="w-4 h-4" />
+                    <span>Add Work Center</span>
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle className="font-[Chivo]">{editingWorkCenter ? 'Edit Work Center' : 'Add Work Center'}</DialogTitle>
+                  </DialogHeader>
+                  <form onSubmit={handleWorkCenterSubmit} className="space-y-4 mt-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Code *</label>
+                      <input
+                        type="text"
+                        value={workCenterForm.code}
+                        onChange={(e) => setWorkCenterForm({ ...workCenterForm, code: e.target.value })}
+                        className="input-field mono"
+                        placeholder="WC-001"
+                        required
+                        disabled={!!editingWorkCenter}
+                        data-testid="wc-code-input"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Name *</label>
+                      <input
+                        type="text"
+                        value={workCenterForm.name}
+                        onChange={(e) => setWorkCenterForm({ ...workCenterForm, name: e.target.value })}
+                        className="input-field"
+                        placeholder="Welding Bay"
+                        required
+                        data-testid="wc-name-input"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Description</label>
+                      <textarea
+                        value={workCenterForm.description}
+                        onChange={(e) => setWorkCenterForm({ ...workCenterForm, description: e.target.value })}
+                        className="input-field"
+                        rows={2}
+                        placeholder="Work center description..."
+                        data-testid="wc-description-input"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-[#111827] mb-1">Hourly Rate ($)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={workCenterForm.hourly_rate}
+                          onChange={(e) => setWorkCenterForm({ ...workCenterForm, hourly_rate: parseFloat(e.target.value) || 0 })}
+                          className="input-field mono"
+                          data-testid="wc-rate-input"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-[#111827] mb-1">Capacity/Hour</label>
+                        <input
+                          type="number"
+                          min="0.1"
+                          step="0.1"
+                          value={workCenterForm.capacity_per_hour}
+                          onChange={(e) => setWorkCenterForm({ ...workCenterForm, capacity_per_hour: parseFloat(e.target.value) || 1 })}
+                          className="input-field mono"
+                          data-testid="wc-capacity-input"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Status</label>
+                      <Select value={workCenterForm.status} onValueChange={(v) => setWorkCenterForm({ ...workCenterForm, status: v })}>
+                        <SelectTrigger data-testid="wc-status-select">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="active">Active</SelectItem>
+                          <SelectItem value="inactive">Inactive</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
+                      <button type="button" onClick={() => setIsWorkCenterDialogOpen(false)} className="btn-secondary">
+                        Cancel
+                      </button>
+                      <button type="submit" className="btn-primary" data-testid="wc-save-btn">
+                        {editingWorkCenter ? 'Update' : 'Add'} Work Center
+                      </button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            )}
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center h-48">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div>
+            </div>
+          ) : workCenters.length === 0 ? (
+            <div className="card-flat flex flex-col items-center justify-center h-48 text-[#4B5563]">
+              <Settings2 className="w-12 h-12 mb-2 text-[#9CA3AF]" />
+              <p>No work centers found</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {workCenters.map((wc) => (
+                <div key={wc.id} className="card-flat p-4" data-testid={`wc-card-${wc.code}`}>
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center space-x-2">
+                      <Settings2 className="w-5 h-5 text-[#457B9D]" />
+                      <div>
+                        <span className="mono text-xs text-[#4B5563]">{wc.code}</span>
+                        <h3 className="text-lg font-semibold text-[#111827]">{wc.name}</h3>
+                      </div>
+                    </div>
+                    <span className={`status-badge ${wc.status === 'active' ? 'status-active' : 'status-obsolete'}`}>
+                      {wc.status}
+                    </span>
+                  </div>
+
+                  {wc.description && (
+                    <p className="text-sm text-[#4B5563] mb-3">{wc.description}</p>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="bg-[#F3F4F6] p-2 rounded-sm">
+                      <p className="text-[#4B5563]">Hourly Rate</p>
+                      <p className="mono font-medium">${wc.hourly_rate?.toFixed(2) || '0.00'}</p>
+                    </div>
+                    <div className="bg-[#F3F4F6] p-2 rounded-sm">
+                      <p className="text-[#4B5563]">Capacity/Hr</p>
+                      <p className="mono font-medium">{wc.capacity_per_hour || 1} units</p>
+                    </div>
+                  </div>
+
+                  {canEdit && (
+                    <div className="flex justify-end mt-3 pt-3 border-t border-[#E5E7EB]">
+                      <button
+                        onClick={() => handleEditWorkCenter(wc)}
+                        className="p-1 text-[#4B5563] hover:text-[#1D3557]"
+                        data-testid={`edit-wc-${wc.code}`}
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

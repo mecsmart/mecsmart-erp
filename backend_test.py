@@ -206,6 +206,81 @@ class ERPAPITester:
         success, orders = self.make_request('GET', '/api/production')
         self.log_test("Get Production Orders", success and isinstance(orders, list))
 
+    def test_suppliers_crud(self):
+        """Test Suppliers CRUD operations"""
+        # Get all suppliers
+        success, suppliers = self.make_request('GET', '/api/suppliers')
+        self.log_test("Get Suppliers", success and isinstance(suppliers, list))
+        
+        if success and suppliers:
+            self.test_data['sample_supplier'] = suppliers[0]
+            
+            # Test get single supplier
+            supplier_id = suppliers[0].get('id')
+            if supplier_id:
+                success, supplier = self.make_request('GET', f'/api/suppliers/{supplier_id}')
+                self.log_test("Get Single Supplier", success and supplier.get('id') == supplier_id)
+
+    def test_purchase_orders_crud(self):
+        """Test Purchase Orders CRUD operations"""
+        # Get all purchase orders
+        success, pos = self.make_request('GET', '/api/purchase-orders')
+        self.log_test("Get Purchase Orders", success and isinstance(pos, list))
+        
+        # Test MRP suggestions for PO creation
+        success, suggestions = self.make_request('GET', '/api/mrp/suggestions')
+        self.log_test("Get MRP Suggestions for PO", success and isinstance(suggestions, list))
+
+    def test_warehouses_crud(self):
+        """Test Warehouses CRUD operations"""
+        # Get all warehouses
+        success, warehouses = self.make_request('GET', '/api/warehouses')
+        self.log_test("Get Warehouses", success and isinstance(warehouses, list))
+        
+        if success and warehouses:
+            # Test warehouse stock
+            warehouse_id = warehouses[0].get('id')
+            if warehouse_id:
+                success, stock_data = self.make_request('GET', f'/api/warehouses/{warehouse_id}/stock')
+                has_stock_structure = 'warehouse' in stock_data and 'stock' in stock_data
+                self.log_test("Get Warehouse Stock", success and has_stock_structure)
+        
+        # Test transfer history
+        success, transfers = self.make_request('GET', '/api/warehouses/transfers/history')
+        self.log_test("Get Transfer History", success and isinstance(transfers, list))
+
+    def test_work_centers_crud(self):
+        """Test Work Centers CRUD operations"""
+        # Get all work centers
+        success, work_centers = self.make_request('GET', '/api/work-centers')
+        self.log_test("Get Work Centers", success and isinstance(work_centers, list))
+        
+        if success and work_centers:
+            # Test get single work center
+            wc_id = work_centers[0].get('id')
+            if wc_id:
+                success, wc = self.make_request('GET', f'/api/work-centers/{wc_id}')
+                self.log_test("Get Single Work Center", success and wc.get('id') == wc_id)
+
+    def test_routings_crud(self):
+        """Test Routings CRUD operations"""
+        # Get all routings
+        success, routings = self.make_request('GET', '/api/routings')
+        self.log_test("Get Routings", success and isinstance(routings, list))
+        
+        if success and routings:
+            # Test get single routing
+            routing_id = routings[0].get('id')
+            if routing_id:
+                success, routing = self.make_request('GET', f'/api/routings/{routing_id}')
+                self.log_test("Get Single Routing", success and routing.get('id') == routing_id)
+
+    def test_work_orders_crud(self):
+        """Test Work Orders CRUD operations"""
+        # Get all work orders
+        success, work_orders = self.make_request('GET', '/api/work-orders')
+        self.log_test("Get Work Orders", success and isinstance(work_orders, list))
+
     def test_user_management(self):
         """Test User management (admin only)"""
         success, users = self.make_request('GET', '/api/users')
@@ -230,13 +305,23 @@ class ERPAPITester:
             self.test_get_current_user()
             self.test_dashboard_stats()
             
-            # Module tests
+            # Core module tests
             self.test_items_crud()
             self.test_bom_operations()
             self.test_mrp_calculations()
             self.test_quality_operations()
             self.test_inventory_operations()
             self.test_production_orders()
+            
+            # New module tests (Procurement, Stores, Manufacturing)
+            self.test_suppliers_crud()
+            self.test_purchase_orders_crud()
+            self.test_warehouses_crud()
+            self.test_work_centers_crud()
+            self.test_routings_crud()
+            self.test_work_orders_crud()
+            
+            # Admin tests
             self.test_user_management()
             
             # Cleanup

@@ -39,6 +39,12 @@ inventory_router = APIRouter(prefix="/inventory")
 production_router = APIRouter(prefix="/production")
 users_router = APIRouter(prefix="/users")
 dashboard_router = APIRouter(prefix="/dashboard")
+suppliers_router = APIRouter(prefix="/suppliers")
+purchase_orders_router = APIRouter(prefix="/purchase-orders")
+warehouses_router = APIRouter(prefix="/warehouses")
+work_centers_router = APIRouter(prefix="/work-centers")
+routings_router = APIRouter(prefix="/routings")
+work_orders_router = APIRouter(prefix="/work-orders")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -149,6 +155,134 @@ class InventoryTransactionCreate(BaseModel):
     reference_type: Optional[str] = None  # production_order, purchase_order, adjustment
     reference_id: Optional[str] = None
     notes: Optional[str] = ""
+    from_warehouse_id: Optional[str] = None
+    to_warehouse_id: Optional[str] = None
+
+# ================== PROCUREMENT MODELS ==================
+
+class SupplierCreate(BaseModel):
+    code: str
+    name: str
+    contact_person: Optional[str] = ""
+    email: Optional[str] = ""
+    phone: Optional[str] = ""
+    address: Optional[str] = ""
+    payment_terms: Optional[str] = "Net 30"
+    lead_time_days: int = 7
+    rating: Optional[int] = 3  # 1-5 stars
+    status: str = "active"  # active, inactive
+
+class SupplierUpdate(BaseModel):
+    name: Optional[str] = None
+    contact_person: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    payment_terms: Optional[str] = None
+    lead_time_days: Optional[int] = None
+    rating: Optional[int] = None
+    status: Optional[str] = None
+
+class PurchaseOrderLineCreate(BaseModel):
+    item_id: str
+    quantity: int
+    unit_price: float
+    notes: Optional[str] = ""
+
+class PurchaseOrderCreate(BaseModel):
+    supplier_id: str
+    expected_date: datetime
+    lines: List[PurchaseOrderLineCreate]
+    notes: Optional[str] = ""
+
+class PurchaseOrderUpdate(BaseModel):
+    expected_date: Optional[datetime] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+# ================== STORES/WAREHOUSE MODELS ==================
+
+class WarehouseCreate(BaseModel):
+    code: str
+    name: str
+    location: Optional[str] = ""
+    is_default: bool = False
+    status: str = "active"
+
+class WarehouseUpdate(BaseModel):
+    name: Optional[str] = None
+    location: Optional[str] = None
+    is_default: Optional[bool] = None
+    status: Optional[str] = None
+
+class StockTransferCreate(BaseModel):
+    item_id: str
+    from_warehouse_id: str
+    to_warehouse_id: str
+    quantity: int
+    notes: Optional[str] = ""
+
+# ================== MANUFACTURING PROCESS MODELS ==================
+
+class WorkCenterCreate(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = ""
+    hourly_rate: float = 0.0
+    capacity_per_hour: float = 1.0
+    status: str = "active"
+
+class WorkCenterUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    hourly_rate: Optional[float] = None
+    capacity_per_hour: Optional[float] = None
+    status: Optional[str] = None
+
+class RoutingOperationCreate(BaseModel):
+    sequence: int
+    work_center_id: str
+    operation_name: str
+    description: Optional[str] = ""
+    setup_time_minutes: int = 0
+    run_time_minutes: int = 0
+
+class RoutingCreate(BaseModel):
+    item_id: str
+    name: str
+    description: Optional[str] = ""
+    revision: str = "A"
+    status: str = "active"
+    operations: List[RoutingOperationCreate] = []
+
+class RoutingUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    revision: Optional[str] = None
+    status: Optional[str] = None
+    operations: Optional[List[RoutingOperationCreate]] = None
+
+class WorkOrderCreate(BaseModel):
+    production_order_id: str
+    routing_id: str
+    quantity: int
+    scheduled_start: Optional[datetime] = None
+    scheduled_end: Optional[datetime] = None
+    notes: Optional[str] = ""
+
+class WorkOrderUpdate(BaseModel):
+    status: Optional[str] = None
+    actual_start: Optional[datetime] = None
+    actual_end: Optional[datetime] = None
+    quantity_completed: Optional[int] = None
+    notes: Optional[str] = None
+
+class WorkOrderOperationUpdate(BaseModel):
+    status: str  # pending, in_progress, completed
+    actual_start: Optional[datetime] = None
+    actual_end: Optional[datetime] = None
+    quantity_completed: Optional[int] = None
+    notes: Optional[str] = None
 
 # ================== PASSWORD UTILS ==================
 
@@ -338,7 +472,7 @@ async def get_item(item_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Item not found")
     return item
 
-@items_router.post("")
+@items_router.post("", status_code=201)
 async def create_item(item_data: ItemCreate, request: Request):
     user = await get_current_user(request)
     if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
@@ -992,6 +1126,707 @@ async def get_dashboard_stats(request: Request):
         "quality": quality_metrics
     }
 
+# ================== SUPPLIER ROUTES ==================
+
+@suppliers_router.get("")
+async def get_suppliers(request: Request, status: Optional[str] = None):
+    await get_current_user(request)
+    query = {}
+    if status:
+        query["status"] = status
+    suppliers = await db.suppliers.find(query, {"_id": 0}).to_list(1000)
+    return suppliers
+
+@suppliers_router.get("/{supplier_id}")
+async def get_supplier(supplier_id: str, request: Request):
+    await get_current_user(request)
+    supplier = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    return supplier
+
+@suppliers_router.post("", status_code=201)
+async def create_supplier(supplier_data: SupplierCreate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    existing = await db.suppliers.find_one({"code": supplier_data.code})
+    if existing:
+        raise HTTPException(status_code=400, detail="Supplier code already exists")
+    
+    supplier_doc = {
+        "id": str(uuid.uuid4()),
+        **supplier_data.model_dump(),
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.suppliers.insert_one(supplier_doc)
+    supplier_doc.pop("_id", None)
+    return supplier_doc
+
+@suppliers_router.put("/{supplier_id}")
+async def update_supplier(supplier_id: str, supplier_data: SupplierUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    update_data = {k: v for k, v in supplier_data.model_dump().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data to update")
+    
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    result = await db.suppliers.update_one({"id": supplier_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    
+    supplier = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0})
+    return supplier
+
+@suppliers_router.delete("/{supplier_id}")
+async def delete_supplier(supplier_id: str, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    result = await db.suppliers.delete_one({"id": supplier_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    return {"message": "Supplier deleted"}
+
+# ================== PURCHASE ORDER ROUTES ==================
+
+@purchase_orders_router.get("")
+async def get_purchase_orders(request: Request, status: Optional[str] = None, supplier_id: Optional[str] = None):
+    await get_current_user(request)
+    query = {}
+    if status:
+        query["status"] = status
+    if supplier_id:
+        query["supplier_id"] = supplier_id
+    
+    orders = await db.purchase_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    for order in orders:
+        supplier = await db.suppliers.find_one({"id": order.get("supplier_id")}, {"_id": 0})
+        order["supplier"] = supplier
+        # Enrich lines with item details
+        for line in order.get("lines", []):
+            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
+            line["item"] = item
+    return orders
+
+@purchase_orders_router.get("/{po_id}")
+async def get_purchase_order(po_id: str, request: Request):
+    await get_current_user(request)
+    order = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    
+    supplier = await db.suppliers.find_one({"id": order.get("supplier_id")}, {"_id": 0})
+    order["supplier"] = supplier
+    for line in order.get("lines", []):
+        item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
+        line["item"] = item
+    return order
+
+@purchase_orders_router.post("", status_code=201)
+async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    supplier = await db.suppliers.find_one({"id": po_data.supplier_id})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    
+    # Generate PO number
+    count = await db.purchase_orders.count_documents({})
+    po_number = f"PO-{str(count + 1).zfill(6)}"
+    
+    # Calculate totals
+    total_amount = sum(line.quantity * line.unit_price for line in po_data.lines)
+    
+    po_doc = {
+        "id": str(uuid.uuid4()),
+        "po_number": po_number,
+        "supplier_id": po_data.supplier_id,
+        "expected_date": po_data.expected_date,
+        "lines": [l.model_dump() for l in po_data.lines],
+        "total_amount": total_amount,
+        "status": "draft",  # draft, sent, partial, received, cancelled
+        "notes": po_data.notes,
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.purchase_orders.insert_one(po_doc)
+    po_doc.pop("_id", None)
+    return po_doc
+
+@purchase_orders_router.post("/from-mrp", status_code=201)
+async def create_po_from_mrp(supplier_id: str, item_ids: List[str], request: Request):
+    """Create PO from MRP suggestions"""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    supplier = await db.suppliers.find_one({"id": supplier_id})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    
+    lines = []
+    for item_id in item_ids:
+        item = await db.items.find_one({"id": item_id}, {"_id": 0})
+        if item:
+            suggested_qty = max(item.get("safety_stock", 0) * 2 - item.get("current_stock", 0), 1)
+            lines.append({
+                "item_id": item_id,
+                "quantity": suggested_qty,
+                "unit_price": item.get("unit_cost", 0),
+                "notes": ""
+            })
+    
+    if not lines:
+        raise HTTPException(status_code=400, detail="No valid items to order")
+    
+    count = await db.purchase_orders.count_documents({})
+    po_number = f"PO-{str(count + 1).zfill(6)}"
+    total_amount = sum(l["quantity"] * l["unit_price"] for l in lines)
+    
+    po_doc = {
+        "id": str(uuid.uuid4()),
+        "po_number": po_number,
+        "supplier_id": supplier_id,
+        "expected_date": datetime.now(timezone.utc) + timedelta(days=supplier.get("lead_time_days", 7)),
+        "lines": lines,
+        "total_amount": total_amount,
+        "status": "draft",
+        "notes": "Created from MRP suggestions",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.purchase_orders.insert_one(po_doc)
+    po_doc.pop("_id", None)
+    return po_doc
+
+@purchase_orders_router.put("/{po_id}")
+async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    update_data = {k: v for k, v in po_data.model_dump().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data to update")
+    
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    result = await db.purchase_orders.update_one({"id": po_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    return po
+
+@purchase_orders_router.post("/{po_id}/receive")
+async def receive_purchase_order(po_id: str, request: Request):
+    """Receive PO and update inventory"""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    po = await db.purchase_orders.find_one({"id": po_id})
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    
+    if po.get("status") == "received":
+        raise HTTPException(status_code=400, detail="PO already received")
+    
+    # Create inventory transactions for each line
+    for line in po.get("lines", []):
+        item = await db.items.find_one({"id": line.get("item_id")})
+        if item:
+            current_stock = item.get("current_stock", 0)
+            new_stock = current_stock + line.get("quantity", 0)
+            
+            tx_doc = {
+                "id": str(uuid.uuid4()),
+                "item_id": line.get("item_id"),
+                "transaction_type": "receive",
+                "quantity": line.get("quantity", 0),
+                "reference_type": "purchase_order",
+                "reference_id": po_id,
+                "previous_stock": current_stock,
+                "new_stock": new_stock,
+                "notes": f"Received from PO {po.get('po_number')}",
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"]
+            }
+            await db.inventory_transactions.insert_one(tx_doc)
+            await db.items.update_one({"id": line.get("item_id")}, {"$set": {"current_stock": new_stock}})
+    
+    await db.purchase_orders.update_one(
+        {"id": po_id},
+        {"$set": {"status": "received", "received_at": datetime.now(timezone.utc), "received_by": user["id"]}}
+    )
+    
+    return {"message": "Purchase order received successfully"}
+
+# ================== WAREHOUSE ROUTES ==================
+
+@warehouses_router.get("")
+async def get_warehouses(request: Request, status: Optional[str] = None):
+    await get_current_user(request)
+    query = {}
+    if status:
+        query["status"] = status
+    warehouses = await db.warehouses.find(query, {"_id": 0}).to_list(100)
+    return warehouses
+
+@warehouses_router.get("/{warehouse_id}")
+async def get_warehouse(warehouse_id: str, request: Request):
+    await get_current_user(request)
+    warehouse = await db.warehouses.find_one({"id": warehouse_id}, {"_id": 0})
+    if not warehouse:
+        raise HTTPException(status_code=404, detail="Warehouse not found")
+    return warehouse
+
+@warehouses_router.get("/{warehouse_id}/stock")
+async def get_warehouse_stock(warehouse_id: str, request: Request):
+    """Get stock levels for a specific warehouse"""
+    await get_current_user(request)
+    
+    warehouse = await db.warehouses.find_one({"id": warehouse_id}, {"_id": 0})
+    if not warehouse:
+        raise HTTPException(status_code=404, detail="Warehouse not found")
+    
+    stock = await db.warehouse_stock.find({"warehouse_id": warehouse_id}, {"_id": 0}).to_list(1000)
+    
+    for s in stock:
+        item = await db.items.find_one({"id": s.get("item_id")}, {"_id": 0})
+        s["item"] = item
+    
+    return {"warehouse": warehouse, "stock": stock}
+
+@warehouses_router.post("", status_code=201)
+async def create_warehouse(warehouse_data: WarehouseCreate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    existing = await db.warehouses.find_one({"code": warehouse_data.code})
+    if existing:
+        raise HTTPException(status_code=400, detail="Warehouse code already exists")
+    
+    # If this is default, unset other defaults
+    if warehouse_data.is_default:
+        await db.warehouses.update_many({}, {"$set": {"is_default": False}})
+    
+    warehouse_doc = {
+        "id": str(uuid.uuid4()),
+        **warehouse_data.model_dump(),
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.warehouses.insert_one(warehouse_doc)
+    warehouse_doc.pop("_id", None)
+    return warehouse_doc
+
+@warehouses_router.put("/{warehouse_id}")
+async def update_warehouse(warehouse_id: str, warehouse_data: WarehouseUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    update_data = {k: v for k, v in warehouse_data.model_dump().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data to update")
+    
+    # If setting as default, unset other defaults
+    if update_data.get("is_default"):
+        await db.warehouses.update_many({"id": {"$ne": warehouse_id}}, {"$set": {"is_default": False}})
+    
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    result = await db.warehouses.update_one({"id": warehouse_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Warehouse not found")
+    
+    warehouse = await db.warehouses.find_one({"id": warehouse_id}, {"_id": 0})
+    return warehouse
+
+@warehouses_router.post("/transfer", status_code=201)
+async def create_stock_transfer(transfer_data: StockTransferCreate, request: Request):
+    """Transfer stock between warehouses"""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    # Verify warehouses exist
+    from_wh = await db.warehouses.find_one({"id": transfer_data.from_warehouse_id})
+    to_wh = await db.warehouses.find_one({"id": transfer_data.to_warehouse_id})
+    if not from_wh or not to_wh:
+        raise HTTPException(status_code=404, detail="Warehouse not found")
+    
+    # Check stock in source warehouse
+    from_stock = await db.warehouse_stock.find_one({
+        "warehouse_id": transfer_data.from_warehouse_id,
+        "item_id": transfer_data.item_id
+    })
+    
+    if not from_stock or from_stock.get("quantity", 0) < transfer_data.quantity:
+        raise HTTPException(status_code=400, detail="Insufficient stock in source warehouse")
+    
+    # Update source warehouse stock
+    new_from_qty = from_stock.get("quantity", 0) - transfer_data.quantity
+    await db.warehouse_stock.update_one(
+        {"warehouse_id": transfer_data.from_warehouse_id, "item_id": transfer_data.item_id},
+        {"$set": {"quantity": new_from_qty, "updated_at": datetime.now(timezone.utc)}}
+    )
+    
+    # Update destination warehouse stock
+    to_stock = await db.warehouse_stock.find_one({
+        "warehouse_id": transfer_data.to_warehouse_id,
+        "item_id": transfer_data.item_id
+    })
+    
+    if to_stock:
+        new_to_qty = to_stock.get("quantity", 0) + transfer_data.quantity
+        await db.warehouse_stock.update_one(
+            {"warehouse_id": transfer_data.to_warehouse_id, "item_id": transfer_data.item_id},
+            {"$set": {"quantity": new_to_qty, "updated_at": datetime.now(timezone.utc)}}
+        )
+    else:
+        await db.warehouse_stock.insert_one({
+            "id": str(uuid.uuid4()),
+            "warehouse_id": transfer_data.to_warehouse_id,
+            "item_id": transfer_data.item_id,
+            "quantity": transfer_data.quantity,
+            "created_at": datetime.now(timezone.utc)
+        })
+    
+    # Create transfer record
+    transfer_doc = {
+        "id": str(uuid.uuid4()),
+        **transfer_data.model_dump(),
+        "status": "completed",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.stock_transfers.insert_one(transfer_doc)
+    transfer_doc.pop("_id", None)
+    return transfer_doc
+
+@warehouses_router.get("/transfers/history")
+async def get_transfer_history(request: Request, limit: int = 50):
+    await get_current_user(request)
+    transfers = await db.stock_transfers.find({}, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    
+    for t in transfers:
+        t["from_warehouse"] = await db.warehouses.find_one({"id": t.get("from_warehouse_id")}, {"_id": 0})
+        t["to_warehouse"] = await db.warehouses.find_one({"id": t.get("to_warehouse_id")}, {"_id": 0})
+        t["item"] = await db.items.find_one({"id": t.get("item_id")}, {"_id": 0})
+    
+    return transfers
+
+# ================== WORK CENTER ROUTES ==================
+
+@work_centers_router.get("")
+async def get_work_centers(request: Request, status: Optional[str] = None):
+    await get_current_user(request)
+    query = {}
+    if status:
+        query["status"] = status
+    work_centers = await db.work_centers.find(query, {"_id": 0}).to_list(100)
+    return work_centers
+
+@work_centers_router.get("/{wc_id}")
+async def get_work_center(wc_id: str, request: Request):
+    await get_current_user(request)
+    wc = await db.work_centers.find_one({"id": wc_id}, {"_id": 0})
+    if not wc:
+        raise HTTPException(status_code=404, detail="Work center not found")
+    return wc
+
+@work_centers_router.post("", status_code=201)
+async def create_work_center(wc_data: WorkCenterCreate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    existing = await db.work_centers.find_one({"code": wc_data.code})
+    if existing:
+        raise HTTPException(status_code=400, detail="Work center code already exists")
+    
+    wc_doc = {
+        "id": str(uuid.uuid4()),
+        **wc_data.model_dump(),
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.work_centers.insert_one(wc_doc)
+    wc_doc.pop("_id", None)
+    return wc_doc
+
+@work_centers_router.put("/{wc_id}")
+async def update_work_center(wc_id: str, wc_data: WorkCenterUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    update_data = {k: v for k, v in wc_data.model_dump().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data to update")
+    
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    result = await db.work_centers.update_one({"id": wc_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Work center not found")
+    
+    wc = await db.work_centers.find_one({"id": wc_id}, {"_id": 0})
+    return wc
+
+# ================== ROUTING ROUTES ==================
+
+@routings_router.get("")
+async def get_routings(request: Request, status: Optional[str] = None, item_id: Optional[str] = None):
+    await get_current_user(request)
+    query = {}
+    if status:
+        query["status"] = status
+    if item_id:
+        query["item_id"] = item_id
+    
+    routings = await db.routings.find(query, {"_id": 0}).to_list(1000)
+    
+    for routing in routings:
+        item = await db.items.find_one({"id": routing.get("item_id")}, {"_id": 0})
+        routing["item"] = item
+        # Enrich operations with work center details
+        for op in routing.get("operations", []):
+            wc = await db.work_centers.find_one({"id": op.get("work_center_id")}, {"_id": 0})
+            op["work_center"] = wc
+    
+    return routings
+
+@routings_router.get("/{routing_id}")
+async def get_routing(routing_id: str, request: Request):
+    await get_current_user(request)
+    routing = await db.routings.find_one({"id": routing_id}, {"_id": 0})
+    if not routing:
+        raise HTTPException(status_code=404, detail="Routing not found")
+    
+    item = await db.items.find_one({"id": routing.get("item_id")}, {"_id": 0})
+    routing["item"] = item
+    for op in routing.get("operations", []):
+        wc = await db.work_centers.find_one({"id": op.get("work_center_id")}, {"_id": 0})
+        op["work_center"] = wc
+    
+    return routing
+
+@routings_router.post("", status_code=201)
+async def create_routing(routing_data: RoutingCreate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    item = await db.items.find_one({"id": routing_data.item_id})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    routing_doc = {
+        "id": str(uuid.uuid4()),
+        "item_id": routing_data.item_id,
+        "name": routing_data.name,
+        "description": routing_data.description,
+        "revision": routing_data.revision,
+        "status": routing_data.status,
+        "operations": [op.model_dump() for op in routing_data.operations],
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.routings.insert_one(routing_doc)
+    routing_doc.pop("_id", None)
+    return routing_doc
+
+@routings_router.put("/{routing_id}")
+async def update_routing(routing_id: str, routing_data: RoutingUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    update_data = {}
+    for k, v in routing_data.model_dump().items():
+        if v is not None:
+            if k == "operations":
+                update_data[k] = [op.model_dump() if hasattr(op, 'model_dump') else op for op in v]
+            else:
+                update_data[k] = v
+    
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data to update")
+    
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    result = await db.routings.update_one({"id": routing_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Routing not found")
+    
+    routing = await db.routings.find_one({"id": routing_id}, {"_id": 0})
+    return routing
+
+# ================== WORK ORDER ROUTES ==================
+
+@work_orders_router.get("")
+async def get_work_orders(request: Request, status: Optional[str] = None, production_order_id: Optional[str] = None):
+    await get_current_user(request)
+    query = {}
+    if status:
+        query["status"] = status
+    if production_order_id:
+        query["production_order_id"] = production_order_id
+    
+    work_orders = await db.work_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    for wo in work_orders:
+        routing = await db.routings.find_one({"id": wo.get("routing_id")}, {"_id": 0})
+        wo["routing"] = routing
+        if routing:
+            item = await db.items.find_one({"id": routing.get("item_id")}, {"_id": 0})
+            wo["item"] = item
+        prod_order = await db.production_orders.find_one({"id": wo.get("production_order_id")}, {"_id": 0})
+        wo["production_order"] = prod_order
+    
+    return work_orders
+
+@work_orders_router.get("/{wo_id}")
+async def get_work_order(wo_id: str, request: Request):
+    await get_current_user(request)
+    wo = await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    
+    routing = await db.routings.find_one({"id": wo.get("routing_id")}, {"_id": 0})
+    wo["routing"] = routing
+    if routing:
+        item = await db.items.find_one({"id": routing.get("item_id")}, {"_id": 0})
+        wo["item"] = item
+        # Enrich operations
+        for op in routing.get("operations", []):
+            wc = await db.work_centers.find_one({"id": op.get("work_center_id")}, {"_id": 0})
+            op["work_center"] = wc
+    
+    return wo
+
+@work_orders_router.post("", status_code=201)
+async def create_work_order(wo_data: WorkOrderCreate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    prod_order = await db.production_orders.find_one({"id": wo_data.production_order_id})
+    if not prod_order:
+        raise HTTPException(status_code=404, detail="Production order not found")
+    
+    routing = await db.routings.find_one({"id": wo_data.routing_id})
+    if not routing:
+        raise HTTPException(status_code=404, detail="Routing not found")
+    
+    # Generate WO number
+    count = await db.work_orders.count_documents({})
+    wo_number = f"WO-{str(count + 1).zfill(6)}"
+    
+    # Create operation statuses
+    operations_status = []
+    for op in routing.get("operations", []):
+        operations_status.append({
+            "sequence": op.get("sequence"),
+            "operation_name": op.get("operation_name"),
+            "work_center_id": op.get("work_center_id"),
+            "status": "pending",
+            "quantity_completed": 0
+        })
+    
+    wo_doc = {
+        "id": str(uuid.uuid4()),
+        "wo_number": wo_number,
+        "production_order_id": wo_data.production_order_id,
+        "routing_id": wo_data.routing_id,
+        "quantity": wo_data.quantity,
+        "quantity_completed": 0,
+        "scheduled_start": wo_data.scheduled_start,
+        "scheduled_end": wo_data.scheduled_end,
+        "status": "pending",  # pending, in_progress, completed, cancelled
+        "operations_status": operations_status,
+        "notes": wo_data.notes,
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.work_orders.insert_one(wo_doc)
+    wo_doc.pop("_id", None)
+    return wo_doc
+
+@work_orders_router.put("/{wo_id}")
+async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    update_data = {k: v for k, v in wo_data.model_dump().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data to update")
+    
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    result = await db.work_orders.update_one({"id": wo_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    
+    wo = await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
+    return wo
+
+@work_orders_router.put("/{wo_id}/operations/{sequence}")
+async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOrderOperationUpdate, request: Request):
+    """Update a specific operation status within a work order"""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    wo = await db.work_orders.find_one({"id": wo_id})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    
+    operations = wo.get("operations_status", [])
+    for op in operations:
+        if op.get("sequence") == sequence:
+            op["status"] = op_data.status
+            if op_data.actual_start:
+                op["actual_start"] = op_data.actual_start
+            if op_data.actual_end:
+                op["actual_end"] = op_data.actual_end
+            if op_data.quantity_completed is not None:
+                op["quantity_completed"] = op_data.quantity_completed
+            if op_data.notes:
+                op["notes"] = op_data.notes
+            break
+    
+    # Check if all operations are completed
+    all_completed = all(op.get("status") == "completed" for op in operations)
+    any_in_progress = any(op.get("status") == "in_progress" for op in operations)
+    
+    wo_status = wo.get("status")
+    if all_completed:
+        wo_status = "completed"
+    elif any_in_progress:
+        wo_status = "in_progress"
+    
+    await db.work_orders.update_one(
+        {"id": wo_id},
+        {"$set": {
+            "operations_status": operations,
+            "status": wo_status,
+            "updated_at": datetime.now(timezone.utc)
+        }}
+    )
+    
+    return await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
+
 # ================== SEED DATA ==================
 
 async def seed_admin():
@@ -1119,6 +1954,88 @@ async def seed_sample_data():
     
     await db.inspection_templates.insert_many(templates)
     logger.info("Sample inspection templates seeded")
+    
+    # Seed suppliers
+    suppliers = [
+        {"id": str(uuid.uuid4()), "code": "SUP-001", "name": "Steel Masters Inc.", "contact_person": "John Smith", "email": "john@steelmasters.com", "phone": "+1-555-0101", "address": "123 Industrial Blvd, Chicago, IL", "payment_terms": "Net 30", "lead_time_days": 7, "rating": 5, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "SUP-002", "name": "Precision Components Ltd.", "contact_person": "Sarah Johnson", "email": "sarah@precisioncomp.com", "phone": "+1-555-0102", "address": "456 Tech Park, Detroit, MI", "payment_terms": "Net 45", "lead_time_days": 14, "rating": 4, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "SUP-003", "name": "ElectroPower Systems", "contact_person": "Mike Davis", "email": "mike@electropower.com", "phone": "+1-555-0103", "address": "789 Motor Ave, Cleveland, OH", "payment_terms": "Net 30", "lead_time_days": 21, "rating": 4, "status": "active", "created_at": datetime.now(timezone.utc)},
+    ]
+    await db.suppliers.insert_many(suppliers)
+    logger.info("Sample suppliers seeded")
+    
+    # Seed warehouses
+    warehouses = [
+        {"id": str(uuid.uuid4()), "code": "WH-MAIN", "name": "Main Warehouse", "location": "Building A, Floor 1", "is_default": True, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "WH-RAW", "name": "Raw Materials Store", "location": "Building B, Floor 1", "is_default": False, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "WH-FG", "name": "Finished Goods Store", "location": "Building C, Floor 1", "is_default": False, "status": "active", "created_at": datetime.now(timezone.utc)},
+    ]
+    await db.warehouses.insert_many(warehouses)
+    logger.info("Sample warehouses seeded")
+    
+    # Seed warehouse stock (distribute items across warehouses)
+    main_wh = warehouses[0]
+    raw_wh = warehouses[1]
+    fg_wh = warehouses[2]
+    
+    warehouse_stock = []
+    for item in items:
+        if item["category"] == "raw_material":
+            warehouse_stock.append({"id": str(uuid.uuid4()), "warehouse_id": raw_wh["id"], "item_id": item["id"], "quantity": item["current_stock"], "created_at": datetime.now(timezone.utc)})
+        elif item["category"] == "finished_good":
+            warehouse_stock.append({"id": str(uuid.uuid4()), "warehouse_id": fg_wh["id"], "item_id": item["id"], "quantity": item["current_stock"], "created_at": datetime.now(timezone.utc)})
+        else:
+            warehouse_stock.append({"id": str(uuid.uuid4()), "warehouse_id": main_wh["id"], "item_id": item["id"], "quantity": item["current_stock"], "created_at": datetime.now(timezone.utc)})
+    await db.warehouse_stock.insert_many(warehouse_stock)
+    logger.info("Sample warehouse stock seeded")
+    
+    # Seed work centers
+    work_centers = [
+        {"id": str(uuid.uuid4()), "code": "WC-CUT", "name": "Cutting Station", "description": "Laser and plasma cutting machines", "hourly_rate": 75.00, "capacity_per_hour": 10, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "WC-WELD", "name": "Welding Bay", "description": "MIG/TIG welding stations", "hourly_rate": 85.00, "capacity_per_hour": 5, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "WC-MACH", "name": "Machining Center", "description": "CNC milling and turning", "hourly_rate": 120.00, "capacity_per_hour": 3, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "WC-ASSY", "name": "Assembly Line", "description": "Final assembly workstations", "hourly_rate": 65.00, "capacity_per_hour": 8, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "WC-TEST", "name": "Testing Station", "description": "Quality testing and inspection", "hourly_rate": 70.00, "capacity_per_hour": 6, "status": "active", "created_at": datetime.now(timezone.utc)},
+    ]
+    await db.work_centers.insert_many(work_centers)
+    logger.info("Sample work centers seeded")
+    
+    # Seed routings
+    routings = [
+        {
+            "id": str(uuid.uuid4()),
+            "item_id": pump_assembly["id"],
+            "name": "Pump Assembly Routing",
+            "description": "Manufacturing routing for pump sub-assembly",
+            "revision": "A",
+            "status": "active",
+            "operations": [
+                {"sequence": 10, "work_center_id": work_centers[0]["id"], "operation_name": "Cut Aluminum Bar", "description": "Cut to required lengths", "setup_time_minutes": 15, "run_time_minutes": 10},
+                {"sequence": 20, "work_center_id": work_centers[2]["id"], "operation_name": "Machine Components", "description": "CNC machining of pump body", "setup_time_minutes": 30, "run_time_minutes": 45},
+                {"sequence": 30, "work_center_id": work_centers[3]["id"], "operation_name": "Assemble Pump", "description": "Assemble all components", "setup_time_minutes": 10, "run_time_minutes": 30},
+                {"sequence": 40, "work_center_id": work_centers[4]["id"], "operation_name": "Test Pump", "description": "Pressure and leak testing", "setup_time_minutes": 5, "run_time_minutes": 15},
+            ],
+            "created_at": datetime.now(timezone.utc)
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "item_id": hydraulic_press["id"],
+            "name": "Hydraulic Press 50T Routing",
+            "description": "Manufacturing routing for hydraulic press",
+            "revision": "B",
+            "status": "active",
+            "operations": [
+                {"sequence": 10, "work_center_id": work_centers[0]["id"], "operation_name": "Cut Steel Sheets", "description": "Cut frame components", "setup_time_minutes": 20, "run_time_minutes": 60},
+                {"sequence": 20, "work_center_id": work_centers[1]["id"], "operation_name": "Weld Frame", "description": "Weld main frame structure", "setup_time_minutes": 45, "run_time_minutes": 120},
+                {"sequence": 30, "work_center_id": work_centers[2]["id"], "operation_name": "Machine Mounting Points", "description": "CNC machine mounting surfaces", "setup_time_minutes": 30, "run_time_minutes": 60},
+                {"sequence": 40, "work_center_id": work_centers[3]["id"], "operation_name": "Final Assembly", "description": "Install hydraulics and controls", "setup_time_minutes": 30, "run_time_minutes": 180},
+                {"sequence": 50, "work_center_id": work_centers[4]["id"], "operation_name": "Final Testing", "description": "Full functional and safety test", "setup_time_minutes": 15, "run_time_minutes": 90},
+            ],
+            "created_at": datetime.now(timezone.utc)
+        }
+    ]
+    await db.routings.insert_many(routings)
+    logger.info("Sample routings seeded")
 
 # ================== APP SETUP ==================
 
@@ -1132,6 +2049,12 @@ async def startup():
     await db.boms.create_index("status")
     await db.production_orders.create_index("status")
     await db.login_attempts.create_index("identifier")
+    await db.suppliers.create_index("code", unique=True)
+    await db.purchase_orders.create_index("status")
+    await db.warehouses.create_index("code", unique=True)
+    await db.work_centers.create_index("code", unique=True)
+    await db.routings.create_index("item_id")
+    await db.work_orders.create_index("status")
     
     # Seed data
     await seed_admin()
@@ -1166,6 +2089,12 @@ api_router.include_router(inventory_router)
 api_router.include_router(production_router)
 api_router.include_router(users_router)
 api_router.include_router(dashboard_router)
+api_router.include_router(suppliers_router)
+api_router.include_router(purchase_orders_router)
+api_router.include_router(warehouses_router)
+api_router.include_router(work_centers_router)
+api_router.include_router(routings_router)
+api_router.include_router(work_orders_router)
 
 app.include_router(api_router)
 
@@ -1180,4 +2109,4 @@ app.add_middleware(
 
 @api_router.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "service": "machinery-erp"}
