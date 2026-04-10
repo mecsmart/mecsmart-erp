@@ -77,25 +77,28 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - Safety stock alerts
 - Reorder point alerts
 
-### Procurement (NEW)
+### Procurement
 - Supplier management with ratings
 - Purchase Orders (Draft → Sent → Received)
 - PO line items with pricing
 - Receive PO and auto-update inventory
 
-### Stores/Warehouse (NEW)
+### Stores/Warehouse
 - Multiple warehouse locations
 - Stock by location tracking
 - Inter-location stock transfers
 - Transfer history
 
-### Manufacturing Process (NEW)
+### Manufacturing Process
 - Work Centers with hourly rates and capacity
 - Routings (operations sequence per item)
 - Work Orders linked to Production Orders
 - Work Order status tracking (Pending → In Progress → Completed)
+- **Auto-create child work orders**: When creating WO for FG, auto-creates WOs for sub-assemblies if stock is insufficient
+- **Material consumption on start**: Raw materials/components consumed from inventory when WO starts
+- **Inventory update on completion**: Finished goods added to inventory when WO completes
 
-## What's Been Implemented (January 2026)
+## What's Been Implemented (February 2026)
 
 ### Backend (server.py)
 - [x] JWT authentication with httpOnly cookies
@@ -120,6 +123,9 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - [x] Work Centers CRUD API
 - [x] Routings with operations API
 - [x] Work Orders API with status management
+- [x] Auto-create sub-assembly work orders
+- [x] Auto-consume materials on WO start
+- [x] Auto-update FG stock on WO complete
 - [x] Sample data seeding (all modules)
 
 ### Frontend
@@ -161,6 +167,8 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - ✅ Procurement (Suppliers, POs)
 - ✅ Stores (Warehouses, Transfers)
 - ✅ Manufacturing (Work Centers, Routings, Work Orders)
+- ✅ Auto-create sub-assembly WOs
+- ✅ Auto-consume materials on WO start
 
 ### P1 (High Priority)
 - [ ] User management page (admin only)
@@ -173,16 +181,20 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - [ ] Production scheduling (Gantt view)
 - [ ] Quality SPC charts
 - [ ] Non-conformance reports
+- [ ] Real-time production dashboard (OEE, machine utilization)
 
 ### P3 (Low Priority)
-- [ ] Barcode scanning integration
+- [ ] Barcode/QR scanning integration
 - [ ] Email notifications
 - [ ] Report templates (PDF export)
 - [ ] Data import/export (CSV/Excel)
 - [ ] Audit trail logging
+- [ ] Windows desktop wrapper (Electron/Tauri)
+
+## Refactoring Needed
+- Backend `server.py` (2100+ lines) should be split into modular route files (`routers/auth.py`, `routers/manufacturing.py`, etc.)
 
 ## Next Tasks
-
 1. Add user management page for admin to create/edit users
 2. Implement auto-populate PO from MRP suggestions
 3. Add work order operation-level tracking
