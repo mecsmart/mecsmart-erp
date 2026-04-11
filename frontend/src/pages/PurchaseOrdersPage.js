@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 
 const statusOptions = [
   { value: 'draft', label: 'Draft' },
@@ -26,7 +27,6 @@ const emptyForm = {
 
 export default function PurchaseOrdersPage() {
   const { user } = useAuth();
-  const [orders, setOrders] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [items, setItems] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -37,6 +37,9 @@ export default function PurchaseOrdersPage() {
   const [editingPO, setEditingPO] = useState(null);
   const [viewPO, setViewPO] = useState(null);
   const [formData, setFormData] = useState({ ...emptyForm });
+  const [activeTab, setActiveTab] = useState('purchase-orders');
+
+  const [allOrders, setAllOrders] = useState([]);
 
   const canEdit = ['admin', 'production_manager', 'inventory_manager'].includes(user?.role);
   const canReceive = ['admin', 'inventory_manager'].includes(user?.role);
@@ -44,15 +47,14 @@ export default function PurchaseOrdersPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const params = statusFilter ? `?status=${statusFilter}` : '';
       const [ordersRes, suppliersRes, itemsRes, whRes, chargesRes] = await Promise.all([
-        api.get(`/api/purchase-orders${params}`),
+        api.get('/api/purchase-orders'),
         api.get('/api/suppliers?status=active'),
         api.get('/api/items'),
         api.get('/api/warehouses?status=active'),
         api.get('/api/settings/po-charges'),
       ]);
-      setOrders(ordersRes.data);
+      setAllOrders(ordersRes.data);
       setSuppliers(suppliersRes.data);
       setItems(itemsRes.data);
       setWarehouses(whRes.data);
@@ -62,9 +64,12 @@ export default function PurchaseOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const filteredOrders = statusFilter ? allOrders.filter(po => po.status === statusFilter) : allOrders;
+  const grnOrders = allOrders.filter(po => po.status === 'received');
 
   const openCreateDialog = () => {
     setEditingPO(null);
@@ -216,137 +221,209 @@ export default function PurchaseOrdersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Purchase Orders</h1>
-          <p className="text-sm text-[#4B5563]">Create and manage purchase orders</p>
+          <p className="text-sm text-[#4B5563]">Create and manage purchase orders & goods receipts</p>
         </div>
-        {canEdit && (
+        {canEdit && activeTab === 'purchase-orders' && (
           <button onClick={openCreateDialog} className="btn-primary flex items-center space-x-2" data-testid="create-po-btn">
             <Plus className="w-4 h-4" /><span>Create PO</span>
           </button>
         )}
       </div>
 
-      {/* Filter */}
-      <div className="card-flat p-4">
-        <div className="flex items-center gap-4">
-          <Select value={statusFilter || undefined} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
-            <SelectTrigger className="w-48" data-testid="po-status-filter">
-              <Filter className="w-4 h-4 mr-2" />
-              <SelectValue placeholder="All Statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              {statusOptions.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {statusFilter && (
-            <button onClick={() => setStatusFilter('')} className="btn-secondary flex items-center space-x-1">
-              <X className="w-4 h-4" /><span>Clear</span>
-            </button>
-          )}
-        </div>
-      </div>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="purchase-orders" data-testid="po-tab">Purchase Orders</TabsTrigger>
+          <TabsTrigger value="grn" data-testid="grn-tab">GRN</TabsTrigger>
+        </TabsList>
 
-      {/* Orders List */}
-      <div className="card-flat overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center h-48">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div>
+        <TabsContent value="purchase-orders" className="space-y-4 mt-4">
+          {/* Filter */}
+          <div className="card-flat p-4">
+            <div className="flex items-center gap-4">
+              <Select value={statusFilter || undefined} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
+                <SelectTrigger className="w-48" data-testid="po-status-filter">
+                  <Filter className="w-4 h-4 mr-2" />
+                  <SelectValue placeholder="All Statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  {statusOptions.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {statusFilter && (
+                <button onClick={() => setStatusFilter('')} className="btn-secondary flex items-center space-x-1">
+                  <X className="w-4 h-4" /><span>Clear</span>
+                </button>
+              )}
+            </div>
           </div>
-        ) : orders.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
-            <FileText className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No purchase orders found</p>
+
+          {/* Orders List */}
+          <div className="card-flat overflow-hidden">
+            {loading ? (
+              <div className="flex items-center justify-center h-48">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div>
+              </div>
+            ) : filteredOrders.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
+                <FileText className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No purchase orders found</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full data-table" data-testid="po-table">
+                  <thead>
+                    <tr>
+                      <th>PO Number</th>
+                      <th>Supplier</th>
+                      <th>Quotation Ref</th>
+                      <th>Lines</th>
+                      <th className="text-right">Subtotal</th>
+                      <th className="text-right">GST</th>
+                      <th className="text-right">Total</th>
+                      <th>Status</th>
+                      <th>Expected</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredOrders.map((po) => (
+                      <tr key={po.id} data-testid={`po-row-${po.id}`}>
+                        <td className="mono font-medium">
+                          {po.po_number}
+                          {po.revision > 0 && <span className="ml-1 text-xs text-[#6B7280]">Rev.{po.revision}</span>}
+                        </td>
+                        <td>
+                          <span className="mono text-xs">{po.supplier?.code}</span>
+                          <p className="text-sm">{po.supplier?.name}</p>
+                        </td>
+                        <td className="text-sm">
+                          {po.quotation_ref ? (
+                            <div>
+                              <span className="mono">{po.quotation_ref}</span>
+                              {po.quotation_date && <p className="text-xs text-[#6B7280]">{new Date(po.quotation_date).toLocaleDateString()}</p>}
+                            </div>
+                          ) : <span className="text-[#9CA3AF]">-</span>}
+                        </td>
+                        <td className="mono">{po.lines?.length || 0} items</td>
+                        <td className="text-right mono">{(po.subtotal || 0).toFixed(2)}</td>
+                        <td className="text-right">
+                          {po.total_tax > 0 ? (
+                            <div className="text-xs">
+                              <span className="mono font-medium">{(po.total_tax || 0).toFixed(2)}</span>
+                              <span className="block text-[#6B7280]">{po.is_inter_state ? 'IGST' : 'CGST+SGST'}</span>
+                            </div>
+                          ) : <span className="mono text-[#9CA3AF]">-</span>}
+                        </td>
+                        <td className="text-right mono font-semibold">{(po.total_amount || 0).toFixed(2)}</td>
+                        <td>
+                          <span className={`status-badge ${getStatusColor(po.status)}`}>{po.status === 'received' ? 'GRN Done' : po.status}</span>
+                        </td>
+                        <td className="text-sm text-[#4B5563]">
+                          {po.expected_date ? new Date(po.expected_date).toLocaleDateString() : '-'}
+                        </td>
+                        <td>
+                          <div className="flex items-center space-x-1">
+                            {po.status !== 'received' && po.status !== 'cancelled' && canEdit && (
+                              <button onClick={() => openEditDialog(po)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit PO" data-testid={`edit-po-${po.id}`}>
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            )}
+                            {po.status === 'draft' && canEdit && (
+                              <button onClick={() => handleStatusChange(po, 'sent')} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Send PO">
+                                <Send className="w-4 h-4" />
+                              </button>
+                            )}
+                            {(po.status === 'sent' || po.status === 'partial') && canReceive && (
+                              <button onClick={() => handleGRN(po)} className="p-1 text-[#4B5563] hover:text-[#03543F]" title="Create GRN" data-testid={`grn-po-${po.id}`}>
+                                <Package className="w-4 h-4" />
+                              </button>
+                            )}
+                            {po.revision > 0 && (
+                              <button onClick={() => setViewPO(po)} className="p-1 text-[#4B5563] hover:text-[#6366F1]" title="View Revisions">
+                                <History className="w-4 h-4" />
+                              </button>
+                            )}
+                            {po.status === 'received' && (
+                              <span className="flex items-center gap-1 text-xs text-[#03543F] font-medium">
+                                <CheckCircle2 className="w-4 h-4" /> GRN
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full data-table" data-testid="po-table">
-              <thead>
-                <tr>
-                  <th>PO Number</th>
-                  <th>Supplier</th>
-                  <th>Quotation Ref</th>
-                  <th>Lines</th>
-                  <th className="text-right">Subtotal</th>
-                  <th className="text-right">GST</th>
-                  <th className="text-right">Total</th>
-                  <th>Status</th>
-                  <th>Expected</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((po) => (
-                  <tr key={po.id} data-testid={`po-row-${po.id}`}>
-                    <td className="mono font-medium">
-                      {po.po_number}
-                      {po.revision > 0 && <span className="ml-1 text-xs text-[#6B7280]">Rev.{po.revision}</span>}
-                    </td>
-                    <td>
-                      <span className="mono text-xs">{po.supplier?.code}</span>
-                      <p className="text-sm">{po.supplier?.name}</p>
-                    </td>
-                    <td className="text-sm">
-                      {po.quotation_ref ? (
-                        <div>
-                          <span className="mono">{po.quotation_ref}</span>
-                          {po.quotation_date && <p className="text-xs text-[#6B7280]">{new Date(po.quotation_date).toLocaleDateString()}</p>}
-                        </div>
-                      ) : <span className="text-[#9CA3AF]">-</span>}
-                    </td>
-                    <td className="mono">{po.lines?.length || 0} items</td>
-                    <td className="text-right mono">{(po.subtotal || 0).toFixed(2)}</td>
-                    <td className="text-right">
-                      {po.total_tax > 0 ? (
-                        <div className="text-xs">
-                          <span className="mono font-medium">{(po.total_tax || 0).toFixed(2)}</span>
-                          <span className="block text-[#6B7280]">{po.is_inter_state ? 'IGST' : 'CGST+SGST'}</span>
-                        </div>
-                      ) : <span className="mono text-[#9CA3AF]">-</span>}
-                    </td>
-                    <td className="text-right mono font-semibold">{(po.total_amount || 0).toFixed(2)}</td>
-                    <td>
-                      <span className={`status-badge ${getStatusColor(po.status)}`}>{po.status}</span>
-                    </td>
-                    <td className="text-sm text-[#4B5563]">
-                      {po.expected_date ? new Date(po.expected_date).toLocaleDateString() : '-'}
-                    </td>
-                    <td>
-                      <div className="flex items-center space-x-1">
-                        {po.status !== 'received' && po.status !== 'cancelled' && canEdit && (
-                          <button onClick={() => openEditDialog(po)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit PO" data-testid={`edit-po-${po.id}`}>
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                        )}
-                        {po.status === 'draft' && canEdit && (
-                          <button onClick={() => handleStatusChange(po, 'sent')} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Send PO">
-                            <Send className="w-4 h-4" />
-                          </button>
-                        )}
-                        {(po.status === 'sent' || po.status === 'partial') && canReceive && (
-                          <button onClick={() => handleGRN(po)} className="p-1 text-[#4B5563] hover:text-[#03543F]" title="GRN" data-testid={`grn-po-${po.id}`}>
-                            <Package className="w-4 h-4" />
-                          </button>
-                        )}
-                        {po.revision > 0 && (
-                          <button onClick={() => setViewPO(po)} className="p-1 text-[#4B5563] hover:text-[#6366F1]" title="View Revisions">
-                            <History className="w-4 h-4" />
-                          </button>
-                        )}
-                        {po.status === 'received' && (
-                          <span className="flex items-center gap-1 text-xs text-[#03543F] font-medium">
-                            <CheckCircle2 className="w-4 h-4" /> GRN
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        </TabsContent>
+
+        <TabsContent value="grn" className="space-y-4 mt-4">
+          {/* GRN List - shows all received POs */}
+          <div className="card-flat overflow-hidden">
+            {loading ? (
+              <div className="flex items-center justify-center h-48">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div>
+              </div>
+            ) : grnOrders.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
+                <Package className="w-12 h-12 mb-2 text-[#9CA3AF]" />
+                <p>No Goods Receipt Notes found</p>
+                <p className="text-xs text-[#9CA3AF] mt-1">GRN entries will appear here when POs are received</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full data-table" data-testid="grn-table">
+                  <thead>
+                    <tr>
+                      <th>GRN</th>
+                      <th>PO Number</th>
+                      <th>Supplier</th>
+                      <th>Items Received</th>
+                      <th className="text-right">Total Amount</th>
+                      <th>Received Date</th>
+                      <th>Delivery Address</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grnOrders.map((po, idx) => (
+                      <tr key={po.id} data-testid={`grn-row-${po.id}`}>
+                        <td className="mono font-semibold text-[#03543F]">GRN-{String(idx + 1).padStart(6, '0')}</td>
+                        <td className="mono font-medium">{po.po_number}</td>
+                        <td>
+                          <span className="mono text-xs">{po.supplier?.code}</span>
+                          <p className="text-sm">{po.supplier?.name}</p>
+                        </td>
+                        <td>
+                          <div className="space-y-0.5">
+                            {(po.lines || []).map((line, li) => (
+                              <div key={li} className="text-xs">
+                                <span className="font-medium">{line.item?.part_number || line.item_id}</span>
+                                <span className="text-[#6B7280] ml-1">{line.item?.name}</span>
+                                <span className="mono ml-2">{line.quantity} {line.uom || 'pcs'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="text-right mono font-semibold">{(po.total_amount || 0).toFixed(2)}</td>
+                        <td className="text-sm text-[#4B5563]">
+                          {po.received_at ? new Date(po.received_at).toLocaleDateString() : po.updated_at ? new Date(po.updated_at).toLocaleDateString() : '-'}
+                        </td>
+                        <td className="text-sm text-[#4B5563] max-w-[200px] truncate">
+                          {po.delivery_address || '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </TabsContent>
+      </Tabs>
 
       {/* Create / Edit PO Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={(open) => { if (!open) { resetForm(); } setIsDialogOpen(open); }}>
