@@ -3168,20 +3168,23 @@ async def startup():
     await seed_admin()
     await seed_sample_data()
     
-    # Write credentials file
-    Path("/app/memory").mkdir(exist_ok=True)
-    with open("/app/memory/test_credentials.md", "w") as f:
-        f.write("# Test Credentials\n\n")
-        f.write("## Admin Account\n")
-        f.write(f"- Email: {os.environ.get('ADMIN_EMAIL', 'admin@erp.com')}\n")
-        f.write(f"- Password: {os.environ.get('ADMIN_PASSWORD', 'Admin@123')}\n")
-        f.write("- Role: admin\n\n")
-        f.write("## Auth Endpoints\n")
-        f.write("- POST /api/auth/login\n")
-        f.write("- POST /api/auth/register\n")
-        f.write("- POST /api/auth/logout\n")
-        f.write("- GET /api/auth/me\n")
-        f.write("- POST /api/auth/refresh\n")
+    # Write credentials file (dev environment only, non-fatal on Windows/other OS)
+    try:
+        Path("/app/memory").mkdir(exist_ok=True)
+        with open("/app/memory/test_credentials.md", "w") as f:
+            f.write("# Test Credentials\n\n")
+            f.write("## Admin Account\n")
+            f.write(f"- Email: {os.environ.get('ADMIN_EMAIL', 'admin@erp.com')}\n")
+            f.write(f"- Password: {os.environ.get('ADMIN_PASSWORD', 'Admin@123')}\n")
+            f.write("- Role: admin\n\n")
+            f.write("## Auth Endpoints\n")
+            f.write("- POST /api/auth/login\n")
+            f.write("- POST /api/auth/register\n")
+            f.write("- POST /api/auth/logout\n")
+            f.write("- GET /api/auth/me\n")
+            f.write("- POST /api/auth/refresh\n")
+    except (OSError, PermissionError):
+        pass
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
