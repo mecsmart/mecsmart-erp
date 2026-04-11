@@ -223,6 +223,10 @@ class SupplierCreate(BaseModel):
     email: Optional[str] = ""
     phone: Optional[str] = ""
     address: Optional[str] = ""
+    address_line2: Optional[str] = ""
+    city: Optional[str] = ""
+    state: Optional[str] = ""
+    pin_code: Optional[str] = ""
     gstin: Optional[str] = ""
     state_code: Optional[str] = ""
     payment_terms: Optional[str] = "Net 30"
@@ -236,6 +240,10 @@ class SupplierUpdate(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pin_code: Optional[str] = None
     gstin: Optional[str] = None
     state_code: Optional[str] = None
     payment_terms: Optional[str] = None
@@ -418,10 +426,18 @@ class CompanySettingsUpdate(BaseModel):
     gstin: Optional[str] = None
     state_code: Optional[str] = None
     address: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pin_code: Optional[str] = None
     pan: Optional[str] = None
     cin: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    logo_data: Optional[str] = None
+    tagline: Optional[str] = None
+    primary_currency: Optional[str] = None
+    secondary_currency: Optional[str] = None
 
 class CustomerCreate(BaseModel):
     code: str
@@ -432,6 +448,10 @@ class CustomerCreate(BaseModel):
     email: Optional[str] = ""
     phone: Optional[str] = ""
     address: Optional[str] = ""
+    address_line2: Optional[str] = ""
+    city: Optional[str] = ""
+    state: Optional[str] = ""
+    pin_code: Optional[str] = ""
     payment_terms: Optional[str] = "Net 30"
     status: str = "active"
 
@@ -443,6 +463,10 @@ class CustomerUpdate(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pin_code: Optional[str] = None
     payment_terms: Optional[str] = None
     status: Optional[str] = None
 
@@ -3263,10 +3287,18 @@ async def get_company_settings(request: Request):
             "gstin": "",
             "state_code": "",
             "address": "",
+            "address_line2": "",
+            "city": "",
+            "state": "",
+            "pin_code": "",
             "pan": "",
             "cin": "",
             "phone": "",
-            "email": ""
+            "email": "",
+            "logo_data": "",
+            "tagline": "",
+            "primary_currency": "INR",
+            "secondary_currency": "USD"
         }
     return settings
 
@@ -3296,6 +3328,73 @@ async def get_indian_states(request: Request):
 async def get_gst_slabs(request: Request):
     await get_current_user(request)
     return GST_SLABS
+
+@settings_router.post("/migrate-addresses")
+async def migrate_addresses(request: Request):
+    """One-time migration: split existing single-line address fields into structured fields"""
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can run migrations")
+
+    migrated = {"suppliers": 0, "customers": 0, "company": 0}
+
+    def split_address(addr_str):
+        """Best-effort split of comma-separated address into structured fields"""
+        if not addr_str:
+            return {}
+        parts = [p.strip() for p in addr_str.replace("\n", ",").split(",") if p.strip()]
+        result = {}
+        # Try to detect pin code (6-digit number at end)
+        pin = ""
+        for i, p in enumerate(parts):
+            import re as _re
+            pin_match = _re.search(r'\b(\d{6})\b', p)
+            if pin_match:
+                pin = pin_match.group(1)
+                parts[i] = _re.sub(r'\s*-?\s*\d{6}\b', '', p).strip()
+                break
+        parts = [p for p in parts if p]
+        if pin:
+            result["pin_code"] = pin
+        if len(parts) >= 4:
+            result["address"] = parts[0]
+            result["address_line2"] = parts[1]
+            result["city"] = parts[2]
+            result["state"] = parts[3]
+        elif len(parts) == 3:
+            result["address"] = parts[0]
+            result["city"] = parts[1]
+            result["state"] = parts[2]
+        elif len(parts) == 2:
+            result["address"] = parts[0]
+            result["city"] = parts[1]
+        elif len(parts) == 1:
+            result["address"] = parts[0]
+        return result
+
+    # Migrate suppliers
+    async for sup in db.suppliers.find({"city": {"$exists": False}, "address": {"$exists": True, "$ne": ""}}):
+        fields = split_address(sup.get("address", ""))
+        if fields:
+            await db.suppliers.update_one({"_id": sup["_id"]}, {"$set": fields})
+            migrated["suppliers"] += 1
+
+    # Migrate customers
+    async for cust in db.customers.find({"city": {"$exists": False}, "address": {"$exists": True, "$ne": ""}}):
+        fields = split_address(cust.get("address", ""))
+        if fields:
+            await db.customers.update_one({"_id": cust["_id"]}, {"$set": fields})
+            migrated["customers"] += 1
+
+    # Migrate company settings
+    company = await db.company_settings.find_one({"type": "company"})
+    if company and not company.get("city"):
+        fields = split_address(company.get("address", ""))
+        if fields:
+            await db.company_settings.update_one({"_id": company["_id"]}, {"$set": fields})
+            migrated["company"] = 1
+
+    return {"message": "Address migration complete", "migrated": migrated}
 
 # ================== PO CHARGE TYPES SETTINGS ==================
 
@@ -3549,9 +3648,9 @@ async def seed_sample_data():
     
     # Seed suppliers
     suppliers = [
-        {"id": str(uuid.uuid4()), "code": "SUP-001", "name": "Steel Masters Pvt. Ltd.", "contact_person": "Rajesh Kumar", "email": "rajesh@steelmasters.in", "phone": "+91-9876543210", "address": "123 Industrial Area, Pune", "gstin": "27AABCS1234F1Z5", "state_code": "27", "payment_terms": "Net 30", "lead_time_days": 7, "rating": 5, "status": "active", "created_at": datetime.now(timezone.utc)},
-        {"id": str(uuid.uuid4()), "code": "SUP-002", "name": "Precision Components Ltd.", "contact_person": "Suresh Patel", "email": "suresh@precisioncomp.in", "phone": "+91-9876543211", "address": "456 GIDC, Ahmedabad", "gstin": "24AABCP5678G1Z3", "state_code": "24", "payment_terms": "Net 45", "lead_time_days": 14, "rating": 4, "status": "active", "created_at": datetime.now(timezone.utc)},
-        {"id": str(uuid.uuid4()), "code": "SUP-003", "name": "ElectroPower Systems", "contact_person": "Amit Sharma", "email": "amit@electropower.in", "phone": "+91-9876543212", "address": "789 Electronic City, Bangalore", "gstin": "29AABCE9012H1Z1", "state_code": "29", "payment_terms": "Net 30", "lead_time_days": 21, "rating": 4, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "SUP-001", "name": "Steel Masters Pvt. Ltd.", "contact_person": "Rajesh Kumar", "email": "rajesh@steelmasters.in", "phone": "+91-9876543210", "address": "123 Industrial Area", "address_line2": "Hadapsar", "city": "Pune", "state": "Maharashtra", "pin_code": "411013", "gstin": "27AABCS1234F1Z5", "state_code": "27", "payment_terms": "Net 30", "lead_time_days": 7, "rating": 5, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "SUP-002", "name": "Precision Components Ltd.", "contact_person": "Suresh Patel", "email": "suresh@precisioncomp.in", "phone": "+91-9876543211", "address": "456 GIDC Estate", "address_line2": "Phase II", "city": "Ahmedabad", "state": "Gujarat", "pin_code": "382445", "gstin": "24AABCP5678G1Z3", "state_code": "24", "payment_terms": "Net 45", "lead_time_days": 14, "rating": 4, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "SUP-003", "name": "ElectroPower Systems", "contact_person": "Amit Sharma", "email": "amit@electropower.in", "phone": "+91-9876543212", "address": "789 Electronic City", "address_line2": "Phase I", "city": "Bangalore", "state": "Karnataka", "pin_code": "560100", "gstin": "29AABCE9012H1Z1", "state_code": "29", "payment_terms": "Net 30", "lead_time_days": 21, "rating": 4, "status": "active", "created_at": datetime.now(timezone.utc)},
     ]
     await db.suppliers.insert_many(suppliers)
     logger.info("Sample suppliers seeded")
@@ -3563,11 +3662,19 @@ async def seed_sample_data():
             "company_name": "MachineWorks Manufacturing Pvt. Ltd.",
             "gstin": "27AABCM1234A1Z5",
             "state_code": "27",
-            "address": "Plot No. 45, MIDC, Pune - 411019, Maharashtra, India",
+            "address": "Plot No. 45, MIDC",
+            "address_line2": "Bhosari Industrial Estate",
+            "city": "Pune",
+            "state": "Maharashtra",
+            "pin_code": "411019",
             "pan": "AABCM1234A",
             "cin": "",
             "phone": "+91-20-12345678",
             "email": "info@machineworks.in",
+            "logo_data": "",
+            "tagline": "Precision Engineering Solutions",
+            "primary_currency": "INR",
+            "secondary_currency": "USD",
             "created_at": datetime.now(timezone.utc)
         })
         logger.info("Company settings seeded")
@@ -3575,9 +3682,9 @@ async def seed_sample_data():
     # Seed sample customers
     if await db.customers.count_documents({}) == 0:
         customers = [
-            {"id": str(uuid.uuid4()), "code": "CUST-001", "name": "Tata Motors Ltd.", "gstin": "27AAACT1234D1Z5", "state_code": "27", "contact_person": "Vikram Singh", "email": "vikram@tatamotors.in", "phone": "+91-9988776655", "address": "Pimpri, Pune, Maharashtra", "payment_terms": "Net 30", "status": "active", "created_at": datetime.now(timezone.utc)},
-            {"id": str(uuid.uuid4()), "code": "CUST-002", "name": "Bharat Heavy Electricals", "gstin": "09AABCB5678E1Z3", "state_code": "09", "contact_person": "Priya Verma", "email": "priya@bhel.in", "phone": "+91-9988776656", "address": "Sector 17, Noida, UP", "payment_terms": "Net 45", "status": "active", "created_at": datetime.now(timezone.utc)},
-            {"id": str(uuid.uuid4()), "code": "CUST-003", "name": "Larsen & Toubro", "gstin": "27AABCL9012F1Z1", "state_code": "27", "contact_person": "Anish Mehta", "email": "anish@lnt.in", "phone": "+91-9988776657", "address": "Powai, Mumbai, Maharashtra", "payment_terms": "Net 30", "status": "active", "created_at": datetime.now(timezone.utc)},
+            {"id": str(uuid.uuid4()), "code": "CUST-001", "name": "Tata Motors Ltd.", "gstin": "27AAACT1234D1Z5", "state_code": "27", "contact_person": "Vikram Singh", "email": "vikram@tatamotors.in", "phone": "+91-9988776655", "address": "Pimpri Plant", "address_line2": "Mumbai-Pune Road", "city": "Pune", "state": "Maharashtra", "pin_code": "411018", "payment_terms": "Net 30", "status": "active", "created_at": datetime.now(timezone.utc)},
+            {"id": str(uuid.uuid4()), "code": "CUST-002", "name": "Bharat Heavy Electricals", "gstin": "09AABCB5678E1Z3", "state_code": "09", "contact_person": "Priya Verma", "email": "priya@bhel.in", "phone": "+91-9988776656", "address": "Sector 17", "address_line2": "Industrial Area", "city": "Noida", "state": "Uttar Pradesh", "pin_code": "201301", "payment_terms": "Net 45", "status": "active", "created_at": datetime.now(timezone.utc)},
+            {"id": str(uuid.uuid4()), "code": "CUST-003", "name": "Larsen & Toubro", "gstin": "27AABCL9012F1Z1", "state_code": "27", "contact_person": "Anish Mehta", "email": "anish@lnt.in", "phone": "+91-9988776657", "address": "L&T Business Park", "address_line2": "Saki Vihar Road, Powai", "city": "Mumbai", "state": "Maharashtra", "pin_code": "400072", "payment_terms": "Net 30", "status": "active", "created_at": datetime.now(timezone.utc)},
         ]
         await db.customers.insert_many(customers)
         logger.info("Sample customers seeded")

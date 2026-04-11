@@ -15,7 +15,8 @@ export default function CustomersPage() {
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [formData, setFormData] = useState({
     code: '', name: '', gstin: '', state_code: '', contact_person: '',
-    email: '', phone: '', address: '', payment_terms: 'Net 30', status: 'active',
+    email: '', phone: '', address: '', address_line2: '', city: '', state: '', pin_code: '',
+    payment_terms: 'Net 30', status: 'active',
   });
 
   const canEdit = ['admin', 'production_manager'].includes(user?.role);
@@ -55,7 +56,7 @@ export default function CustomersPage() {
 
   const handleEdit = (c) => {
     setEditingCustomer(c);
-    setFormData({ code: c.code, name: c.name, gstin: c.gstin || '', state_code: c.state_code || '', contact_person: c.contact_person || '', email: c.email || '', phone: c.phone || '', address: c.address || '', payment_terms: c.payment_terms || 'Net 30', status: c.status });
+    setFormData({ code: c.code, name: c.name, gstin: c.gstin || '', state_code: c.state_code || '', contact_person: c.contact_person || '', email: c.email || '', phone: c.phone || '', address: c.address || '', address_line2: c.address_line2 || '', city: c.city || '', state: c.state || '', pin_code: c.pin_code || '', payment_terms: c.payment_terms || 'Net 30', status: c.status });
     setIsDialogOpen(true);
   };
 
@@ -71,7 +72,7 @@ export default function CustomersPage() {
 
   const resetForm = () => {
     setEditingCustomer(null);
-    setFormData({ code: '', name: '', gstin: '', state_code: '', contact_person: '', email: '', phone: '', address: '', payment_terms: 'Net 30', status: 'active' });
+    setFormData({ code: '', name: '', gstin: '', state_code: '', contact_person: '', email: '', phone: '', address: '', address_line2: '', city: '', state: '', pin_code: '', payment_terms: 'Net 30', status: 'active' });
   };
 
   const getStateName = (code) => {
@@ -144,8 +145,24 @@ export default function CustomersPage() {
                   </Select>
                 </div>
                 <div className="col-span-2">
-                  <label className="text-sm font-medium">Address</label>
-                  <textarea className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" rows={2} value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} data-testid="customer-address-input" />
+                  <label className="text-sm font-medium">Address Line 1</label>
+                  <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" placeholder="Plot/Building/Street" value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} data-testid="customer-address-input" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-sm font-medium">Address Line 2</label>
+                  <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" placeholder="Area/Locality" value={formData.address_line2} onChange={e => setFormData({...formData, address_line2: e.target.value})} data-testid="customer-address2-input" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">City</label>
+                  <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.city} onChange={e => setFormData({...formData, city: e.target.value})} data-testid="customer-city-input" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">State</label>
+                  <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.state} onChange={e => setFormData({...formData, state: e.target.value})} data-testid="customer-state-name-input" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Pin Code</label>
+                  <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm font-mono" maxLength={6} placeholder="411019" value={formData.pin_code} onChange={e => setFormData({...formData, pin_code: e.target.value.replace(/\D/g, '')})} data-testid="customer-pincode-input" />
                 </div>
               </div>
               <div className="flex justify-end space-x-2 mt-4">
@@ -193,7 +210,7 @@ export default function CustomersPage() {
             )}
             {c.state_code && (
               <div className="mb-2 flex items-center text-sm text-[#4B5563]">
-                <MapPin className="w-3 h-3 mr-1" />{getStateName(c.state_code)}
+                <MapPin className="w-3 h-3 mr-1" />{c.city ? `${c.city}, ` : ''}{c.state || getStateName(c.state_code)}{c.pin_code ? ` - ${c.pin_code}` : ''}
               </div>
             )}
             <div className="space-y-1 text-sm text-[#4B5563]">

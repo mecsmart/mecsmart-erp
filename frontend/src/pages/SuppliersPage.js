@@ -31,6 +31,10 @@ export default function SuppliersPage() {
     email: '',
     phone: '',
     address: '',
+    address_line2: '',
+    city: '',
+    state: '',
+    pin_code: '',
     gstin: '',
     state_code: '',
     payment_terms: 'Net 30',
@@ -95,6 +99,10 @@ export default function SuppliersPage() {
       email: supplier.email || '',
       phone: supplier.phone || '',
       address: supplier.address || '',
+      address_line2: supplier.address_line2 || '',
+      city: supplier.city || '',
+      state: supplier.state || '',
+      pin_code: supplier.pin_code || '',
       gstin: supplier.gstin || '',
       state_code: supplier.state_code || '',
       payment_terms: supplier.payment_terms || 'Net 30',
@@ -124,6 +132,10 @@ export default function SuppliersPage() {
       email: '',
       phone: '',
       address: '',
+      address_line2: '',
+      city: '',
+      state: '',
+      pin_code: '',
       gstin: '',
       state_code: '',
       payment_terms: 'Net 30',
@@ -248,15 +260,40 @@ export default function SuppliersPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-[#111827] mb-1">Address</label>
-                  <textarea
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Address Line 1</label>
+                  <input
+                    type="text"
                     value={formData.address}
                     onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                     className="input-field"
-                    rows={2}
-                    placeholder="123 Industrial Blvd, City, State"
+                    placeholder="Plot/Building/Street"
                     data-testid="supplier-address-input"
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Address Line 2</label>
+                  <input
+                    type="text"
+                    value={formData.address_line2}
+                    onChange={(e) => setFormData({ ...formData, address_line2: e.target.value })}
+                    className="input-field"
+                    placeholder="Area/Locality"
+                    data-testid="supplier-address2-input"
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">City</label>
+                    <input type="text" value={formData.city} onChange={(e) => setFormData({ ...formData, city: e.target.value })} className="input-field" placeholder="City" data-testid="supplier-city-input" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">State</label>
+                    <input type="text" value={formData.state} onChange={(e) => setFormData({ ...formData, state: e.target.value })} className="input-field" placeholder="State" data-testid="supplier-state-name-input" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Pin Code</label>
+                    <input type="text" value={formData.pin_code} onChange={(e) => setFormData({ ...formData, pin_code: e.target.value.replace(/\D/g, '') })} className="input-field mono" maxLength={6} placeholder="411019" data-testid="supplier-pincode-input" />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -409,10 +446,16 @@ export default function SuppliersPage() {
                     <span>{supplier.phone}</span>
                   </div>
                 )}
-                {supplier.address && (
+                {(supplier.address || supplier.city) && (
                   <div className="flex items-start space-x-2 text-sm text-[#4B5563]">
-                    <MapPin className="w-4 h-4 mt-0.5" />
-                    <span className="line-clamp-2">{supplier.address}</span>
+                    <MapPin className="w-4 h-4 mt-0.5 shrink-0" />
+                    <div className="line-clamp-3">
+                      {supplier.address && <span>{supplier.address}</span>}
+                      {supplier.address_line2 && <span>, {supplier.address_line2}</span>}
+                      {supplier.city && <><br />{supplier.city}</>}
+                      {supplier.state && <>, {supplier.state}</>}
+                      {supplier.pin_code && <> - {supplier.pin_code}</>}
+                    </div>
                   </div>
                 )}
               </div>

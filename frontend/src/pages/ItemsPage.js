@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
+import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
   Plus, 
   Search, 
@@ -27,6 +28,7 @@ const units = ['pcs', 'kg', 'meter', 'sheet', 'kit', 'liter', 'set'];
 
 export default function ItemsPage() {
   const { user } = useAuth();
+  const { formatCurrency } = useCompanySettings();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -467,7 +469,7 @@ export default function ItemsPage() {
                     <td className="mono text-sm">{item.hsn_code || '-'}</td>
                     <td className="text-right mono">{item.gst_rate != null ? `${item.gst_rate}%` : '-'}</td>
                     <td className="text-right mono">{item.current_stock} {item.unit_of_measure}</td>
-                    <td className="text-right mono">${item.unit_cost.toFixed(2)}</td>
+                    <td className="text-right mono">{formatCurrency(item.unit_cost)}</td>
                     <td>
                       <div className="flex items-center space-x-2">
                         {canEdit && (

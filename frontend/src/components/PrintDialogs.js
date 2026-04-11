@@ -17,6 +17,24 @@ const PAPER_SIZES = [
   { id: 'a5', name: 'A5', w: '148mm', h: '210mm' },
 ];
 
+const CURRENCY_SYMBOLS = { INR: '\u20B9', USD: '$' };
+
+function formatFullAddress(obj) {
+  if (!obj) return '';
+  const parts = [obj.address, obj.address_line2].filter(Boolean);
+  const cityLine = [obj.city, obj.state].filter(Boolean).join(', ');
+  if (obj.pin_code) {
+    parts.push(cityLine ? `${cityLine} - ${obj.pin_code}` : obj.pin_code);
+  } else if (cityLine) {
+    parts.push(cityLine);
+  }
+  return parts.join(', ');
+}
+
+function getCurrencySymbol(company) {
+  return CURRENCY_SYMBOLS[company?.primary_currency] || CURRENCY_SYMBOLS.INR;
+}
+
 const defaultOpts = {
   template: 'standard',
   paperSize: 'a4',
@@ -49,7 +67,7 @@ export function POPrintDialog({ po, open, onClose }) {
 
   const toggle = (key) => setOpts({ ...opts, [key]: !opts[key] });
 
-  const numberToWords = (num) => {
+  const numberToWords = (num, currencyName) => {
     if (num === 0) return 'Zero';
     const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
     const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
@@ -65,9 +83,11 @@ export function POPrintDialog({ po, open, onClose }) {
       return ones[Math.floor(g / 100)] + ' Hundred' + (g % 100 ? ' and ' + convertGroup(g % 100, false) : '');
     };
     const parts = groups.map((g, i) => g ? convertGroup(g, i === 0) + (scales[i] ? ' ' + scales[i] : '') : '').filter(Boolean).reverse();
-    const rupees = parts.join(' ');
-    const paise = Math.round((num - Math.floor(num)) * 100);
-    return rupees + ' Rupees' + (paise > 0 ? ' and ' + convertGroup(paise) + ' Paise' : '') + ' Only';
+    const mainUnit = currencyName === 'USD' ? 'Dollars' : 'Rupees';
+    const subUnit = currencyName === 'USD' ? 'Cents' : 'Paise';
+    const main = parts.join(' ');
+    const decimal = Math.round((num - Math.floor(num)) * 100);
+    return main + ' ' + mainUnit + (decimal > 0 ? ' and ' + convertGroup(decimal) + ' ' + subUnit : '') + ' Only';
   };
 
   const buildHTML = () => {
@@ -89,7 +109,10 @@ export function POPrintDialog({ po, open, onClose }) {
       .page { max-width:${paper.w}; margin:0 auto; padding:${isModern ? '0' : '15px'}; }
       ${isModern ? `.page { border:2px solid ${accent}; }` : ''}
       .letterhead { text-align:center; padding:15px 20px; ${isModern ? `background:${accent}; color:white;` : `border-bottom:2px solid ${accent};`} margin-bottom:15px; }
-      .letterhead h1 { font-size:18px; font-weight:700; ${isModern ? 'color:white;' : `color:${accent};`} letter-spacing:0.5px; }
+      .letterhead .logo-row { display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom:4px; }
+      .letterhead .logo-row img { max-height:48px; max-width:120px; object-fit:contain; }
+      .letterhead h1 { font-size:18px; font-weight:700; ${isModern ? 'color:white;' : `color:${accent};`} letter-spacing:0.5px; margin:0; }
+      .letterhead .tagline { font-size:9px; ${isModern ? 'color:#ccd6e0;' : 'color:#888;'} font-style:italic; margin-top:1px; letter-spacing:0.3px; }
       .letterhead .sub { font-size:9.5px; ${isModern ? 'color:#ccd6e0;' : 'color:#666;'} margin-top:2px; }
       .doc-title { font-size:14px; font-weight:700; color:${accent}; text-transform:uppercase; padding:8px 15px; ${isModern ? `background:${accentLight};` : `border-bottom:1px solid ${accent};`} margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
       .doc-title .rev { font-size:10px; color:#666; font-weight:normal; }
@@ -126,17 +149,24 @@ export function POPrintDialog({ po, open, onClose }) {
 
     // Build letterhead
     let letterhead = '';
+    const companyAddr = formatFullAddress(company);
+    const sym = getCurrencySymbol(company);
     if (opts.showLetterhead) {
+      const logoHTML = (opts.showLogo && company.logo_data) ? `<img src="${company.logo_data}" alt="Logo" />` : '';
       letterhead = `<div class="letterhead">
-        <h1>${company.company_name || 'Company Name'}</h1>
-        <div class="sub">${[company.address, company.phone ? `Ph: ${company.phone}` : '', company.email].filter(Boolean).join(' | ')}</div>
+        <div class="logo-row">${logoHTML}<h1>${company.company_name || 'Company Name'}</h1></div>
+        ${company.tagline ? `<div class="tagline">${company.tagline}</div>` : ''}
+        <div class="sub">${[companyAddr, company.phone ? `Ph: ${company.phone}` : '', company.email].filter(Boolean).join(' | ')}</div>
         ${company.gstin ? `<div class="sub">GSTIN: ${company.gstin}${company.pan ? ` | PAN: ${company.pan}` : ''}</div>` : ''}
       </div>`;
+    } else {
+      // Even without letterhead, we need the currency symbol
     }
 
     // Info blocks
+    const supplierAddr = formatFullAddress(supplier);
     let infoHTML = `<div class="info-section">
-      <div class="info-block"><div class="label">Supplier</div><div class="value">${supplier.name || ''}</div><div class="detail">${supplier.code || ''}${supplier.gstin ? ` | GSTIN: ${supplier.gstin}` : ''}</div>${supplier.address ? `<div class="detail">${supplier.address}</div>` : ''}</div>
+      <div class="info-block"><div class="label">Supplier</div><div class="value">${supplier.name || ''}</div><div class="detail">${supplier.code || ''}${supplier.gstin ? ` | GSTIN: ${supplier.gstin}` : ''}</div>${supplierAddr ? `<div class="detail">${supplierAddr}</div>` : ''}</div>
       <div class="info-block"><div class="label">PO Date / Expected</div><div class="value">${d.created_at ? new Date(d.created_at).toLocaleDateString() : '-'}</div><div class="detail">Expected: ${d.expected_date ? new Date(d.expected_date).toLocaleDateString() : '-'}</div></div>
       ${d.quotation_ref ? `<div class="info-block"><div class="label">Vendor Quotation</div><div class="value mono">${d.quotation_ref}</div>${d.quotation_date ? `<div class="detail">Dated: ${new Date(d.quotation_date).toLocaleDateString()}</div>` : ''}</div>` : ''}
       ${d.delivery_address ? `<div class="info-block"><div class="label">Delivery Address</div><div class="detail">${d.delivery_address}</div></div>` : ''}
@@ -210,24 +240,24 @@ export function POPrintDialog({ po, open, onClose }) {
 
     // Totals
     let totalsHTML = `<div class="totals-box"><table>
-      <tr><td class="label-cell">Subtotal</td><td class="val-cell">${(d.subtotal||0).toFixed(2)}</td></tr>`;
-    if ((d.charges_subtotal||0) > 0) totalsHTML += `<tr><td class="label-cell">Charges</td><td class="val-cell">${(d.charges_subtotal||0).toFixed(2)}</td></tr>`;
+      <tr><td class="label-cell">Subtotal</td><td class="val-cell">${sym}${(d.subtotal||0).toFixed(2)}</td></tr>`;
+    if ((d.charges_subtotal||0) > 0) totalsHTML += `<tr><td class="label-cell">Charges</td><td class="val-cell">${sym}${(d.charges_subtotal||0).toFixed(2)}</td></tr>`;
     if (opts.showGSTBreakup) {
       if (d.is_inter_state) {
-        totalsHTML += `<tr><td class="label-cell">IGST</td><td class="val-cell">${(d.total_igst||0).toFixed(2)}</td></tr>`;
+        totalsHTML += `<tr><td class="label-cell">IGST</td><td class="val-cell">${sym}${(d.total_igst||0).toFixed(2)}</td></tr>`;
       } else {
-        totalsHTML += `<tr><td class="label-cell">CGST</td><td class="val-cell">${(d.total_cgst||0).toFixed(2)}</td></tr>`;
-        totalsHTML += `<tr><td class="label-cell">SGST</td><td class="val-cell">${(d.total_sgst||0).toFixed(2)}</td></tr>`;
+        totalsHTML += `<tr><td class="label-cell">CGST</td><td class="val-cell">${sym}${(d.total_cgst||0).toFixed(2)}</td></tr>`;
+        totalsHTML += `<tr><td class="label-cell">SGST</td><td class="val-cell">${sym}${(d.total_sgst||0).toFixed(2)}</td></tr>`;
       }
     } else {
-      totalsHTML += `<tr><td class="label-cell">Tax</td><td class="val-cell">${(d.total_tax||0).toFixed(2)}</td></tr>`;
+      totalsHTML += `<tr><td class="label-cell">Tax</td><td class="val-cell">${sym}${(d.total_tax||0).toFixed(2)}</td></tr>`;
     }
-    totalsHTML += `<tr class="grand"><td class="label-cell grand-total">Grand Total</td><td class="val-cell grand-total">${(d.total_amount||0).toFixed(2)}</td></tr></table></div>`;
+    totalsHTML += `<tr class="grand"><td class="label-cell grand-total">Grand Total</td><td class="val-cell grand-total">${sym}${(d.total_amount||0).toFixed(2)}</td></tr></table></div>`;
 
     // Amount in words
     let wordsHTML = '';
     if (opts.showQtyWords) {
-      wordsHTML = `<div class="amount-words"><strong>Amount in words:</strong> ${numberToWords(d.total_amount || 0)}</div>`;
+      wordsHTML = `<div class="amount-words"><strong>Amount in words:</strong> ${numberToWords(d.total_amount || 0, company?.primary_currency)}</div>`;
     }
 
     // Terms
@@ -424,7 +454,10 @@ export function GRNPrintDialog({ grn, open, onClose }) {
       body { font-family:'Segoe UI',Arial,sans-serif; font-size:10.5px; color:#222; line-height:1.5; }
       .page { max-width:${paper.w}; margin:0 auto; padding:15px; }
       .letterhead { text-align:center; padding:15px 20px; border-bottom:2px solid ${accent}; margin-bottom:15px; }
-      .letterhead h1 { font-size:18px; font-weight:700; color:${accent}; }
+      .letterhead .logo-row { display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom:4px; }
+      .letterhead .logo-row img { max-height:48px; max-width:120px; object-fit:contain; }
+      .letterhead h1 { font-size:18px; font-weight:700; color:${accent}; margin:0; }
+      .letterhead .tagline { font-size:9px; color:#888; font-style:italic; margin-top:1px; }
       .letterhead .sub { font-size:9.5px; color:#666; margin-top:2px; }
       .doc-title { font-size:14px; font-weight:700; color:#03543F; text-transform:uppercase; padding:8px 15px; background:#DEF7EC; margin-bottom:12px; }
       .info-section { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:0 15px; margin-bottom:14px; }
@@ -449,8 +482,11 @@ export function GRNPrintDialog({ grn, open, onClose }) {
 
     let letterhead = '';
     if (opts.showLetterhead) {
-      letterhead = `<div class="letterhead"><h1>${company.company_name || ''}</h1>
-        <div class="sub">${[company.address, company.phone ? `Ph: ${company.phone}` : '', company.email].filter(Boolean).join(' | ')}</div>
+      const companyAddr = formatFullAddress(company);
+      const logoHTML = company.logo_data ? `<img src="${company.logo_data}" alt="Logo" />` : '';
+      letterhead = `<div class="letterhead"><div class="logo-row">${logoHTML}<h1>${company.company_name || ''}</h1></div>
+        ${company.tagline ? `<div class="tagline">${company.tagline}</div>` : ''}
+        <div class="sub">${[companyAddr, company.phone ? `Ph: ${company.phone}` : '', company.email].filter(Boolean).join(' | ')}</div>
         ${company.gstin ? `<div class="sub">GSTIN: ${company.gstin}</div>` : ''}</div>`;
     }
 
@@ -479,7 +515,7 @@ export function GRNPrintDialog({ grn, open, onClose }) {
         <div class="doc-title">Goods Receipt Note: ${d.grn_number}</div>
         <div class="info-section">
           <div class="info-block"><div class="label">PO Reference</div><div class="value mono">${d.po_number||''}</div></div>
-          <div class="info-block"><div class="label">Supplier</div><div class="value">${supplier.name||''}</div><div class="detail">${supplier.code||''}${supplier.gstin ? ` | GSTIN: ${supplier.gstin}` : ''}</div></div>
+          <div class="info-block"><div class="label">Supplier</div><div class="value">${supplier.name||''}</div><div class="detail">${supplier.code||''}${supplier.gstin ? ` | GSTIN: ${supplier.gstin}` : ''}</div>${(supplier.address || supplier.city) ? `<div class="detail">${formatFullAddress(supplier)}</div>` : ''}</div>
           <div class="info-block"><div class="label">Supplier Invoice / Doc Ref</div><div class="value mono">${d.supplier_invoice_no||'-'}</div>${d.supplier_invoice_date ? `<div class="detail">Dated: ${new Date(d.supplier_invoice_date).toLocaleDateString()}</div>` : ''}</div>
           <div class="info-block"><div class="label">Receiving Warehouse</div><div class="value">${wh.name||''} ${wh.code ? `(${wh.code})` : ''}</div>${wh.address ? `<div class="detail">${wh.address}</div>` : ''}</div>
         </div>

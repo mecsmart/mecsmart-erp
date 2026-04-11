@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
+import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
   Plus, 
   FileStack, 
@@ -27,6 +28,7 @@ const statusOptions = [
 
 export default function BOMPage() {
   const { user } = useAuth();
+  const { formatCurrency } = useCompanySettings();
   const [boms, setBoms] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -256,8 +258,8 @@ export default function BOMPage() {
             <td className="py-2 px-3 text-sm">{item.item?.name || 'Unknown'}</td>
             <td className="py-2 px-3 text-sm text-right mono">{item.quantity}</td>
             <td className="py-2 px-3 text-sm">{item.item?.unit_of_measure || '-'}</td>
-            <td className="py-2 px-3 text-sm text-right mono">{item.unit_cost != null ? `$${Number(item.unit_cost).toFixed(2)}` : '-'}</td>
-            <td className="py-2 px-3 text-sm text-right mono font-medium">{item.extended_cost != null ? `$${Number(item.extended_cost).toFixed(2)}` : '-'}</td>
+            <td className="py-2 px-3 text-sm text-right mono">{item.unit_cost != null ? formatCurrency(item.unit_cost) : '-'}</td>
+            <td className="py-2 px-3 text-sm text-right mono font-medium">{item.extended_cost != null ? formatCurrency(item.extended_cost) : '-'}</td>
             <td className="py-2 px-3">
               {item.is_alternate && (
                 <span className="status-badge bg-[#FDF6B2] text-[#723B13]">Alternate</span>
@@ -619,7 +621,7 @@ export default function BOMPage() {
                   </div>
                   <div className="flex items-center space-x-4">
                     <span className="mono font-semibold text-[#1D3557]" data-testid="bom-total-cost">
-                      Total Cost: ${bomExplosion.total_rollup_cost != null ? Number(bomExplosion.total_rollup_cost).toFixed(2) : '0.00'}
+                      Total Cost: {formatCurrency(bomExplosion.total_rollup_cost != null ? bomExplosion.total_rollup_cost : 0)}
                     </span>
                     <span className={`status-badge status-${bomExplosion.bom?.status}`}>
                       Rev {bomExplosion.bom?.revision} &bull; {bomExplosion.bom?.status}

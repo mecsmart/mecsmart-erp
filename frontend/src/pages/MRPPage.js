@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../context/AuthContext';
+import { useCompanySettings } from '../context/CompanySettingsContext';
 import { Package, ShoppingCart, AlertTriangle, DollarSign, TrendingUp, ShoppingBag } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 
 export default function MRPPage() {
+  const { formatCurrency } = useCompanySettings();
   const [demand, setDemand] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -85,7 +87,7 @@ export default function MRPPage() {
         supplier_id: selectedSupplier,
         items: Object.values(selectedItems)
       });
-      alert(`Purchase Order ${data.po_number} created successfully!\nTotal: $${data.total_amount?.toFixed(2)}`);
+      alert(`Purchase Order ${data.po_number} created successfully!\nTotal: ${formatCurrency(data.total_amount)}`);
       setPODialogOpen(false);
       setSelectedItems({});
       setSelectedSupplier('');
@@ -129,7 +131,7 @@ export default function MRPPage() {
         </div>
         <div className="kpi-card">
           <div className="flex items-center justify-between">
-            <div><p className="kpi-label">Est. Purchase Cost</p><p className="kpi-value">${totalEstimatedCost.toLocaleString()}</p></div>
+            <div><p className="kpi-label">Est. Purchase Cost</p><p className="kpi-value">{formatCurrency(totalEstimatedCost)}</p></div>
             <DollarSign className="w-8 h-8 text-[#03543F]" />
           </div>
         </div>
@@ -226,7 +228,7 @@ export default function MRPPage() {
                           )}
                         </td>
                         <td className="text-right mono">{s.lead_time_days}d</td>
-                        <td className="text-right mono">${s.estimated_cost?.toFixed(2) || '0.00'}</td>
+                        <td className="text-right mono">{formatCurrency(s.estimated_cost || 0)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -265,8 +267,8 @@ export default function MRPPage() {
                       <tr key={itemId} className="border-t">
                         <td className="py-2 px-3"><span className="mono text-xs">{sug?.item?.part_number}</span> {sug?.item?.name}</td>
                         <td className="text-right py-2 px-3 mono">{entry.quantity}</td>
-                        <td className="text-right py-2 px-3 mono">${entry.unit_price.toFixed(2)}</td>
-                        <td className="text-right py-2 px-3 mono font-medium">${(entry.quantity * entry.unit_price).toFixed(2)}</td>
+                        <td className="text-right py-2 px-3 mono">{formatCurrency(entry.unit_price)}</td>
+                        <td className="text-right py-2 px-3 mono font-medium">{formatCurrency(entry.quantity * entry.unit_price)}</td>
                       </tr>
                     );
                   })}
@@ -274,7 +276,7 @@ export default function MRPPage() {
                 <tfoot>
                   <tr className="bg-[#F3F4F6] font-semibold border-t">
                     <td colSpan={3} className="py-2 px-3 text-right">Subtotal (before GST):</td>
-                    <td className="text-right py-2 px-3 mono">${Object.values(selectedItems).reduce((s, e) => s + e.quantity * e.unit_price, 0).toFixed(2)}</td>
+                    <td className="text-right py-2 px-3 mono">{formatCurrency(Object.values(selectedItems).reduce((s, e) => s + e.quantity * e.unit_price, 0))}</td>
                   </tr>
                 </tfoot>
               </table>

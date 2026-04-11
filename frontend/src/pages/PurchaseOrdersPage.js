@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
+import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
   Plus, ShoppingCart, FileText, Filter, X, CheckCircle2, Send, 
   Edit2, History, ChevronDown, ChevronUp, Trash2, Printer
@@ -27,6 +28,7 @@ const emptyForm = {
 
 export default function PurchaseOrdersPage() {
   const { user } = useAuth();
+  const { formatCurrency, currencySymbol } = useCompanySettings();
   const [suppliers, setSuppliers] = useState([]);
   const [items, setItems] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -289,16 +291,16 @@ export default function PurchaseOrdersPage() {
                       ) : <span className="text-[#9CA3AF]">-</span>}
                     </td>
                     <td className="mono">{po.lines?.length || 0} items</td>
-                    <td className="text-right mono">{(po.subtotal || 0).toFixed(2)}</td>
+                    <td className="text-right mono">{formatCurrency(po.subtotal || 0)}</td>
                     <td className="text-right">
                       {po.total_tax > 0 ? (
                         <div className="text-xs">
-                          <span className="mono font-medium">{(po.total_tax || 0).toFixed(2)}</span>
+                          <span className="mono font-medium">{formatCurrency(po.total_tax || 0)}</span>
                           <span className="block text-[#6B7280]">{po.is_inter_state ? 'IGST' : 'CGST+SGST'}</span>
                         </div>
                       ) : <span className="mono text-[#9CA3AF]">-</span>}
                     </td>
-                    <td className="text-right mono font-semibold">{(po.total_amount || 0).toFixed(2)}</td>
+                    <td className="text-right mono font-semibold">{formatCurrency(po.total_amount || 0)}</td>
                     <td>
                       <span className={`status-badge ${getStatusColor(po.status)}`}>{po.status === 'received' ? 'GRN Done' : po.status}</span>
                     </td>
@@ -497,10 +499,10 @@ export default function PurchaseOrdersPage() {
             {formData.lines.length > 0 && (
               <div className="flex justify-end pt-2">
                 <div className="text-right space-y-1 min-w-[220px]">
-                  <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Items Subtotal:</span><span className="mono font-medium">{calcSubtotal().toFixed(2)}</span></div>
-                  {calcChargesTotal() > 0 && <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Charges:</span><span className="mono font-medium">{calcChargesTotal().toFixed(2)}</span></div>}
-                  <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Est. GST:</span><span className="mono font-medium">{calcGST().toFixed(2)}</span></div>
-                  <div className="flex justify-between border-t border-[#D1D5DB] pt-1"><span className="text-sm font-semibold">Total:</span><span className="mono font-bold text-lg">{(calcSubtotal() + calcChargesTotal() + calcGST()).toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Items Subtotal:</span><span className="mono font-medium">{formatCurrency(calcSubtotal())}</span></div>
+                  {calcChargesTotal() > 0 && <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Charges:</span><span className="mono font-medium">{formatCurrency(calcChargesTotal())}</span></div>}
+                  <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Est. GST:</span><span className="mono font-medium">{formatCurrency(calcGST())}</span></div>
+                  <div className="flex justify-between border-t border-[#D1D5DB] pt-1"><span className="text-sm font-semibold">Total:</span><span className="mono font-bold text-lg">{formatCurrency(calcSubtotal() + calcChargesTotal() + calcGST())}</span></div>
                 </div>
               </div>
             )}
@@ -543,9 +545,9 @@ export default function PurchaseOrdersPage() {
                       <div className="text-xs text-[#4B5563]">
                         <span>{rev.lines?.length || 0} line items</span>
                         <span className="mx-2">|</span>
-                        <span>Subtotal: {(rev.subtotal || 0).toFixed(2)}</span>
+                        <span>Subtotal: {formatCurrency(rev.subtotal || 0)}</span>
                         <span className="mx-2">|</span>
-                        <span>Total: {(rev.total_amount || 0).toFixed(2)}</span>
+                        <span>Total: {formatCurrency(rev.total_amount || 0)}</span>
                       </div>
                     </div>
                   ))}

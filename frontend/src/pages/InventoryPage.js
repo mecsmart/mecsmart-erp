@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
+import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
   Plus, 
   Package, 
@@ -23,6 +24,7 @@ const transactionTypes = [
 
 export default function InventoryPage() {
   const { user } = useAuth();
+  const { formatCurrency } = useCompanySettings();
   const [inventory, setInventory] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -217,7 +219,7 @@ export default function InventoryPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="kpi-label">Total Inventory Value</p>
-              <p className="kpi-value">${totalValue.toLocaleString()}</p>
+              <p className="kpi-value">{formatCurrency(totalValue)}</p>
             </div>
             <Package className="w-8 h-8 text-[#03543F]" />
           </div>
@@ -332,8 +334,8 @@ export default function InventoryPage() {
                         </td>
                         <td className="text-right mono">{item.safety_stock}</td>
                         <td className="text-right mono">{item.reorder_point}</td>
-                        <td className="text-right mono">${item.unit_cost.toFixed(2)}</td>
-                        <td className="text-right mono">${(item.current_stock * item.unit_cost).toFixed(2)}</td>
+                        <td className="text-right mono">{formatCurrency(item.unit_cost)}</td>
+                        <td className="text-right mono">{formatCurrency(item.current_stock * item.unit_cost)}</td>
                       </tr>
                     ))}
                   </tbody>

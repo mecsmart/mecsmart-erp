@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
+import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
   Plus, 
   Warehouse, 
@@ -21,6 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 
 export default function WarehousesPage() {
   const { user } = useAuth();
+  const { formatCurrency } = useCompanySettings();
   const [warehouses, setWarehouses] = useState([]);
   const [transfers, setTransfers] = useState([]);
   const [items, setItems] = useState([]);
@@ -660,7 +662,7 @@ export default function WarehousesPage() {
                           <p className="text-sm">{po.supplier?.name}</p>
                         </td>
                         <td className="mono text-sm">{po.lines?.length || 0} items</td>
-                        <td className="text-right mono font-semibold">{(po.total_amount || 0).toFixed(2)}</td>
+                        <td className="text-right mono font-semibold">{formatCurrency(po.total_amount || 0)}</td>
                         <td className="text-sm">{po.expected_date ? new Date(po.expected_date).toLocaleDateString() : '-'}</td>
                         <td>
                           <button onClick={() => openGRNDialog(po)} className="btn-primary text-xs flex items-center gap-1" data-testid={`create-grn-${po.id}`}>
@@ -768,7 +770,7 @@ export default function WarehousesPage() {
                       </div>
                       <div>
                         <span className="text-[#6B7280]">PO Total: </span>
-                        <span className="mono font-semibold">{(selectedPO.total_amount || 0).toFixed(2)}</span>
+                        <span className="mono font-semibold">{formatCurrency(selectedPO.total_amount || 0)}</span>
                       </div>
                     </div>
                   </div>
@@ -827,7 +829,7 @@ export default function WarehousesPage() {
                                   <input type="number" min="0" step="any" value={line.received_quantity} onChange={(e) => updateGRNLine(i, 'received_quantity', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono w-20 text-right" data-testid={`grn-received-qty-${i}`} />
                                 </td>
                                 <td className="p-2 mono text-xs">{line.uom}</td>
-                                <td className="p-2 text-right mono">{line.po_price.toFixed(2)}</td>
+                                <td className="p-2 text-right mono">{formatCurrency(line.po_price)}</td>
                                 <td className="p-2">
                                   <input type="number" min="0" step="0.01" value={line.verified_price} onChange={(e) => updateGRNLine(i, 'verified_price', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono w-24 text-right" data-testid={`grn-verified-price-${i}`} />
                                 </td>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
+import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
   Plus, 
   Settings2, 
@@ -18,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 
 export default function ManufacturingPage() {
   const { user } = useAuth();
+  const { formatCurrency, currencySymbol } = useCompanySettings();
   const [workCenters, setWorkCenters] = useState([]);
   const [routings, setRoutings] = useState([]);
   const [workOrders, setWorkOrders] = useState([]);
@@ -1070,7 +1072,7 @@ export default function ManufacturingPage() {
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div className="bg-[#F3F4F6] p-2 rounded-sm">
                       <p className="text-[#4B5563]">Hourly Rate</p>
-                      <p className="mono font-medium">${wc.hourly_rate?.toFixed(2) || '0.00'}</p>
+                      <p className="mono font-medium">{formatCurrency(wc.hourly_rate || 0)}</p>
                     </div>
                     <div className="bg-[#F3F4F6] p-2 rounded-sm">
                       <p className="text-[#4B5563]">Capacity/Hr</p>
