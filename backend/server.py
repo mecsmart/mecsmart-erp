@@ -1,11 +1,13 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File
+from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import io
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from typing import List, Optional, Dict, Any
@@ -239,6 +241,10 @@ class SupplierUpdate(BaseModel):
     lead_time_days: Optional[int] = None
     rating: Optional[int] = None
     status: Optional[str] = None
+
+class MRPCreatePORequest(BaseModel):
+    supplier_id: str
+    items: list  # [{"item_id": "...", "quantity": 100, "unit_price": 45}]
 
 class PurchaseOrderLineCreate(BaseModel):
     item_id: str
@@ -1541,25 +1547,29 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
     return po_doc
 
 @purchase_orders_router.post("/from-mrp", status_code=201)
-async def create_po_from_mrp(supplier_id: str, item_ids: List[str], request: Request):
+async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
     """Create PO from MRP suggestions"""
     user = await get_current_user(request)
     if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
-    supplier = await db.suppliers.find_one({"id": supplier_id})
+    supplier = await db.suppliers.find_one({"id": data.supplier_id})
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
     
+    item_ids = [item.get("item_id") or item for item in data.items] if data.items else []
+    
     lines = []
-    for item_id in item_ids:
+    for entry in data.items:
+        item_id = entry.get("item_id") if isinstance(entry, dict) else entry
         item = await db.items.find_one({"id": item_id}, {"_id": 0})
         if item:
-            suggested_qty = max(item.get("safety_stock", 0) * 2 - item.get("current_stock", 0), 1)
+            qty = entry.get("quantity", max(item.get("safety_stock", 0) * 2 - item.get("current_stock", 0), 1)) if isinstance(entry, dict) else max(item.get("safety_stock", 0) * 2 - item.get("current_stock", 0), 1)
+            price = entry.get("unit_price", item.get("unit_cost", 0)) if isinstance(entry, dict) else item.get("unit_cost", 0)
             lines.append({
                 "item_id": item_id,
-                "quantity": suggested_qty,
-                "unit_price": item.get("unit_cost", 0),
+                "quantity": qty,
+                "unit_price": price,
                 "hsn_code": item.get("hsn_code", ""),
                 "gst_rate": item.get("gst_rate", 18),
                 "notes": ""
@@ -1608,7 +1618,7 @@ async def create_po_from_mrp(supplier_id: str, item_ids: List[str], request: Req
     po_doc = {
         "id": str(uuid.uuid4()),
         "po_number": po_number,
-        "supplier_id": supplier_id,
+        "supplier_id": data.supplier_id,
         "expected_date": datetime.now(timezone.utc) + timedelta(days=supplier.get("lead_time_days", 7)),
         "lines": lines,
         "subtotal": round(subtotal, 2),
@@ -2349,7 +2359,7 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
 
 @work_orders_router.put("/{wo_id}/operations/{sequence}")
 async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOrderOperationUpdate, request: Request):
-    """Update a specific operation status within a work order"""
+    """Update a specific operation status within a work order (Job Card)"""
     user = await get_current_user(request)
     if user["role"] not in ["admin", "production_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
@@ -2358,23 +2368,56 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
     
+    if wo.get("status") not in ["in_progress", "pending"]:
+        raise HTTPException(status_code=400, detail=f"Cannot update operations on {wo.get('status')} work order")
+    
     operations = wo.get("operations_status", [])
-    for op in operations:
+    target_op = None
+    target_idx = None
+    
+    for idx, op in enumerate(operations):
         if op.get("sequence") == sequence:
-            op["status"] = op_data.status
-            if op_data.actual_start:
-                op["actual_start"] = op_data.actual_start
-            if op_data.actual_end:
-                op["actual_end"] = op_data.actual_end
-            if op_data.quantity_completed is not None:
-                op["quantity_completed"] = op_data.quantity_completed
-            if op_data.notes:
-                op["notes"] = op_data.notes
+            target_op = op
+            target_idx = idx
             break
     
-    # Check if all operations are completed
+    if target_op is None:
+        raise HTTPException(status_code=404, detail="Operation not found")
+    
+    # Validate: previous operations must be completed before starting this one
+    if op_data.status == "in_progress":
+        for prev_op in operations[:target_idx]:
+            if prev_op.get("status") != "completed":
+                raise HTTPException(status_code=400, detail=f"Previous operation '{prev_op.get('operation_name')}' must be completed first")
+        target_op["actual_start"] = op_data.actual_start or datetime.now(timezone.utc)
+        target_op["operator"] = user.get("name", "")
+    
+    if op_data.status == "completed":
+        target_op["actual_end"] = op_data.actual_end or datetime.now(timezone.utc)
+        if target_op.get("actual_start"):
+            # Handle both string and datetime formats for actual_start
+            actual_start = target_op["actual_start"]
+            if isinstance(actual_start, str):
+                # Parse ISO format string
+                actual_start = datetime.fromisoformat(actual_start.replace('Z', '+00:00'))
+            # Ensure both are timezone-aware
+            actual_end = target_op["actual_end"]
+            if actual_start.tzinfo is None:
+                actual_start = actual_start.replace(tzinfo=timezone.utc)
+            if actual_end.tzinfo is None:
+                actual_end = actual_end.replace(tzinfo=timezone.utc)
+            delta = (actual_end - actual_start).total_seconds() / 60
+            target_op["actual_time_min"] = round(delta, 1)
+    
+    target_op["status"] = op_data.status
+    if op_data.quantity_completed is not None:
+        target_op["quantity_completed"] = op_data.quantity_completed
+    if op_data.notes:
+        target_op["notes"] = op_data.notes
+    
+    # Auto-determine WO status
     all_completed = all(op.get("status") == "completed" for op in operations)
-    any_in_progress = any(op.get("status") == "in_progress" for op in operations)
+    any_in_progress = any(op.get("status") in ["in_progress", "completed"] for op in operations)
     
     wo_status = wo.get("status")
     if all_completed:
@@ -2382,16 +2425,362 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
     elif any_in_progress:
         wo_status = "in_progress"
     
-    await db.work_orders.update_one(
-        {"id": wo_id},
-        {"$set": {
-            "operations_status": operations,
-            "status": wo_status,
-            "updated_at": datetime.now(timezone.utc)
-        }}
-    )
+    update_fields = {
+        "operations_status": operations,
+        "status": wo_status,
+        "updated_at": datetime.now(timezone.utc)
+    }
+    
+    # If all operations completed, update stock
+    if all_completed and wo_status == "completed":
+        item = await db.items.find_one({"id": wo.get("item_id")})
+        if item:
+            await db.items.update_one(
+                {"id": item["id"]},
+                {"$inc": {"current_stock": wo.get("quantity", 0)}}
+            )
+        update_fields["actual_end"] = datetime.now(timezone.utc)
+        update_fields["quantity_completed"] = wo.get("quantity", 0)
+    
+    await db.work_orders.update_one({"id": wo_id}, {"$set": update_fields})
     
     return await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
+
+# ================== EXPORT / IMPORT ROUTES ==================
+
+@items_router.get("/export/excel")
+async def export_items_excel(request: Request):
+    """Export all items to Excel"""
+    await get_current_user(request)
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+    items = await db.items.find({}, {"_id": 0}).to_list(10000)
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Items Master"
+    
+    headers = ["Part Number", "Name", "Description", "Category", "UOM", "Unit Cost", "Lead Time (Days)", "Safety Stock", "Current Stock", "Reorder Point", "HSN Code", "GST Rate (%)"]
+    header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center')
+        cell.border = thin_border
+    
+    for row, item in enumerate(items, 2):
+        data = [
+            item.get("part_number", ""), item.get("name", ""), item.get("description", ""),
+            item.get("category", ""), item.get("unit_of_measure", ""), item.get("unit_cost", 0),
+            item.get("lead_time_days", 0), item.get("safety_stock", 0), item.get("current_stock", 0),
+            item.get("reorder_point", 0), item.get("hsn_code", ""), item.get("gst_rate", 18)
+        ]
+        for col, value in enumerate(data, 1):
+            cell = ws.cell(row=row, column=col, value=value)
+            cell.border = thin_border
+    
+    for col in range(1, len(headers) + 1):
+        ws.column_dimensions[chr(64 + col) if col <= 26 else 'A'].width = 18
+    
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=items_master.xlsx"}
+    )
+
+@items_router.post("/import/excel")
+async def import_items_excel(request: Request, file: UploadFile = File(...)):
+    """Import items from Excel file"""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    from openpyxl import load_workbook
+    
+    content = await file.read()
+    wb = load_workbook(io.BytesIO(content))
+    ws = wb.active
+    
+    headers = [cell.value for cell in ws[1]]
+    results = {"created": 0, "updated": 0, "errors": []}
+    
+    # Map header names to field names
+    field_map = {
+        "Part Number": "part_number", "Name": "name", "Description": "description",
+        "Category": "category", "UOM": "unit_of_measure", "Unit Cost": "unit_cost",
+        "Lead Time (Days)": "lead_time_days", "Safety Stock": "safety_stock",
+        "Current Stock": "current_stock", "Reorder Point": "reorder_point",
+        "HSN Code": "hsn_code", "GST Rate (%)": "gst_rate"
+    }
+    
+    col_indices = {}
+    for idx, header in enumerate(headers):
+        if header in field_map:
+            col_indices[field_map[header]] = idx
+    
+    for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+        try:
+            if not row or not row[0]:
+                continue
+            
+            item_data = {}
+            for field, col_idx in col_indices.items():
+                if col_idx < len(row) and row[col_idx] is not None:
+                    val = row[col_idx]
+                    if field in ["unit_cost", "gst_rate"]:
+                        val = float(val) if val else 0
+                    elif field in ["lead_time_days", "safety_stock", "current_stock", "reorder_point"]:
+                        val = int(val) if val else 0
+                    else:
+                        val = str(val).strip()
+                    item_data[field] = val
+            
+            if not item_data.get("part_number"):
+                results["errors"].append(f"Row {row_num}: Missing part number")
+                continue
+            
+            # Validate category
+            valid_cats = ["raw_material", "component", "sub_assembly", "finished_good"]
+            if item_data.get("category") and item_data["category"] not in valid_cats:
+                results["errors"].append(f"Row {row_num}: Invalid category '{item_data['category']}'")
+                continue
+            
+            existing = await db.items.find_one({"part_number": item_data["part_number"]})
+            if existing:
+                await db.items.update_one({"part_number": item_data["part_number"]}, {"$set": item_data})
+                results["updated"] += 1
+            else:
+                item_data["id"] = str(uuid.uuid4())
+                item_data.setdefault("unit_of_measure", "pcs")
+                item_data.setdefault("category", "raw_material")
+                item_data.setdefault("gst_rate", 18)
+                item_data["created_at"] = datetime.now(timezone.utc)
+                await db.items.insert_one(item_data)
+                results["created"] += 1
+        except Exception as e:
+            results["errors"].append(f"Row {row_num}: {str(e)}")
+    
+    return results
+
+@bom_router.get("/export/excel")
+async def export_boms_excel(request: Request):
+    """Export all BOMs to Excel"""
+    await get_current_user(request)
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+    boms = await db.boms.find({}, {"_id": 0}).to_list(10000)
+    items_map = {}
+    async for item in db.items.find({}, {"_id": 0}):
+        items_map[item["id"]] = item
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "BOM Data"
+    
+    headers = ["Parent Part Number", "Parent Name", "Revision", "Status", "Component Part Number", "Component Name", "Quantity", "Is Alternate", "Effectivity Start", "Effectivity End"]
+    header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center')
+        cell.border = thin_border
+    
+    row_num = 2
+    for bom in boms:
+        parent = items_map.get(bom.get("parent_item_id"), {})
+        for comp in bom.get("components", []):
+            comp_item = items_map.get(comp.get("item_id"), {})
+            data = [
+                parent.get("part_number", ""), parent.get("name", ""),
+                bom.get("revision", ""), bom.get("status", ""),
+                comp_item.get("part_number", ""), comp_item.get("name", ""),
+                comp.get("quantity", 0), "Yes" if comp.get("is_alternate") else "No",
+                str(bom.get("effectivity_start", "")) if bom.get("effectivity_start") else "",
+                str(bom.get("effectivity_end", "")) if bom.get("effectivity_end") else ""
+            ]
+            for col, value in enumerate(data, 1):
+                cell = ws.cell(row=row_num, column=col, value=value)
+                cell.border = thin_border
+            row_num += 1
+    
+    for col in range(1, len(headers) + 1):
+        ws.column_dimensions[chr(64 + col) if col <= 26 else 'A'].width = 20
+    
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=bom_data.xlsx"}
+    )
+
+@bom_router.post("/import/excel")
+async def import_bom_excel(request: Request, file: UploadFile = File(...)):
+    """Import BOMs from Excel - groups by parent part number"""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    from openpyxl import load_workbook
+    
+    content = await file.read()
+    wb = load_workbook(io.BytesIO(content))
+    ws = wb.active
+    
+    results = {"created": 0, "updated": 0, "errors": []}
+    
+    # Build items lookup
+    items_by_pn = {}
+    async for item in db.items.find({}, {"_id": 0}):
+        items_by_pn[item.get("part_number", "")] = item
+    
+    # Group rows by parent part number
+    bom_groups = {}
+    for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+        if not row or not row[0]:
+            continue
+        parent_pn = str(row[0]).strip()
+        if parent_pn not in bom_groups:
+            bom_groups[parent_pn] = {"revision": str(row[2]).strip() if row[2] else "A", "status": str(row[3]).strip() if row[3] else "active", "components": []}
+        
+        comp_pn = str(row[4]).strip() if row[4] else None
+        if not comp_pn:
+            results["errors"].append(f"Row {row_num}: Missing component part number")
+            continue
+        
+        parent_item = items_by_pn.get(parent_pn)
+        comp_item = items_by_pn.get(comp_pn)
+        
+        if not parent_item:
+            results["errors"].append(f"Row {row_num}: Parent '{parent_pn}' not found in items")
+            continue
+        if not comp_item:
+            results["errors"].append(f"Row {row_num}: Component '{comp_pn}' not found in items")
+            continue
+        
+        bom_groups[parent_pn]["parent_item_id"] = parent_item["id"]
+        bom_groups[parent_pn]["components"].append({
+            "item_id": comp_item["id"],
+            "quantity": float(row[6]) if row[6] else 1,
+            "is_alternate": str(row[7]).strip().lower() in ["yes", "true", "1"] if row[7] else False
+        })
+    
+    # Create or update BOMs
+    for parent_pn, bom_data in bom_groups.items():
+        if not bom_data.get("parent_item_id"):
+            continue
+        
+        existing = await db.boms.find_one({"parent_item_id": bom_data["parent_item_id"], "revision": bom_data["revision"]})
+        if existing:
+            await db.boms.update_one(
+                {"id": existing["id"]},
+                {"$set": {"components": bom_data["components"], "status": bom_data["status"], "updated_at": datetime.now(timezone.utc)}}
+            )
+            results["updated"] += 1
+        else:
+            bom_doc = {
+                "id": str(uuid.uuid4()),
+                "parent_item_id": bom_data["parent_item_id"],
+                "name": f"BOM - {parent_pn}",
+                "revision": bom_data["revision"],
+                "status": bom_data["status"],
+                "components": bom_data["components"],
+                "effectivity_start": None,
+                "effectivity_end": None,
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"]
+            }
+            await db.boms.insert_one(bom_doc)
+            results["created"] += 1
+    
+    return results
+
+@routings_router.get("/export/excel")
+async def export_routings_excel(request: Request):
+    """Export all routings to Excel"""
+    await get_current_user(request)
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    
+    routings = await db.routings.find({}, {"_id": 0}).to_list(10000)
+    items_map = {}
+    async for item in db.items.find({}, {"_id": 0}):
+        items_map[item["id"]] = item
+    
+    wc_map = {}
+    async for wc in db.work_centers.find({}, {"_id": 0}):
+        wc_map[wc["id"]] = wc
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Routings"
+    
+    headers = ["Item Part Number", "Item Name", "Routing Name", "Status", "Seq", "Operation", "Work Center", "Setup Time (min)", "Cycle Time (min)", "Description"]
+    header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+    
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center')
+        cell.border = thin_border
+    
+    row_num = 2
+    for routing in routings:
+        item = items_map.get(routing.get("item_id"), {})
+        for op in routing.get("operations", []):
+            wc = wc_map.get(op.get("work_center_id"), {})
+            data = [
+                item.get("part_number", ""), item.get("name", ""),
+                routing.get("name", ""), routing.get("status", ""),
+                op.get("sequence", ""), op.get("operation_name", ""),
+                wc.get("name", ""), op.get("setup_time", 0), op.get("cycle_time", 0),
+                op.get("description", "")
+            ]
+            for col, value in enumerate(data, 1):
+                cell = ws.cell(row=row_num, column=col, value=value)
+                cell.border = thin_border
+            row_num += 1
+    
+    for col in range(1, len(headers) + 1):
+        ws.column_dimensions[chr(64 + col) if col <= 26 else 'A'].width = 18
+    
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=routings.xlsx"}
+    )
 
 # ================== COMPANY SETTINGS / GST ROUTES ==================
 

@@ -8,7 +8,8 @@ import {
   Play,
   CheckCircle2,
   Clock,
-  AlertCircle
+  AlertCircle,
+  ClipboardList
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -27,6 +28,8 @@ export default function ManufacturingPage() {
   const [isWorkCenterDialogOpen, setIsWorkCenterDialogOpen] = useState(false);
   const [isRoutingDialogOpen, setIsRoutingDialogOpen] = useState(false);
   const [isWorkOrderDialogOpen, setIsWorkOrderDialogOpen] = useState(false);
+  const [isJobCardOpen, setIsJobCardOpen] = useState(false);
+  const [jobCardWO, setJobCardWO] = useState(null);
   const [editingWorkCenter, setEditingWorkCenter] = useState(null);
   
   const [workCenterForm, setWorkCenterForm] = useState({
@@ -162,6 +165,24 @@ export default function ManufacturingPage() {
     } catch (error) {
       console.error('Failed to update work order:', error);
       alert(error.response?.data?.detail || 'Failed to update work order');
+    }
+  };
+
+  const openJobCard = (wo) => {
+    setJobCardWO(wo);
+    setIsJobCardOpen(true);
+  };
+
+  const handleOperationUpdate = async (woId, sequence, newStatus) => {
+    try {
+      const { data } = await api.put(`/api/work-orders/${woId}/operations/${sequence}`, {
+        status: newStatus,
+        quantity_completed: newStatus === 'completed' ? jobCardWO?.quantity : 0
+      });
+      setJobCardWO(data);
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to update operation');
     }
   };
 
@@ -477,6 +498,16 @@ export default function ManufacturingPage() {
                             >
                               <CheckCircle2 className="w-3 h-3" />
                               <span>Complete</span>
+                            </button>
+                          )}
+                          {(wo.status === 'in_progress' || wo.status === 'pending') && wo.operations_status?.length > 0 && (
+                            <button
+                              onClick={() => openJobCard(wo)}
+                              className="btn-secondary text-xs flex items-center space-x-1 ml-1"
+                              data-testid={`jobcard-wo-${wo.id}`}
+                            >
+                              <ClipboardList className="w-3 h-3" />
+                              <span>Job Card</span>
                             </button>
                           )}
                         </td>
@@ -872,6 +903,95 @@ export default function ManufacturingPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Job Card Dialog */}
+      <Dialog open={isJobCardOpen} onOpenChange={(open) => { setIsJobCardOpen(open); if (!open) setJobCardWO(null); }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-[Chivo] flex items-center space-x-2">
+              <ClipboardList className="w-5 h-5" />
+              <span>Job Card - {jobCardWO?.wo_number}</span>
+            </DialogTitle>
+          </DialogHeader>
+          {jobCardWO && (
+            <div className="mt-4 space-y-4">
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                <div><span className="text-[#4B5563]">Item: </span><span className="font-medium">{items.find(i => i.id === jobCardWO.item_id)?.part_number} - {items.find(i => i.id === jobCardWO.item_id)?.name}</span></div>
+                <div><span className="text-[#4B5563]">Quantity: </span><span className="mono font-medium">{jobCardWO.quantity}</span></div>
+                <div><span className="text-[#4B5563]">Status: </span><span className={`status-badge ${getStatusColor(jobCardWO.status)}`}>{jobCardWO.status?.replace('_', ' ')}</span></div>
+              </div>
+
+              <div className="border rounded-sm overflow-hidden" data-testid="job-card-operations">
+                <table className="w-full">
+                  <thead>
+                    <tr className="bg-[#F3F4F6]">
+                      <th className="text-left py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Seq</th>
+                      <th className="text-left py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Operation</th>
+                      <th className="text-left py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Work Center</th>
+                      <th className="text-center py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Status</th>
+                      <th className="text-left py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Operator</th>
+                      <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Actual Time</th>
+                      <th className="text-center py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {jobCardWO.operations_status?.map((op, idx) => {
+                      const wc = workCenters.find(w => w.id === op.work_center_id);
+                      const prevCompleted = idx === 0 || jobCardWO.operations_status.slice(0, idx).every(p => p.status === 'completed');
+                      return (
+                        <tr key={op.sequence} className={`border-t ${op.status === 'in_progress' ? 'bg-[#FDF6B2]/30' : op.status === 'completed' ? 'bg-[#DEF7EC]/30' : ''}`} data-testid={`op-row-${op.sequence}`}>
+                          <td className="py-3 px-3 mono font-medium">{op.sequence}</td>
+                          <td className="py-3 px-3 font-medium">{op.operation_name}</td>
+                          <td className="py-3 px-3 text-sm text-[#4B5563]">{wc?.name || '-'}</td>
+                          <td className="py-3 px-3 text-center">
+                            <span className={`status-badge ${
+                              op.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' :
+                              op.status === 'in_progress' ? 'bg-[#FDF6B2] text-[#723B13]' :
+                              'bg-[#F3F4F6] text-[#4B5563]'
+                            }`}>{op.status?.replace('_', ' ')}</span>
+                          </td>
+                          <td className="py-3 px-3 text-sm">{op.operator || '-'}</td>
+                          <td className="py-3 px-3 text-right mono text-sm">{op.actual_time_min ? `${op.actual_time_min} min` : '-'}</td>
+                          <td className="py-3 px-3 text-center">
+                            {op.status === 'pending' && prevCompleted && canEdit && (
+                              <button onClick={() => handleOperationUpdate(jobCardWO.id, op.sequence, 'in_progress')} className="btn-primary text-xs px-3 py-1" data-testid={`start-op-${op.sequence}`}>
+                                <Play className="w-3 h-3 inline mr-1" />Start
+                              </button>
+                            )}
+                            {op.status === 'in_progress' && canEdit && (
+                              <button onClick={() => handleOperationUpdate(jobCardWO.id, op.sequence, 'completed')} className="btn-primary text-xs px-3 py-1 bg-[#03543F]" data-testid={`complete-op-${op.sequence}`}>
+                                <CheckCircle2 className="w-3 h-3 inline mr-1" />Complete
+                              </button>
+                            )}
+                            {op.status === 'completed' && (
+                              <CheckCircle2 className="w-4 h-4 text-[#03543F] inline" />
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Progress bar */}
+              <div>
+                <div className="flex justify-between text-xs text-[#4B5563] mb-1">
+                  <span>Progress</span>
+                  <span>{jobCardWO.operations_status?.filter(o => o.status === 'completed').length}/{jobCardWO.operations_status?.length} operations</span>
+                </div>
+                <div className="w-full bg-[#E5E7EB] rounded-full h-2.5">
+                  <div
+                    className="bg-[#1D3557] h-2.5 rounded-full transition-all"
+                    style={{ width: `${(jobCardWO.operations_status?.filter(o => o.status === 'completed').length / (jobCardWO.operations_status?.length || 1)) * 100}%` }}
+                    data-testid="job-card-progress"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

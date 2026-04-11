@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -9,7 +9,9 @@ import {
   Trash2,
   Filter,
   X,
-  AlertTriangle
+  AlertTriangle,
+  Download,
+  Upload
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -135,6 +137,42 @@ export default function ItemsPage() {
 
   const isLowStock = (item) => item.current_stock <= item.reorder_point;
 
+  const fileInputRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleExport = async () => {
+    try {
+      const response = await api.get('/api/items/export/excel', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'items_master.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      alert('Failed to export items');
+    }
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await api.post('/api/items/import/excel', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      alert(`Import complete!\nCreated: ${data.created}\nUpdated: ${data.updated}${data.errors?.length ? `\nErrors: ${data.errors.length}` : ''}`);
+      fetchItems();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to import items');
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   return (
     <div className="space-y-6" data-testid="items-page">
       <div className="flex items-center justify-between">
@@ -142,7 +180,19 @@ export default function ItemsPage() {
           <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Items & Parts</h1>
           <p className="text-sm text-[#4B5563]">Manage your inventory items and parts catalog</p>
         </div>
-        {canEdit && (
+        <div className="flex items-center space-x-2">
+          <button onClick={handleExport} className="btn-secondary flex items-center space-x-1 text-sm" data-testid="export-items-btn">
+            <Download className="w-4 h-4" /><span>Export</span>
+          </button>
+          {canEdit && (
+            <>
+              <input type="file" ref={fileInputRef} accept=".xlsx,.xls" onChange={handleImport} className="hidden" />
+              <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="btn-secondary flex items-center space-x-1 text-sm" data-testid="import-items-btn">
+                <Upload className="w-4 h-4" /><span>{importing ? 'Importing...' : 'Import'}</span>
+              </button>
+            </>
+          )}
+          {canEdit && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => {
             setIsDialogOpen(open);
             if (!open) {
@@ -326,6 +376,7 @@ export default function ItemsPage() {
             </DialogContent>
           </Dialog>
         )}
+        </div>
       </div>
 
       {/* Filters */}

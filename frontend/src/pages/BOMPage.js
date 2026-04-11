@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -12,7 +12,9 @@ import {
   Eye,
   X,
   GitBranch,
-  AlertCircle
+  AlertCircle,
+  Download,
+  Upload
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -170,6 +172,42 @@ export default function BOMPage() {
     setFormData({ ...formData, components: newComponents });
   };
 
+  const bomFileRef = useRef(null);
+  const [bomImporting, setBomImporting] = useState(false);
+
+  const handleBomExport = async () => {
+    try {
+      const response = await api.get('/api/bom/export/excel', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'bom_data.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      alert('Failed to export BOM data');
+    }
+  };
+
+  const handleBomImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBomImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await api.post('/api/bom/import/excel', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      alert(`BOM Import complete!\nCreated: ${data.created}\nUpdated: ${data.updated}${data.errors?.length ? `\nErrors: ${data.errors.length}\n${data.errors.slice(0, 5).join('\n')}` : ''}`);
+      fetchBoms();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to import BOMs');
+    } finally {
+      setBomImporting(false);
+      if (bomFileRef.current) bomFileRef.current.value = '';
+    }
+  };
+
   const resetForm = () => {
     setFormData({
       parent_item_id: '',
@@ -239,6 +277,18 @@ export default function BOMPage() {
           <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Bill of Materials</h1>
           <p className="text-sm text-[#4B5563]">Manage product structures and component relationships</p>
         </div>
+        <div className="flex items-center space-x-2">
+          <button onClick={handleBomExport} className="btn-secondary flex items-center space-x-1 text-sm" data-testid="export-bom-btn">
+            <Download className="w-4 h-4" /><span>Export</span>
+          </button>
+          {canEdit && (
+            <>
+              <input type="file" ref={bomFileRef} accept=".xlsx,.xls" onChange={handleBomImport} className="hidden" />
+              <button onClick={() => bomFileRef.current?.click()} disabled={bomImporting} className="btn-secondary flex items-center space-x-1 text-sm" data-testid="import-bom-btn">
+                <Upload className="w-4 h-4" /><span>{bomImporting ? 'Importing...' : 'Import'}</span>
+              </button>
+            </>
+          )}
         {canEdit && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => {
             setIsDialogOpen(open);
@@ -427,6 +477,7 @@ export default function BOMPage() {
             </DialogContent>
           </Dialog>
         )}
+        </div>
       </div>
 
       {/* Status Filter */}
