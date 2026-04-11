@@ -411,34 +411,32 @@ export default function PurchaseOrdersPage() {
               ) : (
                 <div className="space-y-0">
                   {/* Column Headers */}
-                  <div className="grid grid-cols-[2fr_2fr_0.8fr_1fr_0.8fr_0.8fr_0.8fr_1fr_1fr_auto] gap-1 px-2 py-1 bg-[#1D3557] text-white text-xs font-semibold rounded-t-sm" data-testid="po-line-headers">
+                  <div className="grid grid-cols-[2.5fr_0.8fr_1fr_0.8fr_1fr_1.2fr_1fr_1fr_auto] gap-1 px-2 py-1 bg-[#1D3557] text-white text-xs font-semibold rounded-t-sm" data-testid="po-line-headers">
                     <span>Item</span>
-                    <span>Description</span>
                     <span>UOM</span>
                     <span>HSN</span>
                     <span>Qty</span>
                     <span>Rate</span>
-                    <span>Disc</span>
+                    <span>Discount</span>
                     <span>GST%</span>
                     <span className="text-right">Amount</span>
                     <span></span>
                   </div>
                   {formData.lines.map((line, index) => (
-                    <div key={index} className="grid grid-cols-[2fr_2fr_0.8fr_1fr_0.8fr_0.8fr_0.8fr_1fr_1fr_auto] gap-1 p-1 bg-[#F9FAFB] border-b border-[#E5E7EB] items-center" data-testid={`po-line-row-${index}`}>
+                    <div key={index} className="grid grid-cols-[2.5fr_0.8fr_1fr_0.8fr_1fr_1.2fr_1fr_1fr_auto] gap-1 p-1 bg-[#F9FAFB] border-b border-[#E5E7EB] items-center" data-testid={`po-line-row-${index}`}>
                       <Select value={line.item_id} onValueChange={(v) => updateLine(index, 'item_id', v)}>
                         <SelectTrigger className="bg-white text-xs h-8" data-testid={`po-line-item-${index}`}><SelectValue placeholder="Select item" /></SelectTrigger>
                         <SelectContent>
                           {items.map((item) => <SelectItem key={item.id} value={item.id}>{item.part_number} - {item.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
-                      <input type="text" value={line.description} onChange={(e) => updateLine(index, 'description', e.target.value)} className="input-field bg-white text-xs h-8" placeholder="Description" />
                       <input type="text" value={line.uom} onChange={(e) => updateLine(index, 'uom', e.target.value)} className="input-field bg-white text-xs h-8 mono" />
                       <input type="text" value={line.hsn_code} onChange={(e) => updateLine(index, 'hsn_code', e.target.value)} className="input-field bg-white text-xs h-8 mono" />
                       <input type="number" min="0" step="any" value={line.quantity} onChange={(e) => updateLine(index, 'quantity', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono" />
                       <input type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => updateLine(index, 'unit_price', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono" />
-                      <div className="flex items-center gap-0.5">
-                        <input type="number" min="0" step="0.01" value={line.discount_value} onChange={(e) => updateLine(index, 'discount_value', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono w-14" />
-                        <select value={line.discount_type} onChange={(e) => updateLine(index, 'discount_type', e.target.value)} className="text-xs h-8 border border-[#D1D5DB] rounded-sm bg-white px-1">
+                      <div className="flex items-center gap-1">
+                        <input type="number" min="0" step="0.01" value={line.discount_value === 0 ? '' : line.discount_value} onChange={(e) => updateLine(index, 'discount_value', e.target.value === '' ? 0 : parseFloat(e.target.value))} className="input-field bg-white text-xs h-8 mono flex-1" placeholder="0" data-testid={`po-line-discount-${index}`} />
+                        <select value={line.discount_type} onChange={(e) => updateLine(index, 'discount_type', e.target.value)} className="text-xs h-8 border border-[#D1D5DB] rounded-sm bg-white px-1 w-12" data-testid={`po-line-discount-type-${index}`}>
                           <option value="percentage">%</option>
                           <option value="amount">Amt</option>
                         </select>
