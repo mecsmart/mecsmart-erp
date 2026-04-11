@@ -33,6 +33,7 @@ export default function WarehousesPage() {
     code: '',
     name: '',
     location: '',
+    address: '',
     is_default: false,
     status: 'active',
   });
@@ -119,6 +120,7 @@ export default function WarehousesPage() {
       code: warehouse.code,
       name: warehouse.name,
       location: warehouse.location || '',
+      address: warehouse.address || '',
       is_default: warehouse.is_default || false,
       status: warehouse.status || 'active',
     });
@@ -130,6 +132,7 @@ export default function WarehousesPage() {
       code: '',
       name: '',
       location: '',
+      address: '',
       is_default: false,
       status: 'active',
     });
@@ -302,6 +305,18 @@ export default function WarehousesPage() {
                         className="input-field"
                         placeholder="Building A, Floor 1"
                         data-testid="warehouse-location-input"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Delivery Address</label>
+                      <textarea
+                        value={warehouseForm.address}
+                        onChange={(e) => setWarehouseForm({ ...warehouseForm, address: e.target.value })}
+                        className="input-field"
+                        rows={3}
+                        placeholder="Full delivery address for Purchase Orders"
+                        data-testid="warehouse-address-input"
                       />
                     </div>
 

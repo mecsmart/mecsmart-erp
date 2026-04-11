@@ -248,22 +248,53 @@ class MRPCreatePORequest(BaseModel):
 
 class PurchaseOrderLineCreate(BaseModel):
     item_id: str
-    quantity: int
+    description: Optional[str] = ""
+    quantity: float
     unit_price: float
+    uom: Optional[str] = "pcs"
     hsn_code: Optional[str] = ""
     gst_rate: Optional[float] = 18.0
+    discount_type: Optional[str] = "percentage"  # percentage or amount
+    discount_value: Optional[float] = 0.0
     notes: Optional[str] = ""
+
+class POAdditionalCharge(BaseModel):
+    charge_type_id: Optional[str] = ""
+    name: str
+    hsn_code: Optional[str] = ""
+    gst_rate: Optional[float] = 18.0
+    amount: float = 0.0
 
 class PurchaseOrderCreate(BaseModel):
     supplier_id: str
     expected_date: datetime
+    delivery_warehouse_id: Optional[str] = ""
+    quotation_ref: Optional[str] = ""
+    quotation_date: Optional[datetime] = None
     lines: List[PurchaseOrderLineCreate]
+    additional_charges: Optional[List[POAdditionalCharge]] = []
     notes: Optional[str] = ""
 
 class PurchaseOrderUpdate(BaseModel):
+    supplier_id: Optional[str] = None
     expected_date: Optional[datetime] = None
+    delivery_warehouse_id: Optional[str] = None
+    quotation_ref: Optional[str] = None
+    quotation_date: Optional[datetime] = None
+    lines: Optional[List[PurchaseOrderLineCreate]] = None
+    additional_charges: Optional[List[POAdditionalCharge]] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+
+class POChargeTypeCreate(BaseModel):
+    name: str
+    hsn_code: Optional[str] = ""
+    gst_rate: Optional[float] = 18.0
+
+class POChargeTypeUpdate(BaseModel):
+    name: Optional[str] = None
+    hsn_code: Optional[str] = None
+    gst_rate: Optional[float] = None
 
 # ================== STORES/WAREHOUSE MODELS ==================
 
@@ -271,12 +302,14 @@ class WarehouseCreate(BaseModel):
     code: str
     name: str
     location: Optional[str] = ""
+    address: Optional[str] = ""
     is_default: bool = False
     status: str = "active"
 
 class WarehouseUpdate(BaseModel):
     name: Optional[str] = None
     location: Optional[str] = None
+    address: Optional[str] = None
     is_default: Optional[bool] = None
     status: Optional[str] = None
 
@@ -1484,7 +1517,7 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
     supplier_state = supplier.get("state_code", "")
     is_inter_state = company_state and supplier_state and company_state != supplier_state
     
-    # Calculate totals with GST
+    # Calculate line totals with discount and GST
     lines_with_tax = []
     subtotal = 0
     total_cgst = 0
@@ -1493,15 +1526,30 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
     
     for line in po_data.lines:
         line_data = line.model_dump()
-        line_amount = line.quantity * line.unit_price
+        gross_amount = line.quantity * line.unit_price
+        
+        # Calculate discount
+        discount_amount = 0
+        if line.discount_value and line.discount_value > 0:
+            if line.discount_type == "percentage":
+                discount_amount = round(gross_amount * line.discount_value / 100, 2)
+            else:
+                discount_amount = round(line.discount_value, 2)
+        line_data["discount_amount"] = discount_amount
+        line_amount = gross_amount - discount_amount
+        
+        # Auto-fill UOM/HSN from item if not provided
+        item_doc = await db.items.find_one({"id": line.item_id}, {"_id": 0})
+        if item_doc:
+            if not line_data.get("hsn_code"):
+                line_data["hsn_code"] = item_doc.get("hsn_code", "")
+            if not line_data.get("uom") or line_data["uom"] == "pcs":
+                line_data["uom"] = item_doc.get("unit_of_measure", "pcs")
+            if not line_data.get("description"):
+                line_data["description"] = item_doc.get("description", "")
+        
         gst_rate = line.gst_rate or 0
         tax_amount = round(line_amount * gst_rate / 100, 2)
-        
-        # Fetch item to auto-fill HSN if not provided
-        if not line_data.get("hsn_code"):
-            item_doc = await db.items.find_one({"id": line.item_id}, {"_id": 0})
-            if item_doc:
-                line_data["hsn_code"] = item_doc.get("hsn_code", "")
         
         if is_inter_state:
             line_data["igst_amount"] = tax_amount
@@ -1516,21 +1564,63 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
             total_cgst += half_tax
             total_sgst += half_tax
         
-        line_data["line_amount"] = line_amount
+        line_data["gross_amount"] = round(gross_amount, 2)
+        line_data["line_amount"] = round(line_amount, 2)
         line_data["tax_amount"] = tax_amount
         subtotal += line_amount
         lines_with_tax.append(line_data)
     
+    # Process additional charges with GST
+    charges_with_tax = []
+    charges_subtotal = 0
+    for charge in (po_data.additional_charges or []):
+        c_data = charge.model_dump()
+        c_amount = charge.amount
+        c_gst_rate = charge.gst_rate or 0
+        c_tax = round(c_amount * c_gst_rate / 100, 2)
+        
+        if is_inter_state:
+            c_data["igst_amount"] = c_tax
+            c_data["cgst_amount"] = 0
+            c_data["sgst_amount"] = 0
+            total_igst += c_tax
+        else:
+            c_half = round(c_tax / 2, 2)
+            c_data["cgst_amount"] = c_half
+            c_data["sgst_amount"] = c_half
+            c_data["igst_amount"] = 0
+            total_cgst += c_half
+            total_sgst += c_half
+        
+        c_data["tax_amount"] = c_tax
+        charges_subtotal += c_amount
+        charges_with_tax.append(c_data)
+    
     total_tax = total_cgst + total_sgst + total_igst
-    total_amount = subtotal + total_tax
+    total_amount = subtotal + charges_subtotal + total_tax
+    
+    # Get delivery address from warehouse
+    delivery_address = ""
+    if po_data.delivery_warehouse_id:
+        wh = await db.warehouses.find_one({"id": po_data.delivery_warehouse_id}, {"_id": 0})
+        if wh:
+            delivery_address = wh.get("address", "") or wh.get("location", "")
     
     po_doc = {
         "id": str(uuid.uuid4()),
         "po_number": po_number,
+        "revision": 0,
+        "revision_history": [],
         "supplier_id": po_data.supplier_id,
         "expected_date": po_data.expected_date,
+        "delivery_warehouse_id": po_data.delivery_warehouse_id or "",
+        "delivery_address": delivery_address,
+        "quotation_ref": po_data.quotation_ref or "",
+        "quotation_date": po_data.quotation_date,
         "lines": lines_with_tax,
+        "additional_charges": charges_with_tax,
         "subtotal": round(subtotal, 2),
+        "charges_subtotal": round(charges_subtotal, 2),
         "total_cgst": round(total_cgst, 2),
         "total_sgst": round(total_sgst, 2),
         "total_igst": round(total_igst, 2),
@@ -1618,10 +1708,18 @@ async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
     po_doc = {
         "id": str(uuid.uuid4()),
         "po_number": po_number,
+        "revision": 0,
+        "revision_history": [],
         "supplier_id": data.supplier_id,
         "expected_date": datetime.now(timezone.utc) + timedelta(days=supplier.get("lead_time_days", 7)),
+        "delivery_warehouse_id": "",
+        "delivery_address": "",
+        "quotation_ref": "",
+        "quotation_date": None,
         "lines": lines,
+        "additional_charges": [],
         "subtotal": round(subtotal, 2),
+        "charges_subtotal": 0,
         "total_cgst": round(total_cgst, 2),
         "total_sgst": round(total_sgst, 2),
         "total_igst": round(total_igst, 2),
@@ -1643,14 +1741,154 @@ async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, reques
     if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
-    update_data = {k: v for k, v in po_data.model_dump().items() if v is not None}
+    existing_po = await db.purchase_orders.find_one({"id": po_id})
+    if not existing_po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    
+    if existing_po.get("status") in ["received", "cancelled"]:
+        raise HTTPException(status_code=400, detail="Cannot edit a received or cancelled PO")
+    
+    is_draft = existing_po.get("status") == "draft"
+    
+    # If PO is already submitted (sent/partial), create a revision
+    if not is_draft and po_data.lines is not None:
+        # Save current state to revision history
+        snapshot = {
+            "revision": existing_po.get("revision", 0),
+            "lines": existing_po.get("lines", []),
+            "additional_charges": existing_po.get("additional_charges", []),
+            "subtotal": existing_po.get("subtotal", 0),
+            "total_amount": existing_po.get("total_amount", 0),
+            "revised_at": datetime.now(timezone.utc),
+            "revised_by": user["id"]
+        }
+        await db.purchase_orders.update_one(
+            {"id": po_id},
+            {"$push": {"revision_history": snapshot},
+             "$inc": {"revision": 1}}
+        )
+    
+    # Build update data - recalculate if lines or charges changed
+    if po_data.lines is not None:
+        supplier_id = po_data.supplier_id or existing_po.get("supplier_id")
+        supplier = await db.suppliers.find_one({"id": supplier_id})
+        company_settings = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
+        company_state = company_settings.get("state_code", "") if company_settings else ""
+        supplier_state = supplier.get("state_code", "") if supplier else ""
+        is_inter_state = company_state and supplier_state and company_state != supplier_state
+        
+        lines_with_tax = []
+        subtotal = 0
+        total_cgst = 0
+        total_sgst = 0
+        total_igst = 0
+        
+        for line in po_data.lines:
+            line_data = line.model_dump()
+            gross_amount = line.quantity * line.unit_price
+            discount_amount = 0
+            if line.discount_value and line.discount_value > 0:
+                if line.discount_type == "percentage":
+                    discount_amount = round(gross_amount * line.discount_value / 100, 2)
+                else:
+                    discount_amount = round(line.discount_value, 2)
+            line_data["discount_amount"] = discount_amount
+            line_amount = gross_amount - discount_amount
+            
+            item_doc = await db.items.find_one({"id": line.item_id}, {"_id": 0})
+            if item_doc:
+                if not line_data.get("hsn_code"):
+                    line_data["hsn_code"] = item_doc.get("hsn_code", "")
+                if not line_data.get("uom") or line_data["uom"] == "pcs":
+                    line_data["uom"] = item_doc.get("unit_of_measure", "pcs")
+                if not line_data.get("description"):
+                    line_data["description"] = item_doc.get("description", "")
+            
+            gst_rate = line.gst_rate or 0
+            tax_amount = round(line_amount * gst_rate / 100, 2)
+            if is_inter_state:
+                line_data["igst_amount"] = tax_amount
+                line_data["cgst_amount"] = 0
+                line_data["sgst_amount"] = 0
+                total_igst += tax_amount
+            else:
+                half_tax = round(tax_amount / 2, 2)
+                line_data["cgst_amount"] = half_tax
+                line_data["sgst_amount"] = half_tax
+                line_data["igst_amount"] = 0
+                total_cgst += half_tax
+                total_sgst += half_tax
+            
+            line_data["gross_amount"] = round(gross_amount, 2)
+            line_data["line_amount"] = round(line_amount, 2)
+            line_data["tax_amount"] = tax_amount
+            subtotal += line_amount
+            lines_with_tax.append(line_data)
+        
+        charges_with_tax = []
+        charges_subtotal = 0
+        for charge in (po_data.additional_charges or existing_po.get("additional_charges", [])):
+            c_data = charge.model_dump() if hasattr(charge, 'model_dump') else dict(charge)
+            c_amount = c_data.get("amount", 0)
+            c_gst_rate = c_data.get("gst_rate", 0)
+            c_tax = round(c_amount * c_gst_rate / 100, 2)
+            if is_inter_state:
+                c_data["igst_amount"] = c_tax
+                c_data["cgst_amount"] = 0
+                c_data["sgst_amount"] = 0
+                total_igst += c_tax
+            else:
+                c_half = round(c_tax / 2, 2)
+                c_data["cgst_amount"] = c_half
+                c_data["sgst_amount"] = c_half
+                c_data["igst_amount"] = 0
+                total_cgst += c_half
+                total_sgst += c_half
+            c_data["tax_amount"] = c_tax
+            charges_subtotal += c_amount
+            charges_with_tax.append(c_data)
+        
+        total_tax = total_cgst + total_sgst + total_igst
+        total_amount = subtotal + charges_subtotal + total_tax
+        
+        update_data = {
+            "lines": lines_with_tax,
+            "additional_charges": charges_with_tax,
+            "subtotal": round(subtotal, 2),
+            "charges_subtotal": round(charges_subtotal, 2),
+            "total_cgst": round(total_cgst, 2),
+            "total_sgst": round(total_sgst, 2),
+            "total_igst": round(total_igst, 2),
+            "total_tax": round(total_tax, 2),
+            "total_amount": round(total_amount, 2),
+            "is_inter_state": is_inter_state,
+        }
+        if po_data.supplier_id:
+            update_data["supplier_id"] = po_data.supplier_id
+    else:
+        update_data = {}
+    
+    # Set simple fields
+    if po_data.expected_date is not None:
+        update_data["expected_date"] = po_data.expected_date
+    if po_data.status is not None:
+        update_data["status"] = po_data.status
+    if po_data.notes is not None:
+        update_data["notes"] = po_data.notes
+    if po_data.delivery_warehouse_id is not None:
+        update_data["delivery_warehouse_id"] = po_data.delivery_warehouse_id
+        wh = await db.warehouses.find_one({"id": po_data.delivery_warehouse_id}, {"_id": 0})
+        update_data["delivery_address"] = (wh.get("address", "") or wh.get("location", "")) if wh else ""
+    if po_data.quotation_ref is not None:
+        update_data["quotation_ref"] = po_data.quotation_ref
+    if po_data.quotation_date is not None:
+        update_data["quotation_date"] = po_data.quotation_date
+    
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
     
     update_data["updated_at"] = datetime.now(timezone.utc)
-    result = await db.purchase_orders.update_one({"id": po_id}, {"$set": update_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Purchase order not found")
+    await db.purchase_orders.update_one({"id": po_id}, {"$set": update_data})
     
     po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
     return po
@@ -2828,6 +3066,50 @@ async def get_indian_states(request: Request):
 async def get_gst_slabs(request: Request):
     await get_current_user(request)
     return GST_SLABS
+
+# ================== PO CHARGE TYPES SETTINGS ==================
+
+@settings_router.get("/po-charges")
+async def get_po_charge_types(request: Request):
+    await get_current_user(request)
+    charges = await db.po_charge_types.find({"is_active": True}, {"_id": 0}).to_list(100)
+    return charges
+
+@settings_router.post("/po-charges", status_code=201)
+async def create_po_charge_type(data: POChargeTypeCreate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can manage charge types")
+    doc = {
+        "id": str(uuid.uuid4()),
+        **data.model_dump(),
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc)
+    }
+    await db.po_charge_types.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@settings_router.put("/po-charges/{charge_id}")
+async def update_po_charge_type(charge_id: str, data: POChargeTypeUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can manage charge types")
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data to update")
+    result = await db.po_charge_types.update_one({"id": charge_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Charge type not found")
+    return await db.po_charge_types.find_one({"id": charge_id}, {"_id": 0})
+
+@settings_router.delete("/po-charges/{charge_id}")
+async def delete_po_charge_type(charge_id: str, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can manage charge types")
+    await db.po_charge_types.update_one({"id": charge_id}, {"$set": {"is_active": False}})
+    return {"message": "Charge type deleted"}
 
 # ================== CUSTOMER ROUTES ==================
 
