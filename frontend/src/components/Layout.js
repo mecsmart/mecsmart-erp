@@ -17,7 +17,9 @@ import {
   ChevronDown,
   Truck,
   ShoppingCart,
-  Settings2
+  Settings2,
+  Users,
+  Building2
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -37,8 +39,10 @@ const navigation = [
   { name: 'Quality', href: '/quality', icon: ClipboardCheck },
   { name: 'Inventory', href: '/inventory', icon: Warehouse },
   { name: 'Suppliers', href: '/suppliers', icon: Truck },
+  { name: 'Customers', href: '/customers', icon: Users },
   { name: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart },
   { name: 'Stores', href: '/warehouses', icon: Warehouse },
+  { name: 'Settings', href: '/settings', icon: Building2 },
 ];
 
 export default function Layout() {

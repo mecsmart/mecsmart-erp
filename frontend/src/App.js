@@ -15,6 +15,8 @@ import SuppliersPage from "./pages/SuppliersPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import WarehousesPage from "./pages/WarehousesPage";
 import ManufacturingPage from "./pages/ManufacturingPage";
+import SettingsPage from "./pages/SettingsPage";
+import CustomersPage from "./pages/CustomersPage";
 import { Toaster } from "./components/ui/sonner";
 
 function App() {
@@ -47,6 +49,8 @@ function App() {
             <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
             <Route path="warehouses" element={<WarehousesPage />} />
             <Route path="manufacturing" element={<ManufacturingPage />} />
+            <Route path="customers" element={<CustomersPage />} />
+            <Route path="settings" element={<SettingsPage />} />
           </Route>
 
           {/* Catch all */}

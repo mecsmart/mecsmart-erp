@@ -45,6 +45,8 @@ warehouses_router = APIRouter(prefix="/warehouses")
 work_centers_router = APIRouter(prefix="/work-centers")
 routings_router = APIRouter(prefix="/routings")
 work_orders_router = APIRouter(prefix="/work-orders")
+settings_router = APIRouter(prefix="/settings")
+customers_router = APIRouter(prefix="/customers")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -80,6 +82,8 @@ class ItemCreate(BaseModel):
     safety_stock: int = 0
     current_stock: int = 0
     reorder_point: int = 0
+    hsn_code: Optional[str] = ""
+    gst_rate: Optional[float] = 18.0
 
 class ItemUpdate(BaseModel):
     name: Optional[str] = None
@@ -91,6 +95,8 @@ class ItemUpdate(BaseModel):
     safety_stock: Optional[int] = None
     current_stock: Optional[int] = None
     reorder_point: Optional[int] = None
+    hsn_code: Optional[str] = None
+    gst_rate: Optional[float] = None
 
 class BOMComponentCreate(BaseModel):
     item_id: str
@@ -167,6 +173,8 @@ class SupplierCreate(BaseModel):
     email: Optional[str] = ""
     phone: Optional[str] = ""
     address: Optional[str] = ""
+    gstin: Optional[str] = ""
+    state_code: Optional[str] = ""
     payment_terms: Optional[str] = "Net 30"
     lead_time_days: int = 7
     rating: Optional[int] = 3  # 1-5 stars
@@ -178,6 +186,8 @@ class SupplierUpdate(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
+    gstin: Optional[str] = None
+    state_code: Optional[str] = None
     payment_terms: Optional[str] = None
     lead_time_days: Optional[int] = None
     rating: Optional[int] = None
@@ -187,6 +197,8 @@ class PurchaseOrderLineCreate(BaseModel):
     item_id: str
     quantity: int
     unit_price: float
+    hsn_code: Optional[str] = ""
+    gst_rate: Optional[float] = 18.0
     notes: Optional[str] = ""
 
 class PurchaseOrderCreate(BaseModel):
@@ -283,6 +295,56 @@ class WorkOrderOperationUpdate(BaseModel):
     actual_end: Optional[datetime] = None
     quantity_completed: Optional[int] = None
     notes: Optional[str] = None
+
+# ================== GST / INDIA COMPLIANCE MODELS ==================
+
+INDIAN_STATES = {
+    "01": "Jammu & Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh",
+    "05": "Uttarakhand", "06": "Haryana", "07": "Delhi", "08": "Rajasthan",
+    "09": "Uttar Pradesh", "10": "Bihar", "11": "Sikkim", "12": "Arunachal Pradesh",
+    "13": "Nagaland", "14": "Manipur", "15": "Mizoram", "16": "Tripura",
+    "17": "Meghalaya", "18": "Assam", "19": "West Bengal", "20": "Jharkhand",
+    "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
+    "26": "Dadra & Nagar Haveli and Daman & Diu", "27": "Maharashtra", "29": "Karnataka",
+    "30": "Goa", "31": "Lakshadweep", "32": "Kerala", "33": "Tamil Nadu",
+    "34": "Puducherry", "35": "Andaman & Nicobar Islands", "36": "Telangana",
+    "37": "Andhra Pradesh"
+}
+
+GST_SLABS = [0, 5, 12, 18, 28]
+
+class CompanySettingsUpdate(BaseModel):
+    company_name: Optional[str] = None
+    gstin: Optional[str] = None
+    state_code: Optional[str] = None
+    address: Optional[str] = None
+    pan: Optional[str] = None
+    cin: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+class CustomerCreate(BaseModel):
+    code: str
+    name: str
+    gstin: Optional[str] = ""
+    state_code: Optional[str] = ""
+    contact_person: Optional[str] = ""
+    email: Optional[str] = ""
+    phone: Optional[str] = ""
+    address: Optional[str] = ""
+    payment_terms: Optional[str] = "Net 30"
+    status: str = "active"
+
+class CustomerUpdate(BaseModel):
+    name: Optional[str] = None
+    gstin: Optional[str] = None
+    state_code: Optional[str] = None
+    contact_person: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    payment_terms: Optional[str] = None
+    status: Optional[str] = None
 
 # ================== PASSWORD UTILS ==================
 
@@ -1277,17 +1339,66 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
     count = await db.purchase_orders.count_documents({})
     po_number = f"PO-{str(count + 1).zfill(6)}"
     
-    # Calculate totals
-    total_amount = sum(line.quantity * line.unit_price for line in po_data.lines)
+    # Get company settings for GST calculation
+    company_settings = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
+    company_state = company_settings.get("state_code", "") if company_settings else ""
+    supplier_state = supplier.get("state_code", "")
+    is_inter_state = company_state and supplier_state and company_state != supplier_state
+    
+    # Calculate totals with GST
+    lines_with_tax = []
+    subtotal = 0
+    total_cgst = 0
+    total_sgst = 0
+    total_igst = 0
+    
+    for line in po_data.lines:
+        line_data = line.model_dump()
+        line_amount = line.quantity * line.unit_price
+        gst_rate = line.gst_rate or 0
+        tax_amount = round(line_amount * gst_rate / 100, 2)
+        
+        # Fetch item to auto-fill HSN if not provided
+        if not line_data.get("hsn_code"):
+            item_doc = await db.items.find_one({"id": line.item_id}, {"_id": 0})
+            if item_doc:
+                line_data["hsn_code"] = item_doc.get("hsn_code", "")
+        
+        if is_inter_state:
+            line_data["igst_amount"] = tax_amount
+            line_data["cgst_amount"] = 0
+            line_data["sgst_amount"] = 0
+            total_igst += tax_amount
+        else:
+            half_tax = round(tax_amount / 2, 2)
+            line_data["cgst_amount"] = half_tax
+            line_data["sgst_amount"] = half_tax
+            line_data["igst_amount"] = 0
+            total_cgst += half_tax
+            total_sgst += half_tax
+        
+        line_data["line_amount"] = line_amount
+        line_data["tax_amount"] = tax_amount
+        subtotal += line_amount
+        lines_with_tax.append(line_data)
+    
+    total_tax = total_cgst + total_sgst + total_igst
+    total_amount = subtotal + total_tax
     
     po_doc = {
         "id": str(uuid.uuid4()),
         "po_number": po_number,
         "supplier_id": po_data.supplier_id,
         "expected_date": po_data.expected_date,
-        "lines": [l.model_dump() for l in po_data.lines],
-        "total_amount": total_amount,
-        "status": "draft",  # draft, sent, partial, received, cancelled
+        "lines": lines_with_tax,
+        "subtotal": round(subtotal, 2),
+        "total_cgst": round(total_cgst, 2),
+        "total_sgst": round(total_sgst, 2),
+        "total_igst": round(total_igst, 2),
+        "total_tax": round(total_tax, 2),
+        "total_amount": round(total_amount, 2),
+        "is_inter_state": is_inter_state,
+        "status": "draft",
         "notes": po_data.notes,
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
@@ -1316,15 +1427,50 @@ async def create_po_from_mrp(supplier_id: str, item_ids: List[str], request: Req
                 "item_id": item_id,
                 "quantity": suggested_qty,
                 "unit_price": item.get("unit_cost", 0),
+                "hsn_code": item.get("hsn_code", ""),
+                "gst_rate": item.get("gst_rate", 18),
                 "notes": ""
             })
     
     if not lines:
         raise HTTPException(status_code=400, detail="No valid items to order")
     
+    # GST calculation
+    company_settings = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
+    company_state = company_settings.get("state_code", "") if company_settings else ""
+    supplier_state = supplier.get("state_code", "")
+    is_inter_state = company_state and supplier_state and company_state != supplier_state
+    
+    subtotal = 0
+    total_cgst = 0
+    total_sgst = 0
+    total_igst = 0
+    
+    for line in lines:
+        line_amount = line["quantity"] * line["unit_price"]
+        gst_rate = line.get("gst_rate", 0)
+        tax_amount = round(line_amount * gst_rate / 100, 2)
+        line["line_amount"] = line_amount
+        line["tax_amount"] = tax_amount
+        if is_inter_state:
+            line["igst_amount"] = tax_amount
+            line["cgst_amount"] = 0
+            line["sgst_amount"] = 0
+            total_igst += tax_amount
+        else:
+            half_tax = round(tax_amount / 2, 2)
+            line["cgst_amount"] = half_tax
+            line["sgst_amount"] = half_tax
+            line["igst_amount"] = 0
+            total_cgst += half_tax
+            total_sgst += half_tax
+        subtotal += line_amount
+    
+    total_tax = total_cgst + total_sgst + total_igst
+    total_amount = subtotal + total_tax
+    
     count = await db.purchase_orders.count_documents({})
     po_number = f"PO-{str(count + 1).zfill(6)}"
-    total_amount = sum(l["quantity"] * l["unit_price"] for l in lines)
     
     po_doc = {
         "id": str(uuid.uuid4()),
@@ -1332,7 +1478,13 @@ async def create_po_from_mrp(supplier_id: str, item_ids: List[str], request: Req
         "supplier_id": supplier_id,
         "expected_date": datetime.now(timezone.utc) + timedelta(days=supplier.get("lead_time_days", 7)),
         "lines": lines,
-        "total_amount": total_amount,
+        "subtotal": round(subtotal, 2),
+        "total_cgst": round(total_cgst, 2),
+        "total_sgst": round(total_sgst, 2),
+        "total_igst": round(total_igst, 2),
+        "total_tax": round(total_tax, 2),
+        "total_amount": round(total_amount, 2),
+        "is_inter_state": is_inter_state,
         "status": "draft",
         "notes": "Created from MRP suggestions",
         "created_at": datetime.now(timezone.utc),
@@ -2108,6 +2260,120 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
     
     return await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
 
+# ================== COMPANY SETTINGS / GST ROUTES ==================
+
+@settings_router.get("/company")
+async def get_company_settings(request: Request):
+    await get_current_user(request)
+    settings = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
+    if not settings:
+        settings = {
+            "type": "company",
+            "company_name": "My Manufacturing Company",
+            "gstin": "",
+            "state_code": "",
+            "address": "",
+            "pan": "",
+            "cin": "",
+            "phone": "",
+            "email": ""
+        }
+    return settings
+
+@settings_router.put("/company")
+async def update_company_settings(data: CompanySettingsUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can update company settings")
+    
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    update_data["type"] = "company"
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    
+    await db.company_settings.update_one(
+        {"type": "company"},
+        {"$set": update_data},
+        upsert=True
+    )
+    return await db.company_settings.find_one({"type": "company"}, {"_id": 0})
+
+@settings_router.get("/states")
+async def get_indian_states(request: Request):
+    await get_current_user(request)
+    return [{"code": k, "name": v} for k, v in INDIAN_STATES.items()]
+
+@settings_router.get("/gst-slabs")
+async def get_gst_slabs(request: Request):
+    await get_current_user(request)
+    return GST_SLABS
+
+# ================== CUSTOMER ROUTES ==================
+
+@customers_router.get("")
+async def get_customers(request: Request, status: Optional[str] = None):
+    await get_current_user(request)
+    query = {}
+    if status:
+        query["status"] = status
+    customers = await db.customers.find(query, {"_id": 0}).to_list(1000)
+    return customers
+
+@customers_router.get("/{customer_id}")
+async def get_customer(customer_id: str, request: Request):
+    await get_current_user(request)
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return customer
+
+@customers_router.post("", status_code=201)
+async def create_customer(data: CustomerCreate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    existing = await db.customers.find_one({"code": data.code})
+    if existing:
+        raise HTTPException(status_code=400, detail="Customer code already exists")
+    
+    customer_doc = {
+        "id": str(uuid.uuid4()),
+        **data.model_dump(),
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.customers.insert_one(customer_doc)
+    customer_doc.pop("_id", None)
+    return customer_doc
+
+@customers_router.put("/{customer_id}")
+async def update_customer(customer_id: str, data: CustomerUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data to update")
+    
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    result = await db.customers.update_one({"id": customer_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    return await db.customers.find_one({"id": customer_id}, {"_id": 0})
+
+@customers_router.delete("/{customer_id}")
+async def delete_customer(customer_id: str, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    result = await db.customers.delete_one({"id": customer_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return {"message": "Customer deleted"}
+
 # ================== SEED DATA ==================
 
 async def seed_admin():
@@ -2142,16 +2408,16 @@ async def seed_sample_data():
     
     # Sample items
     items = [
-        {"id": str(uuid.uuid4()), "part_number": "RM-001", "name": "Steel Sheet 4mm", "description": "Cold rolled steel sheet", "category": "raw_material", "unit_of_measure": "sheet", "unit_cost": 45.00, "lead_time_days": 7, "safety_stock": 50, "current_stock": 120, "reorder_point": 60},
-        {"id": str(uuid.uuid4()), "part_number": "RM-002", "name": "Aluminum Bar 25mm", "description": "6061-T6 aluminum bar", "category": "raw_material", "unit_of_measure": "meter", "unit_cost": 28.50, "lead_time_days": 5, "safety_stock": 100, "current_stock": 85, "reorder_point": 80},
-        {"id": str(uuid.uuid4()), "part_number": "RM-003", "name": "O-Ring Kit", "description": "NBR O-rings assorted", "category": "raw_material", "unit_of_measure": "kit", "unit_cost": 12.00, "lead_time_days": 3, "safety_stock": 200, "current_stock": 350, "reorder_point": 150},
-        {"id": str(uuid.uuid4()), "part_number": "CP-001", "name": "Hydraulic Cylinder", "description": "50mm bore hydraulic cylinder", "category": "component", "unit_of_measure": "pcs", "unit_cost": 280.00, "lead_time_days": 14, "safety_stock": 10, "current_stock": 25, "reorder_point": 15},
-        {"id": str(uuid.uuid4()), "part_number": "CP-002", "name": "Control Valve", "description": "Directional control valve 4/3", "category": "component", "unit_of_measure": "pcs", "unit_cost": 165.00, "lead_time_days": 10, "safety_stock": 15, "current_stock": 30, "reorder_point": 20},
-        {"id": str(uuid.uuid4()), "part_number": "CP-003", "name": "Electric Motor 5HP", "description": "Three-phase induction motor", "category": "component", "unit_of_measure": "pcs", "unit_cost": 520.00, "lead_time_days": 21, "safety_stock": 5, "current_stock": 8, "reorder_point": 6},
-        {"id": str(uuid.uuid4()), "part_number": "SA-001", "name": "Pump Assembly", "description": "Hydraulic pump sub-assembly", "category": "sub_assembly", "unit_of_measure": "pcs", "unit_cost": 850.00, "lead_time_days": 5, "safety_stock": 8, "current_stock": 12, "reorder_point": 10},
-        {"id": str(uuid.uuid4()), "part_number": "SA-002", "name": "Control Panel", "description": "PLC control panel assembly", "category": "sub_assembly", "unit_of_measure": "pcs", "unit_cost": 1200.00, "lead_time_days": 7, "safety_stock": 3, "current_stock": 5, "reorder_point": 4},
-        {"id": str(uuid.uuid4()), "part_number": "FG-001", "name": "Hydraulic Press 50T", "description": "50-ton hydraulic press machine", "category": "finished_good", "unit_of_measure": "pcs", "unit_cost": 15000.00, "lead_time_days": 30, "safety_stock": 1, "current_stock": 2, "reorder_point": 1},
-        {"id": str(uuid.uuid4()), "part_number": "FG-002", "name": "CNC Milling Center", "description": "3-axis CNC milling machine", "category": "finished_good", "unit_of_measure": "pcs", "unit_cost": 45000.00, "lead_time_days": 45, "safety_stock": 1, "current_stock": 1, "reorder_point": 1},
+        {"id": str(uuid.uuid4()), "part_number": "RM-001", "name": "Steel Sheet 4mm", "description": "Cold rolled steel sheet", "category": "raw_material", "unit_of_measure": "sheet", "unit_cost": 45.00, "lead_time_days": 7, "safety_stock": 50, "current_stock": 120, "reorder_point": 60, "hsn_code": "7208", "gst_rate": 18},
+        {"id": str(uuid.uuid4()), "part_number": "RM-002", "name": "Aluminum Bar 25mm", "description": "6061-T6 aluminum bar", "category": "raw_material", "unit_of_measure": "meter", "unit_cost": 28.50, "lead_time_days": 5, "safety_stock": 100, "current_stock": 85, "reorder_point": 80, "hsn_code": "7604", "gst_rate": 18},
+        {"id": str(uuid.uuid4()), "part_number": "RM-003", "name": "O-Ring Kit", "description": "NBR O-rings assorted", "category": "raw_material", "unit_of_measure": "kit", "unit_cost": 12.00, "lead_time_days": 3, "safety_stock": 200, "current_stock": 350, "reorder_point": 150, "hsn_code": "4016", "gst_rate": 18},
+        {"id": str(uuid.uuid4()), "part_number": "CP-001", "name": "Hydraulic Cylinder", "description": "50mm bore hydraulic cylinder", "category": "component", "unit_of_measure": "pcs", "unit_cost": 280.00, "lead_time_days": 14, "safety_stock": 10, "current_stock": 25, "reorder_point": 15, "hsn_code": "8412", "gst_rate": 18},
+        {"id": str(uuid.uuid4()), "part_number": "CP-002", "name": "Control Valve", "description": "Directional control valve 4/3", "category": "component", "unit_of_measure": "pcs", "unit_cost": 165.00, "lead_time_days": 10, "safety_stock": 15, "current_stock": 30, "reorder_point": 20, "hsn_code": "8481", "gst_rate": 18},
+        {"id": str(uuid.uuid4()), "part_number": "CP-003", "name": "Electric Motor 5HP", "description": "Three-phase induction motor", "category": "component", "unit_of_measure": "pcs", "unit_cost": 520.00, "lead_time_days": 21, "safety_stock": 5, "current_stock": 8, "reorder_point": 6, "hsn_code": "8501", "gst_rate": 18},
+        {"id": str(uuid.uuid4()), "part_number": "SA-001", "name": "Pump Assembly", "description": "Hydraulic pump sub-assembly", "category": "sub_assembly", "unit_of_measure": "pcs", "unit_cost": 850.00, "lead_time_days": 5, "safety_stock": 8, "current_stock": 12, "reorder_point": 10, "hsn_code": "8413", "gst_rate": 18},
+        {"id": str(uuid.uuid4()), "part_number": "SA-002", "name": "Control Panel", "description": "PLC control panel assembly", "category": "sub_assembly", "unit_of_measure": "pcs", "unit_cost": 1200.00, "lead_time_days": 7, "safety_stock": 3, "current_stock": 5, "reorder_point": 4, "hsn_code": "8537", "gst_rate": 18},
+        {"id": str(uuid.uuid4()), "part_number": "FG-001", "name": "Hydraulic Press 50T", "description": "50-ton hydraulic press machine", "category": "finished_good", "unit_of_measure": "pcs", "unit_cost": 15000.00, "lead_time_days": 30, "safety_stock": 1, "current_stock": 2, "reorder_point": 1, "hsn_code": "8462", "gst_rate": 18},
+        {"id": str(uuid.uuid4()), "part_number": "FG-002", "name": "CNC Milling Center", "description": "3-axis CNC milling machine", "category": "finished_good", "unit_of_measure": "pcs", "unit_cost": 45000.00, "lead_time_days": 45, "safety_stock": 1, "current_stock": 1, "reorder_point": 1, "hsn_code": "8459", "gst_rate": 18},
     ]
     
     for item in items:
@@ -2238,12 +2504,38 @@ async def seed_sample_data():
     
     # Seed suppliers
     suppliers = [
-        {"id": str(uuid.uuid4()), "code": "SUP-001", "name": "Steel Masters Inc.", "contact_person": "John Smith", "email": "john@steelmasters.com", "phone": "+1-555-0101", "address": "123 Industrial Blvd, Chicago, IL", "payment_terms": "Net 30", "lead_time_days": 7, "rating": 5, "status": "active", "created_at": datetime.now(timezone.utc)},
-        {"id": str(uuid.uuid4()), "code": "SUP-002", "name": "Precision Components Ltd.", "contact_person": "Sarah Johnson", "email": "sarah@precisioncomp.com", "phone": "+1-555-0102", "address": "456 Tech Park, Detroit, MI", "payment_terms": "Net 45", "lead_time_days": 14, "rating": 4, "status": "active", "created_at": datetime.now(timezone.utc)},
-        {"id": str(uuid.uuid4()), "code": "SUP-003", "name": "ElectroPower Systems", "contact_person": "Mike Davis", "email": "mike@electropower.com", "phone": "+1-555-0103", "address": "789 Motor Ave, Cleveland, OH", "payment_terms": "Net 30", "lead_time_days": 21, "rating": 4, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "SUP-001", "name": "Steel Masters Pvt. Ltd.", "contact_person": "Rajesh Kumar", "email": "rajesh@steelmasters.in", "phone": "+91-9876543210", "address": "123 Industrial Area, Pune", "gstin": "27AABCS1234F1Z5", "state_code": "27", "payment_terms": "Net 30", "lead_time_days": 7, "rating": 5, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "SUP-002", "name": "Precision Components Ltd.", "contact_person": "Suresh Patel", "email": "suresh@precisioncomp.in", "phone": "+91-9876543211", "address": "456 GIDC, Ahmedabad", "gstin": "24AABCP5678G1Z3", "state_code": "24", "payment_terms": "Net 45", "lead_time_days": 14, "rating": 4, "status": "active", "created_at": datetime.now(timezone.utc)},
+        {"id": str(uuid.uuid4()), "code": "SUP-003", "name": "ElectroPower Systems", "contact_person": "Amit Sharma", "email": "amit@electropower.in", "phone": "+91-9876543212", "address": "789 Electronic City, Bangalore", "gstin": "29AABCE9012H1Z1", "state_code": "29", "payment_terms": "Net 30", "lead_time_days": 21, "rating": 4, "status": "active", "created_at": datetime.now(timezone.utc)},
     ]
     await db.suppliers.insert_many(suppliers)
     logger.info("Sample suppliers seeded")
+    
+    # Seed company settings
+    if await db.company_settings.count_documents({"type": "company"}) == 0:
+        await db.company_settings.insert_one({
+            "type": "company",
+            "company_name": "MachineWorks Manufacturing Pvt. Ltd.",
+            "gstin": "27AABCM1234A1Z5",
+            "state_code": "27",
+            "address": "Plot No. 45, MIDC, Pune - 411019, Maharashtra, India",
+            "pan": "AABCM1234A",
+            "cin": "",
+            "phone": "+91-20-12345678",
+            "email": "info@machineworks.in",
+            "created_at": datetime.now(timezone.utc)
+        })
+        logger.info("Company settings seeded")
+    
+    # Seed sample customers
+    if await db.customers.count_documents({}) == 0:
+        customers = [
+            {"id": str(uuid.uuid4()), "code": "CUST-001", "name": "Tata Motors Ltd.", "gstin": "27AAACT1234D1Z5", "state_code": "27", "contact_person": "Vikram Singh", "email": "vikram@tatamotors.in", "phone": "+91-9988776655", "address": "Pimpri, Pune, Maharashtra", "payment_terms": "Net 30", "status": "active", "created_at": datetime.now(timezone.utc)},
+            {"id": str(uuid.uuid4()), "code": "CUST-002", "name": "Bharat Heavy Electricals", "gstin": "09AABCB5678E1Z3", "state_code": "09", "contact_person": "Priya Verma", "email": "priya@bhel.in", "phone": "+91-9988776656", "address": "Sector 17, Noida, UP", "payment_terms": "Net 45", "status": "active", "created_at": datetime.now(timezone.utc)},
+            {"id": str(uuid.uuid4()), "code": "CUST-003", "name": "Larsen & Toubro", "gstin": "27AABCL9012F1Z1", "state_code": "27", "contact_person": "Anish Mehta", "email": "anish@lnt.in", "phone": "+91-9988776657", "address": "Powai, Mumbai, Maharashtra", "payment_terms": "Net 30", "status": "active", "created_at": datetime.now(timezone.utc)},
+        ]
+        await db.customers.insert_many(customers)
+        logger.info("Sample customers seeded")
     
     # Seed warehouses
     warehouses = [
@@ -2336,6 +2628,8 @@ async def startup():
     await db.work_centers.create_index("code", unique=True)
     await db.routings.create_index("item_id")
     await db.work_orders.create_index("status")
+    await db.customers.create_index("code", unique=True)
+    await db.company_settings.create_index("type", unique=True)
     
     # Seed data
     await seed_admin()
@@ -2376,6 +2670,8 @@ api_router.include_router(warehouses_router)
 api_router.include_router(work_centers_router)
 api_router.include_router(routings_router)
 api_router.include_router(work_orders_router)
+api_router.include_router(settings_router)
+api_router.include_router(customers_router)
 
 @api_router.get("/health")
 async def health_check():

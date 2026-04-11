@@ -31,17 +31,30 @@ export default function SuppliersPage() {
     email: '',
     phone: '',
     address: '',
+    gstin: '',
+    state_code: '',
     payment_terms: 'Net 30',
     lead_time_days: 7,
     rating: 3,
     status: 'active',
   });
 
+  const [states, setStates] = useState([]);
   const canEdit = ['admin', 'production_manager'].includes(user?.role);
 
   useEffect(() => {
     fetchSuppliers();
+    fetchStates();
   }, [statusFilter]);
+
+  const fetchStates = async () => {
+    try {
+      const { data } = await api.get('/api/settings/states');
+      setStates(data);
+    } catch (error) {
+      console.error('Failed to fetch states:', error);
+    }
+  };
 
   const fetchSuppliers = async () => {
     try {
@@ -82,6 +95,8 @@ export default function SuppliersPage() {
       email: supplier.email || '',
       phone: supplier.phone || '',
       address: supplier.address || '',
+      gstin: supplier.gstin || '',
+      state_code: supplier.state_code || '',
       payment_terms: supplier.payment_terms || 'Net 30',
       lead_time_days: supplier.lead_time_days || 7,
       rating: supplier.rating || 3,
@@ -109,6 +124,8 @@ export default function SuppliersPage() {
       email: '',
       phone: '',
       address: '',
+      gstin: '',
+      state_code: '',
       payment_terms: 'Net 30',
       lead_time_days: 7,
       rating: 3,
@@ -242,6 +259,34 @@ export default function SuppliersPage() {
                   />
                 </div>
 
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">GSTIN</label>
+                    <input
+                      type="text"
+                      value={formData.gstin}
+                      onChange={(e) => setFormData({ ...formData, gstin: e.target.value.toUpperCase() })}
+                      className="input-field mono uppercase"
+                      maxLength={15}
+                      placeholder="22AAAAA0000A1Z5"
+                      data-testid="supplier-gstin-input"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">State</label>
+                    <Select value={formData.state_code || undefined} onValueChange={(v) => setFormData({ ...formData, state_code: v })}>
+                      <SelectTrigger data-testid="supplier-state-select">
+                        <SelectValue placeholder="Select state" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {states.map((s) => (
+                          <SelectItem key={s.code} value={s.code}>{s.code} - {s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-[#111827] mb-1">Lead Time (days)</label>
@@ -343,6 +388,12 @@ export default function SuppliersPage() {
               </div>
 
               <div className="space-y-2 mb-4">
+                {supplier.gstin && (
+                  <div className="px-2 py-1 bg-[#E1EFFE] rounded-sm">
+                    <span className="text-xs text-[#4B5563]">GSTIN: </span>
+                    <span className="mono text-sm font-medium text-[#1E429F]" data-testid={`supplier-gstin-${supplier.code}`}>{supplier.gstin}</span>
+                  </div>
+                )}
                 {supplier.contact_person && (
                   <p className="text-sm text-[#4B5563]">{supplier.contact_person}</p>
                 )}

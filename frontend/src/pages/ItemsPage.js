@@ -42,6 +42,8 @@ export default function ItemsPage() {
     safety_stock: 0,
     current_stock: 0,
     reorder_point: 0,
+    hsn_code: '',
+    gst_rate: 18,
   });
 
   const canEdit = ['admin', 'production_manager', 'inventory_manager'].includes(user?.role);
@@ -97,6 +99,8 @@ export default function ItemsPage() {
       safety_stock: item.safety_stock,
       current_stock: item.current_stock,
       reorder_point: item.reorder_point,
+      hsn_code: item.hsn_code || '',
+      gst_rate: item.gst_rate != null ? item.gst_rate : 18,
     });
     setIsDialogOpen(true);
   };
@@ -124,6 +128,8 @@ export default function ItemsPage() {
       safety_stock: 0,
       current_stock: 0,
       reorder_point: 0,
+      hsn_code: '',
+      gst_rate: 18,
     });
   };
 
@@ -281,6 +287,33 @@ export default function ItemsPage() {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">HSN Code</label>
+                    <input
+                      type="text"
+                      value={formData.hsn_code}
+                      onChange={(e) => setFormData({ ...formData, hsn_code: e.target.value })}
+                      className="input-field mono"
+                      placeholder="e.g. 7208"
+                      data-testid="item-hsn-code-input"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">GST Rate (%)</label>
+                    <Select value={String(formData.gst_rate)} onValueChange={(v) => setFormData({ ...formData, gst_rate: parseFloat(v) })}>
+                      <SelectTrigger data-testid="item-gst-rate-select"><SelectValue placeholder="Select rate" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0">0%</SelectItem>
+                        <SelectItem value="5">5%</SelectItem>
+                        <SelectItem value="12">12%</SelectItem>
+                        <SelectItem value="18">18%</SelectItem>
+                        <SelectItem value="28">28%</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
                 <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
                   <button type="button" onClick={() => setIsDialogOpen(false)} className="btn-secondary">
                     Cancel
@@ -353,10 +386,10 @@ export default function ItemsPage() {
                   <th>Part Number</th>
                   <th>Name</th>
                   <th>Category</th>
+                  <th>HSN</th>
+                  <th className="text-right">GST%</th>
                   <th className="text-right">Stock</th>
-                  <th className="text-right">Reorder Pt</th>
                   <th className="text-right">Unit Cost</th>
-                  <th className="text-right">Lead Time</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -380,10 +413,10 @@ export default function ItemsPage() {
                         {item.category.replace('_', ' ')}
                       </span>
                     </td>
+                    <td className="mono text-sm">{item.hsn_code || '-'}</td>
+                    <td className="text-right mono">{item.gst_rate != null ? `${item.gst_rate}%` : '-'}</td>
                     <td className="text-right mono">{item.current_stock} {item.unit_of_measure}</td>
-                    <td className="text-right mono">{item.reorder_point}</td>
                     <td className="text-right mono">${item.unit_cost.toFixed(2)}</td>
-                    <td className="text-right mono">{item.lead_time_days}d</td>
                     <td>
                       <div className="flex items-center space-x-2">
                         {canEdit && (

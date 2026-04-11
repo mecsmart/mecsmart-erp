@@ -105,7 +105,7 @@ export default function PurchaseOrdersPage() {
   const addLine = () => {
     setFormData({
       ...formData,
-      lines: [...formData.lines, { item_id: '', quantity: 1, unit_price: 0, notes: '' }],
+      lines: [...formData.lines, { item_id: '', quantity: 1, unit_price: 0, hsn_code: '', gst_rate: 18, notes: '' }],
     });
   };
 
@@ -120,11 +120,13 @@ export default function PurchaseOrdersPage() {
     const newLines = [...formData.lines];
     newLines[index] = { ...newLines[index], [field]: value };
     
-    // Auto-fill unit price when item is selected
+    // Auto-fill unit price, HSN, and GST rate when item is selected
     if (field === 'item_id') {
       const item = items.find(i => i.id === value);
       if (item) {
         newLines[index].unit_price = item.unit_cost;
+        newLines[index].hsn_code = item.hsn_code || '';
+        newLines[index].gst_rate = item.gst_rate != null ? item.gst_rate : 18;
       }
     }
     
@@ -243,28 +245,42 @@ export default function PurchaseOrdersPage() {
                               </SelectContent>
                             </Select>
                           </div>
-                          <div className="w-24">
+                          <div className="w-20">
                             <input
                               type="number"
                               min="1"
                               value={line.quantity}
                               onChange={(e) => updateLine(index, 'quantity', parseInt(e.target.value) || 0)}
-                              className="input-field mono bg-white"
+                              className="input-field mono bg-white text-sm"
                               placeholder="Qty"
                             />
                           </div>
-                          <div className="w-28">
+                          <div className="w-24">
                             <input
                               type="number"
                               min="0"
                               step="0.01"
                               value={line.unit_price}
                               onChange={(e) => updateLine(index, 'unit_price', parseFloat(e.target.value) || 0)}
-                              className="input-field mono bg-white"
+                              className="input-field mono bg-white text-sm"
                               placeholder="Price"
                             />
                           </div>
-                          <div className="w-24 text-right mono font-medium">
+                          <div className="w-20">
+                            <Select value={String(line.gst_rate || 18)} onValueChange={(v) => updateLine(index, 'gst_rate', parseFloat(v))}>
+                              <SelectTrigger className="bg-white text-xs">
+                                <SelectValue placeholder="GST%" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="0">0%</SelectItem>
+                                <SelectItem value="5">5%</SelectItem>
+                                <SelectItem value="12">12%</SelectItem>
+                                <SelectItem value="18">18%</SelectItem>
+                                <SelectItem value="28">28%</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="w-24 text-right mono font-medium text-sm">
                             ${(line.quantity * line.unit_price).toFixed(2)}
                           </div>
                           <button
@@ -277,9 +293,10 @@ export default function PurchaseOrdersPage() {
                         </div>
                       ))}
                       <div className="flex justify-end pt-2">
-                        <div className="text-right">
-                          <span className="text-sm text-[#4B5563]">Total: </span>
-                          <span className="mono font-bold text-lg">${calculateTotal().toFixed(2)}</span>
+                        <div className="text-right space-y-1">
+                          <div><span className="text-sm text-[#4B5563]">Subtotal: </span><span className="mono font-medium">${calculateTotal().toFixed(2)}</span></div>
+                          <div><span className="text-sm text-[#4B5563]">Est. GST: </span><span className="mono font-medium">${formData.lines.reduce((sum, l) => sum + (l.quantity * l.unit_price * (l.gst_rate || 0) / 100), 0).toFixed(2)}</span></div>
+                          <div><span className="text-sm text-[#4B5563]">Total: </span><span className="mono font-bold text-lg">${(calculateTotal() + formData.lines.reduce((sum, l) => sum + (l.quantity * l.unit_price * (l.gst_rate || 0) / 100), 0)).toFixed(2)}</span></div>
                         </div>
                       </div>
                     </div>
@@ -360,9 +377,10 @@ export default function PurchaseOrdersPage() {
                   <th>PO Number</th>
                   <th>Supplier</th>
                   <th>Lines</th>
+                  <th className="text-right">Subtotal</th>
+                  <th className="text-right">GST</th>
                   <th className="text-right">Total</th>
                   <th>Status</th>
-                  <th>Expected</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -375,7 +393,20 @@ export default function PurchaseOrdersPage() {
                       <p className="text-sm">{po.supplier?.name}</p>
                     </td>
                     <td className="mono">{po.lines?.length || 0} items</td>
-                    <td className="text-right mono font-medium">${(po.total_amount || 0).toFixed(2)}</td>
+                    <td className="text-right mono">${(po.subtotal || po.total_amount || 0).toFixed(2)}</td>
+                    <td className="text-right">
+                      {po.total_tax > 0 ? (
+                        <div className="text-xs">
+                          <span className="mono font-medium">${(po.total_tax || 0).toFixed(2)}</span>
+                          {po.is_inter_state ? (
+                            <span className="block text-[#6B7280]">IGST</span>
+                          ) : (
+                            <span className="block text-[#6B7280]">CGST+SGST</span>
+                          )}
+                        </div>
+                      ) : <span className="mono text-[#9CA3AF]">-</span>}
+                    </td>
+                    <td className="text-right mono font-semibold">${(po.total_amount || 0).toFixed(2)}</td>
                     <td>
                       <span className={`status-badge ${getStatusColor(po.status)}`}>
                         {po.status}
