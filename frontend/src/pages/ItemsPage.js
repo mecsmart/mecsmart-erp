@@ -28,7 +28,7 @@ const units = ['pcs', 'kg', 'meter', 'sheet', 'kit', 'liter', 'set'];
 
 export default function ItemsPage() {
   const { user } = useAuth();
-  const { formatCurrency } = useCompanySettings();
+  const { formatCurrency, currencySymbol } = useCompanySettings();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -284,7 +284,7 @@ export default function ItemsPage() {
 
                 <div className="grid grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">Unit Cost ($)</label>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Unit Cost ({currencySymbol})</label>
                     <input
                       type="number"
                       step="0.01"

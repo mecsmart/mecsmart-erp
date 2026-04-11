@@ -6,6 +6,7 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 ## Architecture
 - **Backend**: FastAPI + MongoDB, JWT httpOnly cookies, all endpoints under `/api`
 - **Frontend**: React 19 + Shadcn/UI + Tailwind CSS, Industrial design theme
+- **Global Context**: CompanySettingsContext provides currency formatting (`formatCurrency`, `currencySymbol`) across all pages
 
 ## What's Been Implemented - ALL COMPLETE
 
@@ -14,35 +15,37 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - Dashboard, Items/Parts (HSN code, GST rate), Multi-level BOM with rollup costing
 - MRP (recursive demand, raw materials only + purchase suggestions)
 - Production Orders, Quality inspections & templates, Inventory transactions
-- Suppliers (GSTIN, state), Customers (GSTIN, state)
+- Suppliers (GSTIN, state, structured address), Customers (GSTIN, state, structured address)
 - Warehouses (with delivery address), Stock transfers
 - Manufacturing (Work Centers, Routings, Work Orders with auto-create child WOs)
-- Company Settings (GSTIN, state, PAN)
+- Company Settings (GSTIN, state, PAN, logo, tagline, currency)
+
+### Settings - FULLY ENHANCED
+- 3 tabs: Company & GST, Branding & Currency, PO Additional Charges
+- Structured address fields: Address Line 1, Address Line 2, City, State, Pin Code (Company, Suppliers, Customers)
+- Logo upload (base64, max 500KB) with preview, change, remove
+- Tagline field (shown on printed documents)
+- Primary/Secondary currency selector (INR ₹ / USD $) with preview
+- Address migration endpoint: POST /api/settings/migrate-addresses (splits legacy single-line addresses)
+- Currency symbol dynamically applied across Items, BOM, MRP, POs, GRN, Inventory, Manufacturing
 
 ### Purchase Orders - FULLY ENHANCED
 - Create/Edit PO with revision tracking (draft = free edit, submitted = revision history)
 - Order lines: Item, HSN, Qty, UOM, Rate, Discount (% or Amount), GST%
-- Vendor Quotation Ref No. & Date
-- Delivery Warehouse selector with address auto-fill
-- Additional charges (Transportation, Handling) with HSN & GST% from Settings
-- PO print: Standard + Detailed (GST breakup) formats
-- PO status workflow: Draft → Sent → GRN Done
+- Vendor Quotation Ref No. & Date, Delivery Warehouse
+- Additional charges with HSN & GST% from Settings
+- ERPNext-style Print: 4 templates (Standard, Detailed GST, Compact, Modern) with logo + tagline + currency symbol
 
 ### GRN (Goods Receipt Note) - Under Stores
-- Separate GRN tab in Stores page
-- Pending POs listing for GRN processing
+- Separate GRN tab in Stores page, Pending POs listing
 - Material verification: editable received qty + verified price per line
-- Supplier Invoice / Doc reference number + date
-- Receiving warehouse selection
-- Qty/Price mismatch status indicators
-- GRN print: Standard + Detailed (PO vs Received comparison) formats
-- Auto-updates inventory on GRN confirmation
+- Supplier Invoice / Doc reference + date, Receiving warehouse
+- GRN print with logo + tagline + structured supplier address
 
 ### Manufacturing - Enhanced
-- Work Order print with material consumption details (Part No, Material, Qty, UOM, Cost)
-- Job Card print with operator names, start/end times, signature columns
-- Job card operations blocked when materials not consumed (stock insufficient)
-- Consumed materials display: item code + description + qty + UOM
+- Work Order print with material consumption details
+- Job Card print with operator names
+- Job card operations blocked when materials not consumed
 
 ### User Management & Access Control
 - Admin-only CRUD, Module-wise permissions, Dynamic sidebar filtering
@@ -51,8 +54,7 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - Company Settings, HSN/GST on Items, GSTIN on Suppliers/Customers
 - CGST+SGST (intra) / IGST (inter-state) on POs
 
-### Phase 2 Features
-- Auto-populate PO from MRP, Excel Export/Import, Job Cards
+### Excel Export/Import, Job Cards, Auto-populate PO from MRP
 
 ### Settings > PO Additional Charges
 - CRUD charge types (name, HSN, GST%) used in PO creation
@@ -67,9 +69,7 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - [ ] GST Phase 3: GSTR-1/3B reports, ITC tracking
 
 ### P2 (Low Priority)
+- [ ] Backend refactoring: server.py (3800+ lines) → split into routers/ directory
 - [ ] Barcode/QR scanning, Gantt scheduling
 - [ ] Windows desktop wrapper (Electron/Tauri)
 - [ ] Advanced reporting & analytics dashboard
-
-## Refactoring Needed
-- Backend server.py (3700+ lines) → split into routers/ directory
