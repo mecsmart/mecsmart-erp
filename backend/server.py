@@ -2630,9 +2630,12 @@ async def start_work_order(wo_id: str, request: Request):
                     )
                     
                     consumed_materials.append({
+                        "item_id": comp_item_id,
                         "item": comp_item.get("part_number"),
                         "name": comp_item.get("name"),
-                        "quantity": required_qty
+                        "quantity": required_qty,
+                        "uom": comp_item.get("unit_of_measure", "pcs"),
+                        "unit_cost": comp_item.get("unit_cost", 0)
                     })
     
     if insufficient_materials:
@@ -2654,6 +2657,7 @@ async def start_work_order(wo_id: str, request: Request):
             "status": "in_progress",
             "actual_start": datetime.now(timezone.utc),
             "materials_consumed": True,
+            "consumed_materials": consumed_materials,
             "operations_status": operations,
             "updated_at": datetime.now(timezone.utc)
         }}
@@ -2817,6 +2821,53 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
     await db.work_orders.update_one({"id": wo_id}, {"$set": update_fields})
     
     return await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
+
+@work_orders_router.get("/{wo_id}/print-data")
+async def get_work_order_print_data(wo_id: str, request: Request):
+    """Get full work order data for printing (WO sheet + Job Card)"""
+    await get_current_user(request)
+    
+    wo = await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    
+    # Get item details
+    item = await db.items.find_one({"id": wo.get("item_id")}, {"_id": 0})
+    wo["item"] = item
+    
+    # Get routing details
+    routing = await db.routings.find_one({"id": wo.get("routing_id")}, {"_id": 0})
+    wo["routing"] = routing
+    
+    # Get work center names for operations
+    for op in wo.get("operations_status", []):
+        wc = await db.work_centers.find_one({"id": op.get("work_center_id")}, {"_id": 0})
+        op["work_center_name"] = wc.get("name", "") if wc else ""
+    
+    # Get consumed materials (stored on WO doc or from inventory transactions)
+    consumed = wo.get("consumed_materials", [])
+    if not consumed and wo.get("materials_consumed"):
+        # Fallback: fetch from inventory transactions
+        txns = await db.inventory_transactions.find(
+            {"reference_id": wo_id, "transaction_type": "issue"}, {"_id": 0}
+        ).to_list(100)
+        for tx in txns:
+            tx_item = await db.items.find_one({"id": tx.get("item_id")}, {"_id": 0})
+            consumed.append({
+                "item_id": tx.get("item_id"),
+                "item": tx_item.get("part_number", "") if tx_item else "",
+                "name": tx_item.get("name", "") if tx_item else "",
+                "quantity": tx.get("quantity", 0),
+                "uom": tx_item.get("unit_of_measure", "pcs") if tx_item else "pcs",
+                "unit_cost": tx_item.get("unit_cost", 0) if tx_item else 0
+            })
+    wo["consumed_materials"] = consumed
+    
+    # Get company settings for header
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
+    wo["company"] = company
+    
+    return wo
 
 # ================== EXPORT / IMPORT ROUTES ==================
 

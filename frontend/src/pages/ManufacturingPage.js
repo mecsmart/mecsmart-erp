@@ -9,7 +9,8 @@ import {
   CheckCircle2,
   Clock,
   AlertCircle,
-  ClipboardList
+  ClipboardList,
+  Printer
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -278,6 +279,170 @@ export default function ManufacturingPage() {
     }
   };
 
+  const printWorkOrder = async (wo) => {
+    try {
+      const { data } = await api.get(`/api/work-orders/${wo.id}/print-data`);
+      const company = data.company || {};
+      const item = data.item || {};
+      const consumed = data.consumed_materials || [];
+      const ops = data.operations_status || [];
+      const totalMaterialCost = consumed.reduce((s, m) => s + (m.quantity * (m.unit_cost || 0)), 0);
+
+      const html = `<!DOCTYPE html><html><head><title>Work Order - ${data.wo_number}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #111; padding: 20px; }
+        .header { text-align: center; border-bottom: 2px solid #1D3557; padding-bottom: 10px; margin-bottom: 15px; }
+        .header h1 { font-size: 16px; color: #1D3557; }
+        .header p { font-size: 10px; color: #555; }
+        .title { font-size: 14px; font-weight: bold; color: #1D3557; margin: 10px 0 5px; text-transform: uppercase; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; }
+        .info-box { border: 1px solid #ddd; padding: 6px 8px; }
+        .info-box label { font-size: 9px; color: #888; text-transform: uppercase; display: block; }
+        .info-box span { font-weight: 600; font-size: 11px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        th { background: #1D3557; color: white; padding: 5px 8px; text-align: left; font-size: 10px; text-transform: uppercase; }
+        td { padding: 5px 8px; border-bottom: 1px solid #ddd; font-size: 11px; }
+        tr:nth-child(even) { background: #f9f9f9; }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        .mono { font-family: 'Courier New', monospace; }
+        .total-row { font-weight: bold; background: #f0f4f8 !important; }
+        .footer { margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; font-size: 10px; }
+        .sign-box { border-top: 1px solid #333; padding-top: 4px; text-align: center; }
+        @media print { body { padding: 10px; } }
+      </style></head><body>
+      <div class="header">
+        <h1>${company.company_name || 'Manufacturing ERP'}</h1>
+        ${company.address ? `<p>${company.address}</p>` : ''}
+        ${company.gstin ? `<p>GSTIN: ${company.gstin}</p>` : ''}
+      </div>
+      <div class="title">Work Order: ${data.wo_number}</div>
+      <div class="info-grid">
+        <div class="info-box"><label>Item</label><span class="mono">${item.part_number || ''}</span> - ${item.name || ''}</div>
+        <div class="info-box"><label>Quantity</label><span class="mono">${data.quantity || 0}</span></div>
+        <div class="info-box"><label>Status</label><span>${(data.status || '').replace('_',' ').toUpperCase()}</span></div>
+        <div class="info-box"><label>Scheduled Start</label><span>${data.scheduled_start ? new Date(data.scheduled_start).toLocaleDateString() : '-'}</span></div>
+        <div class="info-box"><label>Scheduled End</label><span>${data.scheduled_end ? new Date(data.scheduled_end).toLocaleDateString() : '-'}</span></div>
+        <div class="info-box"><label>Actual Start</label><span>${data.actual_start ? new Date(data.actual_start).toLocaleDateString() : '-'}</span></div>
+      </div>
+      ${ops.length > 0 ? `
+      <div class="title">Operations</div>
+      <table>
+        <thead><tr><th>Seq</th><th>Operation</th><th>Work Center</th><th class="text-center">Status</th><th>Operator</th><th class="text-right">Time (min)</th></tr></thead>
+        <tbody>${ops.map(op => `<tr>
+          <td class="mono">${op.sequence}</td><td>${op.operation_name}</td><td>${op.work_center_name || '-'}</td>
+          <td class="text-center">${(op.status || '').replace('_',' ')}</td><td>${op.operator || '-'}</td>
+          <td class="text-right mono">${op.actual_time_min ? op.actual_time_min : '-'}</td>
+        </tr>`).join('')}</tbody>
+      </table>` : ''}
+      ${consumed.length > 0 ? `
+      <div class="title">Material Consumption</div>
+      <table>
+        <thead><tr><th>Part No.</th><th>Material</th><th class="text-right">Qty</th><th>UOM</th><th class="text-right">Unit Cost</th><th class="text-right">Total Cost</th></tr></thead>
+        <tbody>${consumed.map(m => `<tr>
+          <td class="mono">${m.item || ''}</td><td>${m.name || ''}</td>
+          <td class="text-right mono">${m.quantity}</td><td>${m.uom || 'pcs'}</td>
+          <td class="text-right mono">${(m.unit_cost || 0).toFixed(2)}</td>
+          <td class="text-right mono">${(m.quantity * (m.unit_cost || 0)).toFixed(2)}</td>
+        </tr>`).join('')}
+        <tr class="total-row"><td colspan="5" class="text-right">Total Material Cost</td><td class="text-right mono">${totalMaterialCost.toFixed(2)}</td></tr>
+        </tbody>
+      </table>` : '<p style="color:#888;margin:10px 0;">No materials consumed yet.</p>'}
+      ${data.notes ? `<div style="margin:10px 0;"><strong>Notes:</strong> ${data.notes}</div>` : ''}
+      <div class="footer">
+        <div><div class="sign-box">Prepared By</div></div>
+        <div><div class="sign-box">Production Manager</div></div>
+        <div><div class="sign-box">Quality Inspector</div></div>
+      </div>
+      <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
+      </body></html>`;
+      const w = window.open('', '_blank', 'width=800,height=600');
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      w.print();
+    } catch (error) {
+      alert('Failed to load print data');
+    }
+  };
+
+  const printJobCard = async (wo) => {
+    try {
+      const { data } = await api.get(`/api/work-orders/${wo.id}/print-data`);
+      const company = data.company || {};
+      const item = data.item || {};
+      const ops = data.operations_status || [];
+
+      const html = `<!DOCTYPE html><html><head><title>Job Card - ${data.wo_number}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #111; padding: 20px; }
+        .header { text-align: center; border-bottom: 2px solid #1D3557; padding-bottom: 10px; margin-bottom: 15px; }
+        .header h1 { font-size: 16px; color: #1D3557; }
+        .header p { font-size: 10px; color: #555; }
+        .title { font-size: 14px; font-weight: bold; color: #1D3557; margin: 10px 0 5px; text-transform: uppercase; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; }
+        .info-box { border: 1px solid #ddd; padding: 6px 8px; }
+        .info-box label { font-size: 9px; color: #888; text-transform: uppercase; display: block; }
+        .info-box span { font-weight: 600; font-size: 11px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        th { background: #1D3557; color: white; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; }
+        td { padding: 8px; border-bottom: 1px solid #ddd; font-size: 11px; }
+        tr:nth-child(even) { background: #f9f9f9; }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        .mono { font-family: 'Courier New', monospace; }
+        .status-done { color: #03543F; font-weight: 600; }
+        .status-wip { color: #B45309; font-weight: 600; }
+        .op-sign { height: 40px; border: 1px solid #ddd; }
+        @media print { body { padding: 10px; } }
+      </style></head><body>
+      <div class="header">
+        <h1>${company.company_name || 'Manufacturing ERP'}</h1>
+        ${company.address ? `<p>${company.address}</p>` : ''}
+      </div>
+      <div class="title">Job Card: ${data.wo_number}</div>
+      <div class="info-grid">
+        <div class="info-box"><label>Item</label><span class="mono">${item.part_number || ''}</span> - ${item.name || ''}</div>
+        <div class="info-box"><label>Quantity</label><span class="mono">${data.quantity || 0}</span></div>
+        <div class="info-box"><label>Status</label><span>${(data.status || '').replace('_',' ').toUpperCase()}</span></div>
+      </div>
+      <table>
+        <thead><tr>
+          <th style="width:40px">Seq</th><th>Operation</th><th>Work Center</th>
+          <th>Operator</th><th class="text-center">Status</th>
+          <th>Start</th><th>End</th><th class="text-right">Time (min)</th><th style="width:80px" class="text-center">Signature</th>
+        </tr></thead>
+        <tbody>${ops.map(op => `<tr>
+          <td class="mono">${op.sequence}</td>
+          <td style="font-weight:600">${op.operation_name}</td>
+          <td>${op.work_center_name || '-'}</td>
+          <td style="font-weight:600">${op.operator || '-'}</td>
+          <td class="text-center ${op.status === 'completed' ? 'status-done' : op.status === 'in_progress' ? 'status-wip' : ''}">${(op.status || '').replace('_',' ')}</td>
+          <td class="mono">${op.actual_start ? new Date(op.actual_start).toLocaleString() : '-'}</td>
+          <td class="mono">${op.actual_end ? new Date(op.actual_end).toLocaleString() : '-'}</td>
+          <td class="text-right mono">${op.actual_time_min ? op.actual_time_min : '-'}</td>
+          <td class="op-sign"></td>
+        </tr>`).join('')}</tbody>
+      </table>
+      ${data.notes ? `<div style="margin:10px 0;"><strong>Notes:</strong> ${data.notes}</div>` : ''}
+      <div style="margin-top:30px;display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10px;">
+        <div><div style="border-top:1px solid #333;padding-top:4px;text-align:center;">Production Supervisor</div></div>
+        <div><div style="border-top:1px solid #333;padding-top:4px;text-align:center;">Quality Approved By</div></div>
+      </div>
+      <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
+      </body></html>`;
+      const w = window.open('', '_blank', 'width=800,height=600');
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      w.print();
+    } catch (error) {
+      alert('Failed to load print data');
+    }
+  };
+
   return (
     <div className="space-y-6" data-testid="manufacturing-page">
       <div className="flex items-center justify-between">
@@ -509,6 +674,18 @@ export default function ManufacturingPage() {
                               <ClipboardList className="w-3 h-3" />
                               <span>Job Card</span>
                             </button>
+                          )}
+                          {wo.status === 'completed' && (
+                            <div className="flex items-center space-x-1">
+                              <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs flex items-center space-x-1" title="Print Work Order" data-testid={`print-wo-${wo.id}`}>
+                                <Printer className="w-3 h-3" /><span>Print WO</span>
+                              </button>
+                              {wo.operations_status?.length > 0 && (
+                                <button onClick={() => printJobCard(wo)} className="btn-secondary text-xs flex items-center space-x-1" title="Print Job Card" data-testid={`print-jobcard-${wo.id}`}>
+                                  <Printer className="w-3 h-3" /><span>Job Card</span>
+                                </button>
+                              )}
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -987,6 +1164,16 @@ export default function ManufacturingPage() {
                     data-testid="job-card-progress"
                   ></div>
                 </div>
+              </div>
+
+              {/* Print Buttons */}
+              <div className="flex justify-end space-x-2 pt-3 border-t border-[#E5E7EB]">
+                <button onClick={() => printWorkOrder(jobCardWO)} className="btn-secondary text-xs flex items-center space-x-1" data-testid="print-wo-from-jobcard">
+                  <Printer className="w-3 h-3" /><span>Print Work Order</span>
+                </button>
+                <button onClick={() => printJobCard(jobCardWO)} className="btn-primary text-xs flex items-center space-x-1" data-testid="print-jobcard-from-dialog">
+                  <Printer className="w-3 h-3" /><span>Print Job Card</span>
+                </button>
               </div>
             </div>
           )}
