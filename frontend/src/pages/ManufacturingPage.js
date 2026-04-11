@@ -148,7 +148,7 @@ export default function ManufacturingPage() {
         // Use the start endpoint which consumes materials
         const { data } = await api.post(`/api/work-orders/${woId}/start`);
         if (data.success === false) {
-          alert(`Cannot start work order: ${data.message}\n\nInsufficient materials:\n${data.insufficient_materials?.map(m => `- ${m.item}: need ${m.required}, have ${m.available}`).join('\n')}`);
+          alert(`Cannot start work order: ${data.message}\n\nInsufficient materials:\n${data.insufficient_materials?.map(m => `- ${m.item} (${m.name || ''}): need ${m.required}, have ${m.available}`).join('\n')}`);
           return;
         }
         alert(`Work order started!\n\nMaterials consumed:\n${data.consumed_materials?.map(m => `- ${m.item}: ${m.quantity}`).join('\n') || 'None'}`);

@@ -563,7 +563,7 @@ async def get_bom(bom_id: str, request: Request):
 
 @bom_router.get("/{bom_id}/explode")
 async def explode_bom(bom_id: str, request: Request, levels: int = 10):
-    """Get full multi-level BOM explosion"""
+    """Get full multi-level BOM explosion with rollup costing"""
     await get_current_user(request)
     
     async def explode_level(bom_id: str, level: int, max_levels: int):
@@ -582,14 +582,22 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
                 "item": item,
                 "quantity": comp.get("quantity"),
                 "is_alternate": comp.get("is_alternate", False),
-                "children": []
+                "children": [],
+                "unit_cost": 0,
+                "extended_cost": 0
             }
             
             # Check for child BOM
             child_bom = await db.boms.find_one({"parent_item_id": comp.get("item_id"), "status": "active"}, {"_id": 0})
             if child_bom:
                 comp_data["children"] = await explode_level(child_bom.get("id"), level + 1, max_levels)
+                # Rollup cost from children
+                comp_data["unit_cost"] = sum(c.get("extended_cost", 0) for c in comp_data["children"])
+            else:
+                # Leaf node - use item unit_cost
+                comp_data["unit_cost"] = item.get("unit_cost", 0) if item else 0
             
+            comp_data["extended_cost"] = comp_data["unit_cost"] * comp.get("quantity", 0)
             result.append(comp_data)
         return result
     
@@ -600,10 +608,14 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
     parent_item = await db.items.find_one({"id": bom.get("parent_item_id")}, {"_id": 0})
     explosion = await explode_level(bom_id, 1, levels)
     
+    # Calculate total rollup cost
+    total_cost = sum(c.get("extended_cost", 0) for c in explosion)
+    
     return {
         "bom": bom,
         "parent_item": parent_item,
-        "explosion": explosion
+        "explosion": explosion,
+        "total_rollup_cost": round(total_cost, 2)
     }
 
 @bom_router.post("")
@@ -851,7 +863,10 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
         available = data["on_hand"] - data["safety_stock"]
         data["net_requirement"] = max(0, data["gross_requirement"] - available)
     
-    return list(demand.values())
+    # Filter to only raw materials (sub-assemblies/components are handled by manufacturing)
+    raw_material_demand = [d for d in demand.values() if d.get("item", {}).get("category") == "raw_material"]
+    
+    return raw_material_demand
 
 @mrp_router.get("/suggestions")
 async def get_purchase_suggestions(request: Request):
@@ -1863,6 +1878,26 @@ async def start_work_order(wo_id: str, request: Request):
     
     if wo.get("materials_consumed"):
         raise HTTPException(status_code=400, detail="Materials already consumed for this work order")
+    
+    # Check if child work orders are all completed before allowing parent to start
+    child_wos = await db.work_orders.find({"parent_wo_id": wo_id}, {"_id": 0}).to_list(1000)
+    incomplete_children = []
+    for child in child_wos:
+        if child.get("status") != "completed":
+            child_item = await db.items.find_one({"id": child.get("item_id")}, {"_id": 0})
+            incomplete_children.append({
+                "wo_number": child.get("wo_number"),
+                "item": child_item.get("part_number", "Unknown") if child_item else "Unknown",
+                "name": child_item.get("name", "") if child_item else "",
+                "status": child.get("status")
+            })
+    
+    if incomplete_children:
+        child_list = "\n".join([f"- {c['wo_number']}: {c['item']} ({c['name']}) - {c['status']}" for c in incomplete_children])
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot start work order: Child work orders must be completed first.\n\nIncomplete child WOs:\n{child_list}"
+        )
     
     # Get the routing and item
     routing = await db.routings.find_one({"id": wo.get("routing_id")})

@@ -1,0 +1,96 @@
+{
+  "summary": "All four fixes verified successfully. Backend: 14/14 tests passed (100%). Frontend: All UI elements working correctly. Fixes: (1) MRP demand shows only raw materials, (2) Insufficient materials includes item name and code, (3) Parent WO blocked when child WOs incomplete, (4) BOM explosion shows rollup costing.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Fix 1: GET /api/mrp/demand returns ONLY raw_material category items (RM-001, RM-002, RM-003)",
+    "Fix 1: MRP demand excludes sub_assembly items",
+    "Fix 1: MRP demand excludes component items",
+    "Fix 1: MRP demand excludes finished_good items",
+    "Fix 2: POST /api/work-orders/{id}/start returns 'item' (part_number) in insufficient_materials",
+    "Fix 2: POST /api/work-orders/{id}/start returns 'name' (description) in insufficient_materials",
+    "Fix 2: Frontend alert shows both item code and name: '- {m.item} ({m.name}): need {required}, have {available}'",
+    "Fix 3: GET /api/work-orders shows parent_wo_id relationships correctly",
+    "Fix 3: POST /api/work-orders/{id}/start returns 400 when child WOs are not completed",
+    "Fix 3: Error message includes child WO details: 'WO-000005: SA-001 (Pump Assembly) - in_progress'",
+    "Fix 3: WO-000004 (parent) correctly blocked from starting due to WO-000005 (child) being in_progress",
+    "Fix 4: GET /api/bom/{id}/explode includes unit_cost on each component",
+    "Fix 4: GET /api/bom/{id}/explode includes extended_cost on each component",
+    "Fix 4: GET /api/bom/{id}/explode includes total_rollup_cost at top level",
+    "Fix 4: extended_cost = unit_cost * quantity calculation verified",
+    "Fix 4: total_rollup_cost = sum of extended_costs verified",
+    "Fix 4: BOM explosion dialog shows Unit Cost column with dollar values",
+    "Fix 4: BOM explosion dialog shows Extended Cost column with dollar values",
+    "Fix 4: BOM explosion dialog shows Total Cost: $349.00 header",
+    "MRP page Material Demand tab shows only 3 raw material items",
+    "Manufacturing page Work Orders tab displays parent-child hierarchy with └ symbol",
+    "Manufacturing page correctly shows alert when trying to start parent WO with incomplete children"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_four_fixes.py",
+    "/app/test_reports/pytest/pytest_four_fixes.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [],
+
+  "updated_files": [
+    "/app/backend/tests/test_four_fixes.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (14/14 tests passed)",
+    "frontend": "100% (All UI elements working correctly)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "No new seed data created - used existing work orders and BOMs",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": true,
+
+  "context_for_next_testing_agent": "Four fixes verified in iteration 6: (1) MRP calculate_demand filters to raw_material only at line 867, (2) start_work_order returns name field in insufficient_materials at line 1935, frontend shows both item and name at line 151, (3) start_work_order checks child WOs at lines 1883-1900 and blocks if any are not completed, (4) BOM explode calculates unit_cost (rollup from children or item.unit_cost for leaf) and extended_cost (unit_cost * qty) at lines 595-600, total_rollup_cost at line 612. Test file: /app/backend/tests/test_four_fixes.py",
+
+  "rca_of_the_issue": {
+    "fix_1_mrp_raw_materials_only": {
+      "root_cause": "MRP demand was showing all items from BOM explosion including sub-assemblies and components",
+      "fix_applied": "Added filter at line 867: raw_material_demand = [d for d in demand.values() if d.get('item', {}).get('category') == 'raw_material']",
+      "verification": "MRP demand now returns only 3 items (RM-001, RM-002, RM-003) instead of all BOM items"
+    },
+    "fix_2_insufficient_materials_name": {
+      "root_cause": "Insufficient materials response only included part_number, not item name/description",
+      "fix_applied": "Added 'name': comp_item.get('name') at line 1935 in backend, frontend alert updated at line 151 to show '- {m.item} ({m.name})'",
+      "verification": "Backend returns both 'item' and 'name' fields in insufficient_materials array"
+    },
+    "fix_3_parent_wo_child_check": {
+      "root_cause": "Parent WO could be started even when child WOs were not completed",
+      "fix_applied": "Added child WO completion check at lines 1883-1900 in start_work_order endpoint",
+      "verification": "WO-000004 correctly blocked from starting due to WO-000005 being in_progress"
+    },
+    "fix_4_bom_rollup_costing": {
+      "root_cause": "BOM explosion did not include cost information",
+      "fix_applied": "Added unit_cost (rollup from children or item.unit_cost), extended_cost (unit_cost * qty), and total_rollup_cost at lines 587-618",
+      "verification": "BOM explosion shows SA-001 Total Cost: $349.00 with Unit Cost and Extended Cost columns"
+    }
+  }
+}

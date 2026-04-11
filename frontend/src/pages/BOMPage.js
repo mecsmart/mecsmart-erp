@@ -218,6 +218,8 @@ export default function BOMPage() {
             <td className="py-2 px-3 text-sm">{item.item?.name || 'Unknown'}</td>
             <td className="py-2 px-3 text-sm text-right mono">{item.quantity}</td>
             <td className="py-2 px-3 text-sm">{item.item?.unit_of_measure || '-'}</td>
+            <td className="py-2 px-3 text-sm text-right mono">{item.unit_cost != null ? `$${Number(item.unit_cost).toFixed(2)}` : '-'}</td>
+            <td className="py-2 px-3 text-sm text-right mono font-medium">{item.extended_cost != null ? `$${Number(item.extended_cost).toFixed(2)}` : '-'}</td>
             <td className="py-2 px-3">
               {item.is_alternate && (
                 <span className="status-badge bg-[#FDF6B2] text-[#723B13]">Alternate</span>
@@ -564,9 +566,14 @@ export default function BOMPage() {
                     <span className="text-[#4B5563] mx-2">-</span>
                     <span>{bomExplosion.parent_item?.name}</span>
                   </div>
-                  <span className={`status-badge status-${bomExplosion.bom?.status}`}>
-                    Rev {bomExplosion.bom?.revision} • {bomExplosion.bom?.status}
-                  </span>
+                  <div className="flex items-center space-x-4">
+                    <span className="mono font-semibold text-[#1D3557]" data-testid="bom-total-cost">
+                      Total Cost: ${bomExplosion.total_rollup_cost != null ? Number(bomExplosion.total_rollup_cost).toFixed(2) : '0.00'}
+                    </span>
+                    <span className={`status-badge status-${bomExplosion.bom?.status}`}>
+                      Rev {bomExplosion.bom?.revision} &bull; {bomExplosion.bom?.status}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -584,6 +591,8 @@ export default function BOMPage() {
                         <th className="text-left py-2 px-3">Description</th>
                         <th className="text-right py-2 px-3">Qty</th>
                         <th className="text-left py-2 px-3">UOM</th>
+                        <th className="text-right py-2 px-3">Unit Cost</th>
+                        <th className="text-right py-2 px-3">Extended Cost</th>
                         <th className="text-left py-2 px-3">Type</th>
                       </tr>
                     </thead>
