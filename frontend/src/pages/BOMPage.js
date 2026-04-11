@@ -267,7 +267,7 @@ export default function BOMPage() {
                         <SelectValue placeholder="Select parent item" />
                       </SelectTrigger>
                       <SelectContent>
-                        {items.filter(i => ['sub_assembly', 'finished_good'].includes(i.category)).map((item) => (
+                        {items.filter(i => ['sub_assembly', 'finished_good', 'component'].includes(i.category)).map((item) => (
                           <SelectItem key={item.id} value={item.id}>
                             {item.part_number} - {item.name}
                           </SelectItem>

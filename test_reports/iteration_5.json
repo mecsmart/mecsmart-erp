@@ -1,0 +1,83 @@
+{
+  "summary": "Bug fix verification complete for MRP recursive demand calculation and BOM component parent selection. Both fixes verified working correctly. All 10 backend tests passed (100%). Frontend UI tests passed - MRP page shows 8 items from ALL BOM levels, BOM parent dropdown shows 7 items including 3 component category items.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Create BOM Dialog",
+        "issues": ["Minor: Missing aria-describedby for DialogContent (accessibility warning in console)"]
+      }
+    ]
+  },
+
+  "passed_tests": [
+    "Admin login with correct credentials (admin@erp.com / Admin@123)",
+    "GET /api/mrp/demand - Returns 8 items from ALL BOM levels (recursive fix verified)",
+    "MRP demand includes child items: RM-002, RM-003, CP-001 from SA-001 BOM",
+    "MRP demand calculates correct quantities with recursive explosion",
+    "GET /api/mrp/suggestions - Includes suggestions based on recursive demand",
+    "GET /api/items - Returns component category items (CP-001, CP-002, CP-003)",
+    "POST /api/bom - Successfully creates BOM with component as parent item",
+    "POST /api/bom - Creates BOM with component parent and child components",
+    "GET /api/bom/{id}/explode - Shows multi-level BOM structure correctly",
+    "BOM explosion shows correct level numbers (1 for top-level, 2 for children)",
+    "Existing BOMs (FG-001, SA-001) not affected by fixes",
+    "BOM details endpoint works correctly for existing BOMs",
+    "BOM page Create dialog shows 7 items in parent dropdown (CP-001, CP-002, CP-003, SA-001, SA-002, FG-001, FG-002)",
+    "MRP page Material Demand tab shows all 8 demand items with correct quantities"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_mrp_bom_fixes.py",
+    "/app/test_reports/pytest/pytest_mrp_bom_results.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [],
+
+  "updated_files": [
+    "/app/backend/tests/test_mrp_bom_fixes.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (10/10 tests passed)",
+    "frontend": "100% (All UI elements working correctly)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "No new seed data created - used existing production orders and BOMs",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": true,
+
+  "context_for_next_testing_agent": "Two bug fixes verified in iteration 5: (1) MRP calculate_demand now uses recursive explode_bom_demand() that follows child BOMs - FG-001 BOM has SA-001 which has its own BOM with RM-002, RM-003, CP-001. MRP now shows all 8 items instead of just 5 top-level. (2) BOM page parent item dropdown filter changed to include 'component' category - now shows CP-001, CP-002, CP-003 alongside sub_assembly and finished_good items. Test file: /app/backend/tests/test_mrp_bom_fixes.py",
+
+  "rca_of_the_issue": {
+    "bug_1_mrp_recursive": {
+      "root_cause": "MRP calculate_demand was only iterating through top-level BOM components without recursively following child BOMs",
+      "fix_applied": "Added explode_bom_demand() recursive function that follows child BOMs to accumulate demand at all levels",
+      "verification": "MRP demand now returns 8 items including RM-002, RM-003, CP-001 which are children of SA-001"
+    },
+    "bug_2_bom_component_parent": {
+      "root_cause": "BOM page parent item dropdown filter was ['sub_assembly', 'finished_good'] excluding 'component' category",
+      "fix_applied": "Changed filter to ['sub_assembly', 'finished_good', 'component'] in BOMPage.js line 270",
+      "verification": "Dropdown now shows 7 items including CP-001, CP-002, CP-003 and POST /api/bom accepts component as parent"
+    }
+  }
+}

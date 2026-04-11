@@ -787,7 +787,7 @@ async def update_production_order(order_id: str, order_data: ProductionOrderUpda
 
 @mrp_router.get("/demand")
 async def calculate_demand(request: Request, production_order_id: Optional[str] = None):
-    """Calculate material requirements based on production orders"""
+    """Calculate material requirements based on production orders - recursively explodes all BOM levels"""
     await get_current_user(request)
     
     query = {"status": {"$in": ["planned", "released", "in_progress"]}}
@@ -797,17 +797,24 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
     orders = await db.production_orders.find(query, {"_id": 0}).to_list(1000)
     
     demand = {}
-    for order in orders:
-        bom = await db.boms.find_one({"id": order.get("bom_id")}, {"_id": 0})
-        if not bom:
-            continue
+    
+    async def explode_bom_demand(bom_id: str, parent_qty: int, order_info: dict, visited: set = None):
+        """Recursively explode BOM and accumulate demand for all child items"""
+        if visited is None:
+            visited = set()
+        if bom_id in visited:
+            return  # Prevent circular references
+        visited.add(bom_id)
         
-        # Explode BOM and calculate requirements
+        bom = await db.boms.find_one({"id": bom_id}, {"_id": 0})
+        if not bom:
+            return
+        
         for comp in bom.get("components", []):
             if comp.get("is_alternate"):
                 continue
             item_id = comp.get("item_id")
-            qty_needed = comp.get("quantity", 0) * order.get("quantity", 0)
+            qty_needed = comp.get("quantity", 0) * parent_qty
             
             if item_id not in demand:
                 item = await db.items.find_one({"id": item_id}, {"_id": 0})
@@ -822,11 +829,22 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
             
             demand[item_id]["gross_requirement"] += qty_needed
             demand[item_id]["orders"].append({
-                "order_id": order.get("id"),
-                "order_number": order.get("order_number"),
+                "order_id": order_info.get("id"),
+                "order_number": order_info.get("order_number"),
                 "quantity_needed": qty_needed,
-                "due_date": order.get("due_date")
+                "due_date": order_info.get("due_date")
             })
+            
+            # Recursively explode child BOMs
+            child_bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
+            if child_bom:
+                await explode_bom_demand(child_bom.get("id"), qty_needed, order_info, visited)
+    
+    for order in orders:
+        bom_id = order.get("bom_id")
+        if not bom_id:
+            continue
+        await explode_bom_demand(bom_id, order.get("quantity", 0), order)
     
     # Calculate net requirements
     for item_id, data in demand.items():
