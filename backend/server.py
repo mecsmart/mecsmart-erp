@@ -1905,7 +1905,7 @@ async def receive_purchase_order(po_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Purchase order not found")
     
     if po.get("status") == "received":
-        raise HTTPException(status_code=400, detail="PO already received")
+        raise HTTPException(status_code=400, detail="GRN already completed for this PO")
     
     # Create inventory transactions for each line
     for line in po.get("lines", []):
@@ -1935,7 +1935,7 @@ async def receive_purchase_order(po_id: str, request: Request):
         {"$set": {"status": "received", "received_at": datetime.now(timezone.utc), "received_by": user["id"]}}
     )
     
-    return {"message": "Purchase order received successfully"}
+    return {"message": "GRN completed successfully"}
 
 # ================== WAREHOUSE ROUTES ==================
 

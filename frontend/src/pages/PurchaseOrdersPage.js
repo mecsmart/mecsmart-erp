@@ -12,7 +12,7 @@ const statusOptions = [
   { value: 'draft', label: 'Draft' },
   { value: 'sent', label: 'Sent' },
   { value: 'partial', label: 'Partial' },
-  { value: 'received', label: 'Received' },
+  { value: 'received', label: 'GRN Done' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
 
@@ -126,13 +126,13 @@ export default function PurchaseOrdersPage() {
     }
   };
 
-  const handleReceive = async (po) => {
-    if (!window.confirm(`Receive all items from PO "${po.po_number}"? This will update inventory.`)) return;
+  const handleGRN = async (po) => {
+    if (!window.confirm(`Create GRN for PO "${po.po_number}"? This will update inventory.`)) return;
     try {
       await api.post(`/api/purchase-orders/${po.id}/receive`);
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.detail || 'Failed to receive purchase order');
+      alert(error.response?.data?.detail || 'Failed to create GRN');
     }
   };
 
@@ -324,7 +324,7 @@ export default function PurchaseOrdersPage() {
                           </button>
                         )}
                         {(po.status === 'sent' || po.status === 'partial') && canReceive && (
-                          <button onClick={() => handleReceive(po)} className="p-1 text-[#4B5563] hover:text-[#03543F]" title="Receive" data-testid={`receive-po-${po.id}`}>
+                          <button onClick={() => handleGRN(po)} className="p-1 text-[#4B5563] hover:text-[#03543F]" title="GRN" data-testid={`grn-po-${po.id}`}>
                             <Package className="w-4 h-4" />
                           </button>
                         )}
@@ -333,7 +333,11 @@ export default function PurchaseOrdersPage() {
                             <History className="w-4 h-4" />
                           </button>
                         )}
-                        {po.status === 'received' && <CheckCircle2 className="w-4 h-4 text-[#03543F]" />}
+                        {po.status === 'received' && (
+                          <span className="flex items-center gap-1 text-xs text-[#03543F] font-medium">
+                            <CheckCircle2 className="w-4 h-4" /> GRN
+                          </span>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -411,11 +415,11 @@ export default function PurchaseOrdersPage() {
               ) : (
                 <div className="space-y-0">
                   {/* Column Headers */}
-                  <div className="grid grid-cols-[2.5fr_0.8fr_1fr_0.8fr_1fr_1.2fr_1fr_1fr_auto] gap-1 px-2 py-1 bg-[#1D3557] text-white text-xs font-semibold rounded-t-sm" data-testid="po-line-headers">
+                  <div className="grid grid-cols-[2.5fr_1fr_0.8fr_0.8fr_1fr_1.2fr_1fr_1fr_auto] gap-1 px-2 py-1 bg-[#1D3557] text-white text-xs font-semibold rounded-t-sm" data-testid="po-line-headers">
                     <span>Item</span>
-                    <span>UOM</span>
                     <span>HSN</span>
                     <span>Qty</span>
+                    <span>UOM</span>
                     <span>Rate</span>
                     <span>Discount</span>
                     <span>GST%</span>
@@ -423,16 +427,16 @@ export default function PurchaseOrdersPage() {
                     <span></span>
                   </div>
                   {formData.lines.map((line, index) => (
-                    <div key={index} className="grid grid-cols-[2.5fr_0.8fr_1fr_0.8fr_1fr_1.2fr_1fr_1fr_auto] gap-1 p-1 bg-[#F9FAFB] border-b border-[#E5E7EB] items-center" data-testid={`po-line-row-${index}`}>
+                    <div key={index} className="grid grid-cols-[2.5fr_1fr_0.8fr_0.8fr_1fr_1.2fr_1fr_1fr_auto] gap-1 p-1 bg-[#F9FAFB] border-b border-[#E5E7EB] items-center" data-testid={`po-line-row-${index}`}>
                       <Select value={line.item_id} onValueChange={(v) => updateLine(index, 'item_id', v)}>
                         <SelectTrigger className="bg-white text-xs h-8" data-testid={`po-line-item-${index}`}><SelectValue placeholder="Select item" /></SelectTrigger>
                         <SelectContent>
                           {items.map((item) => <SelectItem key={item.id} value={item.id}>{item.part_number} - {item.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
-                      <input type="text" value={line.uom} onChange={(e) => updateLine(index, 'uom', e.target.value)} className="input-field bg-white text-xs h-8 mono" />
                       <input type="text" value={line.hsn_code} onChange={(e) => updateLine(index, 'hsn_code', e.target.value)} className="input-field bg-white text-xs h-8 mono" />
                       <input type="number" min="0" step="any" value={line.quantity} onChange={(e) => updateLine(index, 'quantity', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono" />
+                      <input type="text" value={line.uom} onChange={(e) => updateLine(index, 'uom', e.target.value)} className="input-field bg-white text-xs h-8 mono" />
                       <input type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => updateLine(index, 'unit_price', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono" />
                       <div className="flex items-center gap-1">
                         <input type="number" min="0" step="0.01" value={line.discount_value === 0 ? '' : line.discount_value} onChange={(e) => updateLine(index, 'discount_value', e.target.value === '' ? 0 : parseFloat(e.target.value))} className="input-field bg-white text-xs h-8 mono flex-1" placeholder="0" data-testid={`po-line-discount-${index}`} />
