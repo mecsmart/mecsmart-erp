@@ -1,0 +1,330 @@
+import React, { useState, useEffect } from 'react';
+import { api } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
+import { Plus, Edit2, Trash2, Shield, Key, UserPlus, Check, X } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+
+const ROLES = [
+  { value: 'admin', label: 'Admin', color: 'bg-[#FDE8E8] text-[#9B1C1C]' },
+  { value: 'production_manager', label: 'Production Manager', color: 'bg-[#E1EFFE] text-[#1E429F]' },
+  { value: 'quality_inspector', label: 'Quality Inspector', color: 'bg-[#DEF7EC] text-[#03543F]' },
+  { value: 'inventory_manager', label: 'Inventory Manager', color: 'bg-[#FDF6B2] text-[#723B13]' },
+];
+
+const MODULE_LABELS = {
+  dashboard: 'Dashboard', items: 'Items & Parts', bom: 'Bill of Materials',
+  mrp: 'MRP', production: 'Production Orders', manufacturing: 'Manufacturing',
+  quality: 'Quality', inventory: 'Inventory', suppliers: 'Suppliers',
+  customers: 'Customers', purchase_orders: 'Purchase Orders', stores: 'Stores',
+  settings: 'Settings',
+};
+
+const ACTION_LABELS = { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete' };
+
+export default function UserManagementPage() {
+  const { user: currentUser } = useAuth();
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modulesData, setModulesData] = useState(null);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isPermOpen, setIsPermOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+  const [permUser, setPermUser] = useState(null);
+  const [permData, setPermData] = useState({});
+  const [formData, setFormData] = useState({ email: '', password: '', name: '', role: 'inventory_manager' });
+
+  useEffect(() => { fetchData(); }, []);
+
+  const fetchData = async () => {
+    try {
+      const [usersRes, modulesRes] = await Promise.all([
+        api.get('/api/users'),
+        api.get('/api/users/modules'),
+      ]);
+      setUsers(usersRes.data);
+      setModulesData(modulesRes.data);
+    } catch (error) {
+      console.error('Failed to fetch:', error);
+    } finally { setLoading(false); }
+  };
+
+  const handleCreate = async () => {
+    try {
+      await api.post('/api/users', formData);
+      setIsCreateOpen(false);
+      setFormData({ email: '', password: '', name: '', role: 'inventory_manager' });
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to create user');
+    }
+  };
+
+  const handleEdit = (u) => {
+    setEditingUser(u);
+    setFormData({ email: u.email, password: '', name: u.name, role: u.role });
+    setIsCreateOpen(true);
+  };
+
+  const handleUpdate = async () => {
+    try {
+      const payload = { name: formData.name, role: formData.role };
+      if (formData.password) payload.password = formData.password;
+      await api.put(`/api/users/${editingUser.id}`, payload);
+      setIsCreateOpen(false);
+      setEditingUser(null);
+      setFormData({ email: '', password: '', name: '', role: 'inventory_manager' });
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to update user');
+    }
+  };
+
+  const handleDelete = async (u) => {
+    if (!window.confirm(`Delete user "${u.name}" (${u.email})?`)) return;
+    try {
+      await api.delete(`/api/users/${u.id}`);
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to delete user');
+    }
+  };
+
+  const openPermissions = (u) => {
+    setPermUser(u);
+    setPermData(JSON.parse(JSON.stringify(u.permissions || {})));
+    setIsPermOpen(true);
+  };
+
+  const togglePermission = (module, action) => {
+    setPermData(prev => {
+      const updated = { ...prev };
+      if (!updated[module]) updated[module] = [];
+      const actions = [...updated[module]];
+      const idx = actions.indexOf(action);
+      if (idx >= 0) actions.splice(idx, 1);
+      else actions.push(action);
+      updated[module] = actions;
+      return updated;
+    });
+  };
+
+  const toggleAllModule = (module) => {
+    setPermData(prev => {
+      const updated = { ...prev };
+      const current = updated[module] || [];
+      updated[module] = current.length === modulesData?.actions?.length ? [] : [...(modulesData?.actions || [])];
+      return updated;
+    });
+  };
+
+  const applyRoleDefaults = () => {
+    if (permUser && modulesData) {
+      setPermData(JSON.parse(JSON.stringify(modulesData.default_permissions[permUser.role] || {})));
+    }
+  };
+
+  const savePermissions = async () => {
+    try {
+      await api.put(`/api/users/${permUser.id}`, { permissions: permData });
+      setIsPermOpen(false);
+      setPermUser(null);
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to update permissions');
+    }
+  };
+
+  const getRoleColor = (role) => ROLES.find(r => r.value === role)?.color || 'bg-[#F3F4F6] text-[#4B5563]';
+
+  if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div></div>;
+
+  return (
+    <div className="space-y-6" data-testid="user-management-page">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold font-[Chivo] text-[#1D3557]">User Management</h1>
+          <p className="text-sm text-[#4B5563]">Manage users and module-wise access permissions</p>
+        </div>
+        <Dialog open={isCreateOpen} onOpenChange={(open) => { setIsCreateOpen(open); if (!open) { setEditingUser(null); setFormData({ email: '', password: '', name: '', role: 'inventory_manager' }); } }}>
+          <DialogTrigger asChild>
+            <button className="btn-primary flex items-center space-x-2" data-testid="add-user-btn">
+              <UserPlus className="w-4 h-4" /><span>Add User</span>
+            </button>
+          </DialogTrigger>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="font-[Chivo]">{editingUser ? 'Edit User' : 'Create New User'}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 mt-4">
+              <div>
+                <label className="text-sm font-medium text-[#374151]">Full Name *</label>
+                <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} data-testid="user-name-input" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-[#374151]">Email *</label>
+                <input type="email" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} disabled={!!editingUser} data-testid="user-email-input" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-[#374151]">{editingUser ? 'New Password (leave blank to keep)' : 'Password *'}</label>
+                <input type="password" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder={editingUser ? 'Leave blank to keep current' : ''} data-testid="user-password-input" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-[#374151]">Role *</label>
+                <Select value={formData.role} onValueChange={v => setFormData({...formData, role: v})}>
+                  <SelectTrigger data-testid="user-role-select"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {ROLES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex justify-end space-x-2 pt-2">
+                <button className="btn-secondary" onClick={() => { setIsCreateOpen(false); setEditingUser(null); }}>Cancel</button>
+                <button className="btn-primary" onClick={editingUser ? handleUpdate : handleCreate} data-testid="save-user-btn">
+                  {editingUser ? 'Update' : 'Create'} User
+                </button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Users Table */}
+      <div className="card-flat overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full data-table" data-testid="users-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id} data-testid={`user-row-${u.email}`}>
+                  <td className="font-medium text-[#1D3557]">{u.name}</td>
+                  <td className="mono text-sm">{u.email}</td>
+                  <td>
+                    <span className={`status-badge ${getRoleColor(u.role)}`}>
+                      {ROLES.find(r => r.value === u.role)?.label || u.role}
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`status-badge ${u.status === 'active' ? 'bg-[#DEF7EC] text-[#03543F]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>
+                      {u.status || 'active'}
+                    </span>
+                  </td>
+                  <td className="text-sm text-[#4B5563]">
+                    {u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}
+                  </td>
+                  <td>
+                    <div className="flex items-center space-x-1">
+                      <button onClick={() => openPermissions(u)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Permissions" data-testid={`perm-user-${u.email}`}>
+                        <Shield className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleEdit(u)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`edit-user-${u.email}`}>
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      {u.id !== currentUser?.id && (
+                        <button onClick={() => handleDelete(u)} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`delete-user-${u.email}`}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Permissions Dialog */}
+      <Dialog open={isPermOpen} onOpenChange={(open) => { setIsPermOpen(open); if (!open) setPermUser(null); }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-[Chivo] flex items-center space-x-2">
+              <Shield className="w-5 h-5" />
+              <span>Module Permissions - {permUser?.name}</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-2 mb-4 flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <span className={`status-badge ${getRoleColor(permUser?.role)}`}>
+                {ROLES.find(r => r.value === permUser?.role)?.label}
+              </span>
+              <span className="text-sm text-[#4B5563]">{permUser?.email}</span>
+            </div>
+            <button className="btn-secondary text-sm flex items-center space-x-1" onClick={applyRoleDefaults} data-testid="reset-defaults-btn">
+              <Key className="w-3 h-3" /><span>Reset to Role Defaults</span>
+            </button>
+          </div>
+
+          <div className="border rounded-sm overflow-hidden">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-[#F3F4F6]">
+                  <th className="text-left py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Module</th>
+                  {modulesData?.actions?.map(action => (
+                    <th key={action} className="text-center py-2 px-3 text-xs font-semibold uppercase text-[#4B5563] w-20">{ACTION_LABELS[action]}</th>
+                  ))}
+                  <th className="text-center py-2 px-3 text-xs font-semibold uppercase text-[#4B5563] w-16">All</th>
+                </tr>
+              </thead>
+              <tbody>
+                {modulesData?.modules?.map(module => {
+                  const modulePerms = permData[module] || [];
+                  const allChecked = modulePerms.length === modulesData?.actions?.length;
+                  return (
+                    <tr key={module} className="border-t border-[#E5E7EB] hover:bg-[#F9FAFB]" data-testid={`perm-row-${module}`}>
+                      <td className="py-2 px-3 text-sm font-medium text-[#1D3557]">{MODULE_LABELS[module] || module}</td>
+                      {modulesData?.actions?.map(action => (
+                        <td key={action} className="text-center py-2 px-3">
+                          <button
+                            onClick={() => togglePermission(module, action)}
+                            className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${
+                              modulePerms.includes(action)
+                                ? 'bg-[#1D3557] border-[#1D3557] text-white'
+                                : 'border-[#D1D5DB] hover:border-[#9CA3AF]'
+                            }`}
+                            data-testid={`perm-${module}-${action}`}
+                          >
+                            {modulePerms.includes(action) && <Check className="w-3 h-3" />}
+                          </button>
+                        </td>
+                      ))}
+                      <td className="text-center py-2 px-3">
+                        <button
+                          onClick={() => toggleAllModule(module)}
+                          className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${
+                            allChecked
+                              ? 'bg-[#1D3557] border-[#1D3557] text-white'
+                              : 'border-[#D1D5DB] hover:border-[#9CA3AF]'
+                          }`}
+                          data-testid={`perm-${module}-all`}
+                        >
+                          {allChecked && <Check className="w-3 h-3" />}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex justify-end space-x-2 mt-4">
+            <button className="btn-secondary" onClick={() => setIsPermOpen(false)}>Cancel</button>
+            <button className="btn-primary flex items-center space-x-2" onClick={savePermissions} data-testid="save-permissions-btn">
+              <Shield className="w-4 h-4" /><span>Save Permissions</span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

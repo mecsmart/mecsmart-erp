@@ -19,7 +19,8 @@ import {
   ShoppingCart,
   Settings2,
   Users,
-  Building2
+  Building2,
+  Shield
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -30,25 +31,36 @@ import {
 } from '../components/ui/dropdown-menu';
 
 const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Items & Parts', href: '/items', icon: Package },
-  { name: 'Bill of Materials', href: '/bom', icon: FileStack },
-  { name: 'MRP', href: '/mrp', icon: Calculator },
-  { name: 'Production Orders', href: '/production', icon: Factory },
-  { name: 'Manufacturing', href: '/manufacturing', icon: Settings2 },
-  { name: 'Quality', href: '/quality', icon: ClipboardCheck },
-  { name: 'Inventory', href: '/inventory', icon: Warehouse },
-  { name: 'Suppliers', href: '/suppliers', icon: Truck },
-  { name: 'Customers', href: '/customers', icon: Users },
-  { name: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart },
-  { name: 'Stores', href: '/warehouses', icon: Warehouse },
-  { name: 'Settings', href: '/settings', icon: Building2 },
+  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, module: 'dashboard' },
+  { name: 'Items & Parts', href: '/items', icon: Package, module: 'items' },
+  { name: 'Bill of Materials', href: '/bom', icon: FileStack, module: 'bom' },
+  { name: 'MRP', href: '/mrp', icon: Calculator, module: 'mrp' },
+  { name: 'Production Orders', href: '/production', icon: Factory, module: 'production' },
+  { name: 'Manufacturing', href: '/manufacturing', icon: Settings2, module: 'manufacturing' },
+  { name: 'Quality', href: '/quality', icon: ClipboardCheck, module: 'quality' },
+  { name: 'Inventory', href: '/inventory', icon: Warehouse, module: 'inventory' },
+  { name: 'Suppliers', href: '/suppliers', icon: Truck, module: 'suppliers' },
+  { name: 'Customers', href: '/customers', icon: Users, module: 'customers' },
+  { name: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart, module: 'purchase_orders' },
+  { name: 'Stores', href: '/warehouses', icon: Warehouse, module: 'stores' },
+  { name: 'Settings', href: '/settings', icon: Building2, module: 'settings' },
 ];
 
 export default function Layout() {
-  const { user, logout } = useAuth();
+  const { user, logout, hasPermission } = useAuth();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Filter navigation items based on user permissions
+  const filteredNavigation = navigation.filter(item => {
+    if (user?.role === 'admin') return true; // Admin sees everything
+    return hasPermission(item.module, 'view');
+  });
+
+  // Add User Management for admin only
+  const allNavItems = user?.role === 'admin'
+    ? [...filteredNavigation, { name: 'User Management', href: '/users', icon: Shield, module: 'users' }]
+    : filteredNavigation;
 
   const handleLogout = async () => {
     await logout();
@@ -98,7 +110,7 @@ export default function Layout() {
           {/* Navigation */}
           <nav className="flex-1 py-4 overflow-y-auto">
             <ul className="space-y-1">
-              {navigation.map((item) => (
+              {allNavItems.map((item) => (
                 <li key={item.name}>
                   <NavLink
                     to={item.href}

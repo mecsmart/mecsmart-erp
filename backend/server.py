@@ -59,6 +59,14 @@ class UserCreate(BaseModel):
     password: str
     name: str
     role: str = "inventory_manager"
+    permissions: Optional[dict] = None
+
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    password: Optional[str] = None
+    permissions: Optional[dict] = None
+    status: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -70,6 +78,45 @@ class UserResponse(BaseModel):
     name: str
     role: str
     created_at: datetime
+
+# Module permission definitions
+ALL_MODULES = [
+    "dashboard", "items", "bom", "mrp", "production", "manufacturing",
+    "quality", "inventory", "suppliers", "customers", "purchase_orders", "stores", "settings"
+]
+ALL_ACTIONS = ["view", "create", "edit", "delete"]
+
+# Default permissions by role
+DEFAULT_PERMISSIONS = {
+    "admin": {m: ALL_ACTIONS.copy() for m in ALL_MODULES},
+    "production_manager": {
+        "dashboard": ["view"], "items": ["view", "create", "edit"], "bom": ["view", "create", "edit"],
+        "mrp": ["view"], "production": ["view", "create", "edit", "delete"],
+        "manufacturing": ["view", "create", "edit", "delete"], "quality": ["view"],
+        "inventory": ["view"], "suppliers": ["view", "create", "edit"],
+        "customers": ["view", "create", "edit"], "purchase_orders": ["view", "create", "edit"],
+        "stores": ["view"], "settings": ["view"]
+    },
+    "quality_inspector": {
+        "dashboard": ["view"], "items": ["view"], "bom": ["view"],
+        "mrp": [], "production": ["view"],
+        "manufacturing": ["view"], "quality": ["view", "create", "edit"],
+        "inventory": ["view"], "suppliers": [],
+        "customers": [], "purchase_orders": [],
+        "stores": ["view"], "settings": ["view"]
+    },
+    "inventory_manager": {
+        "dashboard": ["view"], "items": ["view", "create", "edit"], "bom": ["view"],
+        "mrp": ["view"], "production": ["view"],
+        "manufacturing": ["view"], "quality": ["view"],
+        "inventory": ["view", "create", "edit", "delete"], "suppliers": ["view"],
+        "customers": ["view"], "purchase_orders": ["view", "create", "edit"],
+        "stores": ["view", "create", "edit", "delete"], "settings": ["view"]
+    }
+}
+
+def get_default_permissions(role: str) -> dict:
+    return DEFAULT_PERMISSIONS.get(role, DEFAULT_PERMISSIONS["inventory_manager"])
 
 class ItemCreate(BaseModel):
     part_number: str
@@ -396,6 +443,9 @@ async def get_current_user(request: Request) -> dict:
         user["id"] = str(user["_id"])
         del user["_id"]
         user.pop("password_hash", None)
+        # Ensure permissions exist
+        if "permissions" not in user or not user["permissions"]:
+            user["permissions"] = get_default_permissions(user.get("role", "inventory_manager"))
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
@@ -424,6 +474,8 @@ async def register(user_data: UserCreate, response: Response):
         "password_hash": hash_password(user_data.password),
         "name": user_data.name,
         "role": user_data.role,
+        "permissions": user_data.permissions or get_default_permissions(user_data.role),
+        "status": "active",
         "created_at": datetime.now(timezone.utc)
     }
     result = await db.users.insert_one(user_doc)
@@ -475,7 +527,7 @@ async def login(user_data: UserLogin, response: Response, request: Request):
     response.set_cookie(key="access_token", value=access_token, httponly=True, secure=False, samesite="lax", max_age=900, path="/")
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=False, samesite="lax", max_age=604800, path="/")
     
-    return {"id": user_id, "email": user["email"], "name": user["name"], "role": user["role"]}
+    return {"id": user_id, "email": user["email"], "name": user["name"], "role": user["role"], "permissions": user.get("permissions") or get_default_permissions(user["role"])}
 
 @auth_router.post("/logout")
 async def logout(response: Response):
@@ -486,6 +538,9 @@ async def logout(response: Response):
 @auth_router.get("/me")
 async def get_me(request: Request):
     user = await get_current_user(request)
+    # Ensure permissions exist (for older users without permissions)
+    if "permissions" not in user or not user["permissions"]:
+        user["permissions"] = get_default_permissions(user.get("role", "inventory_manager"))
     return user
 
 @auth_router.post("/refresh")
@@ -1147,36 +1202,114 @@ async def get_users(request: Request):
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
-    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(1000)
-    for u in users:
-        u["id"] = str(u.get("id", ""))
-    return users
+    users_list = []
+    async for u in db.users.find({}, {"password_hash": 0}):
+        u["id"] = str(u["_id"])
+        del u["_id"]
+        if "permissions" not in u or not u["permissions"]:
+            u["permissions"] = get_default_permissions(u.get("role", "inventory_manager"))
+        users_list.append(u)
+    return users_list
+
+@users_router.post("", status_code=201)
+async def create_user(user_data: UserCreate, request: Request):
+    admin = await get_current_user(request)
+    if admin["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can create users")
+    
+    email = user_data.email.lower()
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    user_doc = {
+        "email": email,
+        "password_hash": hash_password(user_data.password),
+        "name": user_data.name,
+        "role": user_data.role,
+        "permissions": user_data.permissions or get_default_permissions(user_data.role),
+        "status": "active",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": admin["id"]
+    }
+    result = await db.users.insert_one(user_doc)
+    user_doc["id"] = str(result.inserted_id)
+    user_doc.pop("_id", None)
+    user_doc.pop("password_hash", None)
+    return user_doc
 
 @users_router.put("/{user_id}")
-async def update_user(user_id: str, request: Request, role: Optional[str] = None, name: Optional[str] = None):
-    user = await get_current_user(request)
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+async def update_user(user_id: str, data: UserUpdate, request: Request):
+    admin = await get_current_user(request)
+    if admin["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can update users")
     
     update_data = {}
-    if role:
-        update_data["role"] = role
-    if name:
-        update_data["name"] = name
+    if data.name is not None:
+        update_data["name"] = data.name
+    if data.role is not None:
+        update_data["role"] = data.role
+    if data.permissions is not None:
+        update_data["permissions"] = data.permissions
+    if data.status is not None:
+        update_data["status"] = data.status
+    if data.password is not None and data.password.strip():
+        update_data["password_hash"] = hash_password(data.password)
     
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
     
-    # Find user by custom id field
-    result = await db.users.update_one({"id": user_id}, {"$set": update_data})
-    if result.matched_count == 0:
-        # Try with ObjectId
-        try:
-            result = await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update_data})
-        except:
-            pass
+    update_data["updated_at"] = datetime.now(timezone.utc)
     
+    # Try matching by ObjectId
+    try:
+        result = await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update_data})
+    except:
+        result = await db.users.update_one({"id": user_id}, {"$set": update_data})
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Return updated user
+    try:
+        updated = await db.users.find_one({"_id": ObjectId(user_id)}, {"password_hash": 0})
+    except:
+        updated = await db.users.find_one({"id": user_id}, {"password_hash": 0})
+    
+    if updated:
+        updated["id"] = str(updated["_id"])
+        del updated["_id"]
+        return updated
     return {"message": "User updated"}
+
+@users_router.delete("/{user_id}")
+async def delete_user(user_id: str, request: Request):
+    admin = await get_current_user(request)
+    if admin["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can delete users")
+    
+    # Prevent self-deletion
+    if admin["id"] == user_id:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    
+    try:
+        result = await db.users.delete_one({"_id": ObjectId(user_id)})
+    except:
+        result = await db.users.delete_one({"id": user_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": "User deleted"}
+
+@users_router.get("/modules")
+async def get_modules(request: Request):
+    """Get list of all modules and actions for permission UI"""
+    await get_current_user(request)
+    return {
+        "modules": ALL_MODULES,
+        "actions": ALL_ACTIONS,
+        "default_permissions": DEFAULT_PERMISSIONS
+    }
 
 # ================== DASHBOARD ROUTES ==================
 
@@ -2389,6 +2522,8 @@ async def seed_admin():
             "password_hash": hashed,
             "name": "System Admin",
             "role": "admin",
+            "permissions": get_default_permissions("admin"),
+            "status": "active",
             "created_at": datetime.now(timezone.utc)
         })
         logger.info(f"Admin user created: {admin_email}")
@@ -2398,6 +2533,15 @@ async def seed_admin():
             {"$set": {"password_hash": hash_password(admin_password)}}
         )
         logger.info(f"Admin password updated")
+    
+    # Ensure admin has permissions
+    admin_user = await db.users.find_one({"email": admin_email})
+    if admin_user and not admin_user.get("permissions"):
+        await db.users.update_one(
+            {"email": admin_email},
+            {"$set": {"permissions": get_default_permissions("admin"), "status": "active"}}
+        )
+        logger.info("Admin permissions updated")
 
 async def seed_sample_data():
     """Seed sample data for demonstration"""

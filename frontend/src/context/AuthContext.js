@@ -23,14 +23,17 @@ function formatApiErrorDetail(detail) {
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null); // null = checking, false = not authenticated
+  const [permissions, setPermissions] = useState({});
   const [loading, setLoading] = useState(true);
 
   const checkAuth = useCallback(async () => {
     try {
       const { data } = await api.get('/api/auth/me');
       setUser(data);
+      setPermissions(data.permissions || {});
     } catch (error) {
       setUser(false);
+      setPermissions({});
     } finally {
       setLoading(false);
     }
@@ -44,6 +47,7 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.post('/api/auth/login', { email, password });
       setUser(data);
+      setPermissions(data.permissions || {});
       return { success: true, data };
     } catch (error) {
       const message = formatApiErrorDetail(error.response?.data?.detail) || error.message;
@@ -55,6 +59,7 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.post('/api/auth/register', { email, password, name, role });
       setUser(data);
+      setPermissions(data.permissions || {});
       return { success: true, data };
     } catch (error) {
       const message = formatApiErrorDetail(error.response?.data?.detail) || error.message;
@@ -69,6 +74,7 @@ export function AuthProvider({ children }) {
       console.error('Logout error:', error);
     }
     setUser(false);
+    setPermissions({});
   };
 
   const refreshToken = async () => {
@@ -77,17 +83,28 @@ export function AuthProvider({ children }) {
       return true;
     } catch (error) {
       setUser(false);
+      setPermissions({});
       return false;
     }
   };
 
+  // Helper to check if user has permission for a module/action
+  const hasPermission = (module, action = 'view') => {
+    if (!permissions || !module) return false;
+    const modulePerms = permissions[module];
+    if (!modulePerms) return false;
+    return modulePerms.includes(action);
+  };
+
   const value = {
     user,
+    permissions,
     loading,
     login,
     register,
     logout,
     refreshToken,
+    hasPermission,
     isAuthenticated: !!user,
   };
 
