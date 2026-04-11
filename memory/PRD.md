@@ -4,29 +4,35 @@
 Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality process for windows platform.
 
 ## User Choices
-- **BOM Features**: Advanced BOM with revision control, effectivity dates, and alternate components
-- **MRP Features**: Advanced MRP with lead times, safety stock, and purchase order suggestions
+- **BOM Features**: Advanced BOM with revision control, effectivity dates, alternate components, rollup costing
+- **MRP Features**: Advanced MRP with lead times, safety stock, purchase suggestions (raw materials only)
 - **Quality Features**: Basic inspection checklists and pass/fail tracking
-- **Authentication**: JWT-based custom auth with roles (Admin, Production Manager, Quality Inspector, Inventory Manager)
-- **Procurement**: Basic - Purchase Orders, Supplier Management, PO from MRP suggestions
-- **Stores**: Basic - Warehouse/Location management, Stock by location, Inter-location transfers
-- **Manufacturing**: Basic - Work Centers, Routing (operations sequence), Work Order tracking with status
+- **Authentication**: JWT-based custom auth with roles
+- **Procurement**: Purchase Orders, Supplier Management
+- **Stores**: Warehouse/Location management, Stock by location, Transfers
+- **Manufacturing**: Work Centers, Routing, Work Order tracking with child WO dependency enforcement
 
 ## Architecture
-- **Backend**: FastAPI + MongoDB, JWT with httpOnly cookies, all endpoints under `/api`
+- **Backend**: FastAPI + MongoDB, JWT httpOnly cookies, all endpoints under `/api`
 - **Frontend**: React 19 + Shadcn/UI + Tailwind CSS, Industrial design theme
 
-## What's Been Implemented (Feb 2026) - ALL COMPLETE
-- JWT Auth (4 roles), Dashboard, Items/Parts, Multi-level BOM, BOM explosion
-- MRP (recursive demand calc + purchase suggestions), Production Orders
-- Quality inspections & templates, Inventory transactions
+## What's Been Implemented - ALL COMPLETE
+- JWT Auth (4 roles), Dashboard, Items/Parts, Multi-level BOM with rollup costing
+- MRP (recursive demand calc, raw materials only + purchase suggestions)
+- Production Orders, Quality inspections & templates, Inventory transactions
 - Suppliers, Purchase Orders with receive, Warehouses, Stock transfers
 - Manufacturing (Work Centers, Routings, Work Orders with auto-create child WOs)
+- Child WO dependency enforcement (parent can't start until children complete)
+- Insufficient materials dialog with item name + code
 
 ## Bug Fixes Applied
-- **Apr 2026**: Fixed Work Order not auto-creating sub-assembly WOs (stock check was blocking)
-- **Apr 2026**: Fixed MRP not considering child items (only top-level BOM was exploded, now recursive)
-- **Apr 2026**: Fixed BOM creation not allowing Component category as parent item
+- **Apr 2026**: Fixed WO not auto-creating sub-assembly WOs (stock check blocking)
+- **Apr 2026**: Fixed MRP not considering child items (now recursive)
+- **Apr 2026**: Fixed BOM creation not allowing Component category as parent
+- **Apr 2026**: MRP filtered to show only raw materials
+- **Apr 2026**: Insufficient materials dialog now shows item name + code
+- **Apr 2026**: Parent WO blocked when child WOs not completed
+- **Apr 2026**: Added BOM rollup costing (unit cost, extended cost, total cost)
 
 ## Prioritized Backlog
 
@@ -42,7 +48,7 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 
 ### P3 (Low Priority)
 - [ ] Barcode/QR scanning, Email notifications, PDF reports
-- [ ] Data import/export (CSV/Excel), Audit trail, Windows desktop wrapper
+- [ ] Data import/export, Audit trail, Windows desktop wrapper
 
 ## Refactoring Needed
-- Backend server.py (2100+ lines) → split into routers/ directory
+- Backend server.py (2300+ lines) → split into routers/ directory
