@@ -1739,28 +1739,19 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
     created_work_orders = []
     
     # Helper function to create work order for an item
-    async def create_wo_for_item(item_id: str, qty: int, parent_wo_id: str = None):
+    async def create_wo_for_item(item_id: str, qty: int, parent_wo_id: str = None, is_main: bool = False):
         # Find routing for this item
         item_routing = await db.routings.find_one({"item_id": item_id, "status": "active"})
         if not item_routing:
             return None  # No routing, skip
         
-        # Check current stock
         item_doc = await db.items.find_one({"id": item_id})
         if not item_doc:
             return None
         
-        current_stock = item_doc.get("current_stock", 0)
-        
-        # If sufficient stock available, don't create work order
-        if current_stock >= qty:
-            logger.info(f"Item {item_doc.get('part_number')} has sufficient stock ({current_stock} >= {qty}), skipping WO creation")
-            return None
-        
-        # Calculate quantity needed (total needed - available stock)
-        qty_to_manufacture = qty - current_stock
-        if qty_to_manufacture <= 0:
-            return None
+        # Main WO always gets created with full requested quantity (user explicitly chose to manufacture)
+        # Child WOs also always get created for full BOM quantity (needed for this production run)
+        qty_to_manufacture = qty
         
         # Generate WO number
         count = await db.work_orders.count_documents({})
@@ -1790,7 +1781,7 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             "status": "pending",
             "operations_status": operations_status,
             "parent_wo_id": parent_wo_id,
-            "notes": wo_data.notes if not parent_wo_id else f"Auto-created for sub-assembly",
+            "notes": wo_data.notes if is_main else f"Auto-created for {item_doc.get('category', 'child item')}",
             "materials_consumed": False,
             "created_at": datetime.now(timezone.utc),
             "created_by": user["id"]
@@ -1798,6 +1789,7 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
         await db.work_orders.insert_one(wo_doc)
         wo_doc.pop("_id", None)
         
+        logger.info(f"Created WO {wo_number} for {item_doc.get('part_number')} (qty={qty_to_manufacture}, parent={parent_wo_id})")
         return wo_doc
     
     # Helper function to recursively create work orders for child items
@@ -1818,26 +1810,22 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             if not child_item:
                 continue
             
-            # Only create work orders for sub-assemblies or finished goods (items that can be manufactured)
-            if child_item.get("category") in ["sub_assembly", "finished_good"]:
-                # Check if this item has a routing (can be manufactured)
-                child_routing = await db.routings.find_one({"item_id": child_item_id, "status": "active"})
-                if child_routing:
-                    child_wo = await create_wo_for_item(child_item_id, child_qty, parent_wo_id)
-                    if child_wo:
-                        created_work_orders.append(child_wo)
-                        # Recursively create work orders for this child's children
-                        await create_child_work_orders(child_item_id, child_qty, child_wo["id"])
+            # Create work orders for any item that has a routing (can be manufactured)
+            # This includes sub_assemblies, components, and finished_goods
+            child_routing = await db.routings.find_one({"item_id": child_item_id, "status": "active"})
+            if child_routing:
+                child_wo = await create_wo_for_item(child_item_id, child_qty, parent_wo_id)
+                if child_wo:
+                    created_work_orders.append(child_wo)
+                    # Recursively create work orders for this child's children
+                    await create_child_work_orders(child_item_id, child_qty, child_wo["id"])
     
-    # Create main work order for the FG/SA item
-    main_wo = await create_wo_for_item(routing.get("item_id"), wo_data.quantity, None)
+    # Always create main work order (user explicitly requested manufacturing)
+    main_wo = await create_wo_for_item(routing.get("item_id"), wo_data.quantity, None, is_main=True)
     if main_wo:
         created_work_orders.insert(0, main_wo)
         # Create work orders for child items
         await create_child_work_orders(routing.get("item_id"), wo_data.quantity, main_wo["id"])
-    else:
-        # If main item has sufficient stock, just return message
-        return {"message": "Sufficient stock available, no work order needed", "work_orders": []}
     
     return {"message": f"Created {len(created_work_orders)} work order(s)", "work_orders": created_work_orders}
 
