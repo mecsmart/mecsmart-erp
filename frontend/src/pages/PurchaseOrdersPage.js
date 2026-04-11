@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { POPrintDialog } from '../components/PrintDialogs';
 
 const statusOptions = [
   { value: 'draft', label: 'Draft' },
@@ -202,100 +203,7 @@ export default function PurchaseOrdersPage() {
     }
   };
 
-  const [printMenuPO, setPrintMenuPO] = useState(null);
-
-  const printPO = async (po, format) => {
-    setPrintMenuPO(null);
-    try {
-      const { data } = await api.get(`/api/purchase-orders/${po.id}/print-data`);
-      const company = data.company || {};
-      const supplier = data.supplier || {};
-      const lines = data.lines || [];
-      const charges = data.additional_charges || [];
-      const printStyles = `
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:'Segoe UI',Arial,sans-serif; font-size:11px; color:#111; padding:20px; }
-        .header { text-align:center; border-bottom:2px solid #1D3557; padding-bottom:10px; margin-bottom:15px; }
-        .header h1 { font-size:16px; color:#1D3557; } .header p { font-size:10px; color:#555; }
-        .title { font-size:13px; font-weight:bold; color:#1D3557; margin:12px 0 6px; text-transform:uppercase; }
-        .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
-        .info-box { border:1px solid #ddd; padding:6px 8px; }
-        .info-box label { font-size:9px; color:#888; text-transform:uppercase; display:block; }
-        .info-box span { font-weight:600; font-size:11px; }
-        table { width:100%; border-collapse:collapse; margin-bottom:12px; }
-        th { background:#1D3557; color:white; padding:5px 6px; text-align:left; font-size:10px; }
-        td { padding:5px 6px; border-bottom:1px solid #ddd; font-size:11px; }
-        tr:nth-child(even) { background:#f9f9f9; }
-        .text-right { text-align:right; } .mono { font-family:'Courier New',monospace; }
-        .total-row { font-weight:bold; background:#f0f4f8 !important; }
-        .footer { margin-top:30px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; font-size:10px; }
-        .sign-box { border-top:1px solid #333; padding-top:4px; text-align:center; }
-        @media print { body { padding:10px; } }
-      `;
-
-      let linesHTML = '';
-      if (format === 'detailed') {
-        linesHTML = `<table><thead><tr><th>SN</th><th>Item Code</th><th>Description</th><th>HSN</th><th class="text-right">Qty</th><th>UOM</th><th class="text-right">Rate</th><th class="text-right">Discount</th><th class="text-right">Net Amount</th><th class="text-right">GST%</th><th class="text-right">GST Amt</th><th class="text-right">Total</th></tr></thead><tbody>`;
-        lines.forEach((l, i) => {
-          const gross = (l.quantity || 0) * (l.unit_price || 0);
-          const disc = l.discount_amount || (l.discount_type === 'percentage' ? gross * (l.discount_value || 0) / 100 : (l.discount_value || 0));
-          const net = gross - disc;
-          const tax = l.tax_amount || (net * (l.gst_rate || 0) / 100);
-          linesHTML += `<tr><td>${i+1}</td><td class="mono">${l.item?.part_number || ''}</td><td>${l.item?.name || l.description || ''}</td><td class="mono">${l.hsn_code || ''}</td><td class="text-right mono">${l.quantity}</td><td>${l.uom || 'pcs'}</td><td class="text-right mono">${(l.unit_price || 0).toFixed(2)}</td><td class="text-right mono">${disc > 0 ? disc.toFixed(2) : '-'}</td><td class="text-right mono">${net.toFixed(2)}</td><td class="text-right">${l.gst_rate || 0}%</td><td class="text-right mono">${tax.toFixed(2)}</td><td class="text-right mono">${(net + tax).toFixed(2)}</td></tr>`;
-        });
-        linesHTML += `</tbody></table>`;
-      } else {
-        linesHTML = `<table><thead><tr><th>SN</th><th>Item Code</th><th>Description</th><th>HSN</th><th class="text-right">Qty</th><th>UOM</th><th class="text-right">Rate</th><th class="text-right">Amount</th></tr></thead><tbody>`;
-        lines.forEach((l, i) => {
-          const net = l.line_amount || ((l.quantity || 0) * (l.unit_price || 0));
-          linesHTML += `<tr><td>${i+1}</td><td class="mono">${l.item?.part_number || ''}</td><td>${l.item?.name || l.description || ''}</td><td class="mono">${l.hsn_code || ''}</td><td class="text-right mono">${l.quantity}</td><td>${l.uom || 'pcs'}</td><td class="text-right mono">${(l.unit_price || 0).toFixed(2)}</td><td class="text-right mono">${net.toFixed(2)}</td></tr>`;
-        });
-        linesHTML += `</tbody></table>`;
-      }
-
-      let chargesHTML = '';
-      if (charges.length > 0) {
-        chargesHTML = `<div class="title">Additional Charges</div><table><thead><tr><th>Charge</th><th>HSN</th><th class="text-right">Amount</th><th class="text-right">GST%</th><th class="text-right">GST Amt</th></tr></thead><tbody>`;
-        charges.forEach(c => {
-          chargesHTML += `<tr><td>${c.name || ''}</td><td class="mono">${c.hsn_code || ''}</td><td class="text-right mono">${(c.amount || 0).toFixed(2)}</td><td class="text-right">${c.gst_rate || 0}%</td><td class="text-right mono">${(c.tax_amount || 0).toFixed(2)}</td></tr>`;
-        });
-        chargesHTML += `</tbody></table>`;
-      }
-
-      const html = `<!DOCTYPE html><html><head><title>PO ${data.po_number}</title><style>${printStyles}</style></head><body>
-        <div class="header"><h1>${company.company_name || 'Manufacturing ERP'}</h1>
-        ${company.address ? `<p>${company.address}</p>` : ''}${company.gstin ? `<p>GSTIN: ${company.gstin}</p>` : ''}</div>
-        <div class="title">Purchase Order: ${data.po_number}${data.revision > 0 ? ` (Rev. ${data.revision})` : ''}</div>
-        <div class="info-grid">
-          <div class="info-box"><label>Supplier</label><span>${supplier.name || ''}</span><br/><span class="mono" style="font-size:10px">${supplier.code || ''}</span>${supplier.gstin ? `<br/><span style="font-size:10px">GSTIN: ${supplier.gstin}</span>` : ''}</div>
-          <div class="info-box"><label>Expected Date</label><span>${data.expected_date ? new Date(data.expected_date).toLocaleDateString() : '-'}</span></div>
-          ${data.quotation_ref ? `<div class="info-box"><label>Vendor Quotation Ref</label><span>${data.quotation_ref}</span>${data.quotation_date ? `<br/><span style="font-size:10px">${new Date(data.quotation_date).toLocaleDateString()}</span>` : ''}</div>` : ''}
-          ${data.delivery_address ? `<div class="info-box"><label>Delivery Address</label><span style="font-size:10px">${data.delivery_address}</span></div>` : ''}
-        </div>
-        <div class="title">Order Lines</div>
-        ${linesHTML}
-        ${chargesHTML}
-        <div style="text-align:right;margin-top:8px;border-top:1px solid #ddd;padding-top:8px;">
-          <table style="width:250px;margin-left:auto;"><tbody>
-          <tr><td>Subtotal</td><td class="text-right mono">${(data.subtotal || 0).toFixed(2)}</td></tr>
-          ${(data.charges_subtotal || 0) > 0 ? `<tr><td>Charges</td><td class="text-right mono">${(data.charges_subtotal || 0).toFixed(2)}</td></tr>` : ''}
-          ${data.is_inter_state ? `<tr><td>IGST</td><td class="text-right mono">${(data.total_igst || 0).toFixed(2)}</td></tr>` : `<tr><td>CGST</td><td class="text-right mono">${(data.total_cgst || 0).toFixed(2)}</td></tr><tr><td>SGST</td><td class="text-right mono">${(data.total_sgst || 0).toFixed(2)}</td></tr>`}
-          <tr class="total-row"><td><strong>Total</strong></td><td class="text-right mono"><strong>${(data.total_amount || 0).toFixed(2)}</strong></td></tr>
-          </tbody></table>
-        </div>
-        ${data.notes ? `<div style="margin:10px 0;"><strong>Notes:</strong> ${data.notes}</div>` : ''}
-        <div class="footer"><div><div class="sign-box">Prepared By</div></div><div><div class="sign-box">Approved By</div></div><div><div class="sign-box">Supplier Acceptance</div></div></div>
-        <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
-      </body></html>`;
-      const w = window.open('', '_blank', 'width=900,height=700');
-      w.document.write(html);
-      w.document.close();
-      w.focus();
-      w.print();
-    } catch (error) {
-      alert('Failed to load print data');
-    }
-  };
+  const [printPO, setPrintPO] = useState(null);
 
   return (
     <div className="space-y-6" data-testid="purchase-orders-page">
@@ -419,22 +327,10 @@ export default function PurchaseOrdersPage() {
                             <CheckCircle2 className="w-4 h-4" /> {po.grn_number || 'GRN'}
                           </span>
                         )}
-                        {/* Print dropdown */}
-                        <div className="relative">
-                          <button onClick={() => setPrintMenuPO(printMenuPO === po.id ? null : po.id)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Print" data-testid={`print-po-${po.id}`}>
-                            <Printer className="w-4 h-4" />
-                          </button>
-                          {printMenuPO === po.id && (
-                            <div className="absolute right-0 top-7 z-50 bg-white border border-[#D1D5DB] rounded-sm shadow-lg min-w-[170px]" data-testid="print-menu">
-                              <button onClick={() => printPO(po, 'standard')} className="block w-full text-left px-3 py-2 text-xs hover:bg-[#F3F4F6]" data-testid="print-po-standard">
-                                Standard Format
-                              </button>
-                              <button onClick={() => printPO(po, 'detailed')} className="block w-full text-left px-3 py-2 text-xs hover:bg-[#F3F4F6]" data-testid="print-po-detailed">
-                                Detailed (with GST breakup)
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                        {/* Print button */}
+                        <button onClick={() => setPrintPO(po)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Print PO" data-testid={`print-po-${po.id}`}>
+                          <Printer className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -659,6 +555,9 @@ export default function PurchaseOrdersPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* PO Print Dialog */}
+      <POPrintDialog po={printPO} open={!!printPO} onClose={() => setPrintPO(null)} />
     </div>
   );
 }
