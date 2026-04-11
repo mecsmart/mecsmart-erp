@@ -49,6 +49,7 @@ routings_router = APIRouter(prefix="/routings")
 work_orders_router = APIRouter(prefix="/work-orders")
 settings_router = APIRouter(prefix="/settings")
 customers_router = APIRouter(prefix="/customers")
+grn_router = APIRouter(prefix="/grn")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -285,6 +286,19 @@ class PurchaseOrderUpdate(BaseModel):
     additional_charges: Optional[List[POAdditionalCharge]] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+
+class GRNLineVerify(BaseModel):
+    item_id: str
+    received_quantity: float
+    verified_price: float
+
+class GRNCreate(BaseModel):
+    po_id: str
+    supplier_invoice_no: str = ""
+    supplier_invoice_date: Optional[datetime] = None
+    lines: List[GRNLineVerify]
+    warehouse_id: Optional[str] = ""
+    notes: Optional[str] = ""
 
 class POChargeTypeCreate(BaseModel):
     name: str
@@ -2093,6 +2107,126 @@ async def get_transfer_history(request: Request, limit: int = 50):
     
     return transfers
 
+# ================== GRN (GOODS RECEIPT NOTE) ROUTES ==================
+
+@grn_router.get("")
+async def get_grn_list(request: Request):
+    """Get all GRN records"""
+    await get_current_user(request)
+    grns = await db.grn.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for grn in grns:
+        po = await db.purchase_orders.find_one({"id": grn.get("po_id")}, {"_id": 0})
+        grn["po"] = po
+        supplier = await db.suppliers.find_one({"id": po.get("supplier_id")}, {"_id": 0}) if po else None
+        grn["supplier"] = supplier
+        for line in grn.get("lines", []):
+            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
+            line["item"] = item
+    return grns
+
+@grn_router.get("/pending-pos")
+async def get_pending_grn_pos(request: Request):
+    """Get POs that are sent/partial and ready for GRN"""
+    await get_current_user(request)
+    pos = await db.purchase_orders.find(
+        {"status": {"$in": ["sent", "partial"]}}, {"_id": 0}
+    ).sort("created_at", -1).to_list(1000)
+    for po in pos:
+        supplier = await db.suppliers.find_one({"id": po.get("supplier_id")}, {"_id": 0})
+        po["supplier"] = supplier
+        for line in po.get("lines", []):
+            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
+            line["item"] = item
+    return pos
+
+@grn_router.post("", status_code=201)
+async def create_grn(grn_data: GRNCreate, request: Request):
+    """Create GRN - verify material, price, update inventory"""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    po = await db.purchase_orders.find_one({"id": grn_data.po_id})
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    if po.get("status") == "received":
+        raise HTTPException(status_code=400, detail="GRN already completed for this PO")
+    
+    # Generate GRN number
+    count = await db.grn.count_documents({})
+    grn_number = f"GRN-{str(count + 1).zfill(6)}"
+    
+    # Process each line - update inventory with verified quantities
+    grn_lines = []
+    for grn_line in grn_data.lines:
+        item = await db.items.find_one({"id": grn_line.item_id})
+        if not item:
+            continue
+        
+        current_stock = item.get("current_stock", 0)
+        new_stock = current_stock + grn_line.received_quantity
+        
+        # Find matching PO line for reference
+        po_line = next((l for l in po.get("lines", []) if l.get("item_id") == grn_line.item_id), {})
+        
+        grn_lines.append({
+            "item_id": grn_line.item_id,
+            "po_quantity": po_line.get("quantity", 0),
+            "received_quantity": grn_line.received_quantity,
+            "po_price": po_line.get("unit_price", 0),
+            "verified_price": grn_line.verified_price,
+            "uom": po_line.get("uom", "pcs"),
+            "hsn_code": po_line.get("hsn_code", ""),
+        })
+        
+        # Create inventory transaction
+        tx_doc = {
+            "id": str(uuid.uuid4()),
+            "item_id": grn_line.item_id,
+            "transaction_type": "receive",
+            "quantity": grn_line.received_quantity,
+            "reference_type": "grn",
+            "reference_id": grn_number,
+            "previous_stock": current_stock,
+            "new_stock": new_stock,
+            "notes": f"GRN {grn_number} from PO {po.get('po_number')}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"]
+        }
+        await db.inventory_transactions.insert_one(tx_doc)
+        await db.items.update_one({"id": grn_line.item_id}, {"$set": {"current_stock": new_stock}})
+    
+    grn_doc = {
+        "id": str(uuid.uuid4()),
+        "grn_number": grn_number,
+        "po_id": grn_data.po_id,
+        "po_number": po.get("po_number", ""),
+        "supplier_id": po.get("supplier_id", ""),
+        "supplier_invoice_no": grn_data.supplier_invoice_no,
+        "supplier_invoice_date": grn_data.supplier_invoice_date,
+        "warehouse_id": grn_data.warehouse_id or po.get("delivery_warehouse_id", ""),
+        "lines": grn_lines,
+        "notes": grn_data.notes,
+        "status": "completed",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.grn.insert_one(grn_doc)
+    grn_doc.pop("_id", None)
+    
+    # Update PO status to received
+    await db.purchase_orders.update_one(
+        {"id": grn_data.po_id},
+        {"$set": {
+            "status": "received",
+            "received_at": datetime.now(timezone.utc),
+            "received_by": user["id"],
+            "grn_number": grn_number
+        }}
+    )
+    
+    return grn_doc
+
 # ================== WORK CENTER ROUTES ==================
 
 @work_centers_router.get("")
@@ -3490,6 +3624,7 @@ api_router.include_router(routings_router)
 api_router.include_router(work_orders_router)
 api_router.include_router(settings_router)
 api_router.include_router(customers_router)
+api_router.include_router(grn_router)
 
 @api_router.get("/health")
 async def health_check():

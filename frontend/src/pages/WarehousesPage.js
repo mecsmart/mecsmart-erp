@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -9,7 +9,9 @@ import {
   MapPin,
   Package,
   CheckCircle2,
-  Eye
+  Eye,
+  FileText,
+  ClipboardCheck
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -48,6 +50,19 @@ export default function WarehousesPage() {
 
   const canEdit = ['admin', 'inventory_manager'].includes(user?.role);
 
+  // GRN State
+  const [grnList, setGrnList] = useState([]);
+  const [pendingPOs, setPendingPOs] = useState([]);
+  const [grnDialogOpen, setGrnDialogOpen] = useState(false);
+  const [selectedPO, setSelectedPO] = useState(null);
+  const [grnForm, setGrnForm] = useState({
+    supplier_invoice_no: '',
+    supplier_invoice_date: '',
+    warehouse_id: '',
+    notes: '',
+    lines: [],
+  });
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -55,14 +70,18 @@ export default function WarehousesPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [warehousesRes, transfersRes, itemsRes] = await Promise.all([
+      const [warehousesRes, transfersRes, itemsRes, grnRes, pendingRes] = await Promise.all([
         api.get('/api/warehouses'),
         api.get('/api/warehouses/transfers/history'),
         api.get('/api/items'),
+        api.get('/api/grn'),
+        api.get('/api/grn/pending-pos'),
       ]);
       setWarehouses(warehousesRes.data);
       setTransfers(transfersRes.data);
       setItems(itemsRes.data);
+      setGrnList(grnRes.data);
+      setPendingPOs(pendingRes.data);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -146,6 +165,59 @@ export default function WarehousesPage() {
       quantity: 1,
       notes: '',
     });
+  };
+
+  // GRN Functions
+  const openGRNDialog = (po) => {
+    setSelectedPO(po);
+    setGrnForm({
+      supplier_invoice_no: '',
+      supplier_invoice_date: '',
+      warehouse_id: po.delivery_warehouse_id || '',
+      notes: '',
+      lines: (po.lines || []).map(line => ({
+        item_id: line.item_id,
+        item_name: line.item?.name || '',
+        item_part_number: line.item?.part_number || '',
+        po_quantity: line.quantity,
+        received_quantity: line.quantity,
+        po_price: line.unit_price,
+        verified_price: line.unit_price,
+        uom: line.uom || 'pcs',
+        hsn_code: line.hsn_code || '',
+      })),
+    });
+    setGrnDialogOpen(true);
+  };
+
+  const updateGRNLine = (index, field, value) => {
+    const newLines = [...grnForm.lines];
+    newLines[index] = { ...newLines[index], [field]: value };
+    setGrnForm({ ...grnForm, lines: newLines });
+  };
+
+  const handleGRNSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        po_id: selectedPO.id,
+        supplier_invoice_no: grnForm.supplier_invoice_no,
+        supplier_invoice_date: grnForm.supplier_invoice_date ? new Date(grnForm.supplier_invoice_date).toISOString() : null,
+        warehouse_id: grnForm.warehouse_id,
+        notes: grnForm.notes,
+        lines: grnForm.lines.map(l => ({
+          item_id: l.item_id,
+          received_quantity: l.received_quantity,
+          verified_price: l.verified_price,
+        })),
+      };
+      await api.post('/api/grn', payload);
+      setGrnDialogOpen(false);
+      setSelectedPO(null);
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to create GRN');
+    }
   };
 
   return (
@@ -378,6 +450,13 @@ export default function WarehousesPage() {
           >
             Transfer History
           </TabsTrigger>
+          <TabsTrigger 
+            value="grn" 
+            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
+            data-testid="tab-grn"
+          >
+            GRN
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="warehouses" className="mt-4">
@@ -544,6 +623,236 @@ export default function WarehousesPage() {
               </div>
             )}
           </div>
+        </TabsContent>
+
+        {/* GRN Tab */}
+        <TabsContent value="grn" className="mt-4 space-y-4">
+          {/* Pending POs for GRN */}
+          {pendingPOs.length > 0 && (
+            <div className="card-flat overflow-hidden">
+              <div className="p-4 border-b border-[#E5E7EB]">
+                <h3 className="text-sm font-semibold text-[#1D3557] flex items-center gap-2">
+                  <ClipboardCheck className="w-4 h-4" /> Pending POs for GRN
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full data-table" data-testid="pending-grn-table">
+                  <thead>
+                    <tr>
+                      <th>PO Number</th>
+                      <th>Supplier</th>
+                      <th>Items</th>
+                      <th className="text-right">Total</th>
+                      <th>Expected</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingPOs.map(po => (
+                      <tr key={po.id} data-testid={`pending-grn-row-${po.id}`}>
+                        <td className="mono font-medium">{po.po_number}</td>
+                        <td>
+                          <span className="mono text-xs">{po.supplier?.code}</span>
+                          <p className="text-sm">{po.supplier?.name}</p>
+                        </td>
+                        <td className="mono text-sm">{po.lines?.length || 0} items</td>
+                        <td className="text-right mono font-semibold">{(po.total_amount || 0).toFixed(2)}</td>
+                        <td className="text-sm">{po.expected_date ? new Date(po.expected_date).toLocaleDateString() : '-'}</td>
+                        <td>
+                          <button onClick={() => openGRNDialog(po)} className="btn-primary text-xs flex items-center gap-1" data-testid={`create-grn-${po.id}`}>
+                            <Package className="w-3 h-3" /> Create GRN
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Completed GRN List */}
+          <div className="card-flat overflow-hidden">
+            <div className="p-4 border-b border-[#E5E7EB]">
+              <h3 className="text-sm font-semibold text-[#1D3557] flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" /> Completed GRN
+              </h3>
+            </div>
+            {grnList.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
+                <FileText className="w-12 h-12 mb-2 text-[#9CA3AF]" />
+                <p>No GRN records yet</p>
+                <p className="text-xs text-[#9CA3AF] mt-1">GRN entries appear here after material verification from sent POs</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full data-table" data-testid="grn-table">
+                  <thead>
+                    <tr>
+                      <th>GRN No.</th>
+                      <th>PO No.</th>
+                      <th>Supplier</th>
+                      <th>Supplier Invoice</th>
+                      <th>Items Received</th>
+                      <th className="text-right">Total Qty</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grnList.map(grn => (
+                      <tr key={grn.id} data-testid={`grn-row-${grn.id}`}>
+                        <td className="mono font-semibold text-[#03543F]">{grn.grn_number}</td>
+                        <td className="mono">{grn.po_number}</td>
+                        <td>
+                          <span className="mono text-xs">{grn.supplier?.code}</span>
+                          <p className="text-sm">{grn.supplier?.name}</p>
+                        </td>
+                        <td>
+                          {grn.supplier_invoice_no ? (
+                            <div>
+                              <span className="mono font-medium">{grn.supplier_invoice_no}</span>
+                              {grn.supplier_invoice_date && <p className="text-xs text-[#6B7280]">{new Date(grn.supplier_invoice_date).toLocaleDateString()}</p>}
+                            </div>
+                          ) : <span className="text-[#9CA3AF]">-</span>}
+                        </td>
+                        <td>
+                          <div className="space-y-0.5">
+                            {(grn.lines || []).map((line, li) => (
+                              <div key={li} className="text-xs">
+                                <span className="font-medium">{line.item?.part_number || line.item_id}</span>
+                                <span className="text-[#6B7280] ml-1">{line.item?.name}</span>
+                                <span className="mono ml-2">{line.received_quantity} {line.uom}</span>
+                                {line.po_price !== line.verified_price && (
+                                  <span className="ml-1 text-[#B45309] text-xs">(price adjusted)</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="text-right mono">{(grn.lines || []).reduce((s, l) => s + l.received_quantity, 0)}</td>
+                        <td className="text-sm">{grn.created_at ? new Date(grn.created_at).toLocaleDateString() : '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* GRN Create Dialog */}
+          <Dialog open={grnDialogOpen} onOpenChange={(open) => { if (!open) { setSelectedPO(null); } setGrnDialogOpen(open); }}>
+            <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle className="font-[Chivo]">
+                  Create GRN {selectedPO ? `- ${selectedPO.po_number}` : ''}
+                </DialogTitle>
+              </DialogHeader>
+              {selectedPO && (
+                <form onSubmit={handleGRNSubmit} className="space-y-4 mt-3" data-testid="grn-form">
+                  {/* Supplier info */}
+                  <div className="bg-[#F3F4F6] rounded-sm p-3 text-sm">
+                    <div className="flex justify-between">
+                      <div>
+                        <span className="text-[#6B7280]">Supplier: </span>
+                        <span className="font-medium">{selectedPO.supplier?.name} ({selectedPO.supplier?.code})</span>
+                      </div>
+                      <div>
+                        <span className="text-[#6B7280]">PO Total: </span>
+                        <span className="mono font-semibold">{(selectedPO.total_amount || 0).toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Invoice Reference */}
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier Invoice / Doc Ref No. *</label>
+                      <input type="text" value={grnForm.supplier_invoice_no} onChange={(e) => setGrnForm({ ...grnForm, supplier_invoice_no: e.target.value })} className="input-field" placeholder="e.g. INV-2025-0123" required data-testid="grn-invoice-no" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Invoice Date</label>
+                      <input type="date" value={grnForm.supplier_invoice_date} onChange={(e) => setGrnForm({ ...grnForm, supplier_invoice_date: e.target.value })} className="input-field" data-testid="grn-invoice-date" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Receiving Warehouse</label>
+                      <Select value={grnForm.warehouse_id || undefined} onValueChange={(v) => setGrnForm({ ...grnForm, warehouse_id: v })}>
+                        <SelectTrigger data-testid="grn-warehouse-select"><SelectValue placeholder="Select warehouse" /></SelectTrigger>
+                        <SelectContent>
+                          {warehouses.filter(w => w.status === 'active').map(w => <SelectItem key={w.id} value={w.id}>{w.code} - {w.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Material Verification Table */}
+                  <div className="border-t border-[#E5E7EB] pt-4">
+                    <label className="text-sm font-semibold text-[#111827] mb-3 block">Verify Material & Price</label>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm" data-testid="grn-verify-table">
+                        <thead>
+                          <tr className="bg-[#1D3557] text-white text-xs">
+                            <th className="text-left p-2">Item</th>
+                            <th className="text-left p-2">HSN</th>
+                            <th className="text-right p-2">PO Qty</th>
+                            <th className="text-right p-2">Recd Qty</th>
+                            <th className="text-left p-2">UOM</th>
+                            <th className="text-right p-2">PO Price</th>
+                            <th className="text-right p-2">Verified Price</th>
+                            <th className="text-center p-2">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {grnForm.lines.map((line, i) => {
+                            const qtyMatch = line.received_quantity === line.po_quantity;
+                            const priceMatch = line.verified_price === line.po_price;
+                            return (
+                              <tr key={i} className="border-b border-[#E5E7EB]" data-testid={`grn-verify-row-${i}`}>
+                                <td className="p-2">
+                                  <span className="mono text-xs font-medium">{line.item_part_number}</span>
+                                  <p className="text-[#6B7280] text-xs">{line.item_name}</p>
+                                </td>
+                                <td className="p-2 mono text-xs">{line.hsn_code || '-'}</td>
+                                <td className="p-2 text-right mono">{line.po_quantity}</td>
+                                <td className="p-2">
+                                  <input type="number" min="0" step="any" value={line.received_quantity} onChange={(e) => updateGRNLine(i, 'received_quantity', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono w-20 text-right" data-testid={`grn-received-qty-${i}`} />
+                                </td>
+                                <td className="p-2 mono text-xs">{line.uom}</td>
+                                <td className="p-2 text-right mono">{line.po_price.toFixed(2)}</td>
+                                <td className="p-2">
+                                  <input type="number" min="0" step="0.01" value={line.verified_price} onChange={(e) => updateGRNLine(i, 'verified_price', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono w-24 text-right" data-testid={`grn-verified-price-${i}`} />
+                                </td>
+                                <td className="p-2 text-center">
+                                  {qtyMatch && priceMatch ? (
+                                    <CheckCircle2 className="w-4 h-4 text-[#03543F] mx-auto" />
+                                  ) : (
+                                    <span className="text-xs text-[#B45309] font-medium">
+                                      {!qtyMatch && 'Qty'}{!qtyMatch && !priceMatch && '/'}{!priceMatch && 'Price'}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Notes</label>
+                    <textarea value={grnForm.notes} onChange={(e) => setGrnForm({ ...grnForm, notes: e.target.value })} className="input-field" rows={2} placeholder="GRN notes..." data-testid="grn-notes" />
+                  </div>
+
+                  <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
+                    <button type="button" onClick={() => setGrnDialogOpen(false)} className="btn-secondary">Cancel</button>
+                    <button type="submit" className="btn-primary" data-testid="grn-submit-btn">
+                      Confirm GRN
+                    </button>
+                  </div>
+                </form>
+              )}
+            </DialogContent>
+          </Dialog>
         </TabsContent>
       </Tabs>
     </div>
