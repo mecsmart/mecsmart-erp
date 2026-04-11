@@ -1511,6 +1511,26 @@ async def get_purchase_order(po_id: str, request: Request):
         line["item"] = item
     return order
 
+@purchase_orders_router.get("/{po_id}/print-data")
+async def get_po_print_data(po_id: str, request: Request):
+    """Get PO data with company settings for printing"""
+    await get_current_user(request)
+    order = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    supplier = await db.suppliers.find_one({"id": order.get("supplier_id")}, {"_id": 0})
+    order["supplier"] = supplier
+    for line in order.get("lines", []):
+        item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
+        line["item"] = item
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
+    order["company"] = company
+    # Get delivery warehouse details
+    if order.get("delivery_warehouse_id"):
+        wh = await db.warehouses.find_one({"id": order["delivery_warehouse_id"]}, {"_id": 0})
+        order["delivery_warehouse"] = wh
+    return order
+
 @purchase_orders_router.post("", status_code=201)
 async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
     user = await get_current_user(request)
@@ -2227,6 +2247,27 @@ async def create_grn(grn_data: GRNCreate, request: Request):
     
     return grn_doc
 
+@grn_router.get("/{grn_id}/print-data")
+async def get_grn_print_data(grn_id: str, request: Request):
+    """Get GRN data for printing"""
+    await get_current_user(request)
+    grn = await db.grn.find_one({"id": grn_id}, {"_id": 0})
+    if not grn:
+        raise HTTPException(status_code=404, detail="GRN not found")
+    po = await db.purchase_orders.find_one({"id": grn.get("po_id")}, {"_id": 0})
+    grn["po"] = po
+    supplier = await db.suppliers.find_one({"id": grn.get("supplier_id")}, {"_id": 0})
+    grn["supplier"] = supplier
+    for line in grn.get("lines", []):
+        item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
+        line["item"] = item
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
+    grn["company"] = company
+    if grn.get("warehouse_id"):
+        wh = await db.warehouses.find_one({"id": grn["warehouse_id"]}, {"_id": 0})
+        grn["warehouse"] = wh
+    return grn
+
 # ================== WORK CENTER ROUTES ==================
 
 @work_centers_router.get("")
@@ -2744,8 +2785,12 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
     
-    if wo.get("status") not in ["in_progress", "pending"]:
+    if wo.get("status") == "pending":
+        raise HTTPException(status_code=400, detail="Cannot update operations: Work order has not been started. Please start the work order first to consume materials.")
+    if wo.get("status") not in ["in_progress"]:
         raise HTTPException(status_code=400, detail=f"Cannot update operations on {wo.get('status')} work order")
+    if not wo.get("materials_consumed"):
+        raise HTTPException(status_code=400, detail="Cannot update operations: Materials have not been consumed yet. Required materials are not in stock.")
     
     operations = wo.get("operations_status", [])
     target_op = None

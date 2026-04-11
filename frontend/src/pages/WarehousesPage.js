@@ -11,7 +11,8 @@ import {
   CheckCircle2,
   Eye,
   FileText,
-  ClipboardCheck
+  ClipboardCheck,
+  Printer
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -217,6 +218,84 @@ export default function WarehousesPage() {
       fetchData();
     } catch (error) {
       alert(error.response?.data?.detail || 'Failed to create GRN');
+    }
+  };
+
+  const [printMenuGRN, setPrintMenuGRN] = useState(null);
+
+  const printGRN = async (grn, format) => {
+    setPrintMenuGRN(null);
+    try {
+      const { data } = await api.get(`/api/grn/${grn.id}/print-data`);
+      const company = data.company || {};
+      const supplier = data.supplier || {};
+      const lines = data.lines || [];
+      const wh = data.warehouse || {};
+      const printStyles = `
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Segoe UI',Arial,sans-serif; font-size:11px; color:#111; padding:20px; }
+        .header { text-align:center; border-bottom:2px solid #1D3557; padding-bottom:10px; margin-bottom:15px; }
+        .header h1 { font-size:16px; color:#1D3557; } .header p { font-size:10px; color:#555; }
+        .title { font-size:13px; font-weight:bold; color:#1D3557; margin:12px 0 6px; text-transform:uppercase; }
+        .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+        .info-box { border:1px solid #ddd; padding:6px 8px; }
+        .info-box label { font-size:9px; color:#888; text-transform:uppercase; display:block; }
+        .info-box span { font-weight:600; font-size:11px; }
+        table { width:100%; border-collapse:collapse; margin-bottom:12px; }
+        th { background:#1D3557; color:white; padding:5px 6px; text-align:left; font-size:10px; }
+        td { padding:5px 6px; border-bottom:1px solid #ddd; font-size:11px; }
+        tr:nth-child(even) { background:#f9f9f9; }
+        .text-right { text-align:right; } .mono { font-family:'Courier New',monospace; }
+        .total-row { font-weight:bold; background:#f0f4f8 !important; }
+        .mismatch { color:#B45309; font-weight:600; }
+        .footer { margin-top:30px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; font-size:10px; }
+        .sign-box { border-top:1px solid #333; padding-top:4px; text-align:center; }
+        @media print { body { padding:10px; } }
+      `;
+
+      let linesHTML = '';
+      if (format === 'detailed') {
+        linesHTML = `<table><thead><tr><th>SN</th><th>Item Code</th><th>Description</th><th>HSN</th><th class="text-right">PO Qty</th><th class="text-right">Recd Qty</th><th>UOM</th><th class="text-right">PO Price</th><th class="text-right">Verified Price</th><th class="text-center">Status</th></tr></thead><tbody>`;
+        lines.forEach((l, i) => {
+          const qtyMatch = l.received_quantity === l.po_quantity;
+          const priceMatch = l.verified_price === l.po_price;
+          linesHTML += `<tr><td>${i+1}</td><td class="mono">${l.item?.part_number || ''}</td><td>${l.item?.name || ''}</td><td class="mono">${l.hsn_code || ''}</td><td class="text-right mono">${l.po_quantity || 0}</td><td class="text-right mono ${!qtyMatch ? 'mismatch' : ''}">${l.received_quantity}</td><td>${l.uom || 'pcs'}</td><td class="text-right mono">${(l.po_price || 0).toFixed(2)}</td><td class="text-right mono ${!priceMatch ? 'mismatch' : ''}">${(l.verified_price || 0).toFixed(2)}</td><td class="text-center">${qtyMatch && priceMatch ? 'OK' : '<span class="mismatch">Mismatch</span>'}</td></tr>`;
+        });
+        linesHTML += `</tbody></table>`;
+      } else {
+        linesHTML = `<table><thead><tr><th>SN</th><th>Item Code</th><th>Description</th><th>HSN</th><th class="text-right">Recd Qty</th><th>UOM</th><th class="text-right">Verified Price</th><th class="text-right">Amount</th></tr></thead><tbody>`;
+        let total = 0;
+        lines.forEach((l, i) => {
+          const amt = l.received_quantity * l.verified_price;
+          total += amt;
+          linesHTML += `<tr><td>${i+1}</td><td class="mono">${l.item?.part_number || ''}</td><td>${l.item?.name || ''}</td><td class="mono">${l.hsn_code || ''}</td><td class="text-right mono">${l.received_quantity}</td><td>${l.uom || 'pcs'}</td><td class="text-right mono">${(l.verified_price || 0).toFixed(2)}</td><td class="text-right mono">${amt.toFixed(2)}</td></tr>`;
+        });
+        linesHTML += `<tr class="total-row"><td colspan="7" class="text-right">Total</td><td class="text-right mono">${total.toFixed(2)}</td></tr></tbody></table>`;
+      }
+
+      const html = `<!DOCTYPE html><html><head><title>GRN ${data.grn_number}</title><style>${printStyles}</style></head><body>
+        <div class="header"><h1>${company.company_name || 'Manufacturing ERP'}</h1>
+        ${company.address ? `<p>${company.address}</p>` : ''}${company.gstin ? `<p>GSTIN: ${company.gstin}</p>` : ''}</div>
+        <div class="title">Goods Receipt Note: ${data.grn_number}</div>
+        <div class="info-grid">
+          <div class="info-box"><label>PO Reference</label><span class="mono">${data.po_number || ''}</span></div>
+          <div class="info-box"><label>Supplier</label><span>${supplier.name || ''}</span><br/><span class="mono" style="font-size:10px">${supplier.code || ''}</span>${supplier.gstin ? `<br/><span style="font-size:10px">GSTIN: ${supplier.gstin}</span>` : ''}</div>
+          <div class="info-box"><label>Supplier Invoice / Doc Ref</label><span class="mono">${data.supplier_invoice_no || '-'}</span>${data.supplier_invoice_date ? `<br/><span style="font-size:10px">${new Date(data.supplier_invoice_date).toLocaleDateString()}</span>` : ''}</div>
+          <div class="info-box"><label>Received At</label><span>${wh.name || ''} ${wh.code ? `(${wh.code})` : ''}</span>${wh.address ? `<br/><span style="font-size:10px">${wh.address}</span>` : ''}</div>
+        </div>
+        <div class="title">Items Received</div>
+        ${linesHTML}
+        ${data.notes ? `<div style="margin:10px 0;"><strong>Notes:</strong> ${data.notes}</div>` : ''}
+        <div class="footer"><div><div class="sign-box">Received By (Stores)</div></div><div><div class="sign-box">Inspected By (QC)</div></div><div><div class="sign-box">Approved By</div></div></div>
+        <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
+      </body></html>`;
+      const w = window.open('', '_blank', 'width=900,height=700');
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      w.print();
+    } catch (error) {
+      alert('Failed to load GRN print data');
     }
   };
 
@@ -696,6 +775,7 @@ export default function WarehousesPage() {
                       <th>Items Received</th>
                       <th className="text-right">Total Qty</th>
                       <th>Date</th>
+                      <th>Print</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -731,6 +811,23 @@ export default function WarehousesPage() {
                         </td>
                         <td className="text-right mono">{(grn.lines || []).reduce((s, l) => s + l.received_quantity, 0)}</td>
                         <td className="text-sm">{grn.created_at ? new Date(grn.created_at).toLocaleDateString() : '-'}</td>
+                        <td>
+                          <div className="relative">
+                            <button onClick={() => setPrintMenuGRN(printMenuGRN === grn.id ? null : grn.id)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Print GRN" data-testid={`print-grn-${grn.id}`}>
+                              <Printer className="w-4 h-4" />
+                            </button>
+                            {printMenuGRN === grn.id && (
+                              <div className="absolute right-0 top-7 z-50 bg-white border border-[#D1D5DB] rounded-sm shadow-lg min-w-[170px]">
+                                <button onClick={() => printGRN(grn, 'standard')} className="block w-full text-left px-3 py-2 text-xs hover:bg-[#F3F4F6]" data-testid="print-grn-standard">
+                                  Standard Format
+                                </button>
+                                <button onClick={() => printGRN(grn, 'detailed')} className="block w-full text-left px-3 py-2 text-xs hover:bg-[#F3F4F6]" data-testid="print-grn-detailed">
+                                  Detailed (PO vs Received)
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

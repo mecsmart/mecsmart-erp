@@ -14,37 +14,48 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - Dashboard, Items/Parts (HSN code, GST rate), Multi-level BOM with rollup costing
 - MRP (recursive demand, raw materials only + purchase suggestions)
 - Production Orders, Quality inspections & templates, Inventory transactions
-- Suppliers (GSTIN, state), Purchase Orders with GST tax calculation
-- Warehouses (with delivery address), Stock transfers, Customers (GSTIN, state)
+- Suppliers (GSTIN, state), Customers (GSTIN, state)
+- Warehouses (with delivery address), Stock transfers
 - Manufacturing (Work Centers, Routings, Work Orders with auto-create child WOs)
 - Company Settings (GSTIN, state, PAN)
 
-### User Management & Access Control - COMPLETE
-- Admin-only User Management page (CRUD users)
-- Module-wise access permissions (View/Create/Edit/Delete per module)
-- 4 default role presets (Admin, Production Manager, Quality Inspector, Inventory Manager)
-- Custom permission overrides per user
-- Sidebar navigation dynamically filters based on user permissions
+### Purchase Orders - FULLY ENHANCED
+- Create/Edit PO with revision tracking (draft = free edit, submitted = revision history)
+- Order lines: Item, HSN, Qty, UOM, Rate, Discount (% or Amount), GST%
+- Vendor Quotation Ref No. & Date
+- Delivery Warehouse selector with address auto-fill
+- Additional charges (Transportation, Handling) with HSN & GST% from Settings
+- PO print: Standard + Detailed (GST breakup) formats
+- PO status workflow: Draft → Sent → GRN Done
 
-### GST India Compliance (Phase 1) - COMPLETE
+### GRN (Goods Receipt Note) - Under Stores
+- Separate GRN tab in Stores page
+- Pending POs listing for GRN processing
+- Material verification: editable received qty + verified price per line
+- Supplier Invoice / Doc reference number + date
+- Receiving warehouse selection
+- Qty/Price mismatch status indicators
+- GRN print: Standard + Detailed (PO vs Received comparison) formats
+- Auto-updates inventory on GRN confirmation
+
+### Manufacturing - Enhanced
+- Work Order print with material consumption details (Part No, Material, Qty, UOM, Cost)
+- Job Card print with operator names, start/end times, signature columns
+- Job card operations blocked when materials not consumed (stock insufficient)
+- Consumed materials display: item code + description + qty + UOM
+
+### User Management & Access Control
+- Admin-only CRUD, Module-wise permissions, Dynamic sidebar filtering
+
+### GST India Compliance (Phase 1)
 - Company Settings, HSN/GST on Items, GSTIN on Suppliers/Customers
-- CGST+SGST (intra-state) / IGST (inter-state) on Purchase Orders
+- CGST+SGST (intra) / IGST (inter-state) on POs
 
-### Phase 2 Features - COMPLETE
-- Auto-populate PO from MRP suggestions UI
-- Excel Export/Import for Items, BOMs & Routings
-- Job Card (Work Order operation-level tracking)
+### Phase 2 Features
+- Auto-populate PO from MRP, Excel Export/Import, Job Cards
 
-### PO Enhancements (Phase 3) - COMPLETE (Apr 2026)
-- Edit PO before submission (full edit for draft POs)
-- PO Revision system (sent POs create new revision with history snapshot)
-- Order line columns: UOM, HSN, Discount (% or Amount), GST%
-- Delivery address from warehouse (warehouses have address field)
-- Vendor quotation reference No. & Date on PO header
-- Additional charges (Transportation, Handling, etc.) with HSN & GST%
-- Settings > PO Additional Charges tab (CRUD charge types)
-- Column headers visible during PO creation
-- Discount field properly editable with %/Amt toggle
+### Settings > PO Additional Charges
+- CRUD charge types (name, HSN, GST%) used in PO creation
 
 ## Prioritized Backlog
 
@@ -54,11 +65,11 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 ### P1 (Medium Priority)
 - [ ] GST Phase 2: Sales Orders/Invoicing, E-Way Bill
 - [ ] GST Phase 3: GSTR-1/3B reports, ITC tracking
-- [ ] Production scheduling (Gantt view)
 
 ### P2 (Low Priority)
-- [ ] Barcode/QR scanning, Email notifications
-- [ ] Data import/export (CSV), Audit trail, Windows desktop wrapper
+- [ ] Barcode/QR scanning, Gantt scheduling
+- [ ] Windows desktop wrapper (Electron/Tauri)
+- [ ] Advanced reporting & analytics dashboard
 
 ## Refactoring Needed
-- Backend server.py (3400+ lines) → split into routers/ directory
+- Backend server.py (3700+ lines) → split into routers/ directory

@@ -152,10 +152,10 @@ export default function ManufacturingPage() {
         // Use the start endpoint which consumes materials
         const { data } = await api.post(`/api/work-orders/${woId}/start`);
         if (data.success === false) {
-          alert(`Cannot start work order: ${data.message}\n\nInsufficient materials:\n${data.insufficient_materials?.map(m => `- ${m.item} (${m.name || ''}): need ${m.required}, have ${m.available}`).join('\n')}`);
+          alert(`Cannot start work order: ${data.message}\n\nInsufficient materials:\n${data.insufficient_materials?.map(m => `- ${m.item} - ${m.name || ''}: need ${m.required}, have ${m.available}`).join('\n')}`);
           return;
         }
-        alert(`Work order started!\n\nMaterials consumed:\n${data.consumed_materials?.map(m => `- ${m.item}: ${m.quantity}`).join('\n') || 'None'}`);
+        alert(`Work order started!\n\nMaterials consumed:\n${data.consumed_materials?.map(m => `- ${m.item} - ${m.name || ''}: ${m.quantity} ${m.uom || 'pcs'}`).join('\n') || 'None'}`);
       } else {
         await api.put(`/api/work-orders/${woId}`, { status: newStatus });
         if (newStatus === 'completed') {
@@ -629,9 +629,24 @@ export default function ManufacturingPage() {
                           {wo.quantity_completed || 0}/{wo.quantity}
                         </td>
                         <td>
-                          <span className={`status-badge ${wo.materials_consumed ? 'bg-[#DEF7EC] text-[#03543F]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>
-                            {wo.materials_consumed ? 'Consumed' : 'Pending'}
-                          </span>
+                          {wo.materials_consumed ? (
+                            <div>
+                              <span className="status-badge bg-[#DEF7EC] text-[#03543F] mb-1">Consumed</span>
+                              {wo.consumed_materials?.length > 0 && (
+                                <div className="mt-1 space-y-0.5">
+                                  {wo.consumed_materials.map((m, mi) => (
+                                    <div key={mi} className="text-xs text-[#4B5563]">
+                                      <span className="mono font-medium">{m.item}</span>
+                                      <span className="text-[#6B7280] ml-1">{m.name}</span>
+                                      <span className="mono ml-1">{m.quantity} {m.uom || 'pcs'}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="status-badge bg-[#F3F4F6] text-[#4B5563]">Pending</span>
+                          )}
                         </td>
                         <td>
                           <div className="flex items-center space-x-1">
