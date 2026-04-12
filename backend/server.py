@@ -1712,14 +1712,19 @@ async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
         item_id = entry.get("item_id") if isinstance(entry, dict) else entry
         item = await db.items.find_one({"id": item_id}, {"_id": 0})
         if item:
-            qty = entry.get("quantity", max(item.get("safety_stock", 0) * 2 - item.get("current_stock", 0), 1)) if isinstance(entry, dict) else max(item.get("safety_stock", 0) * 2 - item.get("current_stock", 0), 1)
-            price = entry.get("unit_price", item.get("unit_cost", 0)) if isinstance(entry, dict) else item.get("unit_cost", 0)
+            if isinstance(entry, dict):
+                qty = entry.get("quantity") or entry.get("suggested_quantity") or max(item.get("safety_stock", 0) * 2 - item.get("current_stock", 0), 1)
+                price = entry.get("unit_price") or item.get("unit_cost", 0)
+            else:
+                qty = max(item.get("safety_stock", 0) * 2 - item.get("current_stock", 0), 1)
+                price = item.get("unit_cost", 0)
             lines.append({
                 "item_id": item_id,
-                "quantity": qty,
+                "quantity": max(int(qty), 1),
                 "unit_price": price,
                 "hsn_code": item.get("hsn_code", ""),
                 "gst_rate": item.get("gst_rate", 18),
+                "uom": item.get("unit_of_measure", "pcs"),
                 "notes": ""
             })
     

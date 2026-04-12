@@ -11,8 +11,10 @@ export default function MRPPage() {
   const [demand, setDemand] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [productionOrders, setProductionOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('demand');
+  const [selectedPO, setSelectedPO] = useState('');
   
   // PO creation from suggestions
   const [selectedItems, setSelectedItems] = useState({});
@@ -20,19 +22,22 @@ export default function MRPPage() {
   const [selectedSupplier, setSelectedSupplier] = useState('');
   const [creating, setCreating] = useState(false);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [selectedPO]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [demandRes, suggestionsRes, suppliersRes] = await Promise.all([
-        api.get('/api/mrp/demand'),
+      const demandUrl = selectedPO ? `/api/mrp/demand?production_order_id=${selectedPO}` : '/api/mrp/demand';
+      const [demandRes, suggestionsRes, suppliersRes, poRes] = await Promise.all([
+        api.get(demandUrl),
         api.get('/api/mrp/suggestions'),
         api.get('/api/suppliers'),
+        api.get('/api/production'),
       ]);
       setDemand(demandRes.data);
       setSuggestions(suggestionsRes.data);
       setSuppliers(suppliersRes.data);
+      setProductionOrders(poRes.data);
     } catch (error) {
       console.error('Failed to fetch MRP data:', error);
     } finally { setLoading(false); }
@@ -144,6 +149,22 @@ export default function MRPPage() {
         </TabsList>
 
         <TabsContent value="demand" className="mt-4">
+          <div className="flex items-center gap-3 mb-4">
+            <Select value={selectedPO || 'all'} onValueChange={(v) => setSelectedPO(v === 'all' ? '' : v)}>
+              <SelectTrigger className="w-72" data-testid="mrp-po-filter">
+                <SelectValue placeholder="All Production Orders" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Production Orders</SelectItem>
+                {productionOrders.filter(po => ['planned', 'released', 'in_progress'].includes(po.status)).map(po => (
+                  <SelectItem key={po.id} value={po.id}>{po.order_number} - {po.item?.name || 'Unknown'}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedPO && (
+              <button onClick={() => setSelectedPO('')} className="text-xs text-[#4B5563] hover:text-[#1D3557]">Clear</button>
+            )}
+          </div>
           <div className="card-flat overflow-hidden">
             {loading ? (
               <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div></div>
@@ -158,7 +179,7 @@ export default function MRPPage() {
                     <tr>
                       <th>Part Number</th><th>Item Name</th><th className="text-right">Gross Req.</th>
                       <th className="text-right">On Hand</th><th className="text-right">Safety Stock</th>
-                      <th className="text-right">Net Req.</th><th>Orders</th>
+                      <th className="text-right">Net Req.</th><th>Production Orders</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -170,7 +191,9 @@ export default function MRPPage() {
                         <td className="text-right mono">{d.on_hand}</td>
                         <td className="text-right mono">{d.safety_stock}</td>
                         <td className="text-right mono font-medium">{d.net_requirement > 0 ? <span className="text-[#9B1C1C]">{d.net_requirement}</span> : <span className="text-[#03543F]">0</span>}</td>
-                        <td className="text-xs">{d.orders?.map(o => o.order_number).join(', ')}</td>
+                        <td className="text-xs text-[#4B5563]">
+                          {d.orders?.map(o => o.order_number).filter((v, i, a) => a.indexOf(v) === i).join(', ')}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
