@@ -3152,11 +3152,9 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
         raise HTTPException(status_code=404, detail="Work order not found")
     
     if wo.get("status") == "pending":
-        raise HTTPException(status_code=400, detail="Cannot update operations: Manufacturing order has not been started. Please start the MO first to consume materials.")
+        raise HTTPException(status_code=400, detail="Cannot update operations: Manufacturing order has not been started. Please start the MO first.")
     if wo.get("status") not in ["in_progress"]:
         raise HTTPException(status_code=400, detail=f"Cannot update operations on {wo.get('status')} manufacturing order")
-    if not wo.get("materials_consumed"):
-        raise HTTPException(status_code=400, detail="Cannot update operations: Materials have not been consumed yet.")
     
     operations = wo.get("operations_status", [])
     target_op = None
@@ -3193,7 +3191,7 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             sc_order_number = f"JW-{str(sc_count + 1).zfill(6)}"
             
             # Get BOM items for this MO
-            bom = await db.bom.find_one({"parent_item_id": wo.get("item_id"), "status": "active"})
+            bom = await db.boms.find_one({"parent_item_id": wo.get("item_id"), "status": "active"})
             sc_lines = []
             dc_lines = []
             if bom:

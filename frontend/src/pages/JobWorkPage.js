@@ -255,7 +255,7 @@ export default function JobWorkPage() {
                           <td className="text-sm">{o.expected_return_date ? new Date(o.expected_return_date).toLocaleDateString() : '-'}</td>
                           <td>
                             <div className="flex items-center space-x-1">
-                              {canEdit && ['draft', 'confirmed'].includes(o.status) && (
+                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && (
                                 <button onClick={() => handleEditOrder(o)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit" data-testid={`edit-jw-${o.id}`}>
                                   <Edit2 className="w-4 h-4" />
                                 </button>
