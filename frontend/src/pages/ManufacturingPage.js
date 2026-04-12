@@ -11,7 +11,11 @@ import {
   Clock,
   AlertCircle,
   ClipboardList,
-  Printer
+  Printer,
+  Square,
+  User,
+  RotateCcw,
+  XCircle
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -35,6 +39,10 @@ export default function ManufacturingPage() {
   const [jobCardWO, setJobCardWO] = useState(null);
   const [editingWorkCenter, setEditingWorkCenter] = useState(null);
   const [woStatusFilter, setWoStatusFilter] = useState('');
+  
+  // Operation start/stop dialog
+  const [opDialog, setOpDialog] = useState({ open: false, mode: '', sequence: 0 });
+  const [opForm, setOpForm] = useState({ operator: '', quantity: 0, quality_result: 'accept', reject_qty: 0, rework_qty: 0, notes: '' });
   
   const [workCenterForm, setWorkCenterForm] = useState({
     code: '',
@@ -177,6 +185,44 @@ export default function ManufacturingPage() {
     setIsJobCardOpen(true);
   };
 
+  const openOpDialog = (mode, sequence) => {
+    const op = jobCardWO?.operations_status?.find(o => o.sequence === sequence);
+    const moQty = jobCardWO?.quantity || 0;
+    const totalDone = op?.runs?.reduce((s, r) => s + (r.quantity_completed || 0), 0) || 0;
+    const remaining = moQty - totalDone;
+    setOpForm({
+      operator: op?.operator || '',
+      quantity: mode === 'start' ? (remaining > 0 ? remaining : moQty) : (remaining > 0 ? remaining : moQty),
+      quality_result: 'accept',
+      reject_qty: 0,
+      rework_qty: 0,
+      notes: ''
+    });
+    setOpDialog({ open: true, mode, sequence });
+  };
+
+  const handleOpDialogSubmit = async () => {
+    const { mode, sequence } = opDialog;
+    const woId = jobCardWO?.id;
+    if (!woId) return;
+    try {
+      let payload = {};
+      if (mode === 'start') {
+        payload = { status: 'in_progress', operator: opForm.operator, quantity_completed: opForm.quantity };
+      } else if (mode === 'stop') {
+        payload = { status: 'stopped', quantity_completed: opForm.quantity, quality_result: opForm.quality_result, reject_qty: opForm.reject_qty, rework_qty: opForm.rework_qty, notes: opForm.notes };
+      } else if (mode === 'complete') {
+        payload = { status: 'completed', quantity_completed: opForm.quantity, quality_result: opForm.quality_result, reject_qty: opForm.reject_qty, rework_qty: opForm.rework_qty, notes: opForm.notes };
+      }
+      const { data } = await api.put(`/api/work-orders/${woId}/operations/${sequence}`, payload);
+      setJobCardWO(data);
+      setOpDialog({ open: false, mode: '', sequence: 0 });
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to update operation');
+    }
+  };
+
   const handleOperationUpdate = async (woId, sequence, newStatus) => {
     try {
       const { data } = await api.put(`/api/work-orders/${woId}/operations/${sequence}`, {
@@ -312,14 +358,20 @@ export default function ManufacturingPage() {
       const item = data.item || {};
       const consumed = data.consumed_materials || [];
       const ops = data.operations_status || [];
+      const childMos = data.child_mos || [];
       const totalMaterialCost = consumed.reduce((s, m) => s + (m.quantity * (m.unit_cost || 0)), 0);
+      const sym = company.primary_currency === 'USD' ? '$' : '\u20B9';
+      const companyAddr = [company.address, company.address_line2, company.city, company.state].filter(Boolean).join(', ') + (company.pin_code ? ` - ${company.pin_code}` : '');
 
       const html = `<!DOCTYPE html><html><head><title>Manufacturing Order - ${data.wo_number}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #111; padding: 20px; }
         .header { text-align: center; border-bottom: 2px solid #1D3557; padding-bottom: 10px; margin-bottom: 15px; }
-        .header h1 { font-size: 16px; color: #1D3557; }
+        .header .logo-row { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:3px; }
+        .header .logo-row img { max-height:40px; max-width:100px; object-fit:contain; }
+        .header h1 { font-size: 16px; color: #1D3557; margin:0; }
+        .header .tagline { font-size:9px; color:#888; font-style:italic; }
         .header p { font-size: 10px; color: #555; }
         .title { font-size: 14px; font-weight: bold; color: #1D3557; margin: 10px 0 5px; text-transform: uppercase; }
         .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; }
@@ -339,8 +391,9 @@ export default function ManufacturingPage() {
         @media print { body { padding: 10px; } }
       </style></head><body>
       <div class="header">
-        <h1>${company.company_name || 'Manufacturing ERP'}</h1>
-        ${company.address ? `<p>${company.address}</p>` : ''}
+        <div class="logo-row">${company.logo_data ? `<img src="${company.logo_data}" alt="Logo" />` : ''}<h1>${company.company_name || 'Manufacturing ERP'}</h1></div>
+        ${company.tagline ? `<div class="tagline">${company.tagline}</div>` : ''}
+        ${companyAddr ? `<p>${companyAddr}</p>` : ''}
         ${company.gstin ? `<p>GSTIN: ${company.gstin}</p>` : ''}
       </div>
       <div class="title">Manufacturing Order: ${data.wo_number}</div>
@@ -355,12 +408,20 @@ export default function ManufacturingPage() {
       ${ops.length > 0 ? `
       <div class="title">Operations</div>
       <table>
-        <thead><tr><th>Seq</th><th>Operation</th><th>Work Center</th><th class="text-center">Status</th><th>Operator</th><th class="text-right">Time (min)</th></tr></thead>
-        <tbody>${ops.map(op => `<tr>
+        <thead><tr><th>Seq</th><th>Operation</th><th>Work Center</th><th class="text-center">Status</th><th>Operator</th><th class="text-right">Qty Done</th><th class="text-right">Accept/Rej</th><th class="text-right">Time (min)</th></tr></thead>
+        <tbody>${ops.map(op => {
+          const runs = op.runs || [];
+          const operators = runs.map(r => r.operator).filter(Boolean).join(', ') || op.operator || '-';
+          const qtyDone = op.quantity_completed || 0;
+          const accepted = op.quantity_accepted || qtyDone;
+          const rejected = op.quantity_rejected || 0;
+          return `<tr>
           <td class="mono">${op.sequence}</td><td>${op.operation_name}</td><td>${op.work_center_name || '-'}</td>
-          <td class="text-center">${(op.status || '').replace('_',' ')}</td><td>${op.operator || '-'}</td>
+          <td class="text-center">${(op.status || '').replace('_',' ')}</td><td>${operators}</td>
+          <td class="text-right mono">${qtyDone}</td>
+          <td class="text-right mono">${accepted}/${rejected > 0 ? rejected + 'R' : '-'}</td>
           <td class="text-right mono">${op.actual_time_min ? op.actual_time_min : '-'}</td>
-        </tr>`).join('')}</tbody>
+        </tr>`;}).join('')}</tbody>
       </table>` : ''}
       ${consumed.length > 0 ? `
       <div class="title">Material Consumption</div>
@@ -369,12 +430,25 @@ export default function ManufacturingPage() {
         <tbody>${consumed.map(m => `<tr>
           <td class="mono">${m.item || ''}</td><td>${m.name || ''}</td>
           <td class="text-right mono">${m.quantity}</td><td>${m.uom || 'pcs'}</td>
-          <td class="text-right mono">${(m.unit_cost || 0).toFixed(2)}</td>
-          <td class="text-right mono">${(m.quantity * (m.unit_cost || 0)).toFixed(2)}</td>
+          <td class="text-right mono">${sym}${(m.unit_cost || 0).toFixed(2)}</td>
+          <td class="text-right mono">${sym}${(m.quantity * (m.unit_cost || 0)).toFixed(2)}</td>
         </tr>`).join('')}
-        <tr class="total-row"><td colspan="5" class="text-right">Total Material Cost</td><td class="text-right mono">${totalMaterialCost.toFixed(2)}</td></tr>
+        <tr class="total-row"><td colspan="5" class="text-right">Total Material Cost</td><td class="text-right mono">${sym}${totalMaterialCost.toFixed(2)}</td></tr>
         </tbody>
       </table>` : '<p style="color:#888;margin:10px 0;">No materials consumed yet.</p>'}
+      ${childMos.length > 0 ? `
+      <div class="title">Sub-Assembly Manufacturing Orders</div>
+      <table>
+        <thead><tr><th>MO Number</th><th>Part No.</th><th>Item Name</th><th class="text-right">Quantity</th><th class="text-center">Status</th></tr></thead>
+        <tbody>${childMos.map(c => `<tr>
+          <td class="mono">${c.wo_number || ''}</td>
+          <td class="mono">${c.item?.part_number || '-'}</td>
+          <td>${c.item?.name || '-'}</td>
+          <td class="text-right mono">${c.quantity || 0}</td>
+          <td class="text-center">${(c.status || '').replace('_',' ')}</td>
+        </tr>`).join('')}
+        </tbody>
+      </table>` : ''}
       ${data.notes ? `<div style="margin:10px 0;"><strong>Notes:</strong> ${data.notes}</div>` : ''}
       <div class="footer">
         <div><div class="sign-box">Prepared By</div></div>
@@ -542,14 +616,17 @@ export default function ManufacturingPage() {
                   <form onSubmit={handleWorkOrderSubmit} className="space-y-4 mt-4">
                     <div>
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Sales Order *</label>
-                      <Select value={workOrderForm.production_order_id} onValueChange={(v) => setWorkOrderForm({ ...workOrderForm, production_order_id: v })}>
+                      <Select value={workOrderForm.production_order_id} onValueChange={(v) => {
+                        const so = productionOrders.find(po => po.id === v);
+                        setWorkOrderForm({ ...workOrderForm, production_order_id: v, quantity: so?.quantity || 1 });
+                      }}>
                         <SelectTrigger data-testid="wo-production-order-select">
                           <SelectValue placeholder="Select sales order" />
                         </SelectTrigger>
                         <SelectContent>
                           {productionOrders.filter(po => ['confirmed', 'planned'].includes(po.status)).map((po) => (
                             <SelectItem key={po.id} value={po.id}>
-                              {po.order_number} - {po.item?.name || 'Unknown'}
+                              {po.order_number} - {po.item?.name || 'Unknown'} (Qty: {po.quantity})
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1165,7 +1242,7 @@ export default function ManufacturingPage() {
 
       {/* Job Card Dialog */}
       <Dialog open={isJobCardOpen} onOpenChange={(open) => { setIsJobCardOpen(open); if (!open) setJobCardWO(null); }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-[Chivo] flex items-center space-x-2">
               <ClipboardList className="w-5 h-5" />
@@ -1189,16 +1266,20 @@ export default function ManufacturingPage() {
                       <th className="text-left py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Work Center</th>
                       <th className="text-center py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Status</th>
                       <th className="text-left py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Operator</th>
-                      <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Actual Time</th>
+                      <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Qty Done</th>
+                      <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Accept/Reject</th>
                       <th className="text-center py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {jobCardWO.operations_status?.map((op, idx) => {
                       const wc = workCenters.find(w => w.id === op.work_center_id);
-                      const prevCompleted = idx === 0 || jobCardWO.operations_status.slice(0, idx).every(p => p.status === 'completed');
+                      const prevDone = idx === 0 || jobCardWO.operations_status.slice(0, idx).every(p => ['completed', 'stopped'].includes(p.status));
+                      const totalDone = op.runs?.reduce((s, r) => s + (r.quantity_completed || 0), 0) || op.quantity_completed || 0;
+                      const totalAccepted = op.quantity_accepted || (totalDone - (op.quantity_rejected || 0) - (op.quantity_rework || 0));
+                      const remaining = jobCardWO.quantity - totalDone;
                       return (
-                        <tr key={op.sequence} className={`border-t ${op.status === 'in_progress' ? 'bg-[#FDF6B2]/30' : op.status === 'completed' ? 'bg-[#DEF7EC]/30' : ''}`} data-testid={`op-row-${op.sequence}`}>
+                        <tr key={op.sequence} className={`border-t ${op.status === 'in_progress' ? 'bg-[#FDF6B2]/30' : op.status === 'completed' ? 'bg-[#DEF7EC]/30' : op.status === 'stopped' ? 'bg-[#FDE8E8]/10' : ''}`} data-testid={`op-row-${op.sequence}`}>
                           <td className="py-3 px-3 mono font-medium">{op.sequence}</td>
                           <td className="py-3 px-3 font-medium">{op.operation_name}</td>
                           <td className="py-3 px-3 text-sm text-[#4B5563]">{wc?.name || '-'}</td>
@@ -1206,25 +1287,62 @@ export default function ManufacturingPage() {
                             <span className={`status-badge ${
                               op.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' :
                               op.status === 'in_progress' ? 'bg-[#FDF6B2] text-[#723B13]' :
+                              op.status === 'stopped' ? 'bg-[#E1EFFE] text-[#1E429F]' :
                               'bg-[#F3F4F6] text-[#4B5563]'
                             }`}>{op.status?.replace('_', ' ')}</span>
                           </td>
-                          <td className="py-3 px-3 text-sm">{op.operator || '-'}</td>
-                          <td className="py-3 px-3 text-right mono text-sm">{op.actual_time_min ? `${op.actual_time_min} min` : '-'}</td>
+                          <td className="py-3 px-3 text-sm">
+                            {op.runs?.length > 0 ? (
+                              <div className="space-y-0.5">
+                                {op.runs.map((r, ri) => (
+                                  <div key={ri} className="flex items-center gap-1 text-xs">
+                                    <User className="w-3 h-3 text-[#6B7280]" />
+                                    <span>{r.operator}</span>
+                                    <span className="mono text-[#6B7280]">({r.quantity_completed || 0} pcs)</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (op.operator || '-')}
+                          </td>
+                          <td className="py-3 px-3 text-right mono text-sm">
+                            <span className="font-medium">{totalDone}</span>
+                            <span className="text-[#6B7280]">/{jobCardWO.quantity}</span>
+                            {remaining > 0 && totalDone > 0 && (
+                              <p className="text-[10px] text-[#9B1C1C]">{remaining} remaining</p>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-right text-xs">
+                            {totalDone > 0 && (
+                              <div className="space-y-0.5">
+                                <div className="text-[#03543F]">A: {totalAccepted}</div>
+                                {(op.quantity_rejected || 0) > 0 && <div className="text-[#9B1C1C]">R: {op.quantity_rejected}</div>}
+                                {(op.quantity_rework || 0) > 0 && <div className="text-[#723B13]">RW: {op.quantity_rework}</div>}
+                              </div>
+                            )}
+                          </td>
                           <td className="py-3 px-3 text-center">
-                            {op.status === 'pending' && prevCompleted && canEdit && (
-                              <button onClick={() => handleOperationUpdate(jobCardWO.id, op.sequence, 'in_progress')} className="btn-primary text-xs px-3 py-1" data-testid={`start-op-${op.sequence}`}>
-                                <Play className="w-3 h-3 inline mr-1" />Start
-                              </button>
-                            )}
-                            {op.status === 'in_progress' && canEdit && (
-                              <button onClick={() => handleOperationUpdate(jobCardWO.id, op.sequence, 'completed')} className="btn-primary text-xs px-3 py-1 bg-[#03543F]" data-testid={`complete-op-${op.sequence}`}>
-                                <CheckCircle2 className="w-3 h-3 inline mr-1" />Complete
-                              </button>
-                            )}
-                            {op.status === 'completed' && (
-                              <CheckCircle2 className="w-4 h-4 text-[#03543F] inline" />
-                            )}
+                            <div className="flex items-center justify-center gap-1">
+                              {/* Start button */}
+                              {(op.status === 'pending' || op.status === 'stopped') && prevDone && canEdit && (
+                                <button onClick={() => openOpDialog('start', op.sequence)} className="btn-primary text-xs px-2 py-1" data-testid={`start-op-${op.sequence}`}>
+                                  <Play className="w-3 h-3 inline mr-1" />{op.status === 'stopped' ? 'Resume' : 'Start'}
+                                </button>
+                              )}
+                              {/* Stop button */}
+                              {op.status === 'in_progress' && canEdit && (
+                                <>
+                                  <button onClick={() => openOpDialog('stop', op.sequence)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`stop-op-${op.sequence}`}>
+                                    <Square className="w-3 h-3 inline mr-1" />Stop
+                                  </button>
+                                  <button onClick={() => openOpDialog('complete', op.sequence)} className="text-xs px-2 py-1 bg-[#03543F] text-white rounded-sm hover:bg-[#024733]" data-testid={`complete-op-${op.sequence}`}>
+                                    <CheckCircle2 className="w-3 h-3 inline mr-1" />Complete
+                                  </button>
+                                </>
+                              )}
+                              {op.status === 'completed' && (
+                                <CheckCircle2 className="w-4 h-4 text-[#03543F]" />
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1259,6 +1377,79 @@ export default function ManufacturingPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Operation Start/Stop/Complete Dialog */}
+      <Dialog open={opDialog.open} onOpenChange={(open) => { if (!open) setOpDialog({ open: false, mode: '', sequence: 0 }); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-[Chivo]">
+              {opDialog.mode === 'start' ? 'Start Operation' : opDialog.mode === 'stop' ? 'Stop Operation' : 'Complete Operation'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-3">
+            {opDialog.mode === 'start' && (
+              <>
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Operator Name *</label>
+                  <input type="text" value={opForm.operator} onChange={e => setOpForm({...opForm, operator: e.target.value})} className="input-field" placeholder="Enter operator name" data-testid="op-operator-input" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity to Produce</label>
+                  <input type="number" min="1" value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: parseInt(e.target.value) || 0})} className="input-field mono" data-testid="op-qty-input" />
+                </div>
+              </>
+            )}
+            {(opDialog.mode === 'stop' || opDialog.mode === 'complete') && (
+              <>
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity Produced</label>
+                  <input type="number" min="0" value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: parseInt(e.target.value) || 0})} className="input-field mono" data-testid="op-produced-qty-input" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Quality Result</label>
+                  <div className="flex gap-2">
+                    {[
+                      { value: 'accept', label: 'Accept', color: 'bg-[#DEF7EC] text-[#03543F] border-[#03543F]', icon: CheckCircle2 },
+                      { value: 'reject', label: 'Reject', color: 'bg-[#FDE8E8] text-[#9B1C1C] border-[#9B1C1C]', icon: XCircle },
+                      { value: 'rework', label: 'Rework', color: 'bg-[#FDF6B2] text-[#723B13] border-[#723B13]', icon: RotateCcw },
+                    ].map(opt => (
+                      <button key={opt.value} type="button"
+                        onClick={() => setOpForm({...opForm, quality_result: opt.value})}
+                        className={`flex-1 flex items-center justify-center gap-1 py-2 px-3 rounded-sm border-2 text-sm font-medium transition-all ${opForm.quality_result === opt.value ? opt.color : 'bg-white text-[#6B7280] border-[#D1D5DB]'}`}
+                        data-testid={`quality-${opt.value}`}
+                      >
+                        <opt.icon className="w-4 h-4" />{opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {opForm.quality_result === 'reject' && (
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Reject Quantity</label>
+                    <input type="number" min="0" max={opForm.quantity} value={opForm.reject_qty} onChange={e => setOpForm({...opForm, reject_qty: parseInt(e.target.value) || 0})} className="input-field mono" data-testid="op-reject-qty" />
+                  </div>
+                )}
+                {opForm.quality_result === 'rework' && (
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Rework Quantity</label>
+                    <input type="number" min="0" max={opForm.quantity} value={opForm.rework_qty} onChange={e => setOpForm({...opForm, rework_qty: parseInt(e.target.value) || 0})} className="input-field mono" data-testid="op-rework-qty" />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Notes</label>
+                  <textarea value={opForm.notes} onChange={e => setOpForm({...opForm, notes: e.target.value})} className="input-field" rows={2} placeholder="Any remarks..." data-testid="op-notes-input" />
+                </div>
+              </>
+            )}
+            <div className="flex justify-end space-x-3 pt-3 border-t border-[#E5E7EB]">
+              <button onClick={() => setOpDialog({ open: false, mode: '', sequence: 0 })} className="btn-secondary">Cancel</button>
+              <button onClick={handleOpDialogSubmit} className="btn-primary" disabled={opDialog.mode === 'start' && !opForm.operator.trim()} data-testid="op-dialog-submit">
+                {opDialog.mode === 'start' ? 'Start' : opDialog.mode === 'stop' ? 'Stop & Record' : 'Complete'}
+              </button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -398,10 +398,14 @@ class WorkOrderUpdate(BaseModel):
     notes: Optional[str] = None
 
 class WorkOrderOperationUpdate(BaseModel):
-    status: str  # pending, in_progress, completed
+    status: str  # pending, in_progress, completed, stopped
     actual_start: Optional[datetime] = None
     actual_end: Optional[datetime] = None
     quantity_completed: Optional[int] = None
+    operator: Optional[str] = None
+    quality_result: Optional[str] = None  # accept, reject, rework
+    reject_qty: Optional[int] = None
+    rework_qty: Optional[int] = None
     notes: Optional[str] = None
 
 # ================== GST / INDIA COMPLIANCE MODELS ==================
@@ -2972,11 +2976,11 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
         raise HTTPException(status_code=404, detail="Work order not found")
     
     if wo.get("status") == "pending":
-        raise HTTPException(status_code=400, detail="Cannot update operations: Work order has not been started. Please start the work order first to consume materials.")
+        raise HTTPException(status_code=400, detail="Cannot update operations: Manufacturing order has not been started. Please start the MO first to consume materials.")
     if wo.get("status") not in ["in_progress"]:
-        raise HTTPException(status_code=400, detail=f"Cannot update operations on {wo.get('status')} work order")
+        raise HTTPException(status_code=400, detail=f"Cannot update operations on {wo.get('status')} manufacturing order")
     if not wo.get("materials_consumed"):
-        raise HTTPException(status_code=400, detail="Cannot update operations: Materials have not been consumed yet. Required materials are not in stock.")
+        raise HTTPException(status_code=400, detail="Cannot update operations: Materials have not been consumed yet.")
     
     operations = wo.get("operations_status", [])
     target_op = None
@@ -2991,23 +2995,82 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
     if target_op is None:
         raise HTTPException(status_code=404, detail="Operation not found")
     
-    # Validate: previous operations must be completed before starting this one
+    mo_qty = wo.get("quantity", 0)
+    
+    # START operation
     if op_data.status == "in_progress":
         for prev_op in operations[:target_idx]:
-            if prev_op.get("status") != "completed":
+            if prev_op.get("status") not in ["completed", "stopped"]:
                 raise HTTPException(status_code=400, detail=f"Previous operation '{prev_op.get('operation_name')}' must be completed first")
-        target_op["actual_start"] = op_data.actual_start or datetime.now(timezone.utc)
-        target_op["operator"] = user.get("name", "")
+        
+        # Initialize or append to runs list
+        runs = target_op.get("runs", [])
+        run_entry = {
+            "run_number": len(runs) + 1,
+            "operator": op_data.operator or user.get("name", ""),
+            "quantity_planned": op_data.quantity_completed or mo_qty,
+            "quantity_completed": 0,
+            "started_at": datetime.now(timezone.utc),
+            "ended_at": None,
+            "quality_result": None,
+            "reject_qty": 0,
+            "rework_qty": 0,
+            "notes": op_data.notes or ""
+        }
+        runs.append(run_entry)
+        target_op["runs"] = runs
+        target_op["actual_start"] = target_op.get("actual_start") or datetime.now(timezone.utc)
+        target_op["operator"] = op_data.operator or user.get("name", "")
+        target_op["status"] = "in_progress"
     
-    if op_data.status == "completed":
-        target_op["actual_end"] = op_data.actual_end or datetime.now(timezone.utc)
+    # STOP operation (pause current run)
+    elif op_data.status == "stopped":
+        runs = target_op.get("runs", [])
+        if runs and runs[-1].get("ended_at") is None:
+            runs[-1]["ended_at"] = datetime.now(timezone.utc)
+            runs[-1]["quantity_completed"] = op_data.quantity_completed or 0
+            runs[-1]["quality_result"] = op_data.quality_result or "accept"
+            runs[-1]["reject_qty"] = op_data.reject_qty or 0
+            runs[-1]["rework_qty"] = op_data.rework_qty or 0
+            runs[-1]["notes"] = op_data.notes or runs[-1].get("notes", "")
+        
+        # Calculate totals from all runs
+        total_accepted = sum(r.get("quantity_completed", 0) - r.get("reject_qty", 0) - r.get("rework_qty", 0) for r in runs)
+        total_completed = sum(r.get("quantity_completed", 0) for r in runs)
+        target_op["quantity_completed"] = total_completed
+        target_op["quantity_accepted"] = total_accepted
+        target_op["quantity_rejected"] = sum(r.get("reject_qty", 0) for r in runs)
+        target_op["quantity_rework"] = sum(r.get("rework_qty", 0) for r in runs)
+        target_op["runs"] = runs
+        target_op["status"] = "stopped"
+    
+    # COMPLETE operation
+    elif op_data.status == "completed":
+        runs = target_op.get("runs", [])
+        # Close any open run
+        if runs and runs[-1].get("ended_at") is None:
+            runs[-1]["ended_at"] = datetime.now(timezone.utc)
+            runs[-1]["quantity_completed"] = op_data.quantity_completed or mo_qty
+            runs[-1]["quality_result"] = op_data.quality_result or "accept"
+            runs[-1]["reject_qty"] = op_data.reject_qty or 0
+            runs[-1]["rework_qty"] = op_data.rework_qty or 0
+        
+        total_completed = sum(r.get("quantity_completed", 0) for r in runs)
+        total_accepted = sum(r.get("quantity_completed", 0) - r.get("reject_qty", 0) - r.get("rework_qty", 0) for r in runs)
+        
+        target_op["actual_end"] = datetime.now(timezone.utc)
+        target_op["quantity_completed"] = total_completed
+        target_op["quantity_accepted"] = total_accepted
+        target_op["quantity_rejected"] = sum(r.get("reject_qty", 0) for r in runs)
+        target_op["quantity_rework"] = sum(r.get("rework_qty", 0) for r in runs)
+        target_op["runs"] = runs
+        target_op["status"] = "completed"
+        
+        # Calculate actual time
         if target_op.get("actual_start"):
-            # Handle both string and datetime formats for actual_start
             actual_start = target_op["actual_start"]
             if isinstance(actual_start, str):
-                # Parse ISO format string
                 actual_start = datetime.fromisoformat(actual_start.replace('Z', '+00:00'))
-            # Ensure both are timezone-aware
             actual_end = target_op["actual_end"]
             if actual_start.tzinfo is None:
                 actual_start = actual_start.replace(tzinfo=timezone.utc)
@@ -3016,15 +3079,12 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             delta = (actual_end - actual_start).total_seconds() / 60
             target_op["actual_time_min"] = round(delta, 1)
     
-    target_op["status"] = op_data.status
-    if op_data.quantity_completed is not None:
-        target_op["quantity_completed"] = op_data.quantity_completed
     if op_data.notes:
         target_op["notes"] = op_data.notes
     
     # Auto-determine WO status
     all_completed = all(op.get("status") == "completed" for op in operations)
-    any_in_progress = any(op.get("status") in ["in_progress", "completed"] for op in operations)
+    any_in_progress = any(op.get("status") in ["in_progress", "completed", "stopped"] for op in operations)
     
     wo_status = wo.get("status")
     if all_completed:
@@ -3040,14 +3100,18 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
     
     # If all operations completed, update stock
     if all_completed and wo_status == "completed":
+        # Calculate final accepted qty from last operation
+        last_op = operations[-1] if operations else {}
+        final_accepted = last_op.get("quantity_accepted", mo_qty)
+        
         item = await db.items.find_one({"id": wo.get("item_id")})
         if item:
             await db.items.update_one(
                 {"id": item["id"]},
-                {"$inc": {"current_stock": wo.get("quantity", 0)}}
+                {"$inc": {"current_stock": final_accepted}}
             )
         update_fields["actual_end"] = datetime.now(timezone.utc)
-        update_fields["quantity_completed"] = wo.get("quantity", 0)
+        update_fields["quantity_completed"] = final_accepted
     
     await db.work_orders.update_one({"id": wo_id}, {"$set": update_fields})
     
@@ -3093,6 +3157,13 @@ async def get_work_order_print_data(wo_id: str, request: Request):
                 "unit_cost": tx_item.get("unit_cost", 0) if tx_item else 0
             })
     wo["consumed_materials"] = consumed
+    
+    # Get child manufacturing orders
+    child_mos = await db.work_orders.find({"parent_wo_id": wo_id}, {"_id": 0}).to_list(100)
+    for child in child_mos:
+        child_item = await db.items.find_one({"id": child.get("item_id")}, {"_id": 0})
+        child["item"] = child_item
+    wo["child_mos"] = child_mos
     
     # Get company settings for header
     company = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
