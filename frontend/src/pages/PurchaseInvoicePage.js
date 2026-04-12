@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
-import { Plus, FileText, CheckCircle2, DollarSign, Edit2, Trash2, X } from 'lucide-react';
+import { Plus, FileText, CheckCircle2, DollarSign, X } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 
@@ -10,15 +10,14 @@ export default function PurchaseInvoicePage() {
   const { user } = useAuth();
   const { formatCurrency } = useCompanySettings();
   const [invoices, setInvoices] = useState([]);
-  const [suppliers, setSuppliers] = useState([]);
-  const [pos, setPOs] = useState([]);
+  const [pendingGRNs, setPendingGRNs] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
-    supplier_id: '', po_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '',
-    lines: [{ item_id: '', quantity: 0, unit_price: 0, hsn_code: '', gst_rate: 18 }]
+    supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '',
+    lines: []
   });
 
   const isAdmin = user?.role === 'admin';
@@ -28,34 +27,35 @@ export default function PurchaseInvoicePage() {
     setLoading(true);
     try {
       const params = statusFilter ? `?status=${statusFilter}` : '';
-      const [invRes, supRes, poRes, itemRes] = await Promise.all([
+      const [invRes, grnRes, itemRes] = await Promise.all([
         api.get(`/api/purchase-invoices${params}`),
-        api.get('/api/suppliers'),
-        api.get('/api/purchase-orders'),
+        api.get('/api/purchase-invoices/pending-grns'),
         api.get('/api/items'),
       ]);
       setInvoices(invRes.data);
-      setSuppliers(supRes.data);
-      setPOs(poRes.data);
+      setPendingGRNs(grnRes.data);
       setItems(itemRes.data);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, [statusFilter]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handlePOSelect = (poId) => {
-    const po = pos.find(p => p.id === poId);
-    if (!po) return;
+  const handleGRNSelect = (grnId) => {
+    const grn = pendingGRNs.find(g => g.id === grnId);
+    if (!grn) return;
     setFormData({
       ...formData,
-      po_id: poId,
-      supplier_id: po.supplier_id,
-      lines: po.items?.map(li => ({
-        item_id: li.item_id,
-        quantity: li.quantity,
-        unit_price: li.unit_price,
-        hsn_code: li.hsn_code || '',
-        gst_rate: li.gst_rate || 18
+      grn_id: grnId,
+      supplier_id: grn.supplier_id || '',
+      po_id: grn.po_id || '',
+      invoice_no: grn.supplier_invoice_no || '',
+      invoice_date: grn.supplier_invoice_date ? grn.supplier_invoice_date.split('T')[0] : '',
+      lines: grn.lines?.map(l => ({
+        item_id: l.item_id,
+        quantity: l.received_quantity || 0,
+        unit_price: l.verified_price || l.po_price || 0,
+        hsn_code: l.hsn_code || '',
+        gst_rate: items.find(i => i.id === l.item_id)?.gst_rate || 18
       })) || []
     });
   };
@@ -72,21 +72,22 @@ export default function PurchaseInvoicePage() {
   const calcGST = () => formData.lines.reduce((s, l) => s + (l.quantity * l.unit_price * (l.gst_rate || 18) / 100), 0);
 
   const handleSubmit = async () => {
-    if (!formData.supplier_id || !formData.invoice_no || formData.lines.length === 0) {
-      alert('Please fill supplier, invoice no, and at least one line item');
-      return;
-    }
+    if (!formData.grn_id) { alert('Please select a GRN'); return; }
+    if (!formData.invoice_no) { alert('Please enter supplier invoice number'); return; }
+    if (formData.lines.length === 0) { alert('No line items'); return; }
     try {
       await api.post('/api/purchase-invoices', {
         ...formData,
-        invoice_date: new Date(formData.invoice_date).toISOString(),
+        invoice_date: formData.invoice_date ? new Date(formData.invoice_date).toISOString() : new Date().toISOString(),
         due_date: formData.due_date ? new Date(formData.due_date).toISOString() : null,
       });
       setDialogOpen(false);
-      setFormData({ supplier_id: '', po_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', lines: [{ item_id: '', quantity: 0, unit_price: 0, hsn_code: '', gst_rate: 18 }] });
+      resetForm();
       fetchData();
     } catch (e) { alert(e.response?.data?.detail || 'Failed to create invoice'); }
   };
+
+  const resetForm = () => setFormData({ supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', lines: [] });
 
   const handleApprove = async (id) => {
     if (!window.confirm('Approve this invoice?')) return;
@@ -116,10 +117,10 @@ export default function PurchaseInvoicePage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Purchase Invoices</h1>
-          <p className="text-sm text-[#4B5563]">Record and manage supplier invoices</p>
+          <p className="text-sm text-[#4B5563]">Record supplier invoices against received GRNs</p>
         </div>
         {canEdit && (
-          <button onClick={() => setDialogOpen(true)} className="btn-primary flex items-center space-x-2" data-testid="create-invoice-btn">
+          <button onClick={() => { resetForm(); setDialogOpen(true); }} className="btn-primary flex items-center space-x-2" data-testid="create-invoice-btn" disabled={pendingGRNs.length === 0} title={pendingGRNs.length === 0 ? 'No pending GRNs to invoice' : ''}>
             <Plus className="w-4 h-4" /><span>New Invoice</span>
           </button>
         )}
@@ -138,6 +139,7 @@ export default function PurchaseInvoicePage() {
         </Select>
         {statusFilter && <button onClick={() => setStatusFilter('')} className="text-xs text-[#4B5563] hover:text-[#1D3557]">Clear</button>}
         <span className="text-xs text-[#6B7280]">{invoices.length} invoices</span>
+        {pendingGRNs.length > 0 && <span className="text-xs text-[#723B13] bg-[#FDF6B2] px-2 py-0.5 rounded">{pendingGRNs.length} GRN(s) pending invoice</span>}
       </div>
 
       {/* KPI cards */}
@@ -152,11 +154,12 @@ export default function PurchaseInvoicePage() {
         {invoices.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
             <FileText className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No purchase invoices found</p>
+            {pendingGRNs.length > 0 && <p className="text-xs text-[#6B7280] mt-1">Click "New Invoice" to create from a received GRN</p>}
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full data-table" data-testid="invoice-table">
-              <thead><tr><th>Invoice #</th><th>Supplier Invoice</th><th>Supplier</th><th>PO Ref</th><th>Date</th><th>Due Date</th><th className="text-right">Amount</th><th>Status</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Invoice #</th><th>Supplier Inv.</th><th>Supplier</th><th>PO Ref</th><th>GRN Ref</th><th>Date</th><th>Due Date</th><th className="text-right">Amount</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {invoices.map(inv => (
                   <tr key={inv.id} data-testid={`invoice-row-${inv.id}`}>
@@ -164,6 +167,7 @@ export default function PurchaseInvoicePage() {
                     <td className="mono">{inv.invoice_no}</td>
                     <td>{inv.supplier?.name || '-'}</td>
                     <td className="mono text-sm">{inv.po?.po_number || '-'}</td>
+                    <td className="mono text-sm">{inv.grn?.grn_number || '-'}</td>
                     <td className="text-sm">{inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString() : '-'}</td>
                     <td className="text-sm">{inv.due_date ? new Date(inv.due_date).toLocaleDateString() : '-'}</td>
                     <td className="text-right mono font-semibold">{formatCurrency(inv.total_amount || 0)}</td>
@@ -194,94 +198,116 @@ export default function PurchaseInvoicePage() {
       {/* Create Invoice Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="font-[Chivo]">New Purchase Invoice</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-[Chivo]">New Purchase Invoice from GRN</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-[#111827] mb-1">Load from PO (optional)</label>
-                <Select value={formData.po_id || undefined} onValueChange={handlePOSelect}>
-                  <SelectTrigger data-testid="inv-po-select"><SelectValue placeholder="Select PO to auto-fill" /></SelectTrigger>
-                  <SelectContent>
-                    {pos.filter(p => p.status === 'submitted' || p.status === 'received').map(po => (
-                      <SelectItem key={po.id} value={po.id}>{po.po_number} - {po.supplier_name || suppliers.find(s => s.id === po.supplier_id)?.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier *</label>
-                <Select value={formData.supplier_id} onValueChange={v => setFormData({...formData, supplier_id: v})}>
-                  <SelectTrigger data-testid="inv-supplier-select"><SelectValue placeholder="Select supplier" /></SelectTrigger>
-                  <SelectContent>
-                    {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier Invoice No *</label>
-                <input type="text" value={formData.invoice_no} onChange={e => setFormData({...formData, invoice_no: e.target.value})} className="input-field mono" placeholder="INV-001" data-testid="inv-no-input" />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-[#111827] mb-1">Invoice Date *</label>
-                <input type="date" value={formData.invoice_date} onChange={e => setFormData({...formData, invoice_date: e.target.value})} className="input-field" data-testid="inv-date-input" />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-[#111827] mb-1">Due Date</label>
-                <input type="date" value={formData.due_date} onChange={e => setFormData({...formData, due_date: e.target.value})} className="input-field" data-testid="inv-due-date-input" />
-              </div>
+            {/* GRN Selection */}
+            <div className="bg-[#F0F4F8] border border-[#D1D5DB] rounded-sm p-4">
+              <label className="block text-sm font-semibold text-[#111827] mb-2">Select GRN *</label>
+              <Select value={formData.grn_id || undefined} onValueChange={handleGRNSelect}>
+                <SelectTrigger data-testid="inv-grn-select"><SelectValue placeholder="Select a received GRN" /></SelectTrigger>
+                <SelectContent>
+                  {pendingGRNs.map(grn => (
+                    <SelectItem key={grn.id} value={grn.id}>
+                      {grn.grn_number} — PO: {grn.po?.po_number || grn.po_number || '-'} — {grn.supplier?.name || 'Unknown'}
+                      {grn.lines?.length > 0 && ` (${grn.lines.length} items)`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {pendingGRNs.length === 0 && <p className="text-xs text-[#9B1C1C] mt-1">No GRNs pending invoice. Create a GRN from Stores first.</p>}
             </div>
 
-            {/* Line items */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-semibold text-[#111827]">Line Items</label>
-                <button onClick={addLine} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1"><Plus className="w-3 h-3" />Add Line</button>
-              </div>
-              <div className="border rounded-sm overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs w-20">Qty</th><th className="text-right py-2 px-2 text-xs w-24">Rate</th><th className="text-right py-2 px-2 text-xs w-16">GST%</th><th className="text-right py-2 px-2 text-xs w-24">Amount</th><th className="w-8"></th></tr></thead>
-                  <tbody>
-                    {formData.lines.map((line, idx) => (
-                      <tr key={idx} className="border-t">
-                        <td className="py-1 px-2">
-                          <Select value={line.item_id} onValueChange={v => { const it = items.find(i => i.id === v); updateLine(idx, 'item_id', v); if (it) { updateLine(idx, 'hsn_code', it.hsn_code || ''); updateLine(idx, 'gst_rate', it.gst_rate || 18); updateLine(idx, 'unit_price', it.unit_cost || 0); } }}>
-                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select" /></SelectTrigger>
-                            <SelectContent>{items.map(i => <SelectItem key={i.id} value={i.id}>{i.part_number} - {i.name}</SelectItem>)}</SelectContent>
-                          </Select>
-                        </td>
-                        <td className="py-1 px-2"><input type="number" min="0" value={line.quantity} onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
-                        <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={line.unit_price} onChange={e => updateLine(idx, 'unit_price', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
-                        <td className="py-1 px-2">
-                          <select value={line.gst_rate} onChange={e => updateLine(idx, 'gst_rate', parseFloat(e.target.value))} className="w-full px-1 py-1 border rounded-sm text-xs">
-                            {[0,5,12,18,28].map(r => <option key={r} value={r}>{r}%</option>)}
-                          </select>
-                        </td>
-                        <td className="py-1 px-2 text-right mono text-xs font-medium">{formatCurrency(line.quantity * line.unit_price)}</td>
-                        <td className="py-1 px-1"><button onClick={() => removeLine(idx)} className="text-[#9B1C1C] hover:text-[#DC2626] p-1"><X className="w-3 h-3" /></button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="flex justify-end mt-3 space-y-1 text-sm">
-                <div className="w-48">
-                  <div className="flex justify-between"><span className="text-[#4B5563]">Subtotal:</span><span className="mono">{formatCurrency(calcSubtotal())}</span></div>
-                  <div className="flex justify-between"><span className="text-[#4B5563]">GST:</span><span className="mono">{formatCurrency(calcGST())}</span></div>
-                  <div className="flex justify-between font-bold border-t pt-1 mt-1"><span>Total:</span><span className="mono">{formatCurrency(calcSubtotal() + calcGST())}</span></div>
+            {formData.grn_id && (
+              <>
+                {/* Auto-filled info */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier</label>
+                    <div className="input-field bg-[#F9FAFB] text-[#374151]">
+                      {pendingGRNs.find(g => g.id === formData.grn_id)?.supplier?.name || '-'}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">PO Reference</label>
+                    <div className="input-field bg-[#F9FAFB] mono text-[#374151]">
+                      {pendingGRNs.find(g => g.id === formData.grn_id)?.po?.po_number || pendingGRNs.find(g => g.id === formData.grn_id)?.po_number || '-'}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            <div>
-              <label className="block text-sm font-semibold text-[#111827] mb-1">Notes</label>
-              <textarea value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} className="input-field" rows={2} data-testid="inv-notes-input" />
-            </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier Invoice No *</label>
+                    <input type="text" value={formData.invoice_no} onChange={e => setFormData({...formData, invoice_no: e.target.value})} className="input-field mono" placeholder="INV-001" data-testid="inv-no-input" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Invoice Date *</label>
+                    <input type="date" value={formData.invoice_date} onChange={e => setFormData({...formData, invoice_date: e.target.value})} className="input-field" data-testid="inv-date-input" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Due Date</label>
+                    <input type="date" value={formData.due_date} onChange={e => setFormData({...formData, due_date: e.target.value})} className="input-field" data-testid="inv-due-date-input" />
+                  </div>
+                </div>
+
+                {/* Line items (auto-populated from GRN) */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-sm font-semibold text-[#111827]">Line Items (from GRN)</label>
+                    <button onClick={addLine} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1"><Plus className="w-3 h-3" />Add Line</button>
+                  </div>
+                  <div className="border rounded-sm overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead><tr className="bg-[#F3F4F6]">
+                        <th className="text-left py-2 px-2 text-xs">Item</th>
+                        <th className="text-right py-2 px-2 text-xs w-20">Qty</th>
+                        <th className="text-right py-2 px-2 text-xs w-24">Rate</th>
+                        <th className="text-right py-2 px-2 text-xs w-16">GST%</th>
+                        <th className="text-right py-2 px-2 text-xs w-24">Amount</th>
+                        <th className="w-8"></th>
+                      </tr></thead>
+                      <tbody>
+                        {formData.lines.map((line, idx) => {
+                          const it = items.find(i => i.id === line.item_id);
+                          return (
+                            <tr key={idx} className="border-t">
+                              <td className="py-1 px-2">
+                                <div className="text-xs"><span className="mono font-medium">{it?.part_number || '-'}</span> {it?.name || ''}</div>
+                              </td>
+                              <td className="py-1 px-2"><input type="number" min="0" value={line.quantity} onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                              <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={line.unit_price} onChange={e => updateLine(idx, 'unit_price', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                              <td className="py-1 px-2">
+                                <select value={line.gst_rate} onChange={e => updateLine(idx, 'gst_rate', parseFloat(e.target.value))} className="w-full px-1 py-1 border rounded-sm text-xs">
+                                  {[0,5,12,18,28].map(r => <option key={r} value={r}>{r}%</option>)}
+                                </select>
+                              </td>
+                              <td className="py-1 px-2 text-right mono text-xs font-medium">{formatCurrency(line.quantity * line.unit_price)}</td>
+                              <td className="py-1 px-1"><button onClick={() => removeLine(idx)} className="text-[#9B1C1C] hover:text-[#DC2626] p-1"><X className="w-3 h-3" /></button></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex justify-end mt-3 text-sm">
+                    <div className="w-52 space-y-1">
+                      <div className="flex justify-between"><span className="text-[#4B5563]">Subtotal:</span><span className="mono">{formatCurrency(calcSubtotal())}</span></div>
+                      <div className="flex justify-between"><span className="text-[#4B5563]">GST:</span><span className="mono">{formatCurrency(calcGST())}</span></div>
+                      <div className="flex justify-between font-bold border-t pt-1 mt-1"><span>Total:</span><span className="mono text-lg">{formatCurrency(calcSubtotal() + calcGST())}</span></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Notes</label>
+                  <textarea value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} className="input-field" rows={2} data-testid="inv-notes-input" />
+                </div>
+              </>
+            )}
 
             <div className="flex justify-end space-x-3 pt-3 border-t">
               <button onClick={() => setDialogOpen(false)} className="btn-secondary">Cancel</button>
-              <button onClick={handleSubmit} className="btn-primary" data-testid="inv-save-btn">Create Invoice</button>
+              <button onClick={handleSubmit} className="btn-primary" disabled={!formData.grn_id} data-testid="inv-save-btn">Create Invoice</button>
             </div>
           </div>
         </DialogContent>

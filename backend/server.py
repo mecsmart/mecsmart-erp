@@ -4129,10 +4129,40 @@ async def get_purchase_invoices(request: Request, status: str = None):
         if inv.get("po_id"):
             po = await db.purchase_orders.find_one({"id": inv["po_id"]}, {"_id": 0})
             inv["po"] = po
+        if inv.get("grn_id"):
+            grn = await db.grn.find_one({"id": inv["grn_id"]}, {"_id": 0})
+            inv["grn"] = grn
         for line in inv.get("lines", []):
             item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
             line["item"] = item
     return invoices
+
+@purchase_invoices_router.get("/pending-grns")
+async def get_grns_pending_invoice(request: Request):
+    """Get GRNs that don't have a purchase invoice yet"""
+    user = await get_current_user(request)
+    # Get all GRN IDs that already have invoices
+    invoiced_grn_ids = set()
+    async for inv in db.purchase_invoices.find({"grn_id": {"$exists": True, "$ne": ""}}, {"grn_id": 1}):
+        invoiced_grn_ids.add(inv.get("grn_id"))
+    
+    # Get all completed GRNs
+    grns = await db.grn.find({"status": "completed"}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    pending = []
+    for grn in grns:
+        if grn.get("id") in invoiced_grn_ids:
+            continue
+        supplier = await db.suppliers.find_one({"id": grn.get("supplier_id")}, {"_id": 0})
+        grn["supplier"] = supplier
+        po = await db.purchase_orders.find_one({"id": grn.get("po_id")}, {"_id": 0})
+        grn["po"] = po
+        for line in grn.get("lines", []):
+            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
+            line["item"] = item
+        pending.append(grn)
+    
+    return pending
 
 @purchase_invoices_router.post("", status_code=201)
 async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request):
