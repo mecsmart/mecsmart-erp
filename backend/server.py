@@ -953,7 +953,7 @@ async def create_production_order(order_data: ProductionOrderCreate, request: Re
     
     # Generate order number
     count = await db.production_orders.count_documents({})
-    order_number = f"PO-{str(count + 1).zfill(6)}"
+    order_number = f"SO-{str(count + 1).zfill(6)}"
     
     order_doc = {
         "id": str(uuid.uuid4()),
@@ -2525,7 +2525,7 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
         
         # Generate WO number
         count = await db.work_orders.count_documents({})
-        wo_number = f"WO-{str(count + 1).zfill(6)}"
+        wo_number = f"MO-{str(count + 1).zfill(6)}"
         
         # Create operation statuses
         operations_status = []

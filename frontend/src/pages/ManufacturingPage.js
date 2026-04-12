@@ -137,7 +137,7 @@ export default function ManufacturingPage() {
       // Show message about created work orders
       if (data.work_orders && data.work_orders.length > 0) {
         const woList = data.work_orders.map(wo => `- ${wo.wo_number}`).join('\n');
-        alert(`${data.message}\n\nWork Orders Created:\n${woList}`);
+        alert(`${data.message}\n\nManufacturing Orders Created:\n${woList}`);
       } else {
         alert(data.message || 'Work order processing complete');
       }
@@ -145,7 +145,7 @@ export default function ManufacturingPage() {
       fetchData();
     } catch (error) {
       console.error('Failed to save work order:', error);
-      alert(error.response?.data?.detail || 'Failed to save work order');
+      alert(error.response?.data?.detail || 'Failed to save manufacturing order');
     }
   };
 
@@ -155,20 +155,20 @@ export default function ManufacturingPage() {
         // Use the start endpoint which consumes materials
         const { data } = await api.post(`/api/work-orders/${woId}/start`);
         if (data.success === false) {
-          alert(`Cannot start work order: ${data.message}\n\nInsufficient materials:\n${data.insufficient_materials?.map(m => `- ${m.item} - ${m.name || ''}: need ${m.required}, have ${m.available}`).join('\n')}`);
+          alert(`Cannot start manufacturing order: ${data.message}\n\nInsufficient materials:\n${data.insufficient_materials?.map(m => `- ${m.item} - ${m.name || ''}: need ${m.required}, have ${m.available}`).join('\n')}`);
           return;
         }
-        alert(`Work order started!\n\nMaterials consumed:\n${data.consumed_materials?.map(m => `- ${m.item} - ${m.name || ''}: ${m.quantity} ${m.uom || 'pcs'}`).join('\n') || 'None'}`);
+        alert(`Manufacturing order started!\n\nMaterials consumed:\n${data.consumed_materials?.map(m => `- ${m.item} - ${m.name || ''}: ${m.quantity} ${m.uom || 'pcs'}`).join('\n') || 'None'}`);
       } else {
         await api.put(`/api/work-orders/${woId}`, { status: newStatus });
         if (newStatus === 'completed') {
-          alert('Work order completed! Finished goods added to inventory.');
+          alert('Manufacturing order completed! Finished goods added to inventory.');
         }
       }
       fetchData();
     } catch (error) {
       console.error('Failed to update work order:', error);
-      alert(error.response?.data?.detail || 'Failed to update work order');
+      alert(error.response?.data?.detail || 'Failed to update manufacturing order');
     }
   };
 
@@ -314,7 +314,7 @@ export default function ManufacturingPage() {
       const ops = data.operations_status || [];
       const totalMaterialCost = consumed.reduce((s, m) => s + (m.quantity * (m.unit_cost || 0)), 0);
 
-      const html = `<!DOCTYPE html><html><head><title>Work Order - ${data.wo_number}</title>
+      const html = `<!DOCTYPE html><html><head><title>Manufacturing Order - ${data.wo_number}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #111; padding: 20px; }
@@ -343,7 +343,7 @@ export default function ManufacturingPage() {
         ${company.address ? `<p>${company.address}</p>` : ''}
         ${company.gstin ? `<p>GSTIN: ${company.gstin}</p>` : ''}
       </div>
-      <div class="title">Work Order: ${data.wo_number}</div>
+      <div class="title">Manufacturing Order: ${data.wo_number}</div>
       <div class="info-grid">
         <div class="info-box"><label>Item</label><span class="mono">${item.part_number || ''}</span> - ${item.name || ''}</div>
         <div class="info-box"><label>Quantity</label><span class="mono">${data.quantity || 0}</span></div>
@@ -473,8 +473,8 @@ export default function ManufacturingPage() {
     <div className="space-y-6" data-testid="manufacturing-page">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Manufacturing</h1>
-          <p className="text-sm text-[#4B5563]">Work centers, routings, and work order tracking</p>
+          <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Manufacturing Orders</h1>
+          <p className="text-sm text-[#4B5563]">Work centers, routings, and manufacturing order tracking</p>
         </div>
       </div>
 
@@ -486,7 +486,7 @@ export default function ManufacturingPage() {
             className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
             data-testid="tab-work-orders"
           >
-            Work Orders
+            Manufacturing Orders
           </TabsTrigger>
           <TabsTrigger 
             value="routings" 
@@ -532,19 +532,19 @@ export default function ManufacturingPage() {
                 <DialogTrigger asChild>
                   <button className="btn-primary flex items-center space-x-2" data-testid="create-work-order-btn">
                     <Plus className="w-4 h-4" />
-                    <span>Create Work Order</span>
+                    <span>Create Manufacturing Order</span>
                   </button>
                 </DialogTrigger>
                 <DialogContent className="max-w-lg">
                   <DialogHeader>
-                    <DialogTitle className="font-[Chivo]">Create Work Order</DialogTitle>
+                    <DialogTitle className="font-[Chivo]">Create Manufacturing Order</DialogTitle>
                   </DialogHeader>
                   <form onSubmit={handleWorkOrderSubmit} className="space-y-4 mt-4">
                     <div>
-                      <label className="block text-sm font-semibold text-[#111827] mb-1">Production Order *</label>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Sales Order *</label>
                       <Select value={workOrderForm.production_order_id} onValueChange={(v) => setWorkOrderForm({ ...workOrderForm, production_order_id: v })}>
                         <SelectTrigger data-testid="wo-production-order-select">
-                          <SelectValue placeholder="Select production order" />
+                          <SelectValue placeholder="Select sales order" />
                         </SelectTrigger>
                         <SelectContent>
                           {productionOrders.filter(po => po.status === 'planned').map((po) => (
@@ -625,7 +625,7 @@ export default function ManufacturingPage() {
                         Cancel
                       </button>
                       <button type="submit" className="btn-primary" data-testid="wo-save-btn">
-                        Create Work Order
+                        Create Manufacturing Order
                       </button>
                     </div>
                   </form>
@@ -642,14 +642,14 @@ export default function ManufacturingPage() {
             ) : filteredWorkOrders.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
                 <Settings2 className="w-12 h-12 mb-2 text-[#9CA3AF]" />
-                <p>{woStatusFilter ? `No ${woStatusFilter.replace('_',' ')} work orders` : 'No work orders found'}</p>
+              <span>{woStatusFilter ? `No ${woStatusFilter.replace('_',' ')} manufacturing orders` : 'No manufacturing orders found'}</span>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full data-table" data-testid="work-orders-table">
                   <thead>
                     <tr>
-                      <th>WO Number</th>
+                      <th>MO Number</th>
                       <th>Product</th>
                       <th>Routing</th>
                       <th className="text-right">Qty</th>
@@ -758,8 +758,8 @@ export default function ManufacturingPage() {
                           )}
                           {wo.status === 'completed' && (
                             <div className="flex items-center space-x-1">
-                              <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs flex items-center space-x-1" title="Print Work Order" data-testid={`print-wo-${wo.id}`}>
-                                <Printer className="w-3 h-3" /><span>Print WO</span>
+                              <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs flex items-center space-x-1" title="Print Manufacturing Order" data-testid={`print-wo-${wo.id}`}>
+                                <Printer className="w-3 h-3" /><span>Print MO</span>
                               </button>
                               {wo.operations_status?.length > 0 && (
                                 <button onClick={() => printJobCard(wo)} className="btn-secondary text-xs flex items-center space-x-1" title="Print Job Card" data-testid={`print-jobcard-${wo.id}`}>
@@ -1251,7 +1251,7 @@ export default function ManufacturingPage() {
               {/* Print Buttons */}
               <div className="flex justify-end space-x-2 pt-3 border-t border-[#E5E7EB]">
                 <button onClick={() => printWorkOrder(jobCardWO)} className="btn-secondary text-xs flex items-center space-x-1" data-testid="print-wo-from-jobcard">
-                  <Printer className="w-3 h-3" /><span>Print Work Order</span>
+                  <Printer className="w-3 h-3" /><span>Print Manufacturing Order</span>
                 </button>
                 <button onClick={() => printJobCard(jobCardWO)} className="btn-primary text-xs flex items-center space-x-1" data-testid="print-jobcard-from-dialog">
                   <Printer className="w-3 h-3" /><span>Print Job Card</span>

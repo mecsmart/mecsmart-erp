@@ -165,7 +165,7 @@ export default function DashboardPage() {
 
         {/* Production Status */}
         <div className="card-flat p-5">
-          <h3 className="text-lg font-semibold font-[Chivo] text-[#111827] mb-4">Production Status</h3>
+          <h3 className="text-lg font-semibold font-[Chivo] text-[#111827] mb-4">Sales Order Status</h3>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">

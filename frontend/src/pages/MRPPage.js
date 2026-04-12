@@ -152,10 +152,10 @@ export default function MRPPage() {
           <div className="flex items-center gap-3 mb-4">
             <Select value={selectedPO || 'all'} onValueChange={(v) => setSelectedPO(v === 'all' ? '' : v)}>
               <SelectTrigger className="w-72" data-testid="mrp-po-filter">
-                <SelectValue placeholder="All Production Orders" />
+                <SelectValue placeholder="All Sales Orders" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Production Orders</SelectItem>
+                <SelectItem value="all">All Sales Orders</SelectItem>
                 {productionOrders.filter(po => ['planned', 'released', 'in_progress'].includes(po.status)).map(po => (
                   <SelectItem key={po.id} value={po.id}>{po.order_number} - {po.item?.name || 'Unknown'}</SelectItem>
                 ))}
@@ -170,7 +170,7 @@ export default function MRPPage() {
               <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div></div>
             ) : demand.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
-                <TrendingUp className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No material demand from active production orders</p>
+                <TrendingUp className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No material demand from active sales orders</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -179,7 +179,7 @@ export default function MRPPage() {
                     <tr>
                       <th>Part Number</th><th>Item Name</th><th className="text-right">Gross Req.</th>
                       <th className="text-right">On Hand</th><th className="text-right">Safety Stock</th>
-                      <th className="text-right">Net Req.</th><th>Production Orders</th>
+                      <th className="text-right">Net Req.</th><th>Sales Orders</th>
                     </tr>
                   </thead>
                   <tbody>

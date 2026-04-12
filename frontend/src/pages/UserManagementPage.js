@@ -14,7 +14,7 @@ const ROLES = [
 
 const MODULE_LABELS = {
   dashboard: 'Dashboard', items: 'Items & Parts', bom: 'Bill of Materials',
-  mrp: 'MRP', production: 'Production Orders', manufacturing: 'Manufacturing',
+  mrp: 'MRP', production: 'Sales Orders', manufacturing: 'Manufacturing Orders',
   quality: 'Quality', inventory: 'Inventory', suppliers: 'Suppliers',
   customers: 'Customers', purchase_orders: 'Purchase Orders', stores: 'Stores',
   settings: 'Settings',

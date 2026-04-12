@@ -92,7 +92,7 @@ export default function ProductionPage() {
       fetchData();
     } catch (error) {
       console.error('Failed to save production order:', error);
-      alert(error.response?.data?.detail || 'Failed to save production order');
+      alert(error.response?.data?.detail || 'Failed to save sales order');
     }
   };
 
@@ -144,8 +144,8 @@ export default function ProductionPage() {
     <div className="space-y-6" data-testid="production-page">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Production Orders</h1>
-          <p className="text-sm text-[#4B5563]">Manage manufacturing work orders</p>
+          <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Sales Orders</h1>
+          <p className="text-sm text-[#4B5563]">Manage sales orders for manufacturing</p>
         </div>
         {canEdit && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => {
@@ -163,7 +163,7 @@ export default function ProductionPage() {
             </DialogTrigger>
             <DialogContent className="max-w-lg">
               <DialogHeader>
-                <DialogTitle className="font-[Chivo]">{editingOrder ? 'Edit Production Order' : 'Create Production Order'}</DialogTitle>
+                <DialogTitle className="font-[Chivo]">{editingOrder ? 'Edit Sales Order' : 'Create Sales Order'}</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4 mt-4">
                 <div>
@@ -302,7 +302,7 @@ export default function ProductionPage() {
         ) : orders.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
             <Factory className="w-12 h-12 mb-2 text-[#9CA3AF]" />
-            <p>No production orders found</p>
+            <p>No sales orders found</p>
           </div>
         ) : (
           <div className="overflow-x-auto">

@@ -8,39 +8,28 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Frontend**: React 19 + Shadcn/UI + Tailwind CSS, Industrial design theme
 - **Global Context**: CompanySettingsContext provides currency formatting across all pages
 
+## Naming Convention
+- **Sales Order (SO)**: Previously "Production Order" — prefix SO-XXXXXX
+- **Manufacturing Order (MO)**: Previously "Work Order" — prefix MO-XXXXXX
+- Internal DB collections unchanged: `production_orders`, `work_orders`
+
 ## What's Been Implemented - ALL COMPLETE
 
 ### Core Modules
 - JWT Auth (4 roles) + Module-wise permissions (13 modules x 4 actions)
 - Dashboard, Items/Parts (HSN code, GST rate), Multi-level BOM with rollup costing
-- MRP (recursive demand, raw materials only + purchase suggestions)
-- Production Orders, Quality inspections & templates, Inventory transactions
-- Suppliers (GSTIN, state, structured address), Customers (GSTIN, state, structured address)
-- Warehouses (with delivery address), Stock transfers
-- Manufacturing (Work Centers, Routings, Work Orders with auto-create child WOs)
-- Company Settings (GSTIN, state, PAN, logo, tagline, currency)
+- MRP with Sales Order filter, purchase suggestions, MRP→PO creation
+- Sales Orders (SO), Quality inspections & templates, Inventory transactions
+- Suppliers, Customers (structured addresses), Warehouses, Stock transfers
+- Manufacturing Orders (MO) with Work Centers, Routings, auto-create child MOs
+- Company Settings (logo, tagline, currency INR/USD, structured addresses)
 
-### Settings - FULLY ENHANCED
-- 3 tabs: Company & GST, Branding & Currency, PO Additional Charges
-- Structured address fields: Address Line 1, Address Line 2, City, State, Pin Code
-- Logo upload (base64, max 500KB), Tagline, Primary/Secondary currency (INR/USD)
+### Manufacturing Orders - FULLY ENHANCED
+- Progress bar per MO (color-coded: green/blue/amber/grey) with ops detail
+- Status filter (All/Pending/In Progress/Completed/Cancelled)
+- Print MO and Print Job Card
 
-### MRP - FULLY ENHANCED
-- Material Demand tab with **Production Order filter** dropdown (filter by specific PO)
-- Column renamed to "Production Orders" showing deduplicated production order numbers
-- Purchase Suggestions with select-all, editable qty, create PO from selections
-- MRP→PO creation properly passes suggested quantities (fixed qty=1 bug)
-
-### Manufacturing - FULLY ENHANCED
-- Work Orders with progress bar and status filter
-- Work Order creation dropdown shows only **planned** production orders (not completed/in-progress)
-- Work Order print, Job Card print, material consumption blocking
-
-### Purchase Orders - FULLY ENHANCED
-- ERPNext-style Print: 4 templates with logo + tagline + currency symbol
-- Revision tracking, Additional charges, GST calculation
-
-### GRN (Goods Receipt Note), Quality, Inventory, User Management — all complete
+### Settings, Purchase Orders (PO), GRN, Quality, Inventory, User Management — all complete
 
 ## Prioritized Backlog
 
@@ -52,7 +41,7 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - [ ] GST Phase 3: GSTR-1/3B reports, ITC tracking
 
 ### P2 (Low Priority)
-- [ ] Backend refactoring: server.py (3800+ lines) → split into routers/
+- [ ] Backend refactoring: server.py → split into routers/
 - [ ] Barcode/QR scanning, Gantt scheduling
 - [ ] Windows desktop wrapper (Electron/Tauri)
 - [ ] Advanced reporting & analytics dashboard
