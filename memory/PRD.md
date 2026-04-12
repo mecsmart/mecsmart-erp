@@ -10,30 +10,33 @@
 - Collapsible FG->SA->PART tree view
 - MO completion blocked if: any operation not completed, outsourced ops not received, partial qty
 - Job Card: Start/Stop/Complete with operator, qty, Accept/Reject/Rework
-- Outsource toggle in Job Card: switches between Operator and Outsource mode
-- After MO start, all operations remain "pending" — user starts each via Job Card
-- SC MOs hide Job Card and Complete buttons (work is external)
-- **SC Order auto-created** at MO start OR when marking in_progress MO as SC
-- **MO auto-completes** when SC receipt is received (ops completed, FG stock added)
+- Outsource toggle in Job Card
+- SC MOs hide Job Card and Complete buttons
+- SC Order auto-created at MO start OR when marking in_progress MO as SC
+- MO auto-completes when SC receipt is received
 
 ### Sub-Contract Type Selection
-- **With Material**: RM consumed from your stock, sent to vendor via DC. Vendor processes and returns FG
-- **Without Material**: No RM consumed. Vendor sources own materials. Only finished item received back
-- Radio toggle available in both Create MO dialog and SC button dialog on MO rows
-- SC Order stores `subcontract_type` field; DC only created for "with_material"
+- With Material: RM consumed, sent to vendor via DC
+- Without Material: No RM consumed, vendor sources own materials
+- Radio toggle in Create MO dialog and SC button dialog
 
 ### Sales Orders (SO) -> Manufacturing Orders (MO)
-- Create MO dialog shows balance quantity (SO qty - existing MO qty)
-- SO edit blocked when full quantity covered by MOs
-- MO QTY column on SO page shows X/Y with "Fully covered" indicator
+- Balance quantity in Create MO dialog
+- SO edit blocked when full qty covered by MOs
 
 ### Job Work / Subcontracting
 - SC Order with edit, confirm, send DC, receive back
 - MO Number column + Item names in JW orders table
-- Auto-create from MO outsource flow
-- Receipt auto-completes linked MO and updates operation status
+- Receipt auto-completes linked MO
 
-### Routings, Purchase Invoice, BOM, PO, GRN, Quality, Inventory, MRP, Settings, Customers, Suppliers, Stores, User Management — All implemented
+### Delivery Challan (DC) Print
+- **Company header**: Name, tagline, address, phone, email, GSTIN
+- **Vendor details**: Subcontractor name, address, GSTIN, phone
+- **RM Cost**: Rate and Cost columns per item + Total RM Cost row
+- **Terms & Conditions**: 6-point T&C box for job work materials
+- Signature boxes: Prepared By, Dispatched By, Received By
+
+### All Other Modules: Routings, Purchase Invoice, BOM, PO, GRN, Quality, Inventory, MRP, Settings, Customers, Suppliers, Stores, User Management
 
 ## Backlog
 - [ ] GST Phase 2: Sales Invoicing

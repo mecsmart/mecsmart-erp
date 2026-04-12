@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 
 export default function JobWorkPage() {
   const { user } = useAuth();
-  const { formatCurrency } = useCompanySettings();
+  const { formatCurrency, companySettings, currencySymbol } = useCompanySettings();
   const [orders, setOrders] = useState([]);
   const [challans, setChallans] = useState([]);
   const [receipts, setReceipts] = useState([]);
@@ -137,44 +137,103 @@ export default function JobWorkPage() {
 
   const printDC = (dc) => {
     const supplier = dc.supplier || {};
-    const companyAddr = [supplier.address, supplier.city, supplier.state].filter(Boolean).join(', ') + (supplier.pin_code ? ` - ${supplier.pin_code}` : '');
+    const supplierAddr = [supplier.address, supplier.city, supplier.state].filter(Boolean).join(', ') + (supplier.pin_code ? ` - ${supplier.pin_code}` : '');
+    const cs = companySettings || {};
+    const companyAddr = [cs.address, cs.address_line2, cs.city, cs.state].filter(Boolean).join(', ') + (cs.pin_code ? ` - ${cs.pin_code}` : '');
+    const totalRMCost = dc.lines.reduce((s, l) => {
+      const it = l.item || items.find(i => i.id === l.item_id);
+      return s + (l.quantity * (it?.unit_cost || l.rate || 0));
+    }, 0);
     const html = `<!DOCTYPE html><html><head><title>Delivery Challan - ${dc.dc_number}</title>
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
       body { font-family:'Segoe UI',Arial,sans-serif; font-size:11px; color:#111; padding:20px; }
-      .header { text-align:center; border-bottom:2px solid #1D3557; padding-bottom:10px; margin-bottom:15px; }
-      .header h1 { font-size:16px; color:#1D3557; }
-      .header p { font-size:10px; color:#555; }
-      .title { font-size:14px; font-weight:bold; color:#1D3557; margin:10px 0 5px; text-transform:uppercase; }
-      .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:15px; }
-      .info-box { border:1px solid #ddd; padding:6px 8px; }
-      .info-box label { font-size:9px; color:#888; text-transform:uppercase; display:block; }
+      .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #1D3557; padding-bottom:12px; margin-bottom:15px; }
+      .header-left h1 { font-size:18px; color:#1D3557; font-weight:700; margin-bottom:2px; }
+      .header-left .tagline { font-size:9px; color:#888; margin-bottom:4px; }
+      .header-left .company-details { font-size:10px; color:#444; line-height:1.5; }
+      .header-right { text-align:right; }
+      .header-right .dc-title { font-size:14px; font-weight:700; color:#1D3557; text-transform:uppercase; }
+      .header-right .dc-number { font-size:12px; font-family:'Courier New',monospace; color:#333; }
+      .header-right .dc-date { font-size:10px; color:#666; margin-top:4px; }
+      .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:15px; }
+      .info-box { border:1px solid #ddd; padding:8px 10px; border-radius:2px; }
+      .info-box label { font-size:9px; color:#888; text-transform:uppercase; display:block; margin-bottom:2px; }
       .info-box span { font-weight:600; font-size:11px; }
+      .info-box .sub-text { font-weight:normal; font-size:10px; color:#555; }
       table { width:100%; border-collapse:collapse; margin-bottom:15px; }
-      th { background:#1D3557; color:white; padding:5px 8px; text-align:left; font-size:10px; text-transform:uppercase; }
-      td { padding:5px 8px; border-bottom:1px solid #ddd; font-size:11px; }
+      th { background:#1D3557; color:white; padding:6px 8px; text-align:left; font-size:10px; text-transform:uppercase; }
+      td { padding:6px 8px; border-bottom:1px solid #ddd; font-size:11px; }
       .mono { font-family:'Courier New',monospace; }
       .text-right { text-align:right; }
+      .total-row { font-weight:700; background:#f5f5f5; }
+      .terms-box { border:1px solid #ddd; padding:10px; margin-top:10px; margin-bottom:20px; border-radius:2px; }
+      .terms-box h3 { font-size:10px; text-transform:uppercase; color:#1D3557; margin-bottom:6px; font-weight:700; }
+      .terms-box ol { padding-left:18px; font-size:10px; color:#444; line-height:1.7; }
       .footer { margin-top:30px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; font-size:10px; }
-      .sign-box { border-top:1px solid #333; padding-top:4px; text-align:center; }
+      .sign-box { border-top:1px solid #333; padding-top:4px; text-align:center; margin-top:40px; }
       @media print { body { padding:10px; } }
     </style></head><body>
-    <div class="header"><h1>DELIVERY CHALLAN</h1><p>${dc.dc_number}</p></div>
-    <div class="title">${dc.dc_number}</div>
+    <div class="header">
+      <div class="header-left">
+        <h1>${cs.company_name || 'My Manufacturing Company'}</h1>
+        ${cs.tagline ? `<div class="tagline">${cs.tagline}</div>` : ''}
+        <div class="company-details">
+          ${companyAddr ? `${companyAddr}<br/>` : ''}
+          ${cs.phone ? `Phone: ${cs.phone}` : ''}${cs.phone && cs.email ? ' | ' : ''}${cs.email ? `Email: ${cs.email}` : ''}
+          ${cs.gstin ? `<br/>GSTIN: <strong>${cs.gstin}</strong>` : ''}
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="dc-title">Delivery Challan</div>
+        <div class="dc-number">${dc.dc_number}</div>
+        <div class="dc-date">${dc.created_at ? new Date(dc.created_at).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-'}</div>
+      </div>
+    </div>
     <div class="info-grid">
-      <div class="info-box"><label>Subcontractor</label><span>${supplier.name || '-'}</span>${companyAddr ? `<br/><span style="font-weight:normal;font-size:10px">${companyAddr}</span>` : ''}</div>
-      <div class="info-box"><label>JW Order</label><span class="mono">${dc.order?.order_number || '-'}</span></div>
-      <div class="info-box"><label>Date</label><span>${dc.created_at ? new Date(dc.created_at).toLocaleDateString() : '-'}</span></div>
-      <div class="info-box"><label>Status</label><span>${dc.status}</span></div>
+      <div class="info-box">
+        <label>Subcontractor / Vendor</label>
+        <span>${supplier.name || '-'}</span>
+        ${supplierAddr ? `<br/><span class="sub-text">${supplierAddr}</span>` : ''}
+        ${supplier.gstin ? `<br/><span class="sub-text">GSTIN: ${supplier.gstin}</span>` : ''}
+        ${supplier.phone ? `<br/><span class="sub-text">Ph: ${supplier.phone}</span>` : ''}
+      </div>
+      <div class="info-box">
+        <label>Reference</label>
+        <span>JW Order: <span class="mono">${dc.order?.order_number || '-'}</span></span>
+        <br/><span class="sub-text">Status: ${dc.status}</span>
+      </div>
     </div>
     <table>
-      <thead><tr><th>#</th><th>Part No.</th><th>Item</th><th class="text-right">Quantity</th></tr></thead>
-      <tbody>${dc.lines.map((l, i) => `<tr>
-        <td>${i+1}</td><td class="mono">${l.item?.part_number || '-'}</td><td>${l.item?.name || '-'}</td>
+      <thead><tr><th>#</th><th>Part No.</th><th>Item Name</th><th class="text-right">Qty</th><th class="text-right">Rate</th><th class="text-right">RM Cost</th></tr></thead>
+      <tbody>${dc.lines.map((l, i) => {
+        const it = l.item || {};
+        const rate = it.unit_cost || l.rate || 0;
+        const cost = l.quantity * rate;
+        return `<tr>
+        <td>${i+1}</td><td class="mono">${it.part_number || '-'}</td><td>${it.name || '-'}</td>
         <td class="text-right mono">${l.quantity}</td>
-      </tr>`).join('')}</tbody>
+        <td class="text-right mono">${currencySymbol}${rate.toFixed(2)}</td>
+        <td class="text-right mono">${currencySymbol}${cost.toFixed(2)}</td>
+      </tr>`;}).join('')}
+      <tr class="total-row">
+        <td colspan="5" class="text-right">Total RM Cost</td>
+        <td class="text-right mono">${currencySymbol}${totalRMCost.toFixed(2)}</td>
+      </tr>
+      </tbody>
     </table>
-    ${dc.notes ? `<p><strong>Notes:</strong> ${dc.notes}</p>` : ''}
+    ${dc.notes ? `<p style="margin-bottom:10px;"><strong>Notes:</strong> ${dc.notes}</p>` : ''}
+    <div class="terms-box">
+      <h3>Terms & Conditions</h3>
+      <ol>
+        <li>Materials listed above are sent on returnable basis for job work / processing only.</li>
+        <li>The subcontractor shall process and return the materials within the agreed timeline.</li>
+        <li>Any damage, loss, or shortage of materials shall be the responsibility of the subcontractor.</li>
+        <li>Quality of processed goods must meet the specifications agreed upon in the work order.</li>
+        <li>This challan must accompany the materials during transit and be produced on demand.</li>
+        <li>Materials remain the property of ${cs.company_name || 'the company'} until received back.</li>
+      </ol>
+    </div>
     <div class="footer">
       <div><div class="sign-box">Prepared By</div></div>
       <div><div class="sign-box">Dispatched By</div></div>
