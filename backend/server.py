@@ -1142,7 +1142,7 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
     """Calculate material requirements based on production orders - recursively explodes all BOM levels"""
     await get_current_user(request)
     
-    query = {"status": {"$in": ["confirmed", "released", "in_progress"]}}
+    query = {"status": {"$in": ["confirmed", "planned", "released", "in_progress"]}}
     if production_order_id:
         query["id"] = production_order_id
     
@@ -1237,16 +1237,27 @@ async def get_purchase_suggestions(request: Request):
     for d in demand:
         if d.get("net_requirement", 0) > 0:
             item = d.get("item")
-            # Check if not already in suggestions
-            if item and not any(s.get("item", {}).get("id") == item.get("id") for s in suggestions):
+            if not item:
+                continue
+            mrp_qty = d.get("net_requirement", 0)
+            # Check if already in suggestions (from reorder point)
+            existing = next((s for s in suggestions if s.get("item", {}).get("id") == item.get("id")), None)
+            if existing:
+                # Use the higher of reorder-based qty and MRP demand qty
+                if mrp_qty > existing.get("suggested_quantity", 0):
+                    existing["suggested_quantity"] = mrp_qty
+                    existing["net_requirement"] = mrp_qty
+                    existing["reason"] = "mrp_requirement"
+                    existing["estimated_cost"] = mrp_qty * item.get("unit_cost", 0)
+            else:
                 suggestions.append({
                     "item": item,
                     "reason": "mrp_requirement",
                     "current_stock": item.get("current_stock", 0),
-                    "net_requirement": d.get("net_requirement", 0),
-                    "suggested_quantity": d.get("net_requirement", 0),
+                    "net_requirement": mrp_qty,
+                    "suggested_quantity": mrp_qty,
                     "lead_time_days": item.get("lead_time_days", 0),
-                    "estimated_cost": d.get("net_requirement", 0) * item.get("unit_cost", 0)
+                    "estimated_cost": mrp_qty * item.get("unit_cost", 0)
                 })
     
     return suggestions
@@ -1553,7 +1564,7 @@ async def get_dashboard_stats(request: Request):
     active_boms = await db.boms.count_documents({"status": "active"})
     
     # Production orders
-    pending_orders = await db.production_orders.count_documents({"status": {"$in": ["draft", "confirmed", "released"]}})
+    pending_orders = await db.production_orders.count_documents({"status": {"$in": ["draft", "confirmed", "planned", "released"]}})
     in_progress = await db.production_orders.count_documents({"status": "in_progress"})
     
     # Quality metrics

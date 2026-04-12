@@ -16,34 +16,26 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 ## What's Been Implemented - ALL COMPLETE
 
 ### Sales Orders (SO) — FULLY ENHANCED
-- Draft & Confirmation workflow: new orders start as "draft", require explicit confirmation
-- Cancellation with full cascade: SO → Cancel all linked MOs → Reverse consumed materials → Reverse finished goods
-- Status flow: Draft → Confirmed → Released → In Progress → Completed (or Cancelled at any point)
-- Only confirmed SOs appear in MRP demand and are available for MO creation
-- Confirm button, Edit button (draft/confirmed only), Cancel button with cascade detail alert
+- Draft & Confirmation workflow, Cascading cancellation (SO → MO → reverse stock)
+- Status flow: Draft → Confirmed → Released → In Progress → Completed (or Cancelled)
+- Only confirmed/planned SOs appear in MRP demand and MO creation dropdown
 
-### Manufacturing Orders (MO) — FULLY ENHANCED
-- Progress bar, Status filter, Print MO / Job Card
-- Only confirmed SOs shown in MO creation dropdown
-- Auto-create child MOs, material consumption, stock additions
+### MRP — FULLY ENHANCED
+- Material Demand with SO filter, Purchase Suggestions with correct qty logic
+- When item has both low-stock and MRP demand, uses the higher quantity
+- Table headers properly right-aligned for numeric columns
+- MRP→PO creation passes suggested quantities correctly
 
-### Core Modules
-- JWT Auth (4 roles), Dashboard, Items/Parts, Multi-level BOM with rollup costing
-- MRP with SO filter, purchase suggestions, MRP→PO creation
-- Quality, Inventory, Suppliers, Customers (structured addresses), Warehouses
-- Company Settings (logo, tagline, currency INR/USD, structured addresses)
-- Purchase Orders with ERPNext-style Print (4 templates), GRN
+### Manufacturing Orders (MO), Purchase Orders, GRN, Settings, Quality, Inventory — all complete
 
 ## Prioritized Backlog
 
-### P0 (Next - User Requested)
+### P0 (Next)
 - [ ] Job Work / Subcontracting module
 
-### P1 (Medium Priority)
+### P1
 - [ ] GST Phase 2: Sales Invoicing, E-Way Bill
-- [ ] GST Phase 3: GSTR-1/3B reports, ITC tracking
 
-### P2 (Low Priority)
-- [ ] Backend refactoring: server.py → split into routers/
-- [ ] Barcode/QR scanning, Gantt scheduling
-- [ ] Windows desktop wrapper, Advanced reporting
+### P2
+- [ ] Backend refactoring: server.py → routers/
+- [ ] Barcode/QR scanning, Gantt scheduling, Windows wrapper
