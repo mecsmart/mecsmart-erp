@@ -1,0 +1,83 @@
+{
+  "summary": "All 3 bug fixes verified working correctly. Bug 1: SC Order auto-created when marking in_progress MO as subcontract (tested with WO-000005 -> JW-000012). Bug 2: JW orders table shows item names alongside part numbers. Bug 3: MO # column added to JW orders table.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Bug 1: PUT /api/work-orders/{id} with is_subcontract=true creates SC Order for in_progress MO",
+    "Bug 1: SC Order (JW-000012) auto-created when marking WO-000005 as subcontract",
+    "Bug 1: JW orders count increased from 11 to 12 after marking MO as SC",
+    "Bug 2: GET /api/job-work/orders returns item details (part_number, name) in lines",
+    "Bug 2: JW orders table Items column shows 'RM-002 Aluminum Bar 25mm' format",
+    "Bug 3: GET /api/job-work/orders returns mo_number field for orders with reference_wo_id",
+    "Bug 3: JW orders table has 'MO #' column header",
+    "Bug 3: MO # column shows linked MO numbers (e.g., WO-000005, MO-000012)",
+    "Subcontracted MOs (is_subcontract=true) do NOT show Job Card button",
+    "Subcontracted MOs (is_subcontract=true) do NOT show Complete button",
+    "Subcontracted MOs show 'SC' badge and 'Sub-Contract' label in Manufacturing Orders page"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_three_bug_fixes.py",
+    "/app/test_reports/pytest/pytest_three_bug_fixes.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [],
+
+  "updated_files": [
+    "/app/backend/tests/test_three_bug_fixes.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (6/6 core tests passed)",
+    "frontend": "100% (All 3 bugs verified via Playwright)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Marked WO-000005 as subcontract which created JW-000012 SC Order",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": true,
+
+  "context_for_next_testing_agent": "3 bug fixes verified: (1) SC Order creation when marking in_progress MO as SC - working (tested with WO-000005 -> JW-000012), (2) JW orders table shows item names - working (e.g., 'RM-002 Aluminum Bar 25mm'), (3) MO # column in JW orders table - working. Subcontracted MOs correctly hide Job Card/Complete buttons. Test data: WO-000005 (now subcontracted, linked to JW-000012).",
+
+  "bugs_verified": {
+    "bug_1_mo_to_sc_order_creation": {
+      "description": "When marking an already-started (in_progress) MO as subcontract via PUT /api/work-orders/{id}, a SC Order + DC should be auto-created",
+      "status": "FIXED",
+      "verification": "Marked WO-000005 (in_progress) as subcontract, JW-000012 SC Order was auto-created. JW orders count went from 11 to 12.",
+      "code_location": "/app/backend/server.py lines 3157-3205"
+    },
+    "bug_2_jw_page_shows_item_names": {
+      "description": "JW orders table should show item names alongside part numbers in the Items column",
+      "status": "FIXED",
+      "verification": "Items column shows format like 'RM-002 Aluminum Bar 25mm', 'SA-001 Pump Assembly'",
+      "code_location": "/app/frontend/src/pages/JobWorkPage.js lines 251-253"
+    },
+    "bug_3_mo_number_column_in_jw_table": {
+      "description": "JW orders table should have an 'MO #' column showing the linked Manufacturing Order number",
+      "status": "FIXED",
+      "verification": "Table has 'MO #' column header, shows values like 'WO-000005', 'MO-000012'",
+      "code_location": "/app/backend/server.py lines 4594-4596, /app/frontend/src/pages/JobWorkPage.js line 240, 249"
+    }
+  }
+}

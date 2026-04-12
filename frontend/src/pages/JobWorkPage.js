@@ -237,7 +237,7 @@ export default function JobWorkPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full data-table" data-testid="jw-orders-table">
-                  <thead><tr><th>Order #</th><th>Supplier</th><th>Items</th><th>Sent/Total</th><th>Received</th><th className="text-right">Charges</th><th>Status</th><th>Return Date</th><th>Actions</th></tr></thead>
+                  <thead><tr><th>Order #</th><th>MO #</th><th>Supplier</th><th>Items</th><th>Sent/Total</th><th>Received</th><th className="text-right">Charges</th><th>Status</th><th>Return Date</th><th>Actions</th></tr></thead>
                   <tbody>
                     {orders.map(o => {
                       const totalQty = o.lines.reduce((s, l) => s + l.quantity, 0);
@@ -246,8 +246,12 @@ export default function JobWorkPage() {
                       return (
                         <tr key={o.id} data-testid={`jw-order-row-${o.id}`}>
                           <td className="mono font-medium">{o.order_number}</td>
+                          <td className="mono text-sm text-[#1D3557]">{o.mo_number || '-'}</td>
                           <td>{o.supplier?.name || '-'}</td>
-                          <td className="text-sm">{o.lines.map(l => l.item?.part_number || l.item_id).join(', ')}</td>
+                          <td className="text-sm">{o.lines.map((l, li) => {
+                            const it = l.item || items.find(i => i.id === l.item_id);
+                            return <div key={li}><span className="mono">{it?.part_number || l.item_id}</span> <span className="text-[#4B5563]">{it?.name || ''}</span></div>;
+                          })}</td>
                           <td className="mono">{sentQty}/{totalQty}</td>
                           <td className="mono">{recvQty}</td>
                           <td className="text-right mono">{formatCurrency(o.processing_charges || 0)}</td>

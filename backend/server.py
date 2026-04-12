@@ -3153,6 +3153,56 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
     update_data["updated_at"] = datetime.now(timezone.utc)
     await db.work_orders.update_one({"id": wo_id}, {"$set": update_data})
     
+    # If marking an already-started MO as subcontract, create SC Order + DC now
+    if update_data.get("is_subcontract") and wo.get("status") == "in_progress":
+        updated_wo_fresh = await db.work_orders.find_one({"id": wo_id})
+        sc_supplier = updated_wo_fresh.get("subcontract_supplier_id") or update_data.get("subcontract_supplier_id")
+        if sc_supplier:
+            existing_sc = await db.subcontract_orders.find_one({"reference_wo_id": wo_id})
+            if not existing_sc:
+                # Build lines from consumed materials or WO item
+                consumed = updated_wo_fresh.get("consumed_materials", [])
+                sc_lines_data = consumed
+                if not sc_lines_data:
+                    routing = await db.routings.find_one({"id": updated_wo_fresh.get("routing_id")})
+                    wo_item_id = routing.get("item_id") if routing else updated_wo_fresh.get("item_id")
+                    wo_item = await db.items.find_one({"id": wo_item_id}, {"_id": 0})
+                    if wo_item:
+                        sc_lines_data = [{"item_id": wo_item_id, "quantity": updated_wo_fresh.get("quantity", 1), "unit_cost": wo_item.get("unit_cost", 0)}]
+                
+                if sc_lines_data:
+                    sc_count = await db.subcontract_orders.count_documents({})
+                    sc_doc = {
+                        "id": str(uuid.uuid4()),
+                        "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
+                        "supplier_id": sc_supplier,
+                        "reference_wo_id": wo_id,
+                        "lines": [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": m["quantity"], "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_lines_data],
+                        "status": "in_progress",
+                        "notes": f"Auto-created from sub-contract MO {updated_wo_fresh.get('wo_number')}",
+                        "created_at": datetime.now(timezone.utc),
+                        "created_by": user["id"]
+                    }
+                    await db.subcontract_orders.insert_one(sc_doc)
+                    sc_doc.pop("_id", None)
+                    
+                    # Auto-create DC
+                    dc_lines = [{"item_id": m["item_id"], "quantity": m["quantity"], "rate": m.get("unit_cost", 0)} for m in sc_lines_data]
+                    if dc_lines:
+                        dc_count = await db.delivery_challans.count_documents({})
+                        dc_doc = {
+                            "id": str(uuid.uuid4()),
+                            "dc_number": f"DC-{str(dc_count + 1).zfill(6)}",
+                            "subcontract_order_id": sc_doc["id"],
+                            "reference_wo_id": wo_id,
+                            "lines": dc_lines,
+                            "status": "sent",
+                            "notes": f"Auto-DC for sub-contract MO {updated_wo_fresh.get('wo_number')}",
+                            "created_at": datetime.now(timezone.utc),
+                            "created_by": user["id"]
+                        }
+                        await db.delivery_challans.insert_one(dc_doc)
+    
     updated_wo = await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
     return updated_wo
 
@@ -4540,6 +4590,10 @@ async def get_subcontract_orders(request: Request, status: str = None):
     for order in orders:
         supplier = await db.suppliers.find_one({"id": order.get("supplier_id")}, {"_id": 0})
         order["supplier"] = supplier
+        # Include linked MO number
+        if order.get("reference_wo_id"):
+            ref_wo = await db.work_orders.find_one({"id": order["reference_wo_id"]}, {"_id": 0, "wo_number": 1})
+            order["mo_number"] = ref_wo.get("wo_number") if ref_wo else None
         for line in order.get("lines", []):
             item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
             line["item"] = item
