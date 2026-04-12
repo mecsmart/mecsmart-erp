@@ -2853,6 +2853,109 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
                     # Recursively create work orders for this child's children
                     await create_child_work_orders(child_item_id, child_qty, child_wo["id"])
     
+    # If subcontract is selected, create SC Order directly (no MO)
+    if wo_data.is_subcontract and wo_data.subcontract_supplier_id:
+        item_id = routing.get("item_id")
+        bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"})
+        
+        # Build SC lines from first-level BOM components
+        sc_lines = []
+        if bom:
+            for comp in bom.get("components", []):
+                if comp.get("is_alternate"):
+                    continue
+                comp_item = await db.items.find_one({"id": comp["item_id"]}, {"_id": 0})
+                if comp_item:
+                    qty_needed = int(comp["quantity"] * wo_data.quantity)
+                    sc_lines.append({
+                        "item_id": comp["item_id"],
+                        "quantity": qty_needed,
+                        "sent_quantity": qty_needed if wo_data.subcontract_type == "with_material" else 0,
+                        "received_quantity": 0,
+                        "rate": comp_item.get("unit_cost", 0)
+                    })
+        
+        # Fallback: if no BOM, use the item itself
+        if not sc_lines:
+            sc_lines.append({
+                "item_id": item_id,
+                "quantity": wo_data.quantity,
+                "sent_quantity": wo_data.quantity if wo_data.subcontract_type == "with_material" else 0,
+                "received_quantity": 0,
+                "rate": item.get("unit_cost", 0)
+            })
+        
+        # Check if an existing SC order exists for same supplier + same SO (consolidation)
+        existing_sc = await db.subcontract_orders.find_one({
+            "supplier_id": wo_data.subcontract_supplier_id,
+            "production_order_id": wo_data.production_order_id,
+            "status": {"$in": ["draft", "confirmed", "in_progress"]}
+        })
+        
+        if existing_sc:
+            # Consolidate: merge lines into existing SC order
+            existing_lines = existing_sc.get("lines", [])
+            for new_line in sc_lines:
+                found = False
+                for el in existing_lines:
+                    if el["item_id"] == new_line["item_id"]:
+                        el["quantity"] += new_line["quantity"]
+                        el["sent_quantity"] += new_line["sent_quantity"]
+                        found = True
+                        break
+                if not found:
+                    existing_lines.append(new_line)
+            
+            await db.subcontract_orders.update_one(
+                {"id": existing_sc["id"]},
+                {"$set": {"lines": existing_lines, "updated_at": datetime.now(timezone.utc),
+                          "notes": existing_sc.get("notes", "") + f"\nConsolidated: Added {item.get('part_number')} x{wo_data.quantity}"}}
+            )
+            updated_sc = await db.subcontract_orders.find_one({"id": existing_sc["id"]}, {"_id": 0})
+            return {"message": f"Consolidated into existing SC Order {existing_sc['order_number']}", "sc_order": updated_sc, "work_orders": [], "is_sc_direct": True}
+        else:
+            # Create new SC order
+            sc_count = await db.subcontract_orders.count_documents({})
+            sc_doc = {
+                "id": str(uuid.uuid4()),
+                "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
+                "supplier_id": wo_data.subcontract_supplier_id,
+                "production_order_id": wo_data.production_order_id,
+                "subcontract_type": wo_data.subcontract_type or "with_material",
+                "fg_item_id": item_id,
+                "fg_quantity": wo_data.quantity,
+                "lines": sc_lines,
+                "processing_charges": 0,
+                "status": "draft",
+                "notes": f"Direct SC from SO {prod_order.get('order_number', '')} — {item.get('part_number')} x{wo_data.quantity}",
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"]
+            }
+            await db.subcontract_orders.insert_one(sc_doc)
+            sc_doc.pop("_id", None)
+            
+            # Create DC if with_material
+            auto_dc = None
+            if wo_data.subcontract_type == "with_material" and sc_lines:
+                dc_lines = [{"item_id": l["item_id"], "quantity": l["quantity"], "rate": l["rate"]} for l in sc_lines]
+                dc_count = await db.delivery_challans.count_documents({})
+                dc_doc = {
+                    "id": str(uuid.uuid4()),
+                    "dc_number": f"DC-{str(dc_count + 1).zfill(6)}",
+                    "subcontract_order_id": sc_doc["id"],
+                    "lines": dc_lines,
+                    "status": "sent",
+                    "notes": f"Auto-DC for direct SC {sc_doc['order_number']}",
+                    "created_at": datetime.now(timezone.utc),
+                    "created_by": user["id"]
+                }
+                await db.delivery_challans.insert_one(dc_doc)
+                dc_doc.pop("_id", None)
+                auto_dc = dc_doc
+            
+            return {"message": f"Created SC Order {sc_doc['order_number']}" + (" + DC" if auto_dc else ""), "sc_order": sc_doc, "work_orders": [], "is_sc_direct": True}
+    
+    # Normal MO creation flow (no subcontract)
     # Always create main work order (user explicitly requested manufacturing)
     main_wo = await create_wo_for_item(routing.get("item_id"), wo_data.quantity, None, is_main=True)
     if main_wo:

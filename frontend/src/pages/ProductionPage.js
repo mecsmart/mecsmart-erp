@@ -10,7 +10,8 @@ import {
   X,
   CheckCircle2,
   XCircle,
-  AlertTriangle
+  AlertTriangle,
+  Search
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -37,6 +38,7 @@ export default function ProductionPage() {
   const [boms, setBoms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
@@ -308,6 +310,17 @@ export default function ProductionPage() {
       {/* Filter */}
       <div className="card-flat p-4">
         <div className="flex items-center gap-4">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search order #, product..."
+              className="input-field pl-9 text-sm"
+              data-testid="so-search-input"
+            />
+          </div>
           <Select value={statusFilter || undefined} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
             <SelectTrigger className="w-48" data-testid="production-status-filter">
               <Filter className="w-4 h-4 mr-2" />
@@ -320,8 +333,8 @@ export default function ProductionPage() {
               ))}
             </SelectContent>
           </Select>
-          {statusFilter && (
-            <button onClick={() => setStatusFilter('')} className="btn-secondary flex items-center space-x-1">
+          {(statusFilter || searchQuery) && (
+            <button onClick={() => { setStatusFilter(''); setSearchQuery(''); }} className="btn-secondary flex items-center space-x-1">
               <X className="w-4 h-4" />
               <span>Clear</span>
             </button>
@@ -357,7 +370,16 @@ export default function ProductionPage() {
                 </tr>
               </thead>
               <tbody>
-                {orders.map((order) => (
+                {orders.filter(order => {
+                  if (!searchQuery) return true;
+                  const q = searchQuery.toLowerCase();
+                  return (
+                    (order.order_number || '').toLowerCase().includes(q) ||
+                    (order.item?.part_number || '').toLowerCase().includes(q) ||
+                    (order.item?.name || '').toLowerCase().includes(q) ||
+                    (order.bom?.name || '').toLowerCase().includes(q)
+                  );
+                }).map((order) => (
                   <tr key={order.id} className={order.status === 'cancelled' ? 'opacity-50' : ''} data-testid={`production-row-${order.id}`}>
                     <td className="mono font-medium">{order.order_number}</td>
                     <td>

@@ -163,8 +163,11 @@ export default function ManufacturingPage() {
       setIsWorkOrderDialogOpen(false);
       resetWorkOrderForm();
       
-      // Show message about created work orders
-      if (data.work_orders && data.work_orders.length > 0) {
+      if (data.is_sc_direct) {
+        // SC Order created directly
+        const scNum = data.sc_order?.order_number || '';
+        alert(`${data.message}\n\nSubcontract Order: ${scNum}\nGo to Job Work page to manage.`);
+      } else if (data.work_orders && data.work_orders.length > 0) {
         const woList = data.work_orders.map(wo => `- ${wo.wo_number}`).join('\n');
         alert(`${data.message}\n\nManufacturing Orders Created:\n${woList}`);
       } else {
