@@ -14,11 +14,13 @@ import QualityPage from "./pages/QualityPage";
 import InventoryPage from "./pages/InventoryPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
+import PurchaseInvoicePage from "./pages/PurchaseInvoicePage";
 import WarehousesPage from "./pages/WarehousesPage";
 import ManufacturingPage from "./pages/ManufacturingPage";
 import SettingsPage from "./pages/SettingsPage";
 import CustomersPage from "./pages/CustomersPage";
 import UserManagementPage from "./pages/UserManagementPage";
+import JobWorkPage from "./pages/JobWorkPage";
 import { Toaster } from "./components/ui/sonner";
 
 function App() {
@@ -50,11 +52,13 @@ function App() {
             <Route path="inventory" element={<InventoryPage />} />
             <Route path="suppliers" element={<SuppliersPage />} />
             <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
+            <Route path="purchase-invoices" element={<PurchaseInvoicePage />} />
             <Route path="warehouses" element={<WarehousesPage />} />
             <Route path="manufacturing" element={<ManufacturingPage />} />
             <Route path="customers" element={<CustomersPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="users" element={<UserManagementPage />} />
+            <Route path="job-work" element={<JobWorkPage />} />
           </Route>
 
           {/* Catch all */}

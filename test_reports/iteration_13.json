@@ -1,0 +1,132 @@
+{
+  "summary": "Purchase Invoice and Job Work modules fully tested. Backend: 23/23 tests passed. Frontend: All features verified including sidebar Inventory group, PI create/approve/paid flow, JW order/DC/receipt flow.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dialog components", "issues": ["Console warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent} - minor accessibility issue"]},
+      {"screen": "PurchaseInvoicePage GST select", "issues": ["Console warning: In HTML, <span> cannot be a child of <option> - hydration warning from Emergent visual editor wrapper"]}
+    ]
+  },
+
+  "passed_tests": [
+    "Backend: POST /api/purchase-invoices creates invoice with lines, GST calculation, status=draft",
+    "Backend: GET /api/purchase-invoices returns list with supplier and item details",
+    "Backend: POST /api/purchase-invoices/{id}/approve transitions draft→approved",
+    "Backend: POST /api/purchase-invoices/{id}/mark-paid transitions approved→paid",
+    "Backend: Cannot approve already approved invoice (returns 400)",
+    "Backend: Cannot mark draft invoice as paid (returns 400)",
+    "Backend: Filter invoices by status works",
+    "Backend: POST /api/job-work/orders creates subcontract order with status=draft",
+    "Backend: GET /api/job-work/orders returns list with supplier and item details",
+    "Backend: POST /api/job-work/orders/{id}/confirm transitions draft→confirmed",
+    "Backend: Cannot confirm already confirmed order (returns 400)",
+    "Backend: POST /api/job-work/challans creates DC, deducts stock",
+    "Backend: DC creates inventory transaction (type=issue, reference=job_work_dc)",
+    "Backend: DC updates order sent_quantity and status to in_progress",
+    "Backend: DC with insufficient stock returns 400",
+    "Backend: GET /api/job-work/challans returns list with order and supplier details",
+    "Backend: POST /api/job-work/receipts receives materials, adds stock",
+    "Backend: Receipt with rejection - only accepted qty added to stock",
+    "Backend: Order auto-completes when all materials received",
+    "Backend: GET /api/job-work/receipts returns list with order and supplier details",
+    "Frontend: Sidebar shows Inventory group with collapsible sub-items (Stock, Items, Suppliers, MRP, PO, PI)",
+    "Frontend: Job Work link in sidebar",
+    "Frontend: Purchase Invoice page - table, status filter, KPIs, New Invoice button",
+    "Frontend: Purchase Invoice create dialog - Load from PO, Supplier, Invoice No, Date, Line Items with GST%",
+    "Frontend: Purchase Invoice approve flow - draft→approved with Mark Paid button",
+    "Frontend: Purchase Invoice mark paid flow - approved→paid",
+    "Frontend: Job Work page - 3 tabs (Subcontract Orders, Delivery Challans, Receipts)",
+    "Frontend: Job Work create order dialog - Supplier, Return Date, Processing Charges, Materials to Send",
+    "Frontend: Job Work Send DC dialog - From Warehouse, Item with stock, Send Qty",
+    "Frontend: Job Work Receive dialog - To Warehouse, Item, Recv Qty, Reject, QC (Accept/Reject/Rework)",
+    "Frontend: Job Work order status updates correctly (confirmed→in_progress→completed)"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_purchase_invoice_jobwork.py",
+    "/app/test_reports/pytest/pytest_pi_jobwork.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [],
+
+  "updated_files": [
+    "/app/backend/tests/test_purchase_invoice_jobwork.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (23/23 tests passed)",
+    "frontend": "100% (All features verified)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "TEST_ prefixed invoices and job work orders created during tests",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": true,
+
+  "context_for_next_testing_agent": "Purchase Invoice and Job Work modules fully implemented and tested. Key features: (1) Purchase Invoice: Create with GST calculation, Approve (admin only), Mark Paid (admin only) - status flow: draft→approved→paid. (2) Job Work: Create subcontract order, Confirm, Send DC (deducts stock, creates inventory transaction), Receive (adds stock, tracks accepted/rejected qty) - order auto-completes when all materials received. (3) Sidebar reorganized with Inventory group containing Stock, Items & Parts, Suppliers, MRP, Purchase Orders, Purchase Invoices. Test file: /app/backend/tests/test_purchase_invoice_jobwork.py",
+
+  "features_verified": {
+    "purchase_invoice_create": {
+      "description": "Create invoice with lines, GST calculation (CGST/SGST for intra-state, IGST for inter-state)",
+      "verified": true,
+      "endpoint": "POST /api/purchase-invoices"
+    },
+    "purchase_invoice_approve": {
+      "description": "Admin can approve draft invoices",
+      "verified": true,
+      "endpoint": "POST /api/purchase-invoices/{id}/approve"
+    },
+    "purchase_invoice_mark_paid": {
+      "description": "Admin can mark approved invoices as paid",
+      "verified": true,
+      "endpoint": "POST /api/purchase-invoices/{id}/mark-paid"
+    },
+    "jobwork_order_create": {
+      "description": "Create subcontract order with materials to send",
+      "verified": true,
+      "endpoint": "POST /api/job-work/orders"
+    },
+    "jobwork_order_confirm": {
+      "description": "Confirm draft order to enable DC creation",
+      "verified": true,
+      "endpoint": "POST /api/job-work/orders/{id}/confirm"
+    },
+    "jobwork_dc_create": {
+      "description": "Create DC, deduct stock, create inventory transaction",
+      "verified": true,
+      "endpoint": "POST /api/job-work/challans"
+    },
+    "jobwork_receipt_create": {
+      "description": "Receive materials back, add stock, track accepted/rejected qty",
+      "verified": true,
+      "endpoint": "POST /api/job-work/receipts"
+    },
+    "jobwork_auto_complete": {
+      "description": "Order auto-completes when all materials received",
+      "verified": true
+    },
+    "sidebar_inventory_group": {
+      "description": "Sidebar shows Inventory group with collapsible sub-items",
+      "verified": true,
+      "items": ["Stock", "Items & Parts", "Suppliers", "MRP", "Purchase Orders", "Purchase Invoices"]
+    }
+  }
+}

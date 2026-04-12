@@ -1,0 +1,388 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { api } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
+import { useCompanySettings } from '../context/CompanySettingsContext';
+import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, FileText } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+
+export default function JobWorkPage() {
+  const { user } = useAuth();
+  const { formatCurrency } = useCompanySettings();
+  const [orders, setOrders] = useState([]);
+  const [challans, setChallans] = useState([]);
+  const [receipts, setReceipts] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [items, setItems] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('orders');
+
+  // Order dialog
+  const [orderDialog, setOrderDialog] = useState(false);
+  const [orderForm, setOrderForm] = useState({ supplier_id: '', expected_return_date: '', processing_charges: 0, notes: '', lines: [{ item_id: '', quantity: 0, rate: 0 }] });
+
+  // DC dialog
+  const [dcDialog, setDcDialog] = useState(false);
+  const [dcOrder, setDcOrder] = useState(null);
+  const [dcLines, setDcLines] = useState([]);
+  const [dcWarehouse, setDcWarehouse] = useState('');
+
+  // Receipt dialog
+  const [recDialog, setRecDialog] = useState(false);
+  const [recOrder, setRecOrder] = useState(null);
+  const [recLines, setRecLines] = useState([]);
+  const [recWarehouse, setRecWarehouse] = useState('');
+
+  const canEdit = ['admin', 'production_manager'].includes(user?.role);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [ordRes, dcRes, recRes, supRes, itemRes, whRes] = await Promise.all([
+        api.get('/api/job-work/orders'),
+        api.get('/api/job-work/challans'),
+        api.get('/api/job-work/receipts'),
+        api.get('/api/suppliers'),
+        api.get('/api/items'),
+        api.get('/api/warehouses'),
+      ]);
+      setOrders(ordRes.data);
+      setChallans(dcRes.data);
+      setReceipts(recRes.data);
+      setSuppliers(supRes.data);
+      setItems(itemRes.data);
+      setWarehouses(whRes.data);
+    } catch (e) { console.error(e); } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Order CRUD
+  const addOrderLine = () => setOrderForm({ ...orderForm, lines: [...orderForm.lines, { item_id: '', quantity: 0, rate: 0 }] });
+  const removeOrderLine = (idx) => setOrderForm({ ...orderForm, lines: orderForm.lines.filter((_, i) => i !== idx) });
+  const updateOrderLine = (idx, field, val) => { const lines = [...orderForm.lines]; lines[idx] = { ...lines[idx], [field]: val }; setOrderForm({ ...orderForm, lines }); };
+
+  const handleCreateOrder = async () => {
+    if (!orderForm.supplier_id || orderForm.lines.length === 0) { alert('Select supplier and add items'); return; }
+    try {
+      await api.post('/api/job-work/orders', {
+        ...orderForm,
+        expected_return_date: orderForm.expected_return_date ? new Date(orderForm.expected_return_date).toISOString() : null,
+      });
+      setOrderDialog(false);
+      setOrderForm({ supplier_id: '', expected_return_date: '', processing_charges: 0, notes: '', lines: [{ item_id: '', quantity: 0, rate: 0 }] });
+      fetchData();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const handleConfirmOrder = async (id) => {
+    try { await api.post(`/api/job-work/orders/${id}/confirm`); fetchData(); }
+    catch (e) { alert(e.response?.data?.detail || 'Failed to confirm'); }
+  };
+
+  // DC
+  const openDCDialog = (order) => {
+    setDcOrder(order);
+    setDcLines(order.lines.map(l => ({ item_id: l.item_id, quantity: l.quantity - (l.sent_quantity || 0), rate: l.rate || 0 })).filter(l => l.quantity > 0));
+    setDcWarehouse('');
+    setDcDialog(true);
+  };
+
+  const handleCreateDC = async () => {
+    if (dcLines.length === 0) { alert('No items to send'); return; }
+    try {
+      await api.post('/api/job-work/challans', { subcontract_order_id: dcOrder.id, lines: dcLines, warehouse_id: dcWarehouse, notes: '' });
+      setDcDialog(false);
+      fetchData();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to create DC'); }
+  };
+
+  // Receipt
+  const openReceiptDialog = (order) => {
+    setRecOrder(order);
+    setRecLines(order.lines.map(l => ({ item_id: l.item_id, received_quantity: (l.sent_quantity || 0) - (l.received_quantity || 0), quality_result: 'accept', reject_qty: 0 })).filter(l => l.received_quantity > 0));
+    setRecWarehouse('');
+    setRecDialog(true);
+  };
+
+  const handleCreateReceipt = async () => {
+    if (recLines.length === 0) { alert('No items to receive'); return; }
+    try {
+      await api.post('/api/job-work/receipts', { subcontract_order_id: recOrder.id, lines: recLines, warehouse_id: recWarehouse, notes: '' });
+      setRecDialog(false);
+      fetchData();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to create receipt'); }
+  };
+
+  const getStatusColor = (s) => {
+    switch (s) {
+      case 'draft': return 'bg-[#F3F4F6] text-[#4B5563]';
+      case 'confirmed': return 'bg-[#E1EFFE] text-[#1E429F]';
+      case 'in_progress': return 'bg-[#FDF6B2] text-[#723B13]';
+      case 'completed': return 'bg-[#DEF7EC] text-[#03543F]';
+      case 'sent': return 'bg-[#E1EFFE] text-[#1E429F]';
+      case 'received': return 'bg-[#DEF7EC] text-[#03543F]';
+      default: return 'bg-[#F3F4F6] text-[#4B5563]';
+    }
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div></div>;
+
+  return (
+    <div className="space-y-6" data-testid="jobwork-page">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Job Work / Subcontracting</h1>
+          <p className="text-sm text-[#4B5563]">Send materials to subcontractors and receive processed goods</p>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-4 gap-4">
+        <div className="card-flat p-4"><p className="kpi-label">Active Orders</p><p className="kpi-value">{orders.filter(o => ['confirmed', 'in_progress'].includes(o.status)).length}</p></div>
+        <div className="card-flat p-4"><p className="kpi-label">Materials Sent</p><p className="kpi-value">{challans.length}</p></div>
+        <div className="card-flat p-4"><p className="kpi-label">Materials Received</p><p className="kpi-value">{receipts.length}</p></div>
+        <div className="card-flat p-4"><p className="kpi-label">Processing Charges</p><p className="kpi-value">{formatCurrency(orders.reduce((s, o) => s + (o.processing_charges || 0), 0))}</p></div>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="orders">Subcontract Orders</TabsTrigger>
+          <TabsTrigger value="challans" data-testid="challans-tab">Delivery Challans</TabsTrigger>
+          <TabsTrigger value="receipts" data-testid="receipts-tab">Receipts</TabsTrigger>
+        </TabsList>
+
+        {/* Orders Tab */}
+        <TabsContent value="orders" className="mt-4">
+          <div className="flex justify-end mb-4">
+            {canEdit && <button onClick={() => setOrderDialog(true)} className="btn-primary flex items-center space-x-2" data-testid="create-jw-order-btn"><Plus className="w-4 h-4" /><span>New Subcontract Order</span></button>}
+          </div>
+          <div className="card-flat overflow-hidden">
+            {orders.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><Truck className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No subcontract orders</p></div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full data-table" data-testid="jw-orders-table">
+                  <thead><tr><th>Order #</th><th>Supplier</th><th>Items</th><th>Sent/Total</th><th>Received</th><th className="text-right">Charges</th><th>Status</th><th>Return Date</th><th>Actions</th></tr></thead>
+                  <tbody>
+                    {orders.map(o => {
+                      const totalQty = o.lines.reduce((s, l) => s + l.quantity, 0);
+                      const sentQty = o.lines.reduce((s, l) => s + (l.sent_quantity || 0), 0);
+                      const recvQty = o.lines.reduce((s, l) => s + (l.received_quantity || 0), 0);
+                      return (
+                        <tr key={o.id} data-testid={`jw-order-row-${o.id}`}>
+                          <td className="mono font-medium">{o.order_number}</td>
+                          <td>{o.supplier?.name || '-'}</td>
+                          <td className="text-sm">{o.lines.map(l => l.item?.part_number || l.item_id).join(', ')}</td>
+                          <td className="mono">{sentQty}/{totalQty}</td>
+                          <td className="mono">{recvQty}</td>
+                          <td className="text-right mono">{formatCurrency(o.processing_charges || 0)}</td>
+                          <td><span className={`status-badge ${getStatusColor(o.status)}`}>{o.status.replace('_', ' ')}</span></td>
+                          <td className="text-sm">{o.expected_return_date ? new Date(o.expected_return_date).toLocaleDateString() : '-'}</td>
+                          <td>
+                            <div className="flex items-center space-x-1">
+                              {canEdit && o.status === 'draft' && (
+                                <button onClick={() => handleConfirmOrder(o.id)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`confirm-jw-${o.id}`}><CheckCircle2 className="w-3 h-3 inline mr-1" />Confirm</button>
+                              )}
+                              {canEdit && ['confirmed', 'in_progress'].includes(o.status) && sentQty < totalQty && (
+                                <button onClick={() => openDCDialog(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
+                              )}
+                              {canEdit && o.status === 'in_progress' && sentQty > recvQty && (
+                                <button onClick={() => openReceiptDialog(o)} className="btn-secondary text-xs px-2 py-1" data-testid={`receive-${o.id}`}><ArrowLeft className="w-3 h-3 inline mr-1" />Receive</button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Challans Tab */}
+        <TabsContent value="challans" className="mt-4">
+          <div className="card-flat overflow-hidden">
+            {challans.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><FileText className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No delivery challans</p></div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full data-table" data-testid="challans-table">
+                  <thead><tr><th>DC #</th><th>Order #</th><th>Supplier</th><th>Items</th><th>Status</th><th>Date</th></tr></thead>
+                  <tbody>
+                    {challans.map(dc => (
+                      <tr key={dc.id}>
+                        <td className="mono font-medium">{dc.dc_number}</td>
+                        <td className="mono">{dc.order?.order_number || '-'}</td>
+                        <td>{dc.supplier?.name || '-'}</td>
+                        <td className="text-sm">{dc.lines.map(l => `${l.item?.part_number || '-'} (${l.quantity})`).join(', ')}</td>
+                        <td><span className={`status-badge ${getStatusColor(dc.status)}`}>{dc.status}</span></td>
+                        <td className="text-sm">{dc.created_at ? new Date(dc.created_at).toLocaleDateString() : '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Receipts Tab */}
+        <TabsContent value="receipts" className="mt-4">
+          <div className="card-flat overflow-hidden">
+            {receipts.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><Package className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No receipts</p></div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full data-table" data-testid="receipts-table">
+                  <thead><tr><th>Receipt #</th><th>Order #</th><th>Supplier</th><th>Items</th><th>Accepted</th><th>Rejected</th><th>Date</th></tr></thead>
+                  <tbody>
+                    {receipts.map(rec => (
+                      <tr key={rec.id}>
+                        <td className="mono font-medium">{rec.receipt_number}</td>
+                        <td className="mono">{rec.order?.order_number || '-'}</td>
+                        <td>{rec.supplier?.name || '-'}</td>
+                        <td className="text-sm">{rec.lines.map(l => `${l.item?.part_number || '-'} (${l.received_quantity})`).join(', ')}</td>
+                        <td className="mono text-[#03543F]">{rec.lines.reduce((s, l) => s + (l.accepted_quantity || 0), 0)}</td>
+                        <td className="mono text-[#9B1C1C]">{rec.lines.reduce((s, l) => s + (l.reject_qty || 0), 0)}</td>
+                        <td className="text-sm">{rec.created_at ? new Date(rec.created_at).toLocaleDateString() : '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* Create Order Dialog */}
+      <Dialog open={orderDialog} onOpenChange={setOrderDialog}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="font-[Chivo]">New Subcontract Order</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-3">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold mb-1">Supplier *</label>
+                <Select value={orderForm.supplier_id} onValueChange={v => setOrderForm({...orderForm, supplier_id: v})}>
+                  <SelectTrigger data-testid="jw-supplier-select"><SelectValue placeholder="Select" /></SelectTrigger>
+                  <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-1">Expected Return Date</label>
+                <input type="date" value={orderForm.expected_return_date} onChange={e => setOrderForm({...orderForm, expected_return_date: e.target.value})} className="input-field" data-testid="jw-return-date" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-1">Processing Charges</label>
+              <input type="number" min="0" value={orderForm.processing_charges} onChange={e => setOrderForm({...orderForm, processing_charges: parseFloat(e.target.value) || 0})} className="input-field mono w-40" data-testid="jw-charges" />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-semibold">Materials to Send</label>
+                <button onClick={addOrderLine} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1"><Plus className="w-3 h-3" />Add</button>
+              </div>
+              <div className="border rounded-sm overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs w-24">Qty</th><th className="text-right py-2 px-2 text-xs w-24">Rate</th><th className="w-8"></th></tr></thead>
+                  <tbody>
+                    {orderForm.lines.map((l, idx) => (
+                      <tr key={idx} className="border-t">
+                        <td className="py-1 px-2">
+                          <Select value={l.item_id} onValueChange={v => updateOrderLine(idx, 'item_id', v)}>
+                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select item" /></SelectTrigger>
+                            <SelectContent>{items.map(i => <SelectItem key={i.id} value={i.id}>{i.part_number} - {i.name}</SelectItem>)}</SelectContent>
+                          </Select>
+                        </td>
+                        <td className="py-1 px-2"><input type="number" min="1" value={l.quantity} onChange={e => updateOrderLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                        <td className="py-1 px-2"><input type="number" min="0" value={l.rate} onChange={e => updateOrderLine(idx, 'rate', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                        <td className="py-1 px-1"><button onClick={() => removeOrderLine(idx)} className="text-[#9B1C1C] p-1"><X className="w-3 h-3" /></button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div><label className="block text-sm font-semibold mb-1">Notes</label><textarea value={orderForm.notes} onChange={e => setOrderForm({...orderForm, notes: e.target.value})} className="input-field" rows={2} /></div>
+            <div className="flex justify-end space-x-3 pt-3 border-t"><button onClick={() => setOrderDialog(false)} className="btn-secondary">Cancel</button><button onClick={handleCreateOrder} className="btn-primary" data-testid="jw-save-order">Create Order</button></div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Send DC Dialog */}
+      <Dialog open={dcDialog} onOpenChange={setDcDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle className="font-[Chivo]">Send Materials (DC) - {dcOrder?.order_number}</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-3">
+            <div><label className="block text-sm font-semibold mb-1">From Warehouse</label>
+              <Select value={dcWarehouse} onValueChange={setDcWarehouse}>
+                <SelectTrigger><SelectValue placeholder="Select warehouse" /></SelectTrigger>
+                <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="border rounded-sm overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs">Send Qty</th></tr></thead>
+                <tbody>
+                  {dcLines.map((l, idx) => {
+                    const it = items.find(i => i.id === l.item_id);
+                    return (
+                      <tr key={idx} className="border-t">
+                        <td className="py-2 px-2"><span className="mono text-xs">{it?.part_number}</span> - {it?.name} <span className="text-[10px] text-[#6B7280]">(Stock: {it?.current_stock || 0})</span></td>
+                        <td className="py-2 px-2"><input type="number" min="0" max={it?.current_stock || 0} value={l.quantity} onChange={e => { const ls = [...dcLines]; ls[idx].quantity = Math.min(parseFloat(e.target.value) || 0, it?.current_stock || 0); setDcLines(ls); }} className="w-24 px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex justify-end space-x-3 pt-3 border-t"><button onClick={() => setDcDialog(false)} className="btn-secondary">Cancel</button><button onClick={handleCreateDC} className="btn-primary" data-testid="jw-send-dc">Send Materials</button></div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Receive Dialog */}
+      <Dialog open={recDialog} onOpenChange={setRecDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle className="font-[Chivo]">Receive Materials - {recOrder?.order_number}</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-3">
+            <div><label className="block text-sm font-semibold mb-1">To Warehouse</label>
+              <Select value={recWarehouse} onValueChange={setRecWarehouse}>
+                <SelectTrigger><SelectValue placeholder="Select warehouse" /></SelectTrigger>
+                <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="border rounded-sm overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs">Recv Qty</th><th className="text-right py-2 px-2 text-xs">Reject</th><th className="text-center py-2 px-2 text-xs">QC</th></tr></thead>
+                <tbody>
+                  {recLines.map((l, idx) => {
+                    const it = items.find(i => i.id === l.item_id);
+                    return (
+                      <tr key={idx} className="border-t">
+                        <td className="py-2 px-2"><span className="mono text-xs">{it?.part_number}</span> - {it?.name}</td>
+                        <td className="py-2 px-2"><input type="number" min="0" value={l.received_quantity} onChange={e => { const ls = [...recLines]; ls[idx].received_quantity = parseFloat(e.target.value) || 0; setRecLines(ls); }} className="w-20 px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                        <td className="py-2 px-2"><input type="number" min="0" max={l.received_quantity} value={l.reject_qty} onChange={e => { const ls = [...recLines]; ls[idx].reject_qty = Math.min(parseFloat(e.target.value) || 0, l.received_quantity); setRecLines(ls); }} className="w-16 px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                        <td className="py-2 px-2 text-center">
+                          <select value={l.quality_result} onChange={e => { const ls = [...recLines]; ls[idx].quality_result = e.target.value; setRecLines(ls); }} className="px-1 py-1 border rounded-sm text-xs">
+                            <option value="accept">Accept</option><option value="reject">Reject</option><option value="rework">Rework</option>
+                          </select>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex justify-end space-x-3 pt-3 border-t"><button onClick={() => setRecDialog(false)} className="btn-secondary">Cancel</button><button onClick={handleCreateReceipt} className="btn-primary" data-testid="jw-receive">Receive Materials</button></div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

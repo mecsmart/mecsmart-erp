@@ -50,6 +50,8 @@ work_orders_router = APIRouter(prefix="/work-orders")
 settings_router = APIRouter(prefix="/settings")
 customers_router = APIRouter(prefix="/customers")
 grn_router = APIRouter(prefix="/grn")
+purchase_invoices_router = APIRouter(prefix="/purchase-invoices")
+jobwork_router = APIRouter(prefix="/job-work")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -317,6 +319,70 @@ class POChargeTypeUpdate(BaseModel):
     name: Optional[str] = None
     hsn_code: Optional[str] = None
     gst_rate: Optional[float] = None
+
+# ===== Purchase Invoice Models =====
+class PurchaseInvoiceLineItem(BaseModel):
+    item_id: str
+    quantity: float
+    unit_price: float
+    hsn_code: Optional[str] = ""
+    gst_rate: Optional[float] = 18.0
+
+class PurchaseInvoiceCreate(BaseModel):
+    supplier_id: str
+    po_id: Optional[str] = ""
+    grn_id: Optional[str] = ""
+    invoice_no: str
+    invoice_date: datetime
+    due_date: Optional[datetime] = None
+    lines: List[PurchaseInvoiceLineItem]
+    notes: Optional[str] = ""
+
+class PurchaseInvoiceUpdate(BaseModel):
+    invoice_no: Optional[str] = None
+    invoice_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    lines: Optional[List[PurchaseInvoiceLineItem]] = None
+
+# ===== Job Work / Subcontracting Models =====
+class JobWorkLineItem(BaseModel):
+    item_id: str
+    quantity: float
+    rate: Optional[float] = 0
+
+class SubcontractOrderCreate(BaseModel):
+    supplier_id: str
+    lines: List[JobWorkLineItem]
+    expected_return_date: Optional[datetime] = None
+    processing_charges: Optional[float] = 0
+    notes: Optional[str] = ""
+
+class SubcontractOrderUpdate(BaseModel):
+    expected_return_date: Optional[datetime] = None
+    processing_charges: Optional[float] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+class DCCreate(BaseModel):
+    subcontract_order_id: str
+    lines: List[JobWorkLineItem]
+    warehouse_id: Optional[str] = ""
+    notes: Optional[str] = ""
+
+class SubcontractReceiptLineItem(BaseModel):
+    item_id: str
+    received_quantity: float
+    quality_result: Optional[str] = "accept"
+    reject_qty: Optional[float] = 0
+
+class SubcontractReceiptCreate(BaseModel):
+    subcontract_order_id: str
+    dc_id: Optional[str] = ""
+    lines: List[SubcontractReceiptLineItem]
+    warehouse_id: Optional[str] = ""
+    notes: Optional[str] = ""
 
 # ================== STORES/WAREHOUSE MODELS ==================
 
@@ -4048,6 +4114,412 @@ async def startup():
 async def shutdown_db_client():
     client.close()
 
+# ================== PURCHASE INVOICE ROUTES ==================
+
+@purchase_invoices_router.get("")
+async def get_purchase_invoices(request: Request, status: str = None):
+    user = await get_current_user(request)
+    query = {}
+    if status:
+        query["status"] = status
+    invoices = await db.purchase_invoices.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for inv in invoices:
+        supplier = await db.suppliers.find_one({"id": inv.get("supplier_id")}, {"_id": 0})
+        inv["supplier"] = supplier
+        if inv.get("po_id"):
+            po = await db.purchase_orders.find_one({"id": inv["po_id"]}, {"_id": 0})
+            inv["po"] = po
+        for line in inv.get("lines", []):
+            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
+            line["item"] = item
+    return invoices
+
+@purchase_invoices_router.post("", status_code=201)
+async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    count = await db.purchase_invoices.count_documents({})
+    inv_number = f"PI-{str(count + 1).zfill(6)}"
+    
+    supplier = await db.suppliers.find_one({"id": data.supplier_id})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
+    is_inter_state = supplier.get("state_code", "") != (company or {}).get("state_code", "")
+    
+    lines = []
+    subtotal = 0
+    total_cgst = 0
+    total_sgst = 0
+    total_igst = 0
+    
+    for line in data.lines:
+        item = await db.items.find_one({"id": line.item_id}, {"_id": 0})
+        if not item:
+            continue
+        line_total = line.quantity * line.unit_price
+        gst_rate = line.gst_rate if line.gst_rate is not None else item.get("gst_rate", 18)
+        gst_amount = line_total * gst_rate / 100
+        
+        if is_inter_state:
+            total_igst += gst_amount
+        else:
+            total_cgst += gst_amount / 2
+            total_sgst += gst_amount / 2
+        
+        subtotal += line_total
+        lines.append({
+            "item_id": line.item_id,
+            "quantity": line.quantity,
+            "unit_price": line.unit_price,
+            "hsn_code": line.hsn_code or item.get("hsn_code", ""),
+            "gst_rate": gst_rate,
+            "line_total": line_total,
+            "gst_amount": gst_amount
+        })
+    
+    total_tax = total_cgst + total_sgst + total_igst
+    total_amount = subtotal + total_tax
+    
+    invoice_doc = {
+        "id": str(uuid.uuid4()),
+        "invoice_number": inv_number,
+        "supplier_id": data.supplier_id,
+        "po_id": data.po_id or "",
+        "grn_id": data.grn_id or "",
+        "invoice_no": data.invoice_no,
+        "invoice_date": data.invoice_date,
+        "due_date": data.due_date,
+        "lines": lines,
+        "subtotal": round(subtotal, 2),
+        "total_cgst": round(total_cgst, 2),
+        "total_sgst": round(total_sgst, 2),
+        "total_igst": round(total_igst, 2),
+        "total_tax": round(total_tax, 2),
+        "total_amount": round(total_amount, 2),
+        "is_inter_state": is_inter_state,
+        "status": "draft",
+        "notes": data.notes or "",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    
+    await db.purchase_invoices.insert_one(invoice_doc)
+    del invoice_doc["_id"]
+    return invoice_doc
+
+@purchase_invoices_router.put("/{invoice_id}")
+async def update_purchase_invoice(invoice_id: str, data: PurchaseInvoiceUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    invoice = await db.purchase_invoices.find_one({"id": invoice_id})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    if update_data:
+        update_data["updated_at"] = datetime.now(timezone.utc)
+        await db.purchase_invoices.update_one({"id": invoice_id}, {"$set": update_data})
+    
+    return await db.purchase_invoices.find_one({"id": invoice_id}, {"_id": 0})
+
+@purchase_invoices_router.post("/{invoice_id}/approve")
+async def approve_purchase_invoice(invoice_id: str, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin"]:
+        raise HTTPException(status_code=403, detail="Only admin can approve invoices")
+    invoice = await db.purchase_invoices.find_one({"id": invoice_id})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.get("status") != "draft":
+        raise HTTPException(status_code=400, detail="Only draft invoices can be approved")
+    await db.purchase_invoices.update_one({"id": invoice_id}, {"$set": {"status": "approved", "approved_at": datetime.now(timezone.utc), "approved_by": user["id"]}})
+    return await db.purchase_invoices.find_one({"id": invoice_id}, {"_id": 0})
+
+@purchase_invoices_router.post("/{invoice_id}/mark-paid")
+async def mark_invoice_paid(invoice_id: str, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin"]:
+        raise HTTPException(status_code=403, detail="Only admin can mark invoices as paid")
+    invoice = await db.purchase_invoices.find_one({"id": invoice_id})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.get("status") != "approved":
+        raise HTTPException(status_code=400, detail="Only approved invoices can be marked as paid")
+    await db.purchase_invoices.update_one({"id": invoice_id}, {"$set": {"status": "paid", "paid_at": datetime.now(timezone.utc), "paid_by": user["id"]}})
+    return await db.purchase_invoices.find_one({"id": invoice_id}, {"_id": 0})
+
+# ================== JOB WORK / SUBCONTRACTING ROUTES ==================
+
+@jobwork_router.get("/orders")
+async def get_subcontract_orders(request: Request, status: str = None):
+    user = await get_current_user(request)
+    query = {}
+    if status:
+        query["status"] = status
+    orders = await db.subcontract_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for order in orders:
+        supplier = await db.suppliers.find_one({"id": order.get("supplier_id")}, {"_id": 0})
+        order["supplier"] = supplier
+        for line in order.get("lines", []):
+            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
+            line["item"] = item
+    return orders
+
+@jobwork_router.post("/orders", status_code=201)
+async def create_subcontract_order(data: SubcontractOrderCreate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    supplier = await db.suppliers.find_one({"id": data.supplier_id})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    
+    count = await db.subcontract_orders.count_documents({})
+    order_number = f"JW-{str(count + 1).zfill(6)}"
+    
+    lines = []
+    for line in data.lines:
+        item = await db.items.find_one({"id": line.item_id}, {"_id": 0})
+        if not item:
+            continue
+        lines.append({
+            "item_id": line.item_id,
+            "quantity": line.quantity,
+            "sent_quantity": 0,
+            "received_quantity": 0,
+            "rate": line.rate or 0
+        })
+    
+    order_doc = {
+        "id": str(uuid.uuid4()),
+        "order_number": order_number,
+        "supplier_id": data.supplier_id,
+        "lines": lines,
+        "expected_return_date": data.expected_return_date,
+        "processing_charges": data.processing_charges or 0,
+        "status": "draft",
+        "notes": data.notes or "",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    
+    await db.subcontract_orders.insert_one(order_doc)
+    del order_doc["_id"]
+    return order_doc
+
+@jobwork_router.put("/orders/{order_id}")
+async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    order = await db.subcontract_orders.find_one({"id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    if update_data:
+        update_data["updated_at"] = datetime.now(timezone.utc)
+        await db.subcontract_orders.update_one({"id": order_id}, {"$set": update_data})
+    return await db.subcontract_orders.find_one({"id": order_id}, {"_id": 0})
+
+@jobwork_router.post("/orders/{order_id}/confirm")
+async def confirm_subcontract_order(order_id: str, request: Request):
+    user = await get_current_user(request)
+    order = await db.subcontract_orders.find_one({"id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("status") != "draft":
+        raise HTTPException(status_code=400, detail="Only draft orders can be confirmed")
+    await db.subcontract_orders.update_one({"id": order_id}, {"$set": {"status": "confirmed", "confirmed_at": datetime.now(timezone.utc)}})
+    return await db.subcontract_orders.find_one({"id": order_id}, {"_id": 0})
+
+@jobwork_router.get("/challans")
+async def get_delivery_challans(request: Request):
+    user = await get_current_user(request)
+    challans = await db.delivery_challans.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for dc in challans:
+        order = await db.subcontract_orders.find_one({"id": dc.get("subcontract_order_id")}, {"_id": 0})
+        dc["order"] = order
+        supplier = await db.suppliers.find_one({"id": order.get("supplier_id") if order else ""}, {"_id": 0})
+        dc["supplier"] = supplier
+        for line in dc.get("lines", []):
+            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
+            line["item"] = item
+    return challans
+
+@jobwork_router.post("/challans", status_code=201)
+async def create_delivery_challan(data: DCCreate, request: Request):
+    """Create DC - Send materials to subcontractor. Deducts stock."""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    order = await db.subcontract_orders.find_one({"id": data.subcontract_order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Subcontract order not found")
+    if order.get("status") not in ["confirmed", "in_progress"]:
+        raise HTTPException(status_code=400, detail="Order must be confirmed before sending materials")
+    
+    count = await db.delivery_challans.count_documents({})
+    dc_number = f"DC-{str(count + 1).zfill(6)}"
+    
+    dc_lines = []
+    for line in data.lines:
+        item = await db.items.find_one({"id": line.item_id})
+        if not item:
+            continue
+        current_stock = item.get("current_stock", 0)
+        if current_stock < line.quantity:
+            raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.get('part_number')}: need {line.quantity}, have {current_stock}")
+        
+        # Deduct stock
+        new_stock = current_stock - line.quantity
+        await db.items.update_one({"id": line.item_id}, {"$set": {"current_stock": new_stock}})
+        
+        # Create inventory transaction
+        tx = {
+            "id": str(uuid.uuid4()),
+            "item_id": line.item_id,
+            "transaction_type": "issue",
+            "quantity": line.quantity,
+            "reference_type": "job_work_dc",
+            "reference_id": dc_number,
+            "previous_stock": current_stock,
+            "new_stock": new_stock,
+            "notes": f"Sent to subcontractor - {order.get('order_number')}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"]
+        }
+        await db.inventory_transactions.insert_one(tx)
+        
+        dc_lines.append({
+            "item_id": line.item_id,
+            "quantity": line.quantity,
+            "rate": line.rate or 0
+        })
+        
+        # Update sent quantity in order
+        for ol in order.get("lines", []):
+            if ol["item_id"] == line.item_id:
+                ol["sent_quantity"] = ol.get("sent_quantity", 0) + line.quantity
+    
+    await db.subcontract_orders.update_one({"id": data.subcontract_order_id}, {"$set": {"lines": order["lines"], "status": "in_progress"}})
+    
+    dc_doc = {
+        "id": str(uuid.uuid4()),
+        "dc_number": dc_number,
+        "subcontract_order_id": data.subcontract_order_id,
+        "lines": dc_lines,
+        "warehouse_id": data.warehouse_id or "",
+        "status": "sent",
+        "notes": data.notes or "",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    
+    await db.delivery_challans.insert_one(dc_doc)
+    del dc_doc["_id"]
+    return dc_doc
+
+@jobwork_router.get("/receipts")
+async def get_subcontract_receipts(request: Request):
+    user = await get_current_user(request)
+    receipts = await db.subcontract_receipts.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    for rec in receipts:
+        order = await db.subcontract_orders.find_one({"id": rec.get("subcontract_order_id")}, {"_id": 0})
+        rec["order"] = order
+        supplier = await db.suppliers.find_one({"id": order.get("supplier_id") if order else ""}, {"_id": 0})
+        rec["supplier"] = supplier
+        for line in rec.get("lines", []):
+            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
+            line["item"] = item
+    return receipts
+
+@jobwork_router.post("/receipts", status_code=201)
+async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Request):
+    """Receive materials back from subcontractor. Adds stock."""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    order = await db.subcontract_orders.find_one({"id": data.subcontract_order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Subcontract order not found")
+    
+    count = await db.subcontract_receipts.count_documents({})
+    receipt_number = f"SR-{str(count + 1).zfill(6)}"
+    
+    rec_lines = []
+    for line in data.lines:
+        item = await db.items.find_one({"id": line.item_id})
+        if not item:
+            continue
+        
+        accepted_qty = line.received_quantity - (line.reject_qty or 0)
+        
+        # Add stock
+        current_stock = item.get("current_stock", 0)
+        new_stock = current_stock + accepted_qty
+        await db.items.update_one({"id": line.item_id}, {"$set": {"current_stock": new_stock}})
+        
+        tx = {
+            "id": str(uuid.uuid4()),
+            "item_id": line.item_id,
+            "transaction_type": "receive",
+            "quantity": accepted_qty,
+            "reference_type": "job_work_receipt",
+            "reference_id": receipt_number,
+            "previous_stock": current_stock,
+            "new_stock": new_stock,
+            "notes": f"Received from subcontractor - {order.get('order_number')}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"]
+        }
+        await db.inventory_transactions.insert_one(tx)
+        
+        rec_lines.append({
+            "item_id": line.item_id,
+            "received_quantity": line.received_quantity,
+            "accepted_quantity": accepted_qty,
+            "quality_result": line.quality_result or "accept",
+            "reject_qty": line.reject_qty or 0
+        })
+        
+        # Update received quantity in order
+        for ol in order.get("lines", []):
+            if ol["item_id"] == line.item_id:
+                ol["received_quantity"] = ol.get("received_quantity", 0) + accepted_qty
+    
+    # Check if all materials received
+    all_received = all(ol.get("received_quantity", 0) >= ol.get("sent_quantity", 0) for ol in order.get("lines", []))
+    new_status = "completed" if all_received else "in_progress"
+    
+    await db.subcontract_orders.update_one({"id": data.subcontract_order_id}, {"$set": {"lines": order["lines"], "status": new_status}})
+    
+    rec_doc = {
+        "id": str(uuid.uuid4()),
+        "receipt_number": receipt_number,
+        "subcontract_order_id": data.subcontract_order_id,
+        "dc_id": data.dc_id or "",
+        "lines": rec_lines,
+        "warehouse_id": data.warehouse_id or "",
+        "status": "received",
+        "notes": data.notes or "",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    
+    await db.subcontract_receipts.insert_one(rec_doc)
+    del rec_doc["_id"]
+    return rec_doc
+
+
 # Include routers
 api_router.include_router(auth_router)
 api_router.include_router(items_router)
@@ -4067,6 +4539,8 @@ api_router.include_router(work_orders_router)
 api_router.include_router(settings_router)
 api_router.include_router(customers_router)
 api_router.include_router(grn_router)
+api_router.include_router(purchase_invoices_router)
+api_router.include_router(jobwork_router)
 
 @api_router.get("/health")
 async def health_check():
