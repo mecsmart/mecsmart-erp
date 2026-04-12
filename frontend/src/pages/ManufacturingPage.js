@@ -807,151 +807,80 @@ export default function ManufacturingPage() {
               <span>{woStatusFilter ? `No ${woStatusFilter.replace('_',' ')} manufacturing orders` : 'No manufacturing orders found'}</span>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full data-table" data-testid="work-orders-table">
-                  <thead>
-                    <tr>
-                      <th>MO Number</th>
-                      <th>Product</th>
-                      <th>Routing</th>
-                      <th className="text-right">Qty</th>
-                      <th>Progress</th>
-                      <th>Materials</th>
-                      <th>Status</th>
-                      <th>Scheduled</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredWorkOrders.map((wo) => {
-                      const progress = getWOProgress(wo);
-                      const progressColor = getProgressColor(progress);
-                      const ops = wo.operations_status || [];
-                      const completedOps = ops.filter(op => op.status === 'completed').length;
-                      return (
-                      <tr key={wo.id} className={wo.parent_wo_id ? 'bg-[#F9FAFB]' : ''} data-testid={`wo-row-${wo.id}`}>
-                        <td className="mono font-medium">
-                          {wo.parent_wo_id && <span className="text-[#9CA3AF] mr-1">&nbsp;&nbsp;└</span>}
-                          {wo.wo_number}
-                        </td>
-                        <td>
-                          <span className="mono text-sm">{wo.item?.part_number || '-'}</span>
-                          <p className="text-xs text-[#4B5563]">{wo.item?.name || '-'}</p>
-                        </td>
-                        <td className="text-sm">{wo.routing?.name || '-'}</td>
-                        <td className="text-right mono">
-                          {wo.quantity_completed || 0}/{wo.quantity}
-                        </td>
-                        <td style={{minWidth:'120px'}} data-testid={`wo-progress-${wo.id}`}>
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
-                              <div
-                                className="h-full rounded-full transition-all duration-500"
-                                style={{ width: `${progress}%`, backgroundColor: progressColor }}
-                              />
+              <div className="p-4 space-y-3">
+                {(() => {
+                  const parentMOs = filteredWorkOrders.filter(wo => !wo.parent_wo_id);
+                  const childOnlyMOs = filteredWorkOrders.filter(wo => wo.parent_wo_id && !parentMOs.some(p => p.id === wo.parent_wo_id));
+                  const getChildMOs = (pid) => workOrders.filter(wo => wo.parent_wo_id === pid);
+                  const getCatLabel = (wo) => { const cat = wo.item?.category || items.find(i => i.id === wo.item_id)?.category; return cat === 'finished_good' ? 'FG' : cat === 'sub_assembly' ? 'SA' : 'PART'; };
+                  const getCatColor = (wo) => { const cat = wo.item?.category || items.find(i => i.id === wo.item_id)?.category; return cat === 'finished_good' ? '#1D3557' : cat === 'sub_assembly' ? '#1E429F' : '#723B13'; };
+
+                  const renderMORow = (wo, depth = 0) => {
+                    const progress = getWOProgress(wo);
+                    const progressColor = getProgressColor(progress);
+                    const ops = wo.operations_status || [];
+                    const completedOps = ops.filter(op => op.status === 'completed').length;
+                    const children = getChildMOs(wo.id);
+                    return (
+                      <React.Fragment key={wo.id}>
+                        <tr className={depth > 0 ? 'bg-[#F9FAFB]' : ''} data-testid={`wo-row-${wo.id}`}>
+                          <td style={{ paddingLeft: `${12 + depth * 24}px` }}>
+                            {depth > 0 && <span className="text-[#1D3557] mr-1">└→</span>}
+                            <span className="mono font-medium">{wo.wo_number}</span>
+                            <span className="ml-1 text-[10px] px-1 py-0.5 rounded font-semibold text-white" style={{backgroundColor: getCatColor(wo)}}>{getCatLabel(wo)}</span>
+                          </td>
+                          <td><span className="mono text-sm">{wo.item?.part_number || '-'}</span><p className="text-xs text-[#4B5563]">{wo.item?.name || '-'}</p></td>
+                          <td className="text-sm">{wo.routing?.name || '-'}</td>
+                          <td className="text-right mono">{wo.quantity_completed || 0}/{wo.quantity}</td>
+                          <td style={{minWidth:'110px'}}>
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-2 bg-[#E5E7EB] rounded-full overflow-hidden"><div className="h-full rounded-full transition-all" style={{width:`${progress}%`, backgroundColor: progressColor}} /></div>
+                              <span className="text-xs mono w-7 text-right" style={{color:progressColor}}>{progress}%</span>
                             </div>
-                            <span className="text-xs mono font-medium w-8 text-right" style={{ color: progressColor }}>{progress}%</span>
-                          </div>
-                          {ops.length > 0 && (
-                            <p className="text-[10px] text-[#6B7280] mt-0.5">{completedOps}/{ops.length} ops done</p>
-                          )}
-                        </td>
-                        <td>
-                          {wo.materials_consumed ? (
-                            <div>
-                              <span className="status-badge bg-[#DEF7EC] text-[#03543F] mb-1">Consumed</span>
-                              {wo.consumed_materials?.length > 0 && (
-                                <div className="mt-1 space-y-0.5">
-                                  {wo.consumed_materials.map((m, mi) => {
-                                    const matItem = items.find(i => i.id === m.item_id);
-                                    return (
-                                      <div key={mi} className="text-xs text-[#4B5563]">
-                                        <span className="mono font-medium">{m.item || matItem?.part_number || '-'}</span>
-                                        <span className="text-[#6B7280] ml-1">{m.name || matItem?.name || ''}</span>
-                                        <span className="mono ml-1">{m.quantity} {m.uom || 'pcs'}</span>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
+                            {ops.length > 0 && <p className="text-[10px] text-[#6B7280]">{completedOps}/{ops.length} ops</p>}
+                          </td>
+                          <td>
+                            <span className={`status-badge ${getStatusColor(wo.status)}`}>{wo.status?.replace('_',' ')}</span>
+                            {wo.is_subcontract && <span className="ml-1 text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">SC</span>}
+                          </td>
+                          <td>
+                            <div className="flex items-center flex-wrap gap-1">
+                              {canEdit && wo.status === 'pending' && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')} className="btn-secondary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Start</button>}
+                              {canEdit && wo.status === 'in_progress' && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'completed')} className="btn-secondary text-xs px-2 py-1" data-testid={`complete-wo-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />Complete</button>}
+                              {['in_progress','pending'].includes(wo.status) && ops.length > 0 && <button onClick={() => openJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`jobcard-wo-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Job Card</button>}
+                              {canEdit && !wo.is_subcontract && wo.status === 'in_progress' && <button onClick={() => handleMarkSubcontract(wo)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`subcontract-wo-${wo.id}`}><Truck className="w-3 h-3 inline mr-0.5" />SC</button>}
+                              {wo.status === 'completed' && <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-wo-${wo.id}`}><Printer className="w-3 h-3 inline mr-0.5" />Print</button>}
                             </div>
-                          ) : (
-                            <span className="status-badge bg-[#F3F4F6] text-[#4B5563]">Pending</span>
-                          )}
-                        </td>
-                        <td>
-                          <div className="flex items-center space-x-1">
-                            {getStatusIcon(wo.status)}
-                            <span className={`status-badge ${getStatusColor(wo.status)}`}>
-                              {wo.status?.replace('_', ' ')}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="text-sm text-[#4B5563]">
-                          {wo.scheduled_start ? new Date(wo.scheduled_start).toLocaleDateString() : '-'}
-                        </td>
-                        <td>
-                          {canEdit && wo.status === 'pending' && (
-                            <button
-                              onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')}
-                              className="btn-secondary text-xs flex items-center space-x-1"
-                              data-testid={`start-wo-${wo.id}`}
-                            >
-                              <Play className="w-3 h-3" />
-                              <span>Start</span>
-                            </button>
-                          )}
-                          {canEdit && wo.status === 'in_progress' && (
-                            <button
-                              onClick={() => handleUpdateWorkOrderStatus(wo.id, 'completed')}
-                              className="btn-secondary text-xs flex items-center space-x-1"
-                              data-testid={`complete-wo-${wo.id}`}
-                            >
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>Complete</span>
-                            </button>
-                          )}
-                          {(wo.status === 'in_progress' || wo.status === 'pending') && wo.operations_status?.length > 0 && (
-                            <button
-                              onClick={() => openJobCard(wo)}
-                              className="btn-secondary text-xs flex items-center space-x-1 ml-1"
-                              data-testid={`jobcard-wo-${wo.id}`}
-                            >
-                              <ClipboardList className="w-3 h-3" />
-                              <span>Job Card</span>
-                            </button>
-                          )}
-                          {canEdit && !wo.is_subcontract && ['pending', 'in_progress'].includes(wo.status) && (
-                            <button
-                              onClick={() => handleMarkSubcontract(wo)}
-                              className="btn-secondary text-xs flex items-center space-x-1 ml-1 text-[#723B13] border-[#723B13]"
-                              data-testid={`subcontract-wo-${wo.id}`}
-                            >
-                              <Truck className="w-3 h-3" />
-                              <span>Subcontract</span>
-                            </button>
-                          )}
-                          {wo.is_subcontract && (
-                            <span className="text-[10px] bg-[#FDF6B2] text-[#723B13] px-1.5 py-0.5 rounded ml-1">Sub-Contract</span>
-                          )}
-                          {wo.status === 'completed' && (
-                            <div className="flex items-center space-x-1">
-                              <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs flex items-center space-x-1" title="Print Manufacturing Order" data-testid={`print-wo-${wo.id}`}>
-                                <Printer className="w-3 h-3" /><span>Print MO</span>
-                              </button>
-                              {wo.operations_status?.length > 0 && (
-                                <button onClick={() => printJobCard(wo)} className="btn-secondary text-xs flex items-center space-x-1" title="Print Job Card" data-testid={`print-jobcard-${wo.id}`}>
-                                  <Printer className="w-3 h-3" /><span>Job Card</span>
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                          </td>
+                        </tr>
+                        {children.map(c => renderMORow(c, depth + 1))}
+                      </React.Fragment>
+                    );
+                  };
+
+                  return [...parentMOs, ...childOnlyMOs].map(parentMO => {
+                    const parentItem = parentMO.item || items.find(i => i.id === parentMO.item_id);
+                    const children = getChildMOs(parentMO.id);
+                    const catColor = getCatColor(parentMO);
+                    return (
+                      <details key={parentMO.id} open className="border rounded-sm overflow-hidden">
+                        <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none" style={{borderLeft: `4px solid ${catColor}`}}>
+                          <ChevronRight className="w-4 h-4 text-[#4B5563]" />
+                          <span className="mono font-bold text-sm" style={{color: catColor}}>{parentMO.wo_number}</span>
+                          <span className="text-sm font-medium text-[#374151]">{parentItem?.part_number} - {parentItem?.name}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded text-white font-semibold" style={{backgroundColor: catColor}}>{getCatLabel(parentMO)}</span>
+                          <span className={`text-[10px] px-1 rounded ${parentMO.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : parentMO.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : 'bg-[#FDF6B2] text-[#723B13]'}`}>{parentMO.status?.replace('_',' ')}</span>
+                          {parentMO.is_subcontract && <span className="text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">Sub-Contract</span>}
+                          <span className="text-xs text-[#6B7280] ml-auto">{1 + children.length} MO(s)</span>
+                        </summary>
+                        <div className="overflow-x-auto">
+                          <table className="w-full data-table"><thead><tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
+                          <tbody>{renderMORow(parentMO, 0)}</tbody></table>
+                        </div>
+                      </details>
+                    );
+                  });
+                })()}
               </div>
             )}
           </div>

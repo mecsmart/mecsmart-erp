@@ -68,17 +68,14 @@ export default function JobWorkPage() {
   const handleCreateOrder = async () => {
     if (!orderForm.supplier_id || orderForm.lines.length === 0) { alert('Select supplier and add items'); return; }
     try {
+      const payload = {
+        ...orderForm,
+        expected_return_date: orderForm.expected_return_date ? new Date(orderForm.expected_return_date).toISOString() : null,
+      };
       if (editingOrder) {
-        await api.put(`/api/job-work/orders/${editingOrder.id}`, {
-          expected_return_date: orderForm.expected_return_date ? new Date(orderForm.expected_return_date).toISOString() : null,
-          processing_charges: orderForm.processing_charges,
-          notes: orderForm.notes,
-        });
+        await api.put(`/api/job-work/orders/${editingOrder.id}`, payload);
       } else {
-        await api.post('/api/job-work/orders', {
-          ...orderForm,
-          expected_return_date: orderForm.expected_return_date ? new Date(orderForm.expected_return_date).toISOString() : null,
-        });
+        await api.post('/api/job-work/orders', payload);
       }
       setOrderDialog(false);
       setEditingOrder(null);
@@ -292,14 +289,20 @@ export default function JobWorkPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full data-table" data-testid="challans-table">
-                  <thead><tr><th>DC #</th><th>Order #</th><th>Supplier</th><th>Items</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+                  <thead><tr><th>DC #</th><th>Order #</th><th>Supplier</th><th>Items</th><th className="text-right">RM Price</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
                   <tbody>
                     {challans.map(dc => (
                       <tr key={dc.id} data-testid={`dc-row-${dc.id}`}>
                         <td className="mono font-medium">{dc.dc_number}</td>
                         <td className="mono">{dc.order?.order_number || '-'}</td>
                         <td>{dc.supplier?.name || '-'}</td>
-                        <td className="text-sm">{dc.lines.map(l => `${l.item?.part_number || '-'} (${l.quantity})`).join(', ')}</td>
+                        <td className="text-sm">
+                          {dc.lines.map((l, li) => {
+                            const it = l.item || items.find(i => i.id === l.item_id);
+                            return <div key={li}><span className="mono">{it?.part_number || '-'}</span> <span className="text-[#4B5563]">{it?.name || ''}</span> <span className="mono text-[#6B7280]">({l.quantity})</span></div>;
+                          })}
+                        </td>
+                        <td className="text-right mono">{formatCurrency(dc.lines.reduce((s, l) => { const it = l.item || items.find(i => i.id === l.item_id); return s + (l.quantity * (it?.unit_cost || l.rate || 0)); }, 0))}</td>
                         <td><span className={`status-badge ${getStatusColor(dc.status)}`}>{dc.status}</span></td>
                         <td className="text-sm">{dc.created_at ? new Date(dc.created_at).toLocaleDateString() : '-'}</td>
                         <td>

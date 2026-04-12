@@ -365,6 +365,7 @@ class SubcontractOrderUpdate(BaseModel):
     processing_charges: Optional[float] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+    lines: Optional[List[JobWorkLineItem]] = None
 
 class DCCreate(BaseModel):
     subcontract_order_id: str
@@ -3085,6 +3086,17 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
     
     # If completing the work order, update finished goods stock
     if update_data.get("status") == "completed" and wo.get("status") == "in_progress":
+        # Block completion if subcontracted and materials not received
+        if wo.get("is_subcontract"):
+            sc_order = await db.subcontract_orders.find_one({"reference_wo_id": wo_id})
+            if sc_order and sc_order.get("status") != "completed":
+                raise HTTPException(status_code=400, detail="Cannot complete: Subcontracted materials have not been fully received. Please receive materials from subcontractor first.")
+        
+        # Block completion if any operation is outsourced (job work) and not received
+        for op in wo.get("operations_status", []):
+            if op.get("is_job_work") and op.get("status") != "completed":
+                raise HTTPException(status_code=400, detail=f"Cannot complete: Job work operation '{op.get('operation_name')}' is outsourced and not yet completed. Receive materials from vendor first.")
+        
         routing = await db.routings.find_one({"id": wo.get("routing_id")})
         if routing:
             item_id = routing.get("item_id")
@@ -4450,10 +4462,23 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
     order = await db.subcontract_orders.find_one({"id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    
+    update_data = {}
+    if data.expected_return_date is not None:
+        update_data["expected_return_date"] = data.expected_return_date
+    if data.processing_charges is not None:
+        update_data["processing_charges"] = data.processing_charges
+    if data.notes is not None:
+        update_data["notes"] = data.notes
+    if data.status is not None:
+        update_data["status"] = data.status
+    if data.lines is not None:
+        update_data["lines"] = [{"item_id": l.item_id, "quantity": l.quantity, "sent_quantity": 0, "received_quantity": 0, "rate": l.rate or 0} for l in data.lines]
+    
     if update_data:
         update_data["updated_at"] = datetime.now(timezone.utc)
         await db.subcontract_orders.update_one({"id": order_id}, {"$set": update_data})
+    
     return await db.subcontract_orders.find_one({"id": order_id}, {"_id": 0})
 
 @jobwork_router.post("/orders/{order_id}/confirm")
