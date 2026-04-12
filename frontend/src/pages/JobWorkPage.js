@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
-import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, FileText } from 'lucide-react';
+import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, FileText, Edit2, Printer } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -116,6 +116,59 @@ export default function JobWorkPage() {
     } catch (e) { alert(e.response?.data?.detail || 'Failed to create receipt'); }
   };
 
+  const printDC = (dc) => {
+    const supplier = dc.supplier || {};
+    const companyAddr = [supplier.address, supplier.city, supplier.state].filter(Boolean).join(', ') + (supplier.pin_code ? ` - ${supplier.pin_code}` : '');
+    const html = `<!DOCTYPE html><html><head><title>Delivery Challan - ${dc.dc_number}</title>
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { font-family:'Segoe UI',Arial,sans-serif; font-size:11px; color:#111; padding:20px; }
+      .header { text-align:center; border-bottom:2px solid #1D3557; padding-bottom:10px; margin-bottom:15px; }
+      .header h1 { font-size:16px; color:#1D3557; }
+      .header p { font-size:10px; color:#555; }
+      .title { font-size:14px; font-weight:bold; color:#1D3557; margin:10px 0 5px; text-transform:uppercase; }
+      .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:15px; }
+      .info-box { border:1px solid #ddd; padding:6px 8px; }
+      .info-box label { font-size:9px; color:#888; text-transform:uppercase; display:block; }
+      .info-box span { font-weight:600; font-size:11px; }
+      table { width:100%; border-collapse:collapse; margin-bottom:15px; }
+      th { background:#1D3557; color:white; padding:5px 8px; text-align:left; font-size:10px; text-transform:uppercase; }
+      td { padding:5px 8px; border-bottom:1px solid #ddd; font-size:11px; }
+      .mono { font-family:'Courier New',monospace; }
+      .text-right { text-align:right; }
+      .footer { margin-top:30px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; font-size:10px; }
+      .sign-box { border-top:1px solid #333; padding-top:4px; text-align:center; }
+      @media print { body { padding:10px; } }
+    </style></head><body>
+    <div class="header"><h1>DELIVERY CHALLAN</h1><p>${dc.dc_number}</p></div>
+    <div class="title">${dc.dc_number}</div>
+    <div class="info-grid">
+      <div class="info-box"><label>Subcontractor</label><span>${supplier.name || '-'}</span>${companyAddr ? `<br/><span style="font-weight:normal;font-size:10px">${companyAddr}</span>` : ''}</div>
+      <div class="info-box"><label>JW Order</label><span class="mono">${dc.order?.order_number || '-'}</span></div>
+      <div class="info-box"><label>Date</label><span>${dc.created_at ? new Date(dc.created_at).toLocaleDateString() : '-'}</span></div>
+      <div class="info-box"><label>Status</label><span>${dc.status}</span></div>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>Part No.</th><th>Item</th><th class="text-right">Quantity</th></tr></thead>
+      <tbody>${dc.lines.map((l, i) => `<tr>
+        <td>${i+1}</td><td class="mono">${l.item?.part_number || '-'}</td><td>${l.item?.name || '-'}</td>
+        <td class="text-right mono">${l.quantity}</td>
+      </tr>`).join('')}</tbody>
+    </table>
+    ${dc.notes ? `<p><strong>Notes:</strong> ${dc.notes}</p>` : ''}
+    <div class="footer">
+      <div><div class="sign-box">Prepared By</div></div>
+      <div><div class="sign-box">Dispatched By</div></div>
+      <div><div class="sign-box">Received By (Subcontractor)</div></div>
+    </div>
+    <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
+    </body></html>`;
+    const w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
+    w.onload = () => w.print();
+  };
+
   const getStatusColor = (s) => {
     switch (s) {
       case 'draft': return 'bg-[#F3F4F6] text-[#4B5563]';
@@ -212,16 +265,23 @@ export default function JobWorkPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full data-table" data-testid="challans-table">
-                  <thead><tr><th>DC #</th><th>Order #</th><th>Supplier</th><th>Items</th><th>Status</th><th>Date</th></tr></thead>
+                  <thead><tr><th>DC #</th><th>Order #</th><th>Supplier</th><th>Items</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
                   <tbody>
                     {challans.map(dc => (
-                      <tr key={dc.id}>
+                      <tr key={dc.id} data-testid={`dc-row-${dc.id}`}>
                         <td className="mono font-medium">{dc.dc_number}</td>
                         <td className="mono">{dc.order?.order_number || '-'}</td>
                         <td>{dc.supplier?.name || '-'}</td>
                         <td className="text-sm">{dc.lines.map(l => `${l.item?.part_number || '-'} (${l.quantity})`).join(', ')}</td>
                         <td><span className={`status-badge ${getStatusColor(dc.status)}`}>{dc.status}</span></td>
                         <td className="text-sm">{dc.created_at ? new Date(dc.created_at).toLocaleDateString() : '-'}</td>
+                        <td>
+                          <div className="flex items-center space-x-1">
+                            <button onClick={() => printDC(dc)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-dc-${dc.id}`}>
+                              <Printer className="w-3 h-3 inline mr-1" />Print
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

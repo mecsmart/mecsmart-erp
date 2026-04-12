@@ -16,7 +16,8 @@ import {
   User,
   RotateCcw,
   XCircle,
-  Truck
+  Truck,
+  ChevronRight
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -861,13 +862,16 @@ export default function ManufacturingPage() {
                               <span className="status-badge bg-[#DEF7EC] text-[#03543F] mb-1">Consumed</span>
                               {wo.consumed_materials?.length > 0 && (
                                 <div className="mt-1 space-y-0.5">
-                                  {wo.consumed_materials.map((m, mi) => (
-                                    <div key={mi} className="text-xs text-[#4B5563]">
-                                      <span className="mono font-medium">{m.item}</span>
-                                      <span className="text-[#6B7280] ml-1">{m.name}</span>
-                                      <span className="mono ml-1">{m.quantity} {m.uom || 'pcs'}</span>
-                                    </div>
-                                  ))}
+                                  {wo.consumed_materials.map((m, mi) => {
+                                    const matItem = items.find(i => i.id === m.item_id);
+                                    return (
+                                      <div key={mi} className="text-xs text-[#4B5563]">
+                                        <span className="mono font-medium">{m.item || matItem?.part_number || '-'}</span>
+                                        <span className="text-[#6B7280] ml-1">{m.name || matItem?.name || ''}</span>
+                                        <span className="mono ml-1">{m.quantity} {m.uom || 'pcs'}</span>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>
@@ -917,7 +921,7 @@ export default function ManufacturingPage() {
                               <span>Job Card</span>
                             </button>
                           )}
-                          {canEdit && !wo.is_subcontract && wo.status === 'pending' && (
+                          {canEdit && !wo.is_subcontract && ['pending', 'in_progress'].includes(wo.status) && (
                             <button
                               onClick={() => handleMarkSubcontract(wo)}
                               className="btn-secondary text-xs flex items-center space-x-1 ml-1 text-[#723B13] border-[#723B13]"
@@ -966,7 +970,7 @@ export default function ManufacturingPage() {
                 </DialogTrigger>
                 <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
-                    <DialogTitle className="font-[Chivo]">Create Routing</DialogTitle>
+                    <DialogTitle className="font-[Chivo]">{editingRouting ? 'Edit Routing' : 'Create Routing'}</DialogTitle>
                   </DialogHeader>
                   <form onSubmit={handleRoutingSubmit} className="space-y-4 mt-4">
                     <div className="grid grid-cols-2 gap-4">
@@ -1140,47 +1144,63 @@ export default function ManufacturingPage() {
                 <p>No routings found</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full data-table" data-testid="routings-table">
-                  <thead>
-                    <tr>
-                      <th>Item</th>
-                      <th>Routing Name</th>
-                      <th>Revision</th>
-                      <th>Operations</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {routings.map((routing) => (
-                      <tr key={routing.id} data-testid={`routing-row-${routing.id}`}>
-                        <td>
-                          <span className="mono text-sm">{routing.item?.part_number || '-'}</span>
-                          <p className="text-xs text-[#4B5563]">{routing.item?.name || '-'}</p>
-                        </td>
-                        <td className="font-medium">{routing.name}</td>
-                        <td className="mono">{routing.revision}</td>
-                        <td>
-                          <span className="mono">{routing.operations?.length || 0}</span>
-                          {routing.operations?.some(op => op.is_job_work) && <span className="ml-1 text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">JW</span>}
-                        </td>
-                        <td>
-                          <span className={`status-badge status-${routing.status}`}>
-                            {routing.status}
-                          </span>
-                        </td>
-                        <td>
-                          {canEdit && (
-                            <button onClick={() => handleEditRouting(routing)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit Routing" data-testid={`edit-routing-${routing.id}`}>
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="p-4 space-y-3">
+                {[
+                  { key: 'finished_good', label: 'Finished Goods (FG)', color: '#1D3557' },
+                  { key: 'sub_assembly', label: 'Sub-Assemblies (SA)', color: '#1E429F' },
+                  { key: 'component', label: 'Parts / Components', color: '#723B13' },
+                ].map(group => {
+                  const groupRoutings = routings.filter(r => r.item?.category === group.key);
+                  if (groupRoutings.length === 0) return null;
+                  return (
+                    <details key={group.key} open className="border rounded-sm overflow-hidden">
+                      <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none" style={{ borderLeft: `4px solid ${group.color}` }}>
+                        <ChevronRight className="w-4 h-4 text-[#4B5563] transition-transform [details[open]>&]:rotate-90" />
+                        <span className="font-semibold text-sm" style={{ color: group.color }}>{group.label}</span>
+                        <span className="text-xs text-[#6B7280] ml-auto">{groupRoutings.length} routing{groupRoutings.length > 1 ? 's' : ''}</span>
+                      </summary>
+                      <div className="overflow-x-auto">
+                        <table className="w-full data-table" data-testid={`routings-${group.key}`}>
+                          <thead>
+                            <tr><th>Item</th><th>Routing Name</th><th>Rev</th><th>Operations</th><th>Status</th><th>Actions</th></tr>
+                          </thead>
+                          <tbody>
+                            {groupRoutings.map(routing => (
+                              <tr key={routing.id} data-testid={`routing-row-${routing.id}`}>
+                                <td>
+                                  <span className="mono text-sm">{routing.item?.part_number || '-'}</span>
+                                  <p className="text-xs text-[#4B5563]">{routing.item?.name || '-'}</p>
+                                </td>
+                                <td className="font-medium">{routing.name}</td>
+                                <td className="mono">{routing.revision}</td>
+                                <td>
+                                  <div className="space-y-0.5">
+                                    {routing.operations?.map((op, oi) => (
+                                      <div key={oi} className="text-xs flex items-center gap-1">
+                                        <span className="mono text-[#6B7280]">{op.sequence}.</span>
+                                        <span>{op.operation_name}</span>
+                                        {op.is_job_work && <span className="text-[9px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">JW</span>}
+                                      </div>
+                                    ))}
+                                    {(!routing.operations || routing.operations.length === 0) && <span className="text-xs text-[#9CA3AF]">No operations</span>}
+                                  </div>
+                                </td>
+                                <td><span className={`status-badge status-${routing.status}`}>{routing.status}</span></td>
+                                <td>
+                                  {canEdit && (
+                                    <button onClick={() => handleEditRouting(routing)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit Routing" data-testid={`edit-routing-${routing.id}`}>
+                                      <Edit2 className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </details>
+                  );
+                })}
               </div>
             )}
           </div>
