@@ -1138,69 +1138,144 @@ export default function ManufacturingPage() {
               <div className="flex items-center justify-center h-48">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div>
               </div>
-            ) : routings.length === 0 ? (
+            ) : routings.length === 0 && workOrders.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
                 <Settings2 className="w-12 h-12 mb-2 text-[#9CA3AF]" />
                 <p>No routings found</p>
               </div>
             ) : (
               <div className="p-4 space-y-3">
-                {[
-                  { key: 'finished_good', label: 'Finished Goods (FG)', color: '#1D3557' },
-                  { key: 'sub_assembly', label: 'Sub-Assemblies (SA)', color: '#1E429F' },
-                  { key: 'component', label: 'Parts / Components', color: '#723B13' },
-                ].map(group => {
-                  const groupRoutings = routings.filter(r => r.item?.category === group.key);
-                  if (groupRoutings.length === 0) return null;
-                  return (
-                    <details key={group.key} open className="border rounded-sm overflow-hidden">
-                      <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none" style={{ borderLeft: `4px solid ${group.color}` }}>
-                        <ChevronRight className="w-4 h-4 text-[#4B5563] transition-transform [details[open]>&]:rotate-90" />
-                        <span className="font-semibold text-sm" style={{ color: group.color }}>{group.label}</span>
-                        <span className="text-xs text-[#6B7280] ml-auto">{groupRoutings.length} routing{groupRoutings.length > 1 ? 's' : ''}</span>
-                      </summary>
-                      <div className="overflow-x-auto">
-                        <table className="w-full data-table" data-testid={`routings-${group.key}`}>
-                          <thead>
-                            <tr><th>Item</th><th>Routing Name</th><th>Rev</th><th>Operations</th><th>Status</th><th>Actions</th></tr>
-                          </thead>
-                          <tbody>
-                            {groupRoutings.map(routing => (
-                              <tr key={routing.id} data-testid={`routing-row-${routing.id}`}>
-                                <td>
-                                  <span className="mono text-sm">{routing.item?.part_number || '-'}</span>
-                                  <p className="text-xs text-[#4B5563]">{routing.item?.name || '-'}</p>
-                                </td>
-                                <td className="font-medium">{routing.name}</td>
-                                <td className="mono">{routing.revision}</td>
-                                <td>
-                                  <div className="space-y-0.5">
-                                    {routing.operations?.map((op, oi) => (
-                                      <div key={oi} className="text-xs flex items-center gap-1">
-                                        <span className="mono text-[#6B7280]">{op.sequence}.</span>
-                                        <span>{op.operation_name}</span>
-                                        {op.is_job_work && <span className="text-[9px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">JW</span>}
-                                      </div>
-                                    ))}
-                                    {(!routing.operations || routing.operations.length === 0) && <span className="text-xs text-[#9CA3AF]">No operations</span>}
+                {/* Group by parent FG MOs */}
+                {(() => {
+                  const parentMOs = workOrders.filter(wo => !wo.parent_wo_id);
+                  const getRoutingForItem = (itemId) => routings.find(r => r.item_id === itemId);
+                  const getChildMOs = (parentId) => workOrders.filter(wo => wo.parent_wo_id === parentId);
+                  const getCategoryLabel = (item) => item?.category === 'finished_good' ? 'FG' : item?.category === 'sub_assembly' ? 'SA' : 'PART';
+                  const getCategoryColor = (item) => item?.category === 'finished_good' ? '#1D3557' : item?.category === 'sub_assembly' ? '#1E429F' : '#723B13';
+
+                  const renderMORoutingRow = (wo, depth = 0) => {
+                    const item = wo.item || items.find(i => i.id === wo.item_id);
+                    const routing = getRoutingForItem(wo.item_id);
+                    const catLabel = getCategoryLabel(item);
+                    const catColor = getCategoryColor(item);
+                    const children = getChildMOs(wo.id);
+
+                    return (
+                      <React.Fragment key={wo.id}>
+                        <tr className={depth > 0 ? 'bg-[#F9FAFB]' : ''} data-testid={`routing-mo-row-${wo.id}`}>
+                          <td style={{ paddingLeft: `${12 + depth * 24}px` }}>
+                            {depth > 0 && <span className="text-[#1D3557] mr-1">└→</span>}
+                            <span className="mono font-medium text-sm">{wo.wo_number}</span>
+                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-semibold text-white" style={{ backgroundColor: catColor }}>{catLabel}</span>
+                          </td>
+                          <td>
+                            <span className="mono text-sm">{item?.part_number || '-'}</span>
+                            <p className="text-xs text-[#4B5563]">{item?.name || '-'}</p>
+                          </td>
+                          <td>
+                            {routing ? (
+                              <span className="font-medium text-sm">{routing.name} <span className="mono text-[#6B7280] text-xs">Rev {routing.revision}</span></span>
+                            ) : (
+                              <span className="text-sm text-[#9B1C1C] italic">No routing defined</span>
+                            )}
+                          </td>
+                          <td>
+                            {routing?.operations?.length > 0 ? (
+                              <div className="space-y-0.5">
+                                {routing.operations.map((op, oi) => (
+                                  <div key={oi} className="text-xs flex items-center gap-1">
+                                    <span className="mono text-[#6B7280]">{op.sequence}.</span>
+                                    <span>{op.operation_name}</span>
+                                    {op.is_job_work && <span className="text-[9px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">JW</span>}
                                   </div>
-                                </td>
-                                <td><span className={`status-badge status-${routing.status}`}>{routing.status}</span></td>
-                                <td>
-                                  {canEdit && (
-                                    <button onClick={() => handleEditRouting(routing)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit Routing" data-testid={`edit-routing-${routing.id}`}>
-                                      <Edit2 className="w-4 h-4" />
-                                    </button>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </details>
-                  );
-                })}
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-[#9CA3AF]">{routing ? 'No operations' : '-'}</span>
+                            )}
+                          </td>
+                          <td>
+                            <div className="flex items-center gap-1">
+                              {routing ? (
+                                <>
+                                  <button onClick={() => handleEditRouting(routing)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit Routing">
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                </>
+                              ) : canEdit ? (
+                                <button onClick={() => { resetRoutingForm(); setRoutingForm(f => ({...f, item_id: wo.item_id})); setIsRoutingDialogOpen(true); }} className="btn-primary text-xs px-2 py-1" data-testid={`create-routing-for-${wo.id}`}>
+                                  <Plus className="w-3 h-3 inline mr-1" />Define
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                        {children.map(child => renderMORoutingRow(child, depth + 1))}
+                      </React.Fragment>
+                    );
+                  };
+
+                  if (parentMOs.length === 0) {
+                    // Fallback: show routings by category if no MOs exist
+                    return [
+                      { key: 'finished_good', label: 'Finished Goods (FG)', color: '#1D3557' },
+                      { key: 'sub_assembly', label: 'Sub-Assemblies (SA)', color: '#1E429F' },
+                      { key: 'component', label: 'Parts / Components', color: '#723B13' },
+                    ].map(group => {
+                      const groupRoutings = routings.filter(r => r.item?.category === group.key);
+                      if (groupRoutings.length === 0) return null;
+                      return (
+                        <details key={group.key} open className="border rounded-sm overflow-hidden">
+                          <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none" style={{ borderLeft: `4px solid ${group.color}` }}>
+                            <ChevronRight className="w-4 h-4 text-[#4B5563]" />
+                            <span className="font-semibold text-sm" style={{ color: group.color }}>{group.label}</span>
+                            <span className="text-xs text-[#6B7280] ml-auto">{groupRoutings.length} routing(s)</span>
+                          </summary>
+                          <table className="w-full data-table">
+                            <thead><tr><th>Item</th><th>Routing Name</th><th>Rev</th><th>Operations</th><th>Actions</th></tr></thead>
+                            <tbody>
+                              {groupRoutings.map(routing => (
+                                <tr key={routing.id}>
+                                  <td><span className="mono text-sm">{routing.item?.part_number}</span> <span className="text-xs text-[#4B5563]">{routing.item?.name}</span></td>
+                                  <td className="font-medium">{routing.name}</td>
+                                  <td className="mono">{routing.revision}</td>
+                                  <td>{routing.operations?.map((op,i) => <div key={i} className="text-xs"><span className="mono text-[#6B7280]">{op.sequence}.</span> {op.operation_name} {op.is_job_work && <span className="text-[9px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">JW</span>}</div>)}</td>
+                                  <td>{canEdit && <button onClick={() => handleEditRouting(routing)} className="p-1 text-[#4B5563] hover:text-[#1D3557]"><Edit2 className="w-4 h-4" /></button>}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </details>
+                      );
+                    });
+                  }
+
+                  return parentMOs.map(parentMO => {
+                    const parentItem = parentMO.item || items.find(i => i.id === parentMO.item_id);
+                    const children = getChildMOs(parentMO.id);
+                    const totalNodes = 1 + children.length + children.reduce((s, c) => s + getChildMOs(c.id).length, 0);
+                    return (
+                      <details key={parentMO.id} open className="border rounded-sm overflow-hidden">
+                        <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none" style={{ borderLeft: '4px solid #1D3557' }}>
+                          <ChevronRight className="w-4 h-4 text-[#4B5563]" />
+                          <span className="mono font-bold text-sm text-[#1D3557]">{parentMO.wo_number}</span>
+                          <span className="text-sm font-semibold text-[#374151]">{parentItem?.part_number} - {parentItem?.name}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold text-white bg-[#1D3557]">FG</span>
+                          <span className={`text-[10px] px-1 rounded ${parentMO.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : 'bg-[#FDF6B2] text-[#723B13]'}`}>{parentMO.status?.replace('_',' ')}</span>
+                          <span className="text-xs text-[#6B7280] ml-auto">{totalNodes} MO(s)</span>
+                        </summary>
+                        <div className="overflow-x-auto">
+                          <table className="w-full data-table">
+                            <thead><tr><th>MO / Level</th><th>Item</th><th>Routing</th><th>Operations</th><th>Actions</th></tr></thead>
+                            <tbody>
+                              {renderMORoutingRow(parentMO, 0)}
+                            </tbody>
+                          </table>
+                        </div>
+                      </details>
+                    );
+                  });
+                })()}
               </div>
             )}
           </div>

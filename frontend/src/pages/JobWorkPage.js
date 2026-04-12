@@ -21,6 +21,7 @@ export default function JobWorkPage() {
 
   // Order dialog
   const [orderDialog, setOrderDialog] = useState(false);
+  const [editingOrder, setEditingOrder] = useState(null);
   const [orderForm, setOrderForm] = useState({ supplier_id: '', expected_return_date: '', processing_charges: 0, notes: '', lines: [{ item_id: '', quantity: 0, rate: 0 }] });
 
   // DC dialog
@@ -67,14 +68,35 @@ export default function JobWorkPage() {
   const handleCreateOrder = async () => {
     if (!orderForm.supplier_id || orderForm.lines.length === 0) { alert('Select supplier and add items'); return; }
     try {
-      await api.post('/api/job-work/orders', {
-        ...orderForm,
-        expected_return_date: orderForm.expected_return_date ? new Date(orderForm.expected_return_date).toISOString() : null,
-      });
+      if (editingOrder) {
+        await api.put(`/api/job-work/orders/${editingOrder.id}`, {
+          expected_return_date: orderForm.expected_return_date ? new Date(orderForm.expected_return_date).toISOString() : null,
+          processing_charges: orderForm.processing_charges,
+          notes: orderForm.notes,
+        });
+      } else {
+        await api.post('/api/job-work/orders', {
+          ...orderForm,
+          expected_return_date: orderForm.expected_return_date ? new Date(orderForm.expected_return_date).toISOString() : null,
+        });
+      }
       setOrderDialog(false);
+      setEditingOrder(null);
       setOrderForm({ supplier_id: '', expected_return_date: '', processing_charges: 0, notes: '', lines: [{ item_id: '', quantity: 0, rate: 0 }] });
       fetchData();
     } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const handleEditOrder = (order) => {
+    setEditingOrder(order);
+    setOrderForm({
+      supplier_id: order.supplier_id,
+      expected_return_date: order.expected_return_date ? order.expected_return_date.split('T')[0] : '',
+      processing_charges: order.processing_charges || 0,
+      notes: order.notes || '',
+      lines: order.lines?.map(l => ({ item_id: l.item_id, quantity: l.quantity, rate: l.rate || 0 })) || [],
+    });
+    setOrderDialog(true);
   };
 
   const handleConfirmOrder = async (id) => {
@@ -236,6 +258,11 @@ export default function JobWorkPage() {
                           <td className="text-sm">{o.expected_return_date ? new Date(o.expected_return_date).toLocaleDateString() : '-'}</td>
                           <td>
                             <div className="flex items-center space-x-1">
+                              {canEdit && ['draft', 'confirmed'].includes(o.status) && (
+                                <button onClick={() => handleEditOrder(o)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit" data-testid={`edit-jw-${o.id}`}>
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                              )}
                               {canEdit && o.status === 'draft' && (
                                 <button onClick={() => handleConfirmOrder(o.id)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`confirm-jw-${o.id}`}><CheckCircle2 className="w-3 h-3 inline mr-1" />Confirm</button>
                               )}
@@ -323,7 +350,7 @@ export default function JobWorkPage() {
       {/* Create Order Dialog */}
       <Dialog open={orderDialog} onOpenChange={setOrderDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="font-[Chivo]">New Subcontract Order</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-[Chivo]">{editingOrder ? 'Edit Subcontract Order' : 'New Subcontract Order'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3">
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -369,7 +396,7 @@ export default function JobWorkPage() {
               </div>
             </div>
             <div><label className="block text-sm font-semibold mb-1">Notes</label><textarea value={orderForm.notes} onChange={e => setOrderForm({...orderForm, notes: e.target.value})} className="input-field" rows={2} /></div>
-            <div className="flex justify-end space-x-3 pt-3 border-t"><button onClick={() => setOrderDialog(false)} className="btn-secondary">Cancel</button><button onClick={handleCreateOrder} className="btn-primary" data-testid="jw-save-order">Create Order</button></div>
+            <div className="flex justify-end space-x-3 pt-3 border-t"><button onClick={() => { setOrderDialog(false); setEditingOrder(null); }} className="btn-secondary">Cancel</button><button onClick={handleCreateOrder} className="btn-primary" data-testid="jw-save-order">{editingOrder ? 'Update Order' : 'Create Order'}</button></div>
           </div>
         </DialogContent>
       </Dialog>
