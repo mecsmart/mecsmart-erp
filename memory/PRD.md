@@ -13,20 +13,30 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Manufacturing Order (MO)**: prefix MO-XXXXXX
 - Internal DB collections: `production_orders`, `work_orders`
 
-## What's Been Implemented - ALL COMPLETE
+## What's Been Implemented
 
-### Sales Orders (SO) — FULLY ENHANCED
+### Sales Orders (SO)
 - Draft & Confirmation workflow, Cascading cancellation (SO → MO → reverse stock)
-- Status flow: Draft → Confirmed → Released → In Progress → Completed (or Cancelled)
-- Only confirmed/planned SOs appear in MRP demand and MO creation dropdown
+- Status: Draft → Confirmed → Released → In Progress → Completed (or Cancelled)
 
-### MRP — FULLY ENHANCED
+### Manufacturing Orders (MO) — FULLY ENHANCED
+- MO qty auto-fills from selected SO quantity
+- Job Card with explicit Start/Stop/Complete per operation
+- Start dialog: Operator Name + editable Quantity to Produce
+- Stop/Complete dialog: Qty Produced + Accept/Reject/Rework quality decision + reject/rework counts + notes
+- Partial production: tracked via `runs` array — multiple operators per operation for remaining qty
+- Progress bar, Status filter, Print MO (with logo, tagline, currency, child MO details)
+- MO print includes: Operations with operator/qty/accept-reject, Materials, Child Sub-Assembly MOs table
+
+### MRP
 - Material Demand with SO filter, Purchase Suggestions with correct qty logic
-- When item has both low-stock and MRP demand, uses the higher quantity
-- Table headers properly right-aligned for numeric columns
-- MRP→PO creation passes suggested quantities correctly
+- MRP→PO creation with suggested quantities
 
-### Manufacturing Orders (MO), Purchase Orders, GRN, Settings, Quality, Inventory — all complete
+### Settings
+- Logo, Tagline, Currency (INR/USD), Structured addresses (Line1, Line2, City, State, Pin)
+
+### All Other Modules Complete
+- Items/Parts, Multi-level BOM, Purchase Orders (ERPNext-style print), GRN, Quality, Inventory, Suppliers, Customers, Warehouses, User Management
 
 ## Prioritized Backlog
 
