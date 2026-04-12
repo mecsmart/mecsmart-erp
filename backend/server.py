@@ -2859,26 +2859,6 @@ async def start_work_order(wo_id: str, request: Request):
     if wo.get("materials_consumed"):
         raise HTTPException(status_code=400, detail="Materials already consumed for this work order")
     
-    # Check if child work orders are all completed before allowing parent to start
-    child_wos = await db.work_orders.find({"parent_wo_id": wo_id}, {"_id": 0}).to_list(1000)
-    incomplete_children = []
-    for child in child_wos:
-        if child.get("status") != "completed":
-            child_item = await db.items.find_one({"id": child.get("item_id")}, {"_id": 0})
-            incomplete_children.append({
-                "wo_number": child.get("wo_number"),
-                "item": child_item.get("part_number", "Unknown") if child_item else "Unknown",
-                "name": child_item.get("name", "") if child_item else "",
-                "status": child.get("status")
-            })
-    
-    if incomplete_children:
-        child_list = "\n".join([f"- {c['wo_number']}: {c['item']} ({c['name']}) - {c['status']}" for c in incomplete_children])
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Cannot start work order: Child work orders must be completed first.\n\nIncomplete child WOs:\n{child_list}"
-        )
-    
     # Get the routing and item
     routing = await db.routings.find_one({"id": wo.get("routing_id")})
     if not routing:
