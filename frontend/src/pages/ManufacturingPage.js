@@ -693,17 +693,23 @@ export default function ManufacturingPage() {
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Sales Order *</label>
                       <Select value={workOrderForm.production_order_id} onValueChange={(v) => {
                         const so = productionOrders.find(po => po.id === v);
-                        setWorkOrderForm({ ...workOrderForm, production_order_id: v, quantity: so?.quantity || 1 });
+                        const soQty = so?.quantity || 1;
+                        const moQtyCreated = so?.mo_qty_created || 0;
+                        const balanceQty = Math.max(soQty - moQtyCreated, 1);
+                        setWorkOrderForm({ ...workOrderForm, production_order_id: v, quantity: balanceQty });
                       }}>
                         <SelectTrigger data-testid="wo-production-order-select">
                           <SelectValue placeholder="Select sales order" />
                         </SelectTrigger>
                         <SelectContent>
-                          {productionOrders.filter(po => ['confirmed', 'planned'].includes(po.status)).map((po) => (
-                            <SelectItem key={po.id} value={po.id}>
-                              {po.order_number} - {po.item?.name || 'Unknown'} (Qty: {po.quantity})
-                            </SelectItem>
-                          ))}
+                          {productionOrders.filter(po => ['confirmed', 'planned'].includes(po.status)).map((po) => {
+                            const balance = po.quantity - (po.mo_qty_created || 0);
+                            return (
+                              <SelectItem key={po.id} value={po.id} disabled={balance <= 0}>
+                                {po.order_number} - {po.item?.name || 'Unknown'} (Qty: {po.quantity}{balance < po.quantity ? `, Balance: ${balance}` : ''})
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                     </div>
@@ -726,15 +732,32 @@ export default function ManufacturingPage() {
 
                     <div>
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity *</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={workOrderForm.quantity}
-                        onChange={(e) => setWorkOrderForm({ ...workOrderForm, quantity: parseInt(e.target.value) || 1 })}
-                        className="input-field mono"
-                        required
-                        data-testid="wo-quantity-input"
-                      />
+                      {(() => {
+                        const selectedSO = productionOrders.find(po => po.id === workOrderForm.production_order_id);
+                        const soQty = selectedSO?.quantity || 0;
+                        const moQtyCreated = selectedSO?.mo_qty_created || 0;
+                        const balanceQty = Math.max(soQty - moQtyCreated, 0);
+                        return (
+                          <>
+                            <input
+                              type="number"
+                              min="1"
+                              max={balanceQty > 0 ? balanceQty : undefined}
+                              value={workOrderForm.quantity}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value) || 1;
+                                setWorkOrderForm({ ...workOrderForm, quantity: balanceQty > 0 ? Math.min(val, balanceQty) : val });
+                              }}
+                              className="input-field mono"
+                              required
+                              data-testid="wo-quantity-input"
+                            />
+                            {selectedSO && moQtyCreated > 0 && (
+                              <p className="text-xs text-[#723B13] mt-1">SO Qty: {soQty} | Already in MO: {moQtyCreated} | Balance: {balanceQty}</p>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
@@ -856,8 +879,8 @@ export default function ManufacturingPage() {
                           <td>
                             <div className="flex items-center flex-wrap gap-1">
                               {canEdit && wo.status === 'pending' && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')} className="btn-secondary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Start</button>}
-                              {canEdit && wo.status === 'in_progress' && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'completed')} className="btn-secondary text-xs px-2 py-1" data-testid={`complete-wo-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />Complete</button>}
-                              {['in_progress','pending'].includes(wo.status) && ops.length > 0 && <button onClick={() => openJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`jobcard-wo-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Job Card</button>}
+                              {canEdit && wo.status === 'in_progress' && !wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'completed')} className="btn-secondary text-xs px-2 py-1" data-testid={`complete-wo-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />Complete</button>}
+                              {['in_progress','pending'].includes(wo.status) && ops.length > 0 && !wo.is_subcontract && <button onClick={() => openJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`jobcard-wo-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Job Card</button>}
                               {canEdit && !wo.is_subcontract && wo.status === 'in_progress' && <button onClick={() => handleMarkSubcontract(wo)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`subcontract-wo-${wo.id}`}><Truck className="w-3 h-3 inline mr-0.5" />SC</button>}
                               {wo.status === 'completed' && <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-wo-${wo.id}`}><Printer className="w-3 h-3 inline mr-0.5" />Print</button>}
                             </div>

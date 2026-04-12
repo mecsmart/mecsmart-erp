@@ -1006,6 +1006,12 @@ async def get_production_orders(request: Request, status: Optional[str] = None):
             order["bom"] = bom
             item = await db.items.find_one({"id": bom.get("parent_item_id")}, {"_id": 0})
             order["item"] = item
+        # Calculate total MO quantity already created for this SO
+        mos = await db.work_orders.find(
+            {"production_order_id": order["id"], "parent_wo_id": None, "status": {"$ne": "cancelled"}},
+            {"quantity": 1, "_id": 0}
+        ).to_list(1000)
+        order["mo_qty_created"] = sum(mo.get("quantity", 0) for mo in mos)
     return orders
 
 @production_router.get("/{order_id}")
@@ -1058,17 +1064,28 @@ async def update_production_order(order_id: str, order_data: ProductionOrderUpda
     if user["role"] not in ["admin", "production_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
+    order = await db.production_orders.find_one({"id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Production order not found")
+    
+    # Block edit if full quantity is already covered by MOs
+    mos = await db.work_orders.find(
+        {"production_order_id": order_id, "parent_wo_id": None, "status": {"$ne": "cancelled"}},
+        {"quantity": 1, "_id": 0}
+    ).to_list(1000)
+    mo_qty_total = sum(mo.get("quantity", 0) for mo in mos)
+    if mo_qty_total >= order.get("quantity", 0):
+        raise HTTPException(status_code=400, detail=f"Cannot edit: Manufacturing Orders already created for full quantity ({mo_qty_total}/{order['quantity']}). Cancel existing MOs first.")
+    
     update_data = {k: v for k, v in order_data.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
     
     update_data["updated_at"] = datetime.now(timezone.utc)
-    result = await db.production_orders.update_one({"id": order_id}, {"$set": update_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Production order not found")
+    await db.production_orders.update_one({"id": order_id}, {"$set": update_data})
     
-    order = await db.production_orders.find_one({"id": order_id}, {"_id": 0})
-    return order
+    updated = await db.production_orders.find_one({"id": order_id}, {"_id": 0})
+    return updated
 
 @production_router.post("/{order_id}/confirm")
 async def confirm_production_order(order_id: str, request: Request):
@@ -2951,11 +2968,15 @@ async def start_work_order(wo_id: str, request: Request):
         }}
     )
     
-    # Auto-create DC for sub-contract MO
+    # Auto-create SC Order + DC for sub-contract MO
     auto_dc = None
-    if wo.get("is_subcontract") and wo.get("subcontract_supplier_id") and consumed_materials:
-        dc_count = await db.delivery_challans.count_documents({})
-        dc_number = f"DC-{str(dc_count + 1).zfill(6)}"
+    if wo.get("is_subcontract") and wo.get("subcontract_supplier_id"):
+        # Build SC/DC lines from consumed materials; fallback to WO item itself
+        sc_material_lines = consumed_materials
+        if not sc_material_lines:
+            wo_item = await db.items.find_one({"id": item_id}, {"_id": 0})
+            if wo_item:
+                sc_material_lines = [{"item_id": item_id, "quantity": wo.get("quantity", 1), "unit_cost": wo_item.get("unit_cost", 0)}]
         
         # Find or create a subcontract order
         sc_order = await db.subcontract_orders.find_one({"reference_wo_id": wo_id})
@@ -2967,7 +2988,7 @@ async def start_work_order(wo_id: str, request: Request):
                 "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
                 "supplier_id": wo["subcontract_supplier_id"],
                 "reference_wo_id": wo_id,
-                "lines": [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": m["quantity"], "received_quantity": 0, "rate": 0} for m in consumed_materials],
+                "lines": [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": m["quantity"], "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_material_lines],
                 "status": "in_progress",
                 "notes": f"Auto-created from sub-contract MO {wo.get('wo_number')}",
                 "created_at": datetime.now(timezone.utc),
@@ -2979,21 +3000,24 @@ async def start_work_order(wo_id: str, request: Request):
         else:
             sc_order_id = sc_order["id"]
         
-        dc_lines = [{"item_id": m["item_id"], "quantity": m["quantity"], "rate": 0} for m in consumed_materials]
-        dc_doc = {
-            "id": str(uuid.uuid4()),
-            "dc_number": dc_number,
-            "subcontract_order_id": sc_order_id,
-            "reference_wo_id": wo_id,
-            "lines": dc_lines,
-            "status": "sent",
-            "notes": f"Auto-DC for sub-contract MO {wo.get('wo_number')}",
-            "created_at": datetime.now(timezone.utc),
-            "created_by": user["id"]
-        }
-        await db.delivery_challans.insert_one(dc_doc)
-        dc_doc.pop("_id", None)
-        auto_dc = dc_doc
+        dc_lines = [{"item_id": m["item_id"], "quantity": m["quantity"], "rate": m.get("unit_cost", 0)} for m in sc_material_lines]
+        if dc_lines:
+            dc_count = await db.delivery_challans.count_documents({})
+            dc_number = f"DC-{str(dc_count + 1).zfill(6)}"
+            dc_doc = {
+                "id": str(uuid.uuid4()),
+                "dc_number": dc_number,
+                "subcontract_order_id": sc_order_id,
+                "reference_wo_id": wo_id,
+                "lines": dc_lines,
+                "status": "sent",
+                "notes": f"Auto-DC for sub-contract MO {wo.get('wo_number')}",
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"]
+            }
+            await db.delivery_challans.insert_one(dc_doc)
+            dc_doc.pop("_id", None)
+            auto_dc = dc_doc
     
     return {
         "success": True,

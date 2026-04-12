@@ -349,6 +349,7 @@ export default function ProductionPage() {
                   <th>Product</th>
                   <th>BOM</th>
                   <th className="text-right">Quantity</th>
+                  <th className="text-right">MO Qty</th>
                   <th>Priority</th>
                   <th>Status</th>
                   <th>Due Date</th>
@@ -368,6 +369,15 @@ export default function ProductionPage() {
                       <p className="text-xs text-[#4B5563] mono">Rev {order.bom?.revision || '-'}</p>
                     </td>
                     <td className="text-right mono font-medium">{order.quantity}</td>
+                    <td className="text-right">
+                      <span className="mono text-sm">{order.mo_qty_created || 0}/{order.quantity}</span>
+                      {(order.mo_qty_created || 0) >= order.quantity && (
+                        <p className="text-[10px] text-[#03543F]">Fully covered</p>
+                      )}
+                      {(order.mo_qty_created || 0) > 0 && (order.mo_qty_created || 0) < order.quantity && (
+                        <p className="text-[10px] text-[#723B13]">Balance: {order.quantity - (order.mo_qty_created || 0)}</p>
+                      )}
+                    </td>
                     <td>
                       <span className={`status-badge ${getPriorityColor(order.priority)}`}>
                         {order.priority}
@@ -398,8 +408,8 @@ export default function ProductionPage() {
                             <span>Confirm</span>
                           </button>
                         )}
-                        {/* Edit button - draft and confirmed only */}
-                        {canEdit && ['draft', 'confirmed'].includes(order.status) && (
+                        {/* Edit button - draft and confirmed only, and not fully covered by MOs */}
+                        {canEdit && ['draft', 'confirmed'].includes(order.status) && (order.mo_qty_created || 0) < order.quantity && (
                           <button
                             onClick={() => handleEdit(order)}
                             className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded"
