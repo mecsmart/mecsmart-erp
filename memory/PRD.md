@@ -15,6 +15,14 @@
 - After MO start, all operations remain "pending" — user must start each via Job Card with operator/supplier selection
 - Outsourced operation cannot be completed until SC order materials are received
 - Receipt auto-updates linked WO operation status
+- **SC MOs hide Job Card and Complete buttons** (work is external)
+- **SC Order always created on MO start** — even for PART items with no BOM (uses WO item as fallback)
+
+### Sales Orders (SO) -> Manufacturing Orders (MO)
+- Create MO dialog shows **balance quantity** (SO qty - existing MO qty) not full qty
+- SO dropdown shows balance info; SOs fully covered by MOs are disabled
+- **SO edit blocked** when full quantity is covered by MOs (backend + frontend)
+- MO QTY column on SO page shows X/Y format with "Fully covered" indicator
 
 ### Routings
 - Collapsible MO-grouped tree view (FG->SA->PART)
