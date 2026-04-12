@@ -1,0 +1,98 @@
+{
+  "summary": "MO/Subcontracting bug fixes fully tested. Backend: 10/11 tests passed (1 skipped - no pending MO available). Frontend: All 5 bug fixes verified working correctly.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dialog components", "issues": ["Console warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent} - minor accessibility issue"]}
+    ]
+  },
+
+  "passed_tests": [
+    "Backend: Operations remain 'pending' after MO start (Bug Fix #4)",
+    "Backend: MO cannot complete with incomplete operations - returns 400 with specific error (Bug Fix #1)",
+    "Backend: MO cannot complete with partial quantity produced (Bug Fix #3)",
+    "Backend: Outsourced operation cannot complete without SC order receipt (Bug Fix #2)",
+    "Backend: MO cannot complete with unreceived outsourced materials",
+    "Backend: Outsource creates SC Order with materials from consumed_materials (Bug Fix #5)",
+    "Backend: Receipt updates linked WO operation's outsource_status to 'received' and status to 'completed'",
+    "Backend: Operation start requires operator or supplier",
+    "Backend: GET /api/work-orders returns list with operations_status",
+    "Backend: GET /api/job-work/orders returns SC orders with materials",
+    "Frontend: Job Card shows operator/supplier selection dialog on Start",
+    "Frontend: Start dialog shows outsource toggle with supplier dropdown when ON",
+    "Frontend: Start dialog shows operator name input when outsource OFF",
+    "Frontend: Outsource mode shows 'Start & Create OS Order' button",
+    "Frontend: Error alert shown when MO completion blocked: 'Cannot complete: Operation X is not completed yet'",
+    "Frontend: Job Card shows 'OS: {supplier}' for outsourced operations",
+    "Frontend: Job Work page shows SC orders with materials (RM-002, RM-003, CP-001, etc.)"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_mo_subcontracting_fixes.py",
+    "/app/test_reports/pytest/pytest_mo_subcontracting.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [],
+
+  "updated_files": [
+    "/app/backend/tests/test_mo_subcontracting_fixes.py"
+  ],
+
+  "success_rate": {
+    "backend": "91% (10/11 tests passed, 1 skipped)",
+    "frontend": "100% (All bug fixes verified)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "TEST_ prefixed MOs and SC orders created during tests",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": true,
+
+  "context_for_next_testing_agent": "MO/Subcontracting bug fixes verified. Key validations: (1) After starting MO, all operations remain 'pending' - user must start each via Job Card with operator/supplier selection. (2) MO completion blocked if ANY operation not completed, outsourced materials not received, or partial qty produced. (3) Outsourced operation completion blocked if SC order not completed. (4) SC Order created with materials from consumed_materials. (5) Receipt updates linked WO operation. Test file: /app/backend/tests/test_mo_subcontracting_fixes.py. Existing MOs: MO-000010 (in_progress, 2/4 ops), MO-000008 (in_progress, 2/4 ops), WO-000004 (in_progress, 2/5 ops).",
+
+  "bugs_verified": {
+    "bug_1_mo_completed_before_ops_done": {
+      "description": "MO completed before receiving outsourced items/operations done",
+      "status": "FIXED",
+      "verification": "Backend returns 400 with error: 'Cannot complete: Operation X is not completed yet. Complete all operations via Job Card first.'"
+    },
+    "bug_2_outsourced_op_completable_without_receipt": {
+      "description": "Outsourced operation completable without receipt",
+      "status": "FIXED",
+      "verification": "Backend returns 400 with error: 'Cannot complete outsourced operation: Materials not received back from subcontractor.'"
+    },
+    "bug_3_partial_qty_should_block_mo_completion": {
+      "description": "Partial qty should block MO completion",
+      "status": "FIXED",
+      "verification": "Backend returns 400 with error: 'Cannot complete: Last operation produced X/Y units. Full quantity must be produced.'"
+    },
+    "bug_4_job_card_not_showing_operator_supplier_selection": {
+      "description": "Job card not showing operator/supplier selection after MO start (was auto-starting first op)",
+      "status": "FIXED",
+      "verification": "After MO start, all operations remain 'pending'. Job Card Start dialog shows outsource toggle with supplier dropdown (when ON) or operator name input (when OFF)."
+    },
+    "bug_5_job_work_not_showing_materials_in_sc_order": {
+      "description": "Job work outsourcing not showing materials in SC order",
+      "status": "FIXED",
+      "verification": "SC Orders created with materials from consumed_materials. Job Work page shows SC orders with items like RM-002, RM-003, CP-001."
+    }
+  }
+}

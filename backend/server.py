@@ -2939,11 +2939,7 @@ async def start_work_order(wo_id: str, request: Request):
         }
     
     # Update work order status to in_progress
-    operations = wo.get("operations_status", [])
-    if operations:
-        operations[0]["status"] = "in_progress"
-        operations[0]["actual_start"] = datetime.now(timezone.utc)
-    
+    # Do NOT auto-start the first operation — let user pick operator/supplier via Job Card
     await db.work_orders.update_one(
         {"id": wo_id},
         {"$set": {
@@ -2951,7 +2947,6 @@ async def start_work_order(wo_id: str, request: Request):
             "actual_start": datetime.now(timezone.utc),
             "materials_consumed": True,
             "consumed_materials": consumed_materials,
-            "operations_status": operations,
             "updated_at": datetime.now(timezone.utc)
         }}
     )
@@ -3069,16 +3064,31 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
     
     # If completing the work order, update finished goods stock
     if update_data.get("status") == "completed" and wo.get("status") == "in_progress":
+        operations = wo.get("operations_status", [])
+        mo_qty = wo.get("quantity", 0)
+        
+        # Block completion if ANY operation is not completed
+        for op in operations:
+            if op.get("status") != "completed":
+                raise HTTPException(status_code=400, detail=f"Cannot complete: Operation '{op.get('operation_name')}' (Seq {op.get('sequence')}) is not completed yet. Complete all operations via Job Card first.")
+        
         # Block completion if subcontracted and materials not received
         if wo.get("is_subcontract"):
             sc_order = await db.subcontract_orders.find_one({"reference_wo_id": wo_id})
             if sc_order and sc_order.get("status") != "completed":
                 raise HTTPException(status_code=400, detail="Cannot complete: Subcontracted materials have not been fully received. Please receive materials from subcontractor first.")
         
-        # Block completion if any operation is outsourced (job work) and not received
-        for op in wo.get("operations_status", []):
-            if op.get("is_job_work") and op.get("status") != "completed":
-                raise HTTPException(status_code=400, detail=f"Cannot complete: Job work operation '{op.get('operation_name')}' is outsourced and not yet completed. Receive materials from vendor first.")
+        # Block completion if any operation is outsourced and SC order not received
+        for op in operations:
+            if op.get("is_job_work") and op.get("outsource_status") == "sent":
+                raise HTTPException(status_code=400, detail=f"Cannot complete: Outsourced operation '{op.get('operation_name')}' materials not received back. Receive from vendor first.")
+        
+        # Block completion if last operation produced less than MO quantity
+        if operations:
+            last_op = operations[-1]
+            last_op_qty = last_op.get("quantity_completed", 0)
+            if last_op_qty < mo_qty:
+                raise HTTPException(status_code=400, detail=f"Cannot complete: Last operation produced {last_op_qty}/{mo_qty} units. Full quantity must be produced before completing the MO.")
         
         routing = await db.routings.find_one({"id": wo.get("routing_id")})
         if routing:
@@ -3086,7 +3096,9 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
             item = await db.items.find_one({"id": item_id})
             if item:
                 current_stock = item.get("current_stock", 0)
-                produced_qty = wo.get("quantity", 0)
+                # Use actual produced qty from last operation
+                last_op = operations[-1] if operations else {}
+                produced_qty = last_op.get("quantity_accepted", last_op.get("quantity_completed", mo_qty))
                 new_stock = current_stock + produced_qty
                 
                 # Create inventory transaction for produced items
@@ -3170,17 +3182,30 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             sc_count = await db.subcontract_orders.count_documents({})
             sc_order_number = f"JW-{str(sc_count + 1).zfill(6)}"
             
-            # Get BOM items for this MO
-            bom = await db.boms.find_one({"parent_item_id": wo.get("item_id"), "status": "active"})
+            # Get materials for this MO — prefer consumed_materials, fallback to BOM, then WO item itself
+            consumed = wo.get("consumed_materials", [])
             sc_lines = []
             dc_lines = []
-            if bom:
-                for comp in bom.get("components", []):
-                    comp_item = await db.items.find_one({"id": comp["item_id"]}, {"_id": 0})
-                    if comp_item:
-                        qty_needed = comp["quantity"] * mo_qty
-                        sc_lines.append({"item_id": comp["item_id"], "quantity": qty_needed, "sent_quantity": qty_needed, "received_quantity": 0, "rate": comp_item.get("unit_cost", 0)})
-                        dc_lines.append({"item_id": comp["item_id"], "quantity": qty_needed, "rate": comp_item.get("unit_cost", 0)})
+            if consumed:
+                for m in consumed:
+                    qty_needed = m.get("quantity", 0)
+                    sc_lines.append({"item_id": m["item_id"], "quantity": qty_needed, "sent_quantity": qty_needed, "received_quantity": 0, "rate": m.get("unit_cost", 0)})
+                    dc_lines.append({"item_id": m["item_id"], "quantity": qty_needed, "rate": m.get("unit_cost", 0)})
+            else:
+                bom = await db.boms.find_one({"parent_item_id": wo.get("item_id"), "status": "active"})
+                if bom:
+                    for comp in bom.get("components", []):
+                        comp_item = await db.items.find_one({"id": comp["item_id"]}, {"_id": 0})
+                        if comp_item:
+                            qty_needed = comp["quantity"] * mo_qty
+                            sc_lines.append({"item_id": comp["item_id"], "quantity": qty_needed, "sent_quantity": qty_needed, "received_quantity": 0, "rate": comp_item.get("unit_cost", 0)})
+                            dc_lines.append({"item_id": comp["item_id"], "quantity": qty_needed, "rate": comp_item.get("unit_cost", 0)})
+                # Fallback: add the WO item itself
+                if not sc_lines:
+                    wo_item = await db.items.find_one({"id": wo.get("item_id")}, {"_id": 0})
+                    if wo_item:
+                        sc_lines.append({"item_id": wo.get("item_id"), "quantity": mo_qty, "sent_quantity": mo_qty, "received_quantity": 0, "rate": wo_item.get("unit_cost", 0)})
+                        dc_lines.append({"item_id": wo.get("item_id"), "quantity": mo_qty, "rate": wo_item.get("unit_cost", 0)})
             
             sc_order_doc = {
                 "id": str(uuid.uuid4()),
@@ -3287,6 +3312,16 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
     
     # COMPLETE operation
     elif op_data.status == "completed":
+        # Block outsourced operation completion if SC order not received
+        if target_op.get("is_job_work"):
+            sc_order_id = target_op.get("outsource_sc_order_id")
+            if sc_order_id:
+                sc_order = await db.subcontract_orders.find_one({"id": sc_order_id})
+                if sc_order and sc_order.get("status") != "completed":
+                    raise HTTPException(status_code=400, detail=f"Cannot complete outsourced operation: Materials not received back from subcontractor. Receive items via Job Work page first.")
+            elif target_op.get("outsource_status") == "sent":
+                raise HTTPException(status_code=400, detail=f"Cannot complete outsourced operation: Materials not received back. Receive items via Job Work page first.")
+        
         runs = target_op.get("runs", [])
         produced_qty = min(op_data.quantity_completed or mo_qty, mo_qty)
         # Close any open run
@@ -4729,6 +4764,36 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
     new_status = "completed" if all_received else "in_progress"
     
     await db.subcontract_orders.update_one({"id": data.subcontract_order_id}, {"$set": {"lines": order["lines"], "status": new_status}})
+    
+    # If SC order completed and linked to a WO operation, update that operation
+    if new_status == "completed" and order.get("reference_wo_id"):
+        ref_wo_id = order["reference_wo_id"]
+        ref_seq = order.get("reference_operation_seq")
+        ref_wo = await db.work_orders.find_one({"id": ref_wo_id})
+        if ref_wo:
+            ops = ref_wo.get("operations_status", [])
+            updated = False
+            for op in ops:
+                if ref_seq and op.get("sequence") == ref_seq:
+                    op["outsource_status"] = "received"
+                    op["status"] = "completed"
+                    op["actual_end"] = datetime.now(timezone.utc)
+                    # Set quantity from SC order
+                    total_recv = sum(ol.get("received_quantity", 0) for ol in order.get("lines", []))
+                    op["quantity_completed"] = ref_wo.get("quantity", total_recv)
+                    op["quantity_accepted"] = ref_wo.get("quantity", total_recv)
+                    updated = True
+                    break
+                elif not ref_seq and op.get("is_job_work") and op.get("outsource_sc_order_id") == data.subcontract_order_id:
+                    op["outsource_status"] = "received"
+                    op["status"] = "completed"
+                    op["actual_end"] = datetime.now(timezone.utc)
+                    op["quantity_completed"] = ref_wo.get("quantity", 0)
+                    op["quantity_accepted"] = ref_wo.get("quantity", 0)
+                    updated = True
+                    break
+            if updated:
+                await db.work_orders.update_one({"id": ref_wo_id}, {"$set": {"operations_status": ops, "updated_at": datetime.now(timezone.utc)}})
     
     rec_doc = {
         "id": str(uuid.uuid4()),
