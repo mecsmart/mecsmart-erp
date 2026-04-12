@@ -25,27 +25,23 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - Structured address fields: Address Line 1, Address Line 2, City, State, Pin Code (Company, Suppliers, Customers)
 - Logo upload (base64, max 500KB) with preview, change, remove
 - Tagline field (shown on printed documents)
-- Primary/Secondary currency selector (INR ₹ / USD $) with preview
-- Address migration endpoint: POST /api/settings/migrate-addresses (splits legacy single-line addresses)
-- Currency symbol dynamically applied across Items, BOM, MRP, POs, GRN, Inventory, Manufacturing
+- Primary/Secondary currency selector (INR / USD) with preview
+- Address migration endpoint: POST /api/settings/migrate-addresses
 
-### Purchase Orders - FULLY ENHANCED
-- Create/Edit PO with revision tracking (draft = free edit, submitted = revision history)
-- Order lines: Item, HSN, Qty, UOM, Rate, Discount (% or Amount), GST%
-- Vendor Quotation Ref No. & Date, Delivery Warehouse
-- Additional charges with HSN & GST% from Settings
-- ERPNext-style Print: 4 templates (Standard, Detailed GST, Compact, Modern) with logo + tagline + currency symbol
-
-### GRN (Goods Receipt Note) - Under Stores
-- Separate GRN tab in Stores page, Pending POs listing
-- Material verification: editable received qty + verified price per line
-- Supplier Invoice / Doc reference + date, Receiving warehouse
-- GRN print with logo + tagline + structured supplier address
-
-### Manufacturing - Enhanced
+### Manufacturing - FULLY ENHANCED
+- Work Orders with progress bar (color-coded: green=100%, blue=50%+, amber=partial, grey=0%)
+- Operations progress detail ("X/Y ops done")
+- Status filter dropdown (All / Pending / In Progress / Completed / Cancelled) with count
 - Work Order print with material consumption details
 - Job Card print with operator names
 - Job card operations blocked when materials not consumed
+
+### Purchase Orders - FULLY ENHANCED
+- Create/Edit PO with revision tracking
+- ERPNext-style Print: 4 templates with logo + tagline + currency symbol
+
+### GRN (Goods Receipt Note) - Under Stores
+- Separate GRN tab, Material verification, GRN print with logo
 
 ### User Management & Access Control
 - Admin-only CRUD, Module-wise permissions, Dynamic sidebar filtering
@@ -55,9 +51,6 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - CGST+SGST (intra) / IGST (inter-state) on POs
 
 ### Excel Export/Import, Job Cards, Auto-populate PO from MRP
-
-### Settings > PO Additional Charges
-- CRUD charge types (name, HSN, GST%) used in PO creation
 
 ## Prioritized Backlog
 

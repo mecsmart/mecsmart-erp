@@ -34,6 +34,7 @@ export default function ManufacturingPage() {
   const [isJobCardOpen, setIsJobCardOpen] = useState(false);
   const [jobCardWO, setJobCardWO] = useState(null);
   const [editingWorkCenter, setEditingWorkCenter] = useState(null);
+  const [woStatusFilter, setWoStatusFilter] = useState('');
   
   const [workCenterForm, setWorkCenterForm] = useState({
     code: '',
@@ -281,6 +282,29 @@ export default function ManufacturingPage() {
     }
   };
 
+  const getWOProgress = (wo) => {
+    if (wo.status === 'completed') return 100;
+    if (wo.status === 'cancelled') return 0;
+    const ops = wo.operations_status || [];
+    if (ops.length === 0) {
+      if (wo.status === 'in_progress') return 50;
+      return 0;
+    }
+    const completed = ops.filter(op => op.status === 'completed').length;
+    return Math.round((completed / ops.length) * 100);
+  };
+
+  const getProgressColor = (pct) => {
+    if (pct >= 100) return '#03543F';
+    if (pct >= 50) return '#1D3557';
+    if (pct > 0) return '#E3A008';
+    return '#D1D5DB';
+  };
+
+  const filteredWorkOrders = woStatusFilter
+    ? workOrders.filter(wo => wo.status === woStatusFilter)
+    : workOrders;
+
   const printWorkOrder = async (wo) => {
     try {
       const { data } = await api.get(`/api/work-orders/${wo.id}/print-data`);
@@ -482,7 +506,27 @@ export default function ManufacturingPage() {
 
         {/* Work Orders Tab */}
         <TabsContent value="work-orders" className="mt-4">
-          <div className="flex justify-end mb-4">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <Select value={woStatusFilter || 'all'} onValueChange={(v) => setWoStatusFilter(v === 'all' ? '' : v)}>
+                <SelectTrigger className="w-48" data-testid="wo-status-filter">
+                  <SelectValue placeholder="All Statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="in_progress">In Progress</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="cancelled">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+              {woStatusFilter && (
+                <button onClick={() => setWoStatusFilter('')} className="text-xs text-[#4B5563] hover:text-[#1D3557] flex items-center gap-1" data-testid="wo-clear-filter">
+                  <span>Clear</span>
+                </button>
+              )}
+              <span className="text-xs text-[#6B7280]">{filteredWorkOrders.length} of {workOrders.length} orders</span>
+            </div>
             {canEdit && (
               <Dialog open={isWorkOrderDialogOpen} onOpenChange={setIsWorkOrderDialogOpen}>
                 <DialogTrigger asChild>
@@ -595,10 +639,10 @@ export default function ManufacturingPage() {
               <div className="flex items-center justify-center h-48">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div>
               </div>
-            ) : workOrders.length === 0 ? (
+            ) : filteredWorkOrders.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
                 <Settings2 className="w-12 h-12 mb-2 text-[#9CA3AF]" />
-                <p>No work orders found</p>
+                <p>{woStatusFilter ? `No ${woStatusFilter.replace('_',' ')} work orders` : 'No work orders found'}</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -609,6 +653,7 @@ export default function ManufacturingPage() {
                       <th>Product</th>
                       <th>Routing</th>
                       <th className="text-right">Qty</th>
+                      <th>Progress</th>
                       <th>Materials</th>
                       <th>Status</th>
                       <th>Scheduled</th>
@@ -616,10 +661,15 @@ export default function ManufacturingPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {workOrders.map((wo) => (
+                    {filteredWorkOrders.map((wo) => {
+                      const progress = getWOProgress(wo);
+                      const progressColor = getProgressColor(progress);
+                      const ops = wo.operations_status || [];
+                      const completedOps = ops.filter(op => op.status === 'completed').length;
+                      return (
                       <tr key={wo.id} className={wo.parent_wo_id ? 'bg-[#F9FAFB]' : ''} data-testid={`wo-row-${wo.id}`}>
                         <td className="mono font-medium">
-                          {wo.parent_wo_id && <span className="text-[#9CA3AF] mr-1">└</span>}
+                          {wo.parent_wo_id && <span className="text-[#9CA3AF] mr-1">&nbsp;&nbsp;└</span>}
                           {wo.wo_number}
                         </td>
                         <td>
@@ -629,6 +679,20 @@ export default function ManufacturingPage() {
                         <td className="text-sm">{wo.routing?.name || '-'}</td>
                         <td className="text-right mono">
                           {wo.quantity_completed || 0}/{wo.quantity}
+                        </td>
+                        <td style={{minWidth:'120px'}} data-testid={`wo-progress-${wo.id}`}>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-2 bg-[#E5E7EB] rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all duration-500"
+                                style={{ width: `${progress}%`, backgroundColor: progressColor }}
+                              />
+                            </div>
+                            <span className="text-xs mono font-medium w-8 text-right" style={{ color: progressColor }}>{progress}%</span>
+                          </div>
+                          {ops.length > 0 && (
+                            <p className="text-[10px] text-[#6B7280] mt-0.5">{completedOps}/{ops.length} ops done</p>
+                          )}
                         </td>
                         <td>
                           {wo.materials_consumed ? (
@@ -706,7 +770,8 @@ export default function ManufacturingPage() {
                           )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
