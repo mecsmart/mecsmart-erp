@@ -7,30 +7,31 @@
 ## Implemented Features
 
 ### Manufacturing Orders
-- Collapsible FG->SA->PART tree view (same as Routings tab)
-- MO completion blocked if: any operation not completed, outsourced operations not received, partial qty produced
+- Collapsible FG->SA->PART tree view
+- MO completion blocked if: any operation not completed, outsourced ops not received, partial qty
 - Job Card: Start/Stop/Complete with operator, qty, Accept/Reject/Rework
-- Start Operation: **Outsource toggle** — switches between Operator mode and Outsource mode (Supplier + Charges + auto-create SC Order + DC)
-- After MO start, all operations remain "pending" — user must start each via Job Card with operator/supplier selection
-- Outsourced operation cannot be completed until SC order materials are received
-- Receipt auto-updates linked WO operation status
-- **SC MOs hide Job Card and Complete buttons** (work is external)
-- **SC Order auto-created** both when: (a) MO starts with is_subcontract=true, (b) MO marked as SC after already started
-- SC Order creation uses consumed_materials, falls back to WO item for PARTs with no BOM
+- Outsource toggle in Job Card: switches between Operator and Outsource mode
+- After MO start, all operations remain "pending" — user starts each via Job Card
+- SC MOs hide Job Card and Complete buttons (work is external)
+- **SC Order auto-created** at MO start OR when marking in_progress MO as SC
+- **MO auto-completes** when SC receipt is received (ops completed, FG stock added)
+
+### Sub-Contract Type Selection
+- **With Material**: RM consumed from your stock, sent to vendor via DC. Vendor processes and returns FG
+- **Without Material**: No RM consumed. Vendor sources own materials. Only finished item received back
+- Radio toggle available in both Create MO dialog and SC button dialog on MO rows
+- SC Order stores `subcontract_type` field; DC only created for "with_material"
 
 ### Sales Orders (SO) -> Manufacturing Orders (MO)
-- Create MO dialog shows **balance quantity** (SO qty - existing MO qty) not full qty
-- SO dropdown shows balance info; SOs fully covered by MOs are disabled
-- **SO edit blocked** when full quantity is covered by MOs (backend + frontend)
-- MO QTY column on SO page shows X/Y format with "Fully covered" indicator
+- Create MO dialog shows balance quantity (SO qty - existing MO qty)
+- SO edit blocked when full quantity covered by MOs
+- MO QTY column on SO page shows X/Y with "Fully covered" indicator
 
 ### Job Work / Subcontracting
-- SC Order with edit (lines + charges), confirm, send DC, receive back
-- DC with item names and RM price column, print
-- Auto-create from MO outsource flow with consumed_materials
-- Receipt updates linked WO operation outsource_status and marks op completed
-- **MO Number column** in JW orders table for traceability
-- **Item names** displayed alongside part numbers in JW orders
+- SC Order with edit, confirm, send DC, receive back
+- MO Number column + Item names in JW orders table
+- Auto-create from MO outsource flow
+- Receipt auto-completes linked MO and updates operation status
 
 ### Routings, Purchase Invoice, BOM, PO, GRN, Quality, Inventory, MRP, Settings, Customers, Suppliers, Stores, User Management — All implemented
 
