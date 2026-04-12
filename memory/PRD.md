@@ -9,39 +9,36 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Global Context**: CompanySettingsContext provides currency formatting across all pages
 
 ## Naming Convention
-- **Sales Order (SO)**: prefix SO-XXXXXX — workflow: Draft → Confirmed → Released → In Progress → Completed
+- **Sales Order (SO)**: prefix SO-XXXXXX — Draft → Confirmed → Released → In Progress → Completed
 - **Manufacturing Order (MO)**: prefix MO-XXXXXX
-- Internal DB collections: `production_orders`, `work_orders`
+- **Purchase Invoice (PI)**: prefix PI-XXXXXX — Draft → Approved → Paid
+- **Job Work (JW)**: prefix JW-XXXXXX — Draft → Confirmed → In Progress → Completed
+- **Delivery Challan (DC)**: prefix DC-XXXXXX
+- **Subcontract Receipt (SR)**: prefix SR-XXXXXX
+
+## Sidebar Structure
+- Dashboard, BOM, Sales Orders, Manufacturing Orders, Quality, Customers, Job Work, Stores
+- **Inventory** (collapsible group): Stock, Items & Parts, Suppliers, MRP, Purchase Orders, Purchase Invoices
+- Settings, User Management
 
 ## What's Been Implemented
 
-### Sales Orders (SO)
-- Draft & Confirmation workflow, Cascading cancellation (SO → MO → reverse stock)
-- Status: Draft → Confirmed → Released → In Progress → Completed (or Cancelled)
+### Purchase Invoice Entry — NEW
+- Create invoice with GST calculation (CGST/SGST intra-state, IGST inter-state)
+- Load from PO to auto-fill supplier + line items
+- Status flow: Draft → Approved → Paid (admin-only transitions)
+- Status filter, KPI cards, line item editing
 
-### Manufacturing Orders (MO) — FULLY ENHANCED
-- MO qty auto-fills from selected SO quantity
-- Job Card with explicit Start/Stop/Complete per operation
-- Start dialog: Operator Name + editable Quantity to Produce
-- Stop/Complete dialog: Qty Produced + Accept/Reject/Rework quality decision + reject/rework counts + notes
-- Partial production: tracked via `runs` array — multiple operators per operation for remaining qty
-- Progress bar, Status filter, Print MO (with logo, tagline, currency, child MO details)
-- MO print includes: Operations with operator/qty/accept-reject, Materials, Child Sub-Assembly MOs table
+### Job Work / Subcontracting — NEW
+- Subcontract Orders: Create → Confirm → Track sent/received qty
+- Delivery Challan (DC): Send materials to subcontractor, stock deducted, inventory transaction logged
+- Subcontract Receipt (SR): Receive back with Accept/Reject/Rework QC, stock added for accepted qty
+- Order auto-completes when all sent materials are received
+- 3-tab layout (Orders, Challans, Receipts)
 
-### MRP
-- Material Demand with SO filter, Purchase Suggestions with correct qty logic
-- MRP→PO creation with suggested quantities
-
-### Settings
-- Logo, Tagline, Currency (INR/USD), Structured addresses (Line1, Line2, City, State, Pin)
-
-### All Other Modules Complete
-- Items/Parts, Multi-level BOM, Purchase Orders (ERPNext-style print), GRN, Quality, Inventory, Suppliers, Customers, Warehouses, User Management
+### Sales Orders, Manufacturing Orders, MRP, Settings, PO, GRN, Quality, Inventory — all complete
 
 ## Prioritized Backlog
-
-### P0 (Next)
-- [ ] Job Work / Subcontracting module
 
 ### P1
 - [ ] GST Phase 2: Sales Invoicing, E-Way Bill
@@ -49,3 +46,4 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 ### P2
 - [ ] Backend refactoring: server.py → routers/
 - [ ] Barcode/QR scanning, Gantt scheduling, Windows wrapper
+- [ ] Advanced reporting & analytics dashboard
