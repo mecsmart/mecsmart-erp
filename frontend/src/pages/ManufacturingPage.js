@@ -44,7 +44,7 @@ export default function ManufacturingPage() {
   
   // Operation start/stop dialog
   const [opDialog, setOpDialog] = useState({ open: false, mode: '', sequence: 0 });
-  const [opForm, setOpForm] = useState({ operator: '', quantity: 0, quality_result: 'accept', reject_qty: 0, rework_qty: 0, notes: '' });
+  const [opForm, setOpForm] = useState({ operator: '', quantity: 0, quality_result: 'accept', reject_qty: 0, rework_qty: 0, notes: '', is_outsource: false, outsource_supplier_id: '', outsource_charges: 0 });
 
   // Subcontract dialog
   const [subcontractDialog, setSubcontractDialog] = useState(false);
@@ -211,13 +211,17 @@ export default function ManufacturingPage() {
     const moQty = jobCardWO?.quantity || 0;
     const totalDone = op?.runs?.reduce((s, r) => s + (r.quantity_completed || 0), 0) || 0;
     const remaining = moQty - totalDone;
+    const isJW = op?.is_job_work || false;
     setOpForm({
       operator: op?.operator || '',
       quantity: mode === 'start' ? (remaining > 0 ? remaining : moQty) : (remaining > 0 ? remaining : moQty),
       quality_result: 'accept',
       reject_qty: 0,
       rework_qty: 0,
-      notes: ''
+      notes: '',
+      is_outsource: isJW,
+      outsource_supplier_id: op?.job_work_supplier_id || '',
+      outsource_charges: 0,
     });
     setOpDialog({ open: true, mode, sequence });
   };
@@ -229,7 +233,13 @@ export default function ManufacturingPage() {
     try {
       let payload = {};
       if (mode === 'start') {
-        payload = { status: 'in_progress', operator: opForm.operator, quantity_completed: opForm.quantity };
+        if (opForm.is_outsource) {
+          if (!opForm.outsource_supplier_id) { alert('Select a supplier for outsourcing'); return; }
+          payload = { status: 'in_progress', operator: suppliers.find(s => s.id === opForm.outsource_supplier_id)?.name || 'Outsourced', quantity_completed: opForm.quantity, notes: opForm.notes, is_outsource: true, outsource_supplier_id: opForm.outsource_supplier_id, outsource_charges: opForm.outsource_charges };
+        } else {
+          if (!opForm.operator.trim()) { alert('Operator name is required'); return; }
+          payload = { status: 'in_progress', operator: opForm.operator, quantity_completed: opForm.quantity };
+        }
       } else if (mode === 'stop') {
         payload = { status: 'stopped', quantity_completed: opForm.quantity, quality_result: opForm.quality_result, reject_qty: opForm.reject_qty, rework_qty: opForm.rework_qty, notes: opForm.notes };
       } else if (mode === 'complete') {
@@ -1569,15 +1579,54 @@ export default function ManufacturingPage() {
           <div className="space-y-4 mt-3">
             {opDialog.mode === 'start' && (
               <>
-                <div>
-                  <label className="block text-sm font-semibold text-[#111827] mb-1">Operator Name *</label>
-                  <input type="text" value={opForm.operator} onChange={e => setOpForm({...opForm, operator: e.target.value})} className="input-field" placeholder="Enter operator name" data-testid="op-operator-input" required />
-                  {!opForm.operator.trim() && <p className="text-xs text-[#9B1C1C] mt-1">Operator name is required</p>}
+                {/* Outsource Toggle */}
+                <div className="flex items-center justify-between p-3 bg-[#FDF6B2]/30 border border-[#FDF6B2] rounded-sm">
+                  <div>
+                    <span className="text-sm font-semibold text-[#723B13]">Outsource this operation</span>
+                    <p className="text-xs text-[#6B7280]">Send to external supplier for processing</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOpForm({...opForm, is_outsource: !opForm.is_outsource, operator: ''})}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${opForm.is_outsource ? 'bg-[#723B13]' : 'bg-[#D1D5DB]'}`}
+                    data-testid="outsource-toggle"
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${opForm.is_outsource ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity to Produce (max: {jobCardWO?.quantity || 0})</label>
-                  <input type="number" min="1" max={jobCardWO?.quantity || 1} value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: Math.min(parseInt(e.target.value) || 0, jobCardWO?.quantity || 1)})} className="input-field mono" data-testid="op-qty-input" />
-                </div>
+
+                {opForm.is_outsource ? (
+                  <>
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier / Vendor *</label>
+                      <Select value={opForm.outsource_supplier_id} onValueChange={v => setOpForm({...opForm, outsource_supplier_id: v})}>
+                        <SelectTrigger data-testid="outsource-supplier-select"><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                        <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Processing Charges</label>
+                      <input type="number" min="0" step="0.01" value={opForm.outsource_charges} onChange={e => setOpForm({...opForm, outsource_charges: parseFloat(e.target.value) || 0})} className="input-field mono" placeholder="0.00" data-testid="outsource-charges-input" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity to Send (max: {jobCardWO?.quantity || 0})</label>
+                      <input type="number" min="1" max={jobCardWO?.quantity || 1} value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: Math.min(parseInt(e.target.value) || 0, jobCardWO?.quantity || 1)})} className="input-field mono" data-testid="op-qty-input" />
+                    </div>
+                    <p className="text-xs text-[#723B13] bg-[#FDF6B2]/50 p-2 rounded-sm">A Subcontract Order and Delivery Challan will be auto-created when you start this operation.</p>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Operator Name *</label>
+                      <input type="text" value={opForm.operator} onChange={e => setOpForm({...opForm, operator: e.target.value})} className="input-field" placeholder="Enter operator name" data-testid="op-operator-input" required />
+                      {!opForm.operator.trim() && <p className="text-xs text-[#9B1C1C] mt-1">Operator name is required</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity to Produce (max: {jobCardWO?.quantity || 0})</label>
+                      <input type="number" min="1" max={jobCardWO?.quantity || 1} value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: Math.min(parseInt(e.target.value) || 0, jobCardWO?.quantity || 1)})} className="input-field mono" data-testid="op-qty-input" />
+                    </div>
+                  </>
+                )}
               </>
             )}
             {(opDialog.mode === 'stop' || opDialog.mode === 'complete') && (
@@ -1624,8 +1673,8 @@ export default function ManufacturingPage() {
             )}
             <div className="flex justify-end space-x-3 pt-3 border-t border-[#E5E7EB]">
               <button onClick={() => setOpDialog({ open: false, mode: '', sequence: 0 })} className="btn-secondary">Cancel</button>
-              <button onClick={handleOpDialogSubmit} className="btn-primary" disabled={opDialog.mode === 'start' && !opForm.operator.trim()} data-testid="op-dialog-submit">
-                {opDialog.mode === 'start' ? 'Start' : opDialog.mode === 'stop' ? 'Stop & Record' : 'Complete'}
+              <button onClick={handleOpDialogSubmit} className="btn-primary" disabled={opDialog.mode === 'start' && !opForm.is_outsource && !opForm.operator.trim()} data-testid="op-dialog-submit">
+                {opDialog.mode === 'start' ? (opForm.is_outsource ? 'Start & Create OS Order' : 'Start') : opDialog.mode === 'stop' ? 'Stop & Record' : 'Complete'}
               </button>
             </div>
           </div>

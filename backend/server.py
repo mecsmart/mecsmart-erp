@@ -481,6 +481,9 @@ class WorkOrderOperationUpdate(BaseModel):
     reject_qty: Optional[int] = None
     rework_qty: Optional[int] = None
     notes: Optional[str] = None
+    is_outsource: Optional[bool] = None
+    outsource_supplier_id: Optional[str] = None
+    outsource_charges: Optional[float] = None
 
 # ================== GST / INDIA COMPLIANCE MODELS ==================
 
@@ -3176,29 +3179,111 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             if prev_op.get("status") not in ["completed", "stopped"]:
                 raise HTTPException(status_code=400, detail=f"Previous operation '{prev_op.get('operation_name')}' must be completed first")
         
-        if not op_data.operator or not op_data.operator.strip():
-            raise HTTPException(status_code=400, detail="Operator name is required to start an operation")
+        is_outsource = op_data.is_outsource or False
         
-        # Initialize or append to runs list
-        runs = target_op.get("runs", [])
-        planned_qty = min(op_data.quantity_completed or mo_qty, mo_qty)
-        run_entry = {
-            "run_number": len(runs) + 1,
-            "operator": op_data.operator.strip(),
-            "quantity_planned": planned_qty,
-            "quantity_completed": 0,
-            "started_at": datetime.now(timezone.utc),
-            "ended_at": None,
-            "quality_result": None,
-            "reject_qty": 0,
-            "rework_qty": 0,
-            "notes": op_data.notes or ""
-        }
-        runs.append(run_entry)
-        target_op["runs"] = runs
-        target_op["actual_start"] = target_op.get("actual_start") or datetime.now(timezone.utc)
-        target_op["operator"] = op_data.operator.strip()
-        target_op["status"] = "in_progress"
+        if is_outsource:
+            if not op_data.outsource_supplier_id:
+                raise HTTPException(status_code=400, detail="Supplier is required for outsourced operations")
+            
+            supplier = await db.suppliers.find_one({"id": op_data.outsource_supplier_id}, {"_id": 0})
+            supplier_name = supplier.get("name", "Outsourced") if supplier else "Outsourced"
+            
+            # Create SC Order for this operation
+            sc_count = await db.subcontract_orders.count_documents({})
+            sc_order_number = f"JW-{str(sc_count + 1).zfill(6)}"
+            
+            # Get BOM items for this MO
+            bom = await db.bom.find_one({"parent_item_id": wo.get("item_id"), "status": "active"})
+            sc_lines = []
+            dc_lines = []
+            if bom:
+                for comp in bom.get("components", []):
+                    comp_item = await db.items.find_one({"id": comp["item_id"]}, {"_id": 0})
+                    if comp_item:
+                        qty_needed = comp["quantity"] * mo_qty
+                        sc_lines.append({"item_id": comp["item_id"], "quantity": qty_needed, "sent_quantity": qty_needed, "received_quantity": 0, "rate": comp_item.get("unit_cost", 0)})
+                        dc_lines.append({"item_id": comp["item_id"], "quantity": qty_needed, "rate": comp_item.get("unit_cost", 0)})
+            
+            sc_order_doc = {
+                "id": str(uuid.uuid4()),
+                "order_number": sc_order_number,
+                "supplier_id": op_data.outsource_supplier_id,
+                "reference_wo_id": wo_id,
+                "reference_operation_seq": sequence,
+                "lines": sc_lines,
+                "processing_charges": op_data.outsource_charges or 0,
+                "status": "in_progress",
+                "notes": f"Auto-created for outsourced operation: {target_op.get('operation_name')} on MO {wo.get('wo_number')}",
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"]
+            }
+            await db.subcontract_orders.insert_one(sc_order_doc)
+            
+            # Create DC
+            if dc_lines:
+                dc_count = await db.delivery_challans.count_documents({})
+                dc_number = f"DC-{str(dc_count + 1).zfill(6)}"
+                dc_doc = {
+                    "id": str(uuid.uuid4()),
+                    "dc_number": dc_number,
+                    "subcontract_order_id": sc_order_doc["id"],
+                    "reference_wo_id": wo_id,
+                    "lines": dc_lines,
+                    "status": "sent",
+                    "notes": f"Auto-DC for outsourced operation: {target_op.get('operation_name')}",
+                    "created_at": datetime.now(timezone.utc),
+                    "created_by": user["id"]
+                }
+                await db.delivery_challans.insert_one(dc_doc)
+            
+            target_op["is_job_work"] = True
+            target_op["job_work_supplier_id"] = op_data.outsource_supplier_id
+            target_op["outsource_status"] = "sent"
+            target_op["outsource_supplier_name"] = supplier_name
+            target_op["outsource_charges"] = op_data.outsource_charges or 0
+            target_op["outsource_sc_order_id"] = sc_order_doc["id"]
+            target_op["operator"] = f"OS: {supplier_name}"
+            target_op["actual_start"] = target_op.get("actual_start") or datetime.now(timezone.utc)
+            target_op["status"] = "in_progress"
+            
+            runs = target_op.get("runs", [])
+            runs.append({
+                "run_number": len(runs) + 1,
+                "operator": f"OS: {supplier_name}",
+                "quantity_planned": mo_qty,
+                "quantity_completed": 0,
+                "started_at": datetime.now(timezone.utc),
+                "ended_at": None,
+                "quality_result": None,
+                "reject_qty": 0,
+                "rework_qty": 0,
+                "notes": f"Outsourced to {supplier_name}"
+            })
+            target_op["runs"] = runs
+        else:
+            if not op_data.operator or not op_data.operator.strip():
+                raise HTTPException(status_code=400, detail="Operator name is required to start an operation")
+            
+            # Initialize or append to runs list
+            runs = target_op.get("runs", [])
+            planned_qty = min(op_data.quantity_completed or mo_qty, mo_qty)
+            run_entry = {
+                "run_number": len(runs) + 1,
+                "operator": op_data.operator.strip(),
+                "quantity_planned": planned_qty,
+                "quantity_completed": 0,
+                "started_at": datetime.now(timezone.utc),
+                "ended_at": None,
+                "quality_result": None,
+                "reject_qty": 0,
+                "rework_qty": 0,
+                "notes": op_data.notes or ""
+            }
+            runs.append(run_entry)
+            target_op["runs"] = runs
+            target_op["actual_start"] = target_op.get("actual_start") or datetime.now(timezone.utc)
+            target_op["operator"] = op_data.operator.strip()
+            target_op["status"] = "in_progress"
     
     # STOP operation (pause current run)
     elif op_data.status == "stopped":
@@ -3267,7 +3352,19 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
     
     wo_status = wo.get("status")
     if all_completed:
-        wo_status = "completed"
+        # Check subcontract receipt before auto-completing
+        can_complete = True
+        if wo.get("is_subcontract"):
+            sc_order = await db.subcontract_orders.find_one({"reference_wo_id": wo_id})
+            if sc_order and sc_order.get("status") != "completed":
+                can_complete = False
+        # Check any outsourced operation has pending receipt
+        for op in operations:
+            if op.get("is_job_work") and op.get("outsource_status") == "sent":
+                can_complete = False
+        
+        if can_complete:
+            wo_status = "completed"
     elif any_in_progress:
         wo_status = "in_progress"
     

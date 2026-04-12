@@ -1,30 +1,34 @@
-# Machinery Manufacturing ERP - Product Requirements Document
-
-## Original Problem Statement
-Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality process for windows platform, with GST India compliance and role-based access control.
+# Machinery Manufacturing ERP - PRD
 
 ## Architecture
-- **Backend**: FastAPI + MongoDB, JWT httpOnly cookies, all endpoints under `/api`
-- **Frontend**: React 19 + Shadcn/UI + Tailwind CSS, Industrial design theme
+- Backend: FastAPI + MongoDB, JWT httpOnly cookies, /api prefix
+- Frontend: React 19 + Shadcn/UI + Tailwind CSS
 
-## What's Been Implemented
+## Implemented Features
 
-### Manufacturing Orders — FULLY ENHANCED
-- Sub-Contract option: Checkbox at creation OR Subcontract button on pending MOs in Actions column
-- Sub-Contract → Auto DC + JW order when MO starts
-- Routing Job Work flag per operation with supplier
-- MO Tree View: Visual tree in Job Card (FG → SA → PART) with routing names and category badges
-- Routing Edit with full CRUD, item filter includes component/parts category
+### Manufacturing Orders
+- Collapsible FG→SA→PART tree view (same as Routings tab)
+- Subcontract button only on started (in_progress) MOs
+- MO completion blocked if: subcontracted qty not received, or outsourced operations pending
 - Job Card: Start/Stop/Complete with operator, qty, Accept/Reject/Rework
+- Start Operation: **Outsource toggle** — switches between Operator mode and Outsource mode (Supplier + Charges + auto-create SC Order + DC)
 
-### Purchase Invoice — Discount + GRN-linked
-- GRN-required flow with auto-populate, Discount per line item
-- Status: Draft → Approved → Paid
+### Routings
+- Collapsible MO-grouped tree view (FG→SA→PART)
+- Job Work flag per operation with supplier
+- Edit routing with full CRUD
 
-### All Other Modules Complete
-- Sales Orders, MRP, BOM, PO, GRN, Quality, Inventory, Settings, Customers, Suppliers, Job Work, Stores, User Management
+### Job Work / Subcontracting
+- SC Order with edit (lines + charges), confirm, send DC, receive back
+- DC with item names and RM price column, print
+- Auto-create from MO outsource flow
 
-## Prioritized Backlog
-- [ ] GST Phase 2: Sales Invoicing, E-Way Bill
+### Purchase Invoice
+- GRN-linked, discount column, Draft→Approved→Paid
+
+### All Other Modules: SO, MRP, BOM, PO, GRN, Quality, Inventory, Settings, Customers, Suppliers, Stores, User Management
+
+## Backlog
+- [ ] GST Phase 2: Sales Invoicing
 - [ ] Backend refactoring: server.py → routers/
 - [ ] Barcode/QR, Gantt chart, Windows wrapper
