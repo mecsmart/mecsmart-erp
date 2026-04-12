@@ -4850,27 +4850,79 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
         ref_wo = await db.work_orders.find_one({"id": ref_wo_id})
         if ref_wo:
             ops = ref_wo.get("operations_status", [])
-            updated = False
-            for op in ops:
-                if ref_seq and op.get("sequence") == ref_seq:
-                    op["outsource_status"] = "received"
-                    op["status"] = "completed"
-                    op["actual_end"] = datetime.now(timezone.utc)
-                    # Set quantity from SC order
-                    total_recv = sum(ol.get("received_quantity", 0) for ol in order.get("lines", []))
-                    op["quantity_completed"] = ref_wo.get("quantity", total_recv)
-                    op["quantity_accepted"] = ref_wo.get("quantity", total_recv)
-                    updated = True
-                    break
-                elif not ref_seq and op.get("is_job_work") and op.get("outsource_sc_order_id") == data.subcontract_order_id:
-                    op["outsource_status"] = "received"
-                    op["status"] = "completed"
-                    op["actual_end"] = datetime.now(timezone.utc)
-                    op["quantity_completed"] = ref_wo.get("quantity", 0)
-                    op["quantity_accepted"] = ref_wo.get("quantity", 0)
-                    updated = True
-                    break
-            if updated:
+            updated_ops = False
+            
+            if ref_seq:
+                # Operation-level outsource: update the specific operation
+                for op in ops:
+                    if op.get("sequence") == ref_seq:
+                        op["outsource_status"] = "received"
+                        op["status"] = "completed"
+                        op["actual_end"] = datetime.now(timezone.utc)
+                        total_recv = sum(ol.get("received_quantity", 0) for ol in order.get("lines", []))
+                        op["quantity_completed"] = ref_wo.get("quantity", total_recv)
+                        op["quantity_accepted"] = ref_wo.get("quantity", total_recv)
+                        updated_ops = True
+                        break
+            else:
+                # Check for operation-level match by SC order ID
+                for op in ops:
+                    if op.get("is_job_work") and op.get("outsource_sc_order_id") == data.subcontract_order_id:
+                        op["outsource_status"] = "received"
+                        op["status"] = "completed"
+                        op["actual_end"] = datetime.now(timezone.utc)
+                        op["quantity_completed"] = ref_wo.get("quantity", 0)
+                        op["quantity_accepted"] = ref_wo.get("quantity", 0)
+                        updated_ops = True
+                        break
+            
+            # For MO-level subcontract: mark ALL operations completed and auto-complete the MO
+            if ref_wo.get("is_subcontract"):
+                for op in ops:
+                    if op.get("status") != "completed":
+                        op["status"] = "completed"
+                        op["actual_end"] = datetime.now(timezone.utc)
+                        op["quantity_completed"] = ref_wo.get("quantity", 0)
+                        op["quantity_accepted"] = ref_wo.get("quantity", 0)
+                updated_ops = True
+                
+                # Auto-complete the MO and add finished goods to stock
+                mo_qty = ref_wo.get("quantity", 0)
+                routing = await db.routings.find_one({"id": ref_wo.get("routing_id")})
+                fg_item_id = routing.get("item_id") if routing else ref_wo.get("item_id")
+                fg_item = await db.items.find_one({"id": fg_item_id})
+                if fg_item:
+                    current_stock = fg_item.get("current_stock", 0)
+                    new_fg_stock = current_stock + mo_qty
+                    await db.items.update_one({"id": fg_item_id}, {"$set": {"current_stock": new_fg_stock}})
+                    
+                    # Inventory transaction for produced items
+                    fg_tx = {
+                        "id": str(uuid.uuid4()),
+                        "item_id": fg_item_id,
+                        "transaction_type": "receive",
+                        "quantity": mo_qty,
+                        "reference_type": "work_order",
+                        "reference_id": ref_wo_id,
+                        "previous_stock": current_stock,
+                        "new_stock": new_fg_stock,
+                        "notes": f"Produced via sub-contract MO {ref_wo.get('wo_number')} (auto-completed on receipt)",
+                        "created_at": datetime.now(timezone.utc),
+                        "created_by": user["id"]
+                    }
+                    await db.inventory_transactions.insert_one(fg_tx)
+                
+                await db.work_orders.update_one(
+                    {"id": ref_wo_id},
+                    {"$set": {
+                        "operations_status": ops,
+                        "status": "completed",
+                        "quantity_completed": mo_qty,
+                        "actual_end": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(timezone.utc)
+                    }}
+                )
+            elif updated_ops:
                 await db.work_orders.update_one({"id": ref_wo_id}, {"$set": {"operations_status": ops, "updated_at": datetime.now(timezone.utc)}})
     
     rec_doc = {
