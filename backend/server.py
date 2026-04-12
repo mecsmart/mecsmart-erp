@@ -461,6 +461,7 @@ class WorkOrderCreate(BaseModel):
     notes: Optional[str] = ""
     is_subcontract: Optional[bool] = False
     subcontract_supplier_id: Optional[str] = ""
+    subcontract_type: Optional[str] = "with_material"  # with_material | without_material
 
 class WorkOrderUpdate(BaseModel):
     status: Optional[str] = None
@@ -470,6 +471,7 @@ class WorkOrderUpdate(BaseModel):
     notes: Optional[str] = None
     is_subcontract: Optional[bool] = None
     subcontract_supplier_id: Optional[str] = None
+    subcontract_type: Optional[str] = None  # with_material | without_material
 
 class WorkOrderOperationUpdate(BaseModel):
     status: str  # pending, in_progress, completed, stopped
@@ -2811,6 +2813,7 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             "parent_wo_id": parent_wo_id,
             "is_subcontract": wo_data.is_subcontract if is_main else False,
             "subcontract_supplier_id": wo_data.subcontract_supplier_id if is_main else "",
+            "subcontract_type": wo_data.subcontract_type if is_main else "with_material",
             "notes": wo_data.notes if is_main else f"Auto-created for {item_doc.get('category', 'child item')}",
             "materials_consumed": False,
             "created_at": datetime.now(timezone.utc),
@@ -2889,7 +2892,11 @@ async def start_work_order(wo_id: str, request: Request):
     consumed_materials = []
     insufficient_materials = []
     
-    if bom:
+    # Skip material consumption for "without_material" subcontract
+    sc_type = wo.get("subcontract_type", "with_material")
+    skip_material_consumption = wo.get("is_subcontract") and sc_type == "without_material"
+    
+    if bom and not skip_material_consumption:
         wo_qty = wo.get("quantity", 1)
         
         for component in bom.get("components", []):
@@ -2971,26 +2978,34 @@ async def start_work_order(wo_id: str, request: Request):
     # Auto-create SC Order + DC for sub-contract MO
     auto_dc = None
     if wo.get("is_subcontract") and wo.get("subcontract_supplier_id"):
-        # Build SC/DC lines from consumed materials; fallback to WO item itself
-        sc_material_lines = consumed_materials
-        if not sc_material_lines:
+        # For "without_material": SC order line = the finished item itself (no RM sent)
+        # For "with_material": SC order lines = consumed materials (RM sent to vendor)
+        if sc_type == "without_material":
             wo_item = await db.items.find_one({"id": item_id}, {"_id": 0})
-            if wo_item:
-                sc_material_lines = [{"item_id": item_id, "quantity": wo.get("quantity", 1), "unit_cost": wo_item.get("unit_cost", 0)}]
+            sc_material_lines = [{"item_id": item_id, "quantity": wo.get("quantity", 1), "unit_cost": wo_item.get("unit_cost", 0)}] if wo_item else []
+        else:
+            sc_material_lines = consumed_materials
+            if not sc_material_lines:
+                wo_item = await db.items.find_one({"id": item_id}, {"_id": 0})
+                if wo_item:
+                    sc_material_lines = [{"item_id": item_id, "quantity": wo.get("quantity", 1), "unit_cost": wo_item.get("unit_cost", 0)}]
         
         # Find or create a subcontract order
         sc_order = await db.subcontract_orders.find_one({"reference_wo_id": wo_id})
         sc_order_id = ""
         if not sc_order:
             sc_count = await db.subcontract_orders.count_documents({})
+            # For without_material: sent_quantity=0 (nothing sent to vendor), they source themselves
+            sc_sent_qty = lambda m: m["quantity"] if sc_type == "with_material" else 0
             sc_order_doc = {
                 "id": str(uuid.uuid4()),
                 "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
                 "supplier_id": wo["subcontract_supplier_id"],
                 "reference_wo_id": wo_id,
-                "lines": [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": m["quantity"], "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_material_lines],
+                "subcontract_type": sc_type,
+                "lines": [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": sc_sent_qty(m), "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_material_lines],
                 "status": "in_progress",
-                "notes": f"Auto-created from sub-contract MO {wo.get('wo_number')}",
+                "notes": f"Auto-created from sub-contract MO {wo.get('wo_number')} ({sc_type.replace('_', ' ')})",
                 "created_at": datetime.now(timezone.utc),
                 "created_by": user["id"]
             }
@@ -3000,8 +3015,8 @@ async def start_work_order(wo_id: str, request: Request):
         else:
             sc_order_id = sc_order["id"]
         
-        dc_lines = [{"item_id": m["item_id"], "quantity": m["quantity"], "rate": m.get("unit_cost", 0)} for m in sc_material_lines]
-        if dc_lines:
+        # Only create DC for "with_material" type (materials are physically sent)
+        if sc_type == "with_material" and sc_material_lines:
             dc_count = await db.delivery_challans.count_documents({})
             dc_number = f"DC-{str(dc_count + 1).zfill(6)}"
             dc_doc = {
@@ -3019,9 +3034,10 @@ async def start_work_order(wo_id: str, request: Request):
             dc_doc.pop("_id", None)
             auto_dc = dc_doc
     
+    sc_type_label = f" ({sc_type.replace('_', ' ')})" if wo.get("is_subcontract") else ""
     return {
         "success": True,
-        "message": "Work order started, materials consumed" + (" + DC created for sub-contract" if auto_dc else ""),
+        "message": ("Work order started" + (", materials consumed" if consumed_materials else ", no materials consumed (without material SC)") + (" + DC created for sub-contract" if auto_dc else "") + sc_type_label),
         "consumed_materials": consumed_materials,
         "wo_number": wo.get("wo_number"),
         "auto_dc": auto_dc
@@ -3157,51 +3173,61 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
     if update_data.get("is_subcontract") and wo.get("status") == "in_progress":
         updated_wo_fresh = await db.work_orders.find_one({"id": wo_id})
         sc_supplier = updated_wo_fresh.get("subcontract_supplier_id") or update_data.get("subcontract_supplier_id")
+        sc_type = updated_wo_fresh.get("subcontract_type", "with_material")
         if sc_supplier:
             existing_sc = await db.subcontract_orders.find_one({"reference_wo_id": wo_id})
             if not existing_sc:
-                # Build lines from consumed materials or WO item
-                consumed = updated_wo_fresh.get("consumed_materials", [])
-                sc_lines_data = consumed
-                if not sc_lines_data:
+                # Build lines based on subcontract type
+                if sc_type == "without_material":
                     routing = await db.routings.find_one({"id": updated_wo_fresh.get("routing_id")})
                     wo_item_id = routing.get("item_id") if routing else updated_wo_fresh.get("item_id")
                     wo_item = await db.items.find_one({"id": wo_item_id}, {"_id": 0})
-                    if wo_item:
-                        sc_lines_data = [{"item_id": wo_item_id, "quantity": updated_wo_fresh.get("quantity", 1), "unit_cost": wo_item.get("unit_cost", 0)}]
+                    sc_lines_data = [{"item_id": wo_item_id, "quantity": updated_wo_fresh.get("quantity", 1), "unit_cost": wo_item.get("unit_cost", 0)}] if wo_item else []
+                else:
+                    consumed = updated_wo_fresh.get("consumed_materials", [])
+                    sc_lines_data = consumed
+                    if not sc_lines_data:
+                        routing = await db.routings.find_one({"id": updated_wo_fresh.get("routing_id")})
+                        wo_item_id = routing.get("item_id") if routing else updated_wo_fresh.get("item_id")
+                        wo_item = await db.items.find_one({"id": wo_item_id}, {"_id": 0})
+                        if wo_item:
+                            sc_lines_data = [{"item_id": wo_item_id, "quantity": updated_wo_fresh.get("quantity", 1), "unit_cost": wo_item.get("unit_cost", 0)}]
                 
                 if sc_lines_data:
                     sc_count = await db.subcontract_orders.count_documents({})
+                    sc_sent_qty = lambda m: m["quantity"] if sc_type == "with_material" else 0
                     sc_doc = {
                         "id": str(uuid.uuid4()),
                         "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
                         "supplier_id": sc_supplier,
                         "reference_wo_id": wo_id,
-                        "lines": [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": m["quantity"], "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_lines_data],
+                        "subcontract_type": sc_type,
+                        "lines": [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": sc_sent_qty(m), "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_lines_data],
                         "status": "in_progress",
-                        "notes": f"Auto-created from sub-contract MO {updated_wo_fresh.get('wo_number')}",
+                        "notes": f"Auto-created from sub-contract MO {updated_wo_fresh.get('wo_number')} ({sc_type.replace('_', ' ')})",
                         "created_at": datetime.now(timezone.utc),
                         "created_by": user["id"]
                     }
                     await db.subcontract_orders.insert_one(sc_doc)
                     sc_doc.pop("_id", None)
                     
-                    # Auto-create DC
-                    dc_lines = [{"item_id": m["item_id"], "quantity": m["quantity"], "rate": m.get("unit_cost", 0)} for m in sc_lines_data]
-                    if dc_lines:
-                        dc_count = await db.delivery_challans.count_documents({})
-                        dc_doc = {
-                            "id": str(uuid.uuid4()),
-                            "dc_number": f"DC-{str(dc_count + 1).zfill(6)}",
-                            "subcontract_order_id": sc_doc["id"],
-                            "reference_wo_id": wo_id,
-                            "lines": dc_lines,
-                            "status": "sent",
-                            "notes": f"Auto-DC for sub-contract MO {updated_wo_fresh.get('wo_number')}",
-                            "created_at": datetime.now(timezone.utc),
-                            "created_by": user["id"]
-                        }
-                        await db.delivery_challans.insert_one(dc_doc)
+                    # Only create DC for "with_material" type
+                    if sc_type == "with_material":
+                        dc_lines = [{"item_id": m["item_id"], "quantity": m["quantity"], "rate": m.get("unit_cost", 0)} for m in sc_lines_data]
+                        if dc_lines:
+                            dc_count = await db.delivery_challans.count_documents({})
+                            dc_doc = {
+                                "id": str(uuid.uuid4()),
+                                "dc_number": f"DC-{str(dc_count + 1).zfill(6)}",
+                                "subcontract_order_id": sc_doc["id"],
+                                "reference_wo_id": wo_id,
+                                "lines": dc_lines,
+                                "status": "sent",
+                                "notes": f"Auto-DC for sub-contract MO {updated_wo_fresh.get('wo_number')}",
+                                "created_at": datetime.now(timezone.utc),
+                                "created_by": user["id"]
+                            }
+                            await db.delivery_challans.insert_one(dc_doc)
     
     updated_wo = await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
     return updated_wo

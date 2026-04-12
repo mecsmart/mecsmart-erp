@@ -50,6 +50,7 @@ export default function ManufacturingPage() {
   const [subcontractDialog, setSubcontractDialog] = useState(false);
   const [subcontractWO, setSubcontractWO] = useState(null);
   const [subcontractSupplier, setSubcontractSupplier] = useState('');
+  const [subcontractType, setSubcontractType] = useState('with_material');
   
   const [workCenterForm, setWorkCenterForm] = useState({
     code: '',
@@ -78,6 +79,7 @@ export default function ManufacturingPage() {
     notes: '',
     is_subcontract: false,
     subcontract_supplier_id: '',
+    subcontract_type: 'with_material',
   });
 
   const canEdit = ['admin', 'production_manager'].includes(user?.role);
@@ -270,6 +272,7 @@ export default function ManufacturingPage() {
   const handleMarkSubcontract = (wo) => {
     setSubcontractWO(wo);
     setSubcontractSupplier('');
+    setSubcontractType('with_material');
     setSubcontractDialog(true);
   };
 
@@ -278,7 +281,8 @@ export default function ManufacturingPage() {
     try {
       await api.put(`/api/work-orders/${subcontractWO.id}`, {
         is_subcontract: true,
-        subcontract_supplier_id: subcontractSupplier
+        subcontract_supplier_id: subcontractSupplier,
+        subcontract_type: subcontractType
       });
       setSubcontractDialog(false);
       fetchData();
@@ -381,6 +385,7 @@ export default function ManufacturingPage() {
       notes: '',
       is_subcontract: false,
       subcontract_supplier_id: '',
+      subcontract_type: 'with_material',
     });
   };
 
@@ -786,19 +791,45 @@ export default function ManufacturingPage() {
                     {/* Sub-Contract Option */}
                     <div className="border rounded-sm p-3 bg-[#F9FAFB]">
                       <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={workOrderForm.is_subcontract} onChange={e => setWorkOrderForm({...workOrderForm, is_subcontract: e.target.checked, subcontract_supplier_id: ''})} className="rounded" data-testid="wo-subcontract-check" />
+                        <input type="checkbox" checked={workOrderForm.is_subcontract} onChange={e => setWorkOrderForm({...workOrderForm, is_subcontract: e.target.checked, subcontract_supplier_id: '', subcontract_type: 'with_material'})} className="rounded" data-testid="wo-subcontract-check" />
                         <span className="text-sm font-semibold text-[#111827]">Sub-Contract (Send to external supplier)</span>
                       </label>
                       {workOrderForm.is_subcontract && (
-                        <div className="mt-3">
-                          <label className="block text-sm font-semibold text-[#111827] mb-1">Subcontractor *</label>
-                          <Select value={workOrderForm.subcontract_supplier_id} onValueChange={v => setWorkOrderForm({...workOrderForm, subcontract_supplier_id: v})}>
-                            <SelectTrigger data-testid="wo-subcontract-supplier"><SelectValue placeholder="Select supplier" /></SelectTrigger>
-                            <SelectContent>
-                              {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                          <p className="text-xs text-[#6B7280] mt-1">BOM materials will be auto-sent via DC when MO starts</p>
+                        <div className="mt-3 space-y-3">
+                          {/* SC Type Radio */}
+                          <div>
+                            <label className="block text-sm font-semibold text-[#111827] mb-2">Sub-Contract Type *</label>
+                            <div className="flex gap-3">
+                              <label className={`flex-1 flex items-start gap-2 p-2.5 border-2 rounded-sm cursor-pointer transition-all ${workOrderForm.subcontract_type === 'with_material' ? 'border-[#1D3557] bg-[#E1EFFE]/30' : 'border-[#D1D5DB]'}`} data-testid="sc-type-with-material">
+                                <input type="radio" name="sc_type" value="with_material" checked={workOrderForm.subcontract_type === 'with_material'} onChange={() => setWorkOrderForm({...workOrderForm, subcontract_type: 'with_material'})} className="mt-0.5" />
+                                <div>
+                                  <span className="text-sm font-semibold text-[#111827]">With Material</span>
+                                  <p className="text-[11px] text-[#6B7280] mt-0.5">Your RM consumed from stock and sent to vendor via DC</p>
+                                </div>
+                              </label>
+                              <label className={`flex-1 flex items-start gap-2 p-2.5 border-2 rounded-sm cursor-pointer transition-all ${workOrderForm.subcontract_type === 'without_material' ? 'border-[#1D3557] bg-[#E1EFFE]/30' : 'border-[#D1D5DB]'}`} data-testid="sc-type-without-material">
+                                <input type="radio" name="sc_type" value="without_material" checked={workOrderForm.subcontract_type === 'without_material'} onChange={() => setWorkOrderForm({...workOrderForm, subcontract_type: 'without_material'})} className="mt-0.5" />
+                                <div>
+                                  <span className="text-sm font-semibold text-[#111827]">Without Material</span>
+                                  <p className="text-[11px] text-[#6B7280] mt-0.5">Vendor sources RM themselves. No stock consumed, no DC</p>
+                                </div>
+                              </label>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold text-[#111827] mb-1">Subcontractor *</label>
+                            <Select value={workOrderForm.subcontract_supplier_id} onValueChange={v => setWorkOrderForm({...workOrderForm, subcontract_supplier_id: v})}>
+                              <SelectTrigger data-testid="wo-subcontract-supplier"><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                              <SelectContent>
+                                {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <p className="text-xs text-[#723B13] bg-[#FDF6B2]/50 p-2 rounded-sm">
+                            {workOrderForm.subcontract_type === 'with_material'
+                              ? 'BOM materials will be consumed from stock and auto-sent via Delivery Challan when MO starts.'
+                              : 'No materials consumed from your stock. Vendor will source and manufacture. Only finished item received back.'}
+                          </p>
                         </div>
                       )}
                     </div>
@@ -1708,9 +1739,26 @@ export default function ManufacturingPage() {
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle className="font-[Chivo]">Mark as Sub-Contract — {subcontractWO?.wo_number}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3">
-            <p className="text-sm text-[#4B5563]">
-              Select a subcontractor. When this MO is started, BOM materials will be auto-sent via Delivery Challan.
-            </p>
+            {/* SC Type Radio */}
+            <div>
+              <label className="block text-sm font-semibold text-[#111827] mb-2">Sub-Contract Type *</label>
+              <div className="flex gap-3">
+                <label className={`flex-1 flex items-start gap-2 p-2.5 border-2 rounded-sm cursor-pointer transition-all ${subcontractType === 'with_material' ? 'border-[#1D3557] bg-[#E1EFFE]/30' : 'border-[#D1D5DB]'}`} data-testid="sc-dialog-type-with">
+                  <input type="radio" name="sc_dialog_type" value="with_material" checked={subcontractType === 'with_material'} onChange={() => setSubcontractType('with_material')} className="mt-0.5" />
+                  <div>
+                    <span className="text-sm font-semibold text-[#111827]">With Material</span>
+                    <p className="text-[11px] text-[#6B7280] mt-0.5">Your RM sent to vendor via DC</p>
+                  </div>
+                </label>
+                <label className={`flex-1 flex items-start gap-2 p-2.5 border-2 rounded-sm cursor-pointer transition-all ${subcontractType === 'without_material' ? 'border-[#1D3557] bg-[#E1EFFE]/30' : 'border-[#D1D5DB]'}`} data-testid="sc-dialog-type-without">
+                  <input type="radio" name="sc_dialog_type" value="without_material" checked={subcontractType === 'without_material'} onChange={() => setSubcontractType('without_material')} className="mt-0.5" />
+                  <div>
+                    <span className="text-sm font-semibold text-[#111827]">Without Material</span>
+                    <p className="text-[11px] text-[#6B7280] mt-0.5">Vendor sources RM, no DC needed</p>
+                  </div>
+                </label>
+              </div>
+            </div>
             <div>
               <label className="block text-sm font-semibold text-[#111827] mb-1">Subcontractor *</label>
               <Select value={subcontractSupplier} onValueChange={setSubcontractSupplier}>
@@ -1720,6 +1768,11 @@ export default function ManufacturingPage() {
                 </SelectContent>
               </Select>
             </div>
+            <p className="text-xs text-[#723B13] bg-[#FDF6B2]/50 p-2 rounded-sm">
+              {subcontractType === 'with_material'
+                ? 'Consumed materials will be sent to subcontractor via Delivery Challan.'
+                : 'No materials sent. Vendor sources and manufactures. Only finished item received back.'}
+            </p>
             <div className="flex justify-end space-x-3 pt-3 border-t">
               <button onClick={() => setSubcontractDialog(false)} className="btn-secondary">Cancel</button>
               <button onClick={handleConfirmSubcontract} className="btn-primary" disabled={!subcontractSupplier} data-testid="confirm-subcontract-btn">Confirm Sub-Contract</button>
