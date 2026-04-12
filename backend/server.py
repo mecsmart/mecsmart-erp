@@ -325,6 +325,7 @@ class PurchaseInvoiceLineItem(BaseModel):
     item_id: str
     quantity: float
     unit_price: float
+    discount: Optional[float] = 0
     hsn_code: Optional[str] = ""
     gst_rate: Optional[float] = 18.0
 
@@ -432,6 +433,8 @@ class RoutingOperationCreate(BaseModel):
     description: Optional[str] = ""
     setup_time_minutes: int = 0
     run_time_minutes: int = 0
+    is_job_work: Optional[bool] = False
+    job_work_supplier_id: Optional[str] = ""
 
 class RoutingCreate(BaseModel):
     item_id: str
@@ -455,6 +458,8 @@ class WorkOrderCreate(BaseModel):
     scheduled_start: Optional[datetime] = None
     scheduled_end: Optional[datetime] = None
     notes: Optional[str] = ""
+    is_subcontract: Optional[bool] = False
+    subcontract_supplier_id: Optional[str] = ""
 
 class WorkOrderUpdate(BaseModel):
     status: Optional[str] = None
@@ -2761,6 +2766,9 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
                 "sequence": op.get("sequence"),
                 "operation_name": op.get("operation_name"),
                 "work_center_id": op.get("work_center_id"),
+                "work_center_name": "",
+                "is_job_work": op.get("is_job_work", False),
+                "job_work_supplier_id": op.get("job_work_supplier_id", ""),
                 "status": "pending",
                 "quantity_completed": 0
             })
@@ -2778,6 +2786,8 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             "status": "pending",
             "operations_status": operations_status,
             "parent_wo_id": parent_wo_id,
+            "is_subcontract": wo_data.is_subcontract if is_main else False,
+            "subcontract_supplier_id": wo_data.subcontract_supplier_id if is_main else "",
             "notes": wo_data.notes if is_main else f"Auto-created for {item_doc.get('category', 'child item')}",
             "materials_consumed": False,
             "created_at": datetime.now(timezone.utc),
@@ -2960,12 +2970,95 @@ async def start_work_order(wo_id: str, request: Request):
         }}
     )
     
+    # Auto-create DC for sub-contract MO
+    auto_dc = None
+    if wo.get("is_subcontract") and wo.get("subcontract_supplier_id") and consumed_materials:
+        dc_count = await db.delivery_challans.count_documents({})
+        dc_number = f"DC-{str(dc_count + 1).zfill(6)}"
+        
+        # Find or create a subcontract order
+        sc_order = await db.subcontract_orders.find_one({"reference_wo_id": wo_id})
+        sc_order_id = ""
+        if not sc_order:
+            sc_count = await db.subcontract_orders.count_documents({})
+            sc_order_doc = {
+                "id": str(uuid.uuid4()),
+                "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
+                "supplier_id": wo["subcontract_supplier_id"],
+                "reference_wo_id": wo_id,
+                "lines": [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": m["quantity"], "received_quantity": 0, "rate": 0} for m in consumed_materials],
+                "status": "in_progress",
+                "notes": f"Auto-created from sub-contract MO {wo.get('wo_number')}",
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"]
+            }
+            await db.subcontract_orders.insert_one(sc_order_doc)
+            sc_order_doc.pop("_id", None)
+            sc_order_id = sc_order_doc["id"]
+        else:
+            sc_order_id = sc_order["id"]
+        
+        dc_lines = [{"item_id": m["item_id"], "quantity": m["quantity"], "rate": 0} for m in consumed_materials]
+        dc_doc = {
+            "id": str(uuid.uuid4()),
+            "dc_number": dc_number,
+            "subcontract_order_id": sc_order_id,
+            "reference_wo_id": wo_id,
+            "lines": dc_lines,
+            "status": "sent",
+            "notes": f"Auto-DC for sub-contract MO {wo.get('wo_number')}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"]
+        }
+        await db.delivery_challans.insert_one(dc_doc)
+        dc_doc.pop("_id", None)
+        auto_dc = dc_doc
+    
     return {
         "success": True,
-        "message": "Work order started, materials consumed",
+        "message": "Work order started, materials consumed" + (" + DC created for sub-contract" if auto_dc else ""),
         "consumed_materials": consumed_materials,
-        "wo_number": wo.get("wo_number")
+        "wo_number": wo.get("wo_number"),
+        "auto_dc": auto_dc
     }
+
+
+@work_orders_router.get("/{wo_id}/tree")
+async def get_work_order_tree(wo_id: str, request: Request):
+    """Get the MO tree: Finished Good → Semi-Finished → Parts"""
+    await get_current_user(request)
+    
+    async def build_tree(wid):
+        wo = await db.work_orders.find_one({"id": wid}, {"_id": 0})
+        if not wo:
+            return None
+        item = await db.items.find_one({"id": wo.get("item_id")}, {"_id": 0})
+        wo["item"] = item
+        children = await db.work_orders.find({"parent_wo_id": wid}, {"_id": 0}).to_list(100)
+        wo["children"] = []
+        for child in children:
+            child_tree = await build_tree(child["id"])
+            if child_tree:
+                wo["children"].append(child_tree)
+        return wo
+    
+    # Find root MO (may be this one or its parent)
+    wo = await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    
+    root_id = wo_id
+    if wo.get("parent_wo_id"):
+        # Walk up to root
+        current = wo
+        while current.get("parent_wo_id"):
+            parent = await db.work_orders.find_one({"id": current["parent_wo_id"]}, {"_id": 0})
+            if not parent:
+                break
+            current = parent
+            root_id = current["id"]
+    
+    return await build_tree(root_id)
 
 @work_orders_router.put("/{wo_id}")
 async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Request):
@@ -4191,8 +4284,10 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request)
         if not item:
             continue
         line_total = line.quantity * line.unit_price
+        discount_amount = line.discount or 0
+        line_after_discount = line_total - discount_amount
         gst_rate = line.gst_rate if line.gst_rate is not None else item.get("gst_rate", 18)
-        gst_amount = line_total * gst_rate / 100
+        gst_amount = line_after_discount * gst_rate / 100
         
         if is_inter_state:
             total_igst += gst_amount
@@ -4200,14 +4295,15 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request)
             total_cgst += gst_amount / 2
             total_sgst += gst_amount / 2
         
-        subtotal += line_total
+        subtotal += line_after_discount
         lines.append({
             "item_id": line.item_id,
             "quantity": line.quantity,
             "unit_price": line.unit_price,
+            "discount": discount_amount,
             "hsn_code": line.hsn_code or item.get("hsn_code", ""),
             "gst_rate": gst_rate,
-            "line_total": line_total,
+            "line_total": line_after_discount,
             "gst_amount": gst_amount
         })
     

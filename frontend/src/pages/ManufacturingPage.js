@@ -69,9 +69,14 @@ export default function ManufacturingPage() {
     scheduled_start: '',
     scheduled_end: '',
     notes: '',
+    is_subcontract: false,
+    subcontract_supplier_id: '',
   });
 
   const canEdit = ['admin', 'production_manager'].includes(user?.role);
+  const [suppliers, setSuppliers] = useState([]);
+  const [editingRouting, setEditingRouting] = useState(null);
+  const [moTree, setMoTree] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -80,18 +85,20 @@ export default function ManufacturingPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [wcRes, routingsRes, woRes, poRes, itemsRes] = await Promise.all([
+      const [wcRes, routingsRes, woRes, poRes, itemsRes, supRes] = await Promise.all([
         api.get('/api/work-centers'),
         api.get('/api/routings'),
         api.get('/api/work-orders'),
         api.get('/api/production'),
         api.get('/api/items'),
+        api.get('/api/suppliers'),
       ]);
       setWorkCenters(wcRes.data);
       setRoutings(routingsRes.data);
       setWorkOrders(woRes.data);
       setProductionOrders(poRes.data);
       setItems(itemsRes.data);
+      setSuppliers(supRes.data);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -120,8 +127,13 @@ export default function ManufacturingPage() {
   const handleRoutingSubmit = async (e) => {
     e.preventDefault();
     try {
-      await api.post('/api/routings', routingForm);
+      if (editingRouting) {
+        await api.put(`/api/routings/${editingRouting.id}`, routingForm);
+      } else {
+        await api.post('/api/routings', routingForm);
+      }
       setIsRoutingDialogOpen(false);
+      setEditingRouting(null);
       resetRoutingForm();
       fetchData();
     } catch (error) {
@@ -183,6 +195,8 @@ export default function ManufacturingPage() {
   const openJobCard = (wo) => {
     setJobCardWO(wo);
     setIsJobCardOpen(true);
+    // Fetch MO tree
+    api.get(`/api/work-orders/${wo.id}/tree`).then(res => setMoTree(res.data)).catch(() => setMoTree(null));
   };
 
   const openOpDialog = (mode, sequence) => {
@@ -259,6 +273,8 @@ export default function ManufacturingPage() {
         description: '',
         setup_time_minutes: 0,
         run_time_minutes: 0,
+        is_job_work: false,
+        job_work_supplier_id: '',
       }],
     });
   };
@@ -298,6 +314,28 @@ export default function ManufacturingPage() {
     });
   };
 
+  const handleEditRouting = (routing) => {
+    setEditingRouting(routing);
+    setRoutingForm({
+      item_id: routing.item_id,
+      name: routing.name,
+      description: routing.description || '',
+      revision: routing.revision || 'A',
+      status: routing.status || 'active',
+      operations: routing.operations?.map(op => ({
+        sequence: op.sequence,
+        work_center_id: op.work_center_id,
+        operation_name: op.operation_name,
+        description: op.description || '',
+        setup_time_minutes: op.setup_time_minutes || 0,
+        run_time_minutes: op.run_time_minutes || 0,
+        is_job_work: op.is_job_work || false,
+        job_work_supplier_id: op.job_work_supplier_id || '',
+      })) || [],
+    });
+    setIsRoutingDialogOpen(true);
+  };
+
   const resetWorkOrderForm = () => {
     setWorkOrderForm({
       production_order_id: '',
@@ -306,6 +344,8 @@ export default function ManufacturingPage() {
       scheduled_start: '',
       scheduled_end: '',
       notes: '',
+      is_subcontract: false,
+      subcontract_supplier_id: '',
     });
   };
 
@@ -685,6 +725,26 @@ export default function ManufacturingPage() {
                       </div>
                     </div>
 
+                    {/* Sub-Contract Option */}
+                    <div className="border rounded-sm p-3 bg-[#F9FAFB]">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={workOrderForm.is_subcontract} onChange={e => setWorkOrderForm({...workOrderForm, is_subcontract: e.target.checked, subcontract_supplier_id: ''})} className="rounded" data-testid="wo-subcontract-check" />
+                        <span className="text-sm font-semibold text-[#111827]">Sub-Contract (Send to external supplier)</span>
+                      </label>
+                      {workOrderForm.is_subcontract && (
+                        <div className="mt-3">
+                          <label className="block text-sm font-semibold text-[#111827] mb-1">Subcontractor *</label>
+                          <Select value={workOrderForm.subcontract_supplier_id} onValueChange={v => setWorkOrderForm({...workOrderForm, subcontract_supplier_id: v})}>
+                            <SelectTrigger data-testid="wo-subcontract-supplier"><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                            <SelectContent>
+                              {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-[#6B7280] mt-1">BOM materials will be auto-sent via DC when MO starts</p>
+                        </div>
+                      )}
+                    </div>
+
                     <div>
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Notes</label>
                       <textarea
@@ -1000,6 +1060,18 @@ export default function ManufacturingPage() {
                                   placeholder="Run time (min)"
                                 />
                               </div>
+                              <div>
+                                <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                                  <input type="checkbox" checked={op.is_job_work || false} onChange={e => updateOperation(index, 'is_job_work', e.target.checked)} className="rounded" />
+                                  <span className="text-xs font-medium text-[#723B13]">Job Work (Outsourced)</span>
+                                </label>
+                                {op.is_job_work && (
+                                  <Select value={op.job_work_supplier_id || ''} onValueChange={v => updateOperation(index, 'job_work_supplier_id', v)}>
+                                    <SelectTrigger className="mt-1 h-8 text-xs"><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                                    <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}</SelectContent>
+                                  </Select>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -1007,11 +1079,11 @@ export default function ManufacturingPage() {
                     </div>
 
                     <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
-                      <button type="button" onClick={() => setIsRoutingDialogOpen(false)} className="btn-secondary">
+                      <button type="button" onClick={() => { setIsRoutingDialogOpen(false); setEditingRouting(null); }} className="btn-secondary">
                         Cancel
                       </button>
                       <button type="submit" className="btn-primary" data-testid="routing-save-btn">
-                        Create Routing
+                        {editingRouting ? 'Update Routing' : 'Create Routing'}
                       </button>
                     </div>
                   </form>
@@ -1040,6 +1112,7 @@ export default function ManufacturingPage() {
                       <th>Revision</th>
                       <th>Operations</th>
                       <th>Status</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1051,11 +1124,21 @@ export default function ManufacturingPage() {
                         </td>
                         <td className="font-medium">{routing.name}</td>
                         <td className="mono">{routing.revision}</td>
-                        <td className="mono">{routing.operations?.length || 0}</td>
+                        <td>
+                          <span className="mono">{routing.operations?.length || 0}</span>
+                          {routing.operations?.some(op => op.is_job_work) && <span className="ml-1 text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">JW</span>}
+                        </td>
                         <td>
                           <span className={`status-badge status-${routing.status}`}>
                             {routing.status}
                           </span>
+                        </td>
+                        <td>
+                          {canEdit && (
+                            <button onClick={() => handleEditRouting(routing)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit Routing" data-testid={`edit-routing-${routing.id}`}>
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1365,6 +1448,36 @@ export default function ManufacturingPage() {
                   ></div>
                 </div>
               </div>
+
+              {/* MO Tree View */}
+              {moTree && moTree.children && moTree.children.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-[#374151] uppercase tracking-wide mb-2">Manufacturing Order Tree</p>
+                  <div className="border rounded-sm p-3 bg-[#F9FAFB] text-sm">
+                    {(() => {
+                      const renderTree = (node, depth = 0) => {
+                        if (!node) return null;
+                        const indent = depth * 20;
+                        const statusColor = node.status === 'completed' ? '#03543F' : node.status === 'in_progress' ? '#1E429F' : '#723B13';
+                        return (
+                          <div key={node.id}>
+                            <div className="flex items-center gap-2 py-1" style={{ paddingLeft: `${indent}px` }}>
+                              {depth > 0 && <span className="text-[#9CA3AF]">└</span>}
+                              <span className="mono font-medium text-xs" style={{ color: statusColor }}>{node.wo_number}</span>
+                              <span className="text-xs text-[#4B5563]">{node.item?.part_number} - {node.item?.name}</span>
+                              <span className="mono text-[10px] text-[#6B7280]">Qty: {node.quantity}</span>
+                              <span className={`text-[10px] px-1 rounded ${node.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : node.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>{node.status?.replace('_', ' ')}</span>
+                              {node.is_subcontract && <span className="text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">Sub-Contract</span>}
+                            </div>
+                            {node.children?.map(child => renderTree(child, depth + 1))}
+                          </div>
+                        );
+                      };
+                      return renderTree(moTree);
+                    })()}
+                  </div>
+                </div>
+              )}
 
               {/* Print Buttons */}
               <div className="flex justify-end space-x-2 pt-3 border-t border-[#E5E7EB]">

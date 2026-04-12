@@ -54,13 +54,14 @@ export default function PurchaseInvoicePage() {
         item_id: l.item_id,
         quantity: l.received_quantity || 0,
         unit_price: l.verified_price || l.po_price || 0,
+        discount: 0,
         hsn_code: l.hsn_code || '',
         gst_rate: items.find(i => i.id === l.item_id)?.gst_rate || 18
       })) || []
     });
   };
 
-  const addLine = () => setFormData({ ...formData, lines: [...formData.lines, { item_id: '', quantity: 0, unit_price: 0, hsn_code: '', gst_rate: 18 }] });
+  const addLine = () => setFormData({ ...formData, lines: [...formData.lines, { item_id: '', quantity: 0, unit_price: 0, discount: 0, hsn_code: '', gst_rate: 18 }] });
   const removeLine = (idx) => setFormData({ ...formData, lines: formData.lines.filter((_, i) => i !== idx) });
   const updateLine = (idx, field, val) => {
     const lines = [...formData.lines];
@@ -68,8 +69,8 @@ export default function PurchaseInvoicePage() {
     setFormData({ ...formData, lines });
   };
 
-  const calcSubtotal = () => formData.lines.reduce((s, l) => s + (l.quantity * l.unit_price), 0);
-  const calcGST = () => formData.lines.reduce((s, l) => s + (l.quantity * l.unit_price * (l.gst_rate || 18) / 100), 0);
+  const calcSubtotal = () => formData.lines.reduce((s, l) => s + (l.quantity * l.unit_price - (l.discount || 0)), 0);
+  const calcGST = () => formData.lines.reduce((s, l) => s + ((l.quantity * l.unit_price - (l.discount || 0)) * (l.gst_rate || 18) / 100), 0);
 
   const handleSubmit = async () => {
     if (!formData.grn_id) { alert('Please select a GRN'); return; }
@@ -262,6 +263,7 @@ export default function PurchaseInvoicePage() {
                         <th className="text-left py-2 px-2 text-xs">Item</th>
                         <th className="text-right py-2 px-2 text-xs w-20">Qty</th>
                         <th className="text-right py-2 px-2 text-xs w-24">Rate</th>
+                        <th className="text-right py-2 px-2 text-xs w-20">Discount</th>
                         <th className="text-right py-2 px-2 text-xs w-16">GST%</th>
                         <th className="text-right py-2 px-2 text-xs w-24">Amount</th>
                         <th className="w-8"></th>
@@ -269,6 +271,7 @@ export default function PurchaseInvoicePage() {
                       <tbody>
                         {formData.lines.map((line, idx) => {
                           const it = items.find(i => i.id === line.item_id);
+                          const lineAmt = line.quantity * line.unit_price - (line.discount || 0);
                           return (
                             <tr key={idx} className="border-t">
                               <td className="py-1 px-2">
@@ -276,12 +279,13 @@ export default function PurchaseInvoicePage() {
                               </td>
                               <td className="py-1 px-2"><input type="number" min="0" value={line.quantity} onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
                               <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={line.unit_price} onChange={e => updateLine(idx, 'unit_price', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                              <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={line.discount || 0} onChange={e => updateLine(idx, 'discount', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
                               <td className="py-1 px-2">
                                 <select value={line.gst_rate} onChange={e => updateLine(idx, 'gst_rate', parseFloat(e.target.value))} className="w-full px-1 py-1 border rounded-sm text-xs">
                                   {[0,5,12,18,28].map(r => <option key={r} value={r}>{r}%</option>)}
                                 </select>
                               </td>
-                              <td className="py-1 px-2 text-right mono text-xs font-medium">{formatCurrency(line.quantity * line.unit_price)}</td>
+                              <td className="py-1 px-2 text-right mono text-xs font-medium">{formatCurrency(lineAmt)}</td>
                               <td className="py-1 px-1"><button onClick={() => removeLine(idx)} className="text-[#9B1C1C] hover:text-[#DC2626] p-1"><X className="w-3 h-3" /></button></td>
                             </tr>
                           );
