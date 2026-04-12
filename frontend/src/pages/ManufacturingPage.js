@@ -1393,19 +1393,20 @@ export default function ManufacturingPage() {
               <>
                 <div>
                   <label className="block text-sm font-semibold text-[#111827] mb-1">Operator Name *</label>
-                  <input type="text" value={opForm.operator} onChange={e => setOpForm({...opForm, operator: e.target.value})} className="input-field" placeholder="Enter operator name" data-testid="op-operator-input" />
+                  <input type="text" value={opForm.operator} onChange={e => setOpForm({...opForm, operator: e.target.value})} className="input-field" placeholder="Enter operator name" data-testid="op-operator-input" required />
+                  {!opForm.operator.trim() && <p className="text-xs text-[#9B1C1C] mt-1">Operator name is required</p>}
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity to Produce</label>
-                  <input type="number" min="1" value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: parseInt(e.target.value) || 0})} className="input-field mono" data-testid="op-qty-input" />
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity to Produce (max: {jobCardWO?.quantity || 0})</label>
+                  <input type="number" min="1" max={jobCardWO?.quantity || 1} value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: Math.min(parseInt(e.target.value) || 0, jobCardWO?.quantity || 1)})} className="input-field mono" data-testid="op-qty-input" />
                 </div>
               </>
             )}
             {(opDialog.mode === 'stop' || opDialog.mode === 'complete') && (
               <>
                 <div>
-                  <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity Produced</label>
-                  <input type="number" min="0" value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: parseInt(e.target.value) || 0})} className="input-field mono" data-testid="op-produced-qty-input" />
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity Produced (max: {jobCardWO?.quantity || 0})</label>
+                  <input type="number" min="0" max={jobCardWO?.quantity || 1} value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: Math.min(parseInt(e.target.value) || 0, jobCardWO?.quantity || 1)})} className="input-field mono" data-testid="op-produced-qty-input" />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-[#111827] mb-1">Quality Result</label>
@@ -1427,14 +1428,14 @@ export default function ManufacturingPage() {
                 </div>
                 {opForm.quality_result === 'reject' && (
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">Reject Quantity</label>
-                    <input type="number" min="0" max={opForm.quantity} value={opForm.reject_qty} onChange={e => setOpForm({...opForm, reject_qty: parseInt(e.target.value) || 0})} className="input-field mono" data-testid="op-reject-qty" />
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Reject Quantity (max: {opForm.quantity})</label>
+                    <input type="number" min="0" max={opForm.quantity} value={opForm.reject_qty} onChange={e => setOpForm({...opForm, reject_qty: Math.min(parseInt(e.target.value) || 0, opForm.quantity)})} className="input-field mono" data-testid="op-reject-qty" />
                   </div>
                 )}
                 {opForm.quality_result === 'rework' && (
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">Rework Quantity</label>
-                    <input type="number" min="0" max={opForm.quantity} value={opForm.rework_qty} onChange={e => setOpForm({...opForm, rework_qty: parseInt(e.target.value) || 0})} className="input-field mono" data-testid="op-rework-qty" />
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Rework Quantity (max: {opForm.quantity})</label>
+                    <input type="number" min="0" max={opForm.quantity} value={opForm.rework_qty} onChange={e => setOpForm({...opForm, rework_qty: Math.min(parseInt(e.target.value) || 0, opForm.quantity)})} className="input-field mono" data-testid="op-rework-qty" />
                   </div>
                 )}
                 <div>

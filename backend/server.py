@@ -3003,12 +3003,16 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             if prev_op.get("status") not in ["completed", "stopped"]:
                 raise HTTPException(status_code=400, detail=f"Previous operation '{prev_op.get('operation_name')}' must be completed first")
         
+        if not op_data.operator or not op_data.operator.strip():
+            raise HTTPException(status_code=400, detail="Operator name is required to start an operation")
+        
         # Initialize or append to runs list
         runs = target_op.get("runs", [])
+        planned_qty = min(op_data.quantity_completed or mo_qty, mo_qty)
         run_entry = {
             "run_number": len(runs) + 1,
-            "operator": op_data.operator or user.get("name", ""),
-            "quantity_planned": op_data.quantity_completed or mo_qty,
+            "operator": op_data.operator.strip(),
+            "quantity_planned": planned_qty,
             "quantity_completed": 0,
             "started_at": datetime.now(timezone.utc),
             "ended_at": None,
@@ -3020,18 +3024,19 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
         runs.append(run_entry)
         target_op["runs"] = runs
         target_op["actual_start"] = target_op.get("actual_start") or datetime.now(timezone.utc)
-        target_op["operator"] = op_data.operator or user.get("name", "")
+        target_op["operator"] = op_data.operator.strip()
         target_op["status"] = "in_progress"
     
     # STOP operation (pause current run)
     elif op_data.status == "stopped":
         runs = target_op.get("runs", [])
+        produced_qty = min(op_data.quantity_completed or 0, mo_qty)
         if runs and runs[-1].get("ended_at") is None:
             runs[-1]["ended_at"] = datetime.now(timezone.utc)
-            runs[-1]["quantity_completed"] = op_data.quantity_completed or 0
+            runs[-1]["quantity_completed"] = produced_qty
             runs[-1]["quality_result"] = op_data.quality_result or "accept"
-            runs[-1]["reject_qty"] = op_data.reject_qty or 0
-            runs[-1]["rework_qty"] = op_data.rework_qty or 0
+            runs[-1]["reject_qty"] = min(op_data.reject_qty or 0, produced_qty)
+            runs[-1]["rework_qty"] = min(op_data.rework_qty or 0, produced_qty)
             runs[-1]["notes"] = op_data.notes or runs[-1].get("notes", "")
         
         # Calculate totals from all runs
@@ -3047,13 +3052,14 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
     # COMPLETE operation
     elif op_data.status == "completed":
         runs = target_op.get("runs", [])
+        produced_qty = min(op_data.quantity_completed or mo_qty, mo_qty)
         # Close any open run
         if runs and runs[-1].get("ended_at") is None:
             runs[-1]["ended_at"] = datetime.now(timezone.utc)
-            runs[-1]["quantity_completed"] = op_data.quantity_completed or mo_qty
+            runs[-1]["quantity_completed"] = produced_qty
             runs[-1]["quality_result"] = op_data.quality_result or "accept"
-            runs[-1]["reject_qty"] = op_data.reject_qty or 0
-            runs[-1]["rework_qty"] = op_data.rework_qty or 0
+            runs[-1]["reject_qty"] = min(op_data.reject_qty or 0, produced_qty)
+            runs[-1]["rework_qty"] = min(op_data.rework_qty or 0, produced_qty)
         
         total_completed = sum(r.get("quantity_completed", 0) for r in runs)
         total_accepted = sum(r.get("quantity_completed", 0) - r.get("reject_qty", 0) - r.get("rework_qty", 0) for r in runs)
