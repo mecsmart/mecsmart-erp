@@ -467,6 +467,8 @@ class WorkOrderUpdate(BaseModel):
     actual_end: Optional[datetime] = None
     quantity_completed: Optional[int] = None
     notes: Optional[str] = None
+    is_subcontract: Optional[bool] = None
+    subcontract_supplier_id: Optional[str] = None
 
 class WorkOrderOperationUpdate(BaseModel):
     status: str  # pending, in_progress, completed, stopped

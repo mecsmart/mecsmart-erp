@@ -15,7 +15,8 @@ import {
   Square,
   User,
   RotateCcw,
-  XCircle
+  XCircle,
+  Truck
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -43,6 +44,11 @@ export default function ManufacturingPage() {
   // Operation start/stop dialog
   const [opDialog, setOpDialog] = useState({ open: false, mode: '', sequence: 0 });
   const [opForm, setOpForm] = useState({ operator: '', quantity: 0, quality_result: 'accept', reject_qty: 0, rework_qty: 0, notes: '' });
+
+  // Subcontract dialog
+  const [subcontractDialog, setSubcontractDialog] = useState(false);
+  const [subcontractWO, setSubcontractWO] = useState(null);
+  const [subcontractSupplier, setSubcontractSupplier] = useState('');
   
   const [workCenterForm, setWorkCenterForm] = useState({
     code: '',
@@ -248,6 +254,24 @@ export default function ManufacturingPage() {
     } catch (error) {
       alert(error.response?.data?.detail || 'Failed to update operation');
     }
+  };
+
+  const handleMarkSubcontract = (wo) => {
+    setSubcontractWO(wo);
+    setSubcontractSupplier('');
+    setSubcontractDialog(true);
+  };
+
+  const handleConfirmSubcontract = async () => {
+    if (!subcontractSupplier) { alert('Select a subcontractor'); return; }
+    try {
+      await api.put(`/api/work-orders/${subcontractWO.id}`, {
+        is_subcontract: true,
+        subcontract_supplier_id: subcontractSupplier
+      });
+      setSubcontractDialog(false);
+      fetchData();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
   const handleEditWorkCenter = (wc) => {
@@ -893,6 +917,19 @@ export default function ManufacturingPage() {
                               <span>Job Card</span>
                             </button>
                           )}
+                          {canEdit && !wo.is_subcontract && wo.status === 'pending' && (
+                            <button
+                              onClick={() => handleMarkSubcontract(wo)}
+                              className="btn-secondary text-xs flex items-center space-x-1 ml-1 text-[#723B13] border-[#723B13]"
+                              data-testid={`subcontract-wo-${wo.id}`}
+                            >
+                              <Truck className="w-3 h-3" />
+                              <span>Subcontract</span>
+                            </button>
+                          )}
+                          {wo.is_subcontract && (
+                            <span className="text-[10px] bg-[#FDF6B2] text-[#723B13] px-1.5 py-0.5 rounded ml-1">Sub-Contract</span>
+                          )}
                           {wo.status === 'completed' && (
                             <div className="flex items-center space-x-1">
                               <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs flex items-center space-x-1" title="Print Manufacturing Order" data-testid={`print-wo-${wo.id}`}>
@@ -940,7 +977,7 @@ export default function ManufacturingPage() {
                             <SelectValue placeholder="Select item" />
                           </SelectTrigger>
                           <SelectContent>
-                            {items.filter(i => ['sub_assembly', 'finished_good'].includes(i.category)).map((item) => (
+                            {items.filter(i => ['sub_assembly', 'finished_good', 'component'].includes(i.category)).map((item) => (
                               <SelectItem key={item.id} value={item.id}>
                                 {item.part_number} - {item.name}
                               </SelectItem>
@@ -1450,23 +1487,27 @@ export default function ManufacturingPage() {
               </div>
 
               {/* MO Tree View */}
-              {moTree && moTree.children && moTree.children.length > 0 && (
+              {moTree && (moTree.children?.length > 0 || moTree.id) && (
                 <div>
                   <p className="text-xs font-semibold text-[#374151] uppercase tracking-wide mb-2">Manufacturing Order Tree</p>
-                  <div className="border rounded-sm p-3 bg-[#F9FAFB] text-sm">
+                  <div className="border rounded-sm p-4 bg-[#F9FAFB]">
                     {(() => {
                       const renderTree = (node, depth = 0) => {
                         if (!node) return null;
-                        const indent = depth * 20;
-                        const statusColor = node.status === 'completed' ? '#03543F' : node.status === 'in_progress' ? '#1E429F' : '#723B13';
+                        const category = node.item?.category === 'finished_good' ? 'FG' : node.item?.category === 'sub_assembly' ? 'SA' : 'PART';
+                        const hasRouting = routings.some(r => r.item_id === node.item_id);
+                        const routingName = routings.find(r => r.item_id === node.item_id)?.name;
                         return (
-                          <div key={node.id}>
-                            <div className="flex items-center gap-2 py-1" style={{ paddingLeft: `${indent}px` }}>
-                              {depth > 0 && <span className="text-[#9CA3AF]">└</span>}
-                              <span className="mono font-medium text-xs" style={{ color: statusColor }}>{node.wo_number}</span>
-                              <span className="text-xs text-[#4B5563]">{node.item?.part_number} - {node.item?.name}</span>
-                              <span className="mono text-[10px] text-[#6B7280]">Qty: {node.quantity}</span>
-                              <span className={`text-[10px] px-1 rounded ${node.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : node.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>{node.status?.replace('_', ' ')}</span>
+                          <div key={node.id} className={depth > 0 ? 'ml-6 mt-2 pl-4 border-l-2 border-[#1D3557]/20' : ''}>
+                            <div className="flex items-center gap-3 py-1.5">
+                              {depth > 0 && <span className="text-[#1D3557] font-bold -ml-[18px]">└→</span>}
+                              <span className="mono font-bold text-[#1D3557] text-sm">{node.wo_number}</span>
+                              {hasRouting ? (
+                                <span className="text-sm text-[#374151]">Routing: <span className="font-medium">{routingName}</span> <span className="text-[10px] bg-[#DEF7EC] text-[#03543F] px-1 rounded">{category}</span></span>
+                              ) : (
+                                <span className="text-sm text-[#9B1C1C]">Define Routing <span className="text-[10px] bg-[#FDE8E8] text-[#9B1C1C] px-1 rounded">{category}</span></span>
+                              )}
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${node.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : node.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : 'bg-[#FDF6B2] text-[#723B13]'}`}>{node.status?.replace('_', ' ')}</span>
                               {node.is_subcontract && <span className="text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">Sub-Contract</span>}
                             </div>
                             {node.children?.map(child => renderTree(child, depth + 1))}
@@ -1562,6 +1603,30 @@ export default function ManufacturingPage() {
               <button onClick={handleOpDialogSubmit} className="btn-primary" disabled={opDialog.mode === 'start' && !opForm.operator.trim()} data-testid="op-dialog-submit">
                 {opDialog.mode === 'start' ? 'Start' : opDialog.mode === 'stop' ? 'Stop & Record' : 'Complete'}
               </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {/* Subcontract Dialog */}
+      <Dialog open={subcontractDialog} onOpenChange={setSubcontractDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle className="font-[Chivo]">Mark as Sub-Contract — {subcontractWO?.wo_number}</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-3">
+            <p className="text-sm text-[#4B5563]">
+              Select a subcontractor. When this MO is started, BOM materials will be auto-sent via Delivery Challan.
+            </p>
+            <div>
+              <label className="block text-sm font-semibold text-[#111827] mb-1">Subcontractor *</label>
+              <Select value={subcontractSupplier} onValueChange={setSubcontractSupplier}>
+                <SelectTrigger data-testid="subcontract-supplier-select"><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                <SelectContent>
+                  {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end space-x-3 pt-3 border-t">
+              <button onClick={() => setSubcontractDialog(false)} className="btn-secondary">Cancel</button>
+              <button onClick={handleConfirmSubcontract} className="btn-primary" disabled={!subcontractSupplier} data-testid="confirm-subcontract-btn">Confirm Sub-Contract</button>
             </div>
           </div>
         </DialogContent>
