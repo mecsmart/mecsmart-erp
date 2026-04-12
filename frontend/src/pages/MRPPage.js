@@ -156,7 +156,7 @@ export default function MRPPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Sales Orders</SelectItem>
-                {productionOrders.filter(po => ['planned', 'released', 'in_progress'].includes(po.status)).map(po => (
+                {productionOrders.filter(po => ['confirmed', 'released', 'in_progress'].includes(po.status)).map(po => (
                   <SelectItem key={po.id} value={po.id}>{po.order_number} - {po.item?.name || 'Unknown'}</SelectItem>
                 ))}
               </SelectContent>

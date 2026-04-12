@@ -547,7 +547,7 @@ export default function ManufacturingPage() {
                           <SelectValue placeholder="Select sales order" />
                         </SelectTrigger>
                         <SelectContent>
-                          {productionOrders.filter(po => po.status === 'planned').map((po) => (
+                          {productionOrders.filter(po => po.status === 'confirmed').map((po) => (
                             <SelectItem key={po.id} value={po.id}>
                               {po.order_number} - {po.item?.name || 'Unknown'}
                             </SelectItem>

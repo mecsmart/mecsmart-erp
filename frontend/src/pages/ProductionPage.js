@@ -7,7 +7,10 @@ import {
   Edit2,
   Calendar,
   Filter,
-  X
+  X,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -20,7 +23,8 @@ const priorityOptions = [
 ];
 
 const statusOptions = [
-  { value: 'planned', label: 'Planned' },
+  { value: 'draft', label: 'Draft' },
+  { value: 'confirmed', label: 'Confirmed' },
   { value: 'released', label: 'Released' },
   { value: 'in_progress', label: 'In Progress' },
   { value: 'completed', label: 'Completed' },
@@ -91,7 +95,7 @@ export default function ProductionPage() {
       resetForm();
       fetchData();
     } catch (error) {
-      console.error('Failed to save production order:', error);
+      console.error('Failed to save sales order:', error);
       alert(error.response?.data?.detail || 'Failed to save sales order');
     }
   };
@@ -109,6 +113,37 @@ export default function ProductionPage() {
     setIsDialogOpen(true);
   };
 
+  const handleConfirm = async (order) => {
+    if (!window.confirm(`Confirm Sales Order ${order.order_number}?\n\nThis will make it available for MRP and Manufacturing.`)) return;
+    try {
+      await api.post(`/api/production/${order.id}/confirm`);
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to confirm order');
+    }
+  };
+
+  const handleCancel = async (order) => {
+    if (!window.confirm(`Cancel Sales Order ${order.order_number}?\n\nThis will:\n- Cancel all linked Manufacturing Orders\n- Reverse consumed materials back to stock\n- Reverse finished goods from inventory\n\nThis action cannot be undone.`)) return;
+    try {
+      const { data } = await api.post(`/api/production/${order.id}/cancel`);
+      let msg = data.message;
+      if (data.cancelled_mos?.length > 0) {
+        msg += `\n\nCancelled MOs: ${data.cancelled_mos.join(', ')}`;
+      }
+      if (data.reversed_materials?.length > 0) {
+        msg += `\n\nMaterials restored to stock:\n${data.reversed_materials.map(m => `- ${m.item} (${m.name}): ${m.quantity} pcs → MO ${m.mo_number}`).join('\n')}`;
+      }
+      if (data.reversed_finished_goods?.length > 0) {
+        msg += `\n\nFinished goods reversed:\n${data.reversed_finished_goods.map(m => `- ${m.item} (${m.name}): ${m.quantity} pcs → MO ${m.mo_number}`).join('\n')}`;
+      }
+      alert(msg);
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to cancel order');
+    }
+  };
+
   const resetForm = () => {
     setFormData({
       bom_id: '',
@@ -121,11 +156,12 @@ export default function ProductionPage() {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'planned': return 'bg-[#E1EFFE] text-[#1E429F]';
+      case 'draft': return 'bg-[#F3F4F6] text-[#4B5563]';
+      case 'confirmed': return 'bg-[#E1EFFE] text-[#1E429F]';
       case 'released': return 'bg-[#FDF6B2] text-[#723B13]';
       case 'in_progress': return 'bg-[#E1EFFE] text-[#1E429F]';
       case 'completed': return 'bg-[#DEF7EC] text-[#03543F]';
-      case 'cancelled': return 'bg-[#F3F4F6] text-[#4B5563]';
+      case 'cancelled': return 'bg-[#FDE8E8] text-[#9B1C1C]';
       default: return 'bg-[#F3F4F6] text-[#4B5563]';
     }
   };
@@ -158,7 +194,7 @@ export default function ProductionPage() {
             <DialogTrigger asChild>
               <button className="btn-primary flex items-center space-x-2" data-testid="add-production-btn">
                 <Plus className="w-4 h-4" />
-                <span>New Order</span>
+                <span>New Sales Order</span>
               </button>
             </DialogTrigger>
             <DialogContent className="max-w-lg">
@@ -234,7 +270,7 @@ export default function ProductionPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {statusOptions.map((opt) => (
+                          {statusOptions.filter(opt => !['cancelled'].includes(opt.value)).map((opt) => (
                             <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                           ))}
                         </SelectContent>
@@ -321,7 +357,7 @@ export default function ProductionPage() {
               </thead>
               <tbody>
                 {orders.map((order) => (
-                  <tr key={order.id} data-testid={`production-row-${order.id}`}>
+                  <tr key={order.id} className={order.status === 'cancelled' ? 'opacity-50' : ''} data-testid={`production-row-${order.id}`}>
                     <td className="mono font-medium">{order.order_number}</td>
                     <td>
                       <span className="mono text-sm">{order.item?.part_number || '-'}</span>
@@ -349,15 +385,48 @@ export default function ProductionPage() {
                       </div>
                     </td>
                     <td>
-                      {canEdit && (
-                        <button
-                          onClick={() => handleEdit(order)}
-                          className="p-1 text-[#4B5563] hover:text-[#1D3557]"
-                          data-testid={`edit-production-${order.id}`}
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                      )}
+                      <div className="flex items-center space-x-1">
+                        {/* Confirm button - only for draft */}
+                        {canEdit && order.status === 'draft' && (
+                          <button
+                            onClick={() => handleConfirm(order)}
+                            className="btn-secondary text-xs flex items-center space-x-1 text-[#03543F] border-[#03543F] hover:bg-[#DEF7EC]"
+                            data-testid={`confirm-so-${order.id}`}
+                            title="Confirm Order"
+                          >
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Confirm</span>
+                          </button>
+                        )}
+                        {/* Edit button - draft and confirmed only */}
+                        {canEdit && ['draft', 'confirmed'].includes(order.status) && (
+                          <button
+                            onClick={() => handleEdit(order)}
+                            className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded"
+                            data-testid={`edit-production-${order.id}`}
+                            title="Edit"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        {/* Cancel button - any status except cancelled/completed */}
+                        {canEdit && !['cancelled', 'completed'].includes(order.status) && (
+                          <button
+                            onClick={() => handleCancel(order)}
+                            className="p-1.5 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"
+                            data-testid={`cancel-so-${order.id}`}
+                            title="Cancel Order"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                        {/* Cancelled indicator */}
+                        {order.status === 'cancelled' && (
+                          <span className="text-xs text-[#9B1C1C] flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" /> Cancelled
+                          </span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

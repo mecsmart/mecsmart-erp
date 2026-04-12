@@ -962,7 +962,7 @@ async def create_production_order(order_data: ProductionOrderCreate, request: Re
         "quantity": order_data.quantity,
         "due_date": order_data.due_date,
         "priority": order_data.priority,
-        "status": "planned",  # planned, released, in_progress, completed, cancelled
+        "status": "draft",  # draft, confirmed, released, in_progress, completed, cancelled
         "notes": order_data.notes,
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
@@ -989,6 +989,152 @@ async def update_production_order(order_id: str, order_data: ProductionOrderUpda
     order = await db.production_orders.find_one({"id": order_id}, {"_id": 0})
     return order
 
+@production_router.post("/{order_id}/confirm")
+async def confirm_production_order(order_id: str, request: Request):
+    """Confirm a draft sales order - makes it available for MRP and manufacturing"""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    order = await db.production_orders.find_one({"id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sales order not found")
+    
+    if order.get("status") != "draft":
+        raise HTTPException(status_code=400, detail=f"Only draft orders can be confirmed. Current status: {order.get('status')}")
+    
+    await db.production_orders.update_one(
+        {"id": order_id},
+        {"$set": {"status": "confirmed", "confirmed_at": datetime.now(timezone.utc), "confirmed_by": user["id"], "updated_at": datetime.now(timezone.utc)}}
+    )
+    
+    return await db.production_orders.find_one({"id": order_id}, {"_id": 0})
+
+@production_router.post("/{order_id}/cancel")
+async def cancel_production_order(order_id: str, request: Request):
+    """Cancel a sales order with full cascade: SO → MOs → reverse stock → cancel job cards"""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    order = await db.production_orders.find_one({"id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sales order not found")
+    
+    if order.get("status") == "cancelled":
+        raise HTTPException(status_code=400, detail="Order is already cancelled")
+    if order.get("status") == "completed":
+        raise HTTPException(status_code=400, detail="Cannot cancel a completed order")
+    
+    cancelled_mos = []
+    reversed_materials = []
+    reversed_finished_goods = []
+    
+    # Find all manufacturing orders linked to this sales order
+    mos = await db.work_orders.find({"production_order_id": order_id}).to_list(1000)
+    
+    for mo in mos:
+        mo_id = mo["id"]
+        mo_status = mo.get("status", "pending")
+        mo_number = mo.get("wo_number", "")
+        
+        # 1. Reverse consumed materials (if MO was started and materials were consumed)
+        if mo.get("materials_consumed") and mo.get("consumed_materials"):
+            for mat in mo["consumed_materials"]:
+                comp_item = await db.items.find_one({"id": mat["item_id"]})
+                if comp_item:
+                    current_stock = comp_item.get("current_stock", 0)
+                    restore_qty = mat["quantity"]
+                    new_stock = current_stock + restore_qty
+                    
+                    # Create reversal transaction
+                    tx_doc = {
+                        "id": str(uuid.uuid4()),
+                        "item_id": mat["item_id"],
+                        "transaction_type": "receive",
+                        "quantity": restore_qty,
+                        "reference_type": "cancellation",
+                        "reference_id": mo_id,
+                        "previous_stock": current_stock,
+                        "new_stock": new_stock,
+                        "notes": f"Reversal: SO {order.get('order_number')} cancelled - MO {mo_number}",
+                        "created_at": datetime.now(timezone.utc),
+                        "created_by": user["id"]
+                    }
+                    await db.inventory_transactions.insert_one(tx_doc)
+                    await db.items.update_one({"id": mat["item_id"]}, {"$set": {"current_stock": new_stock}})
+                    
+                    reversed_materials.append({
+                        "item": mat.get("item", ""),
+                        "name": mat.get("name", ""),
+                        "quantity": restore_qty,
+                        "mo_number": mo_number
+                    })
+        
+        # 2. Reverse finished goods (if MO was completed and stock was added)
+        if mo_status == "completed":
+            routing = await db.routings.find_one({"id": mo.get("routing_id")})
+            if routing:
+                fg_item_id = routing.get("item_id")
+                fg_item = await db.items.find_one({"id": fg_item_id})
+                if fg_item:
+                    current_stock = fg_item.get("current_stock", 0)
+                    produced_qty = mo.get("quantity", 0)
+                    new_stock = max(0, current_stock - produced_qty)
+                    
+                    tx_doc = {
+                        "id": str(uuid.uuid4()),
+                        "item_id": fg_item_id,
+                        "transaction_type": "issue",
+                        "quantity": produced_qty,
+                        "reference_type": "cancellation",
+                        "reference_id": mo_id,
+                        "previous_stock": current_stock,
+                        "new_stock": new_stock,
+                        "notes": f"Reversal: SO {order.get('order_number')} cancelled - MO {mo_number} finished goods reversed",
+                        "created_at": datetime.now(timezone.utc),
+                        "created_by": user["id"]
+                    }
+                    await db.inventory_transactions.insert_one(tx_doc)
+                    await db.items.update_one({"id": fg_item_id}, {"$set": {"current_stock": new_stock}})
+                    
+                    reversed_finished_goods.append({
+                        "item": fg_item.get("part_number", ""),
+                        "name": fg_item.get("name", ""),
+                        "quantity": produced_qty,
+                        "mo_number": mo_number
+                    })
+        
+        # 3. Cancel the manufacturing order
+        await db.work_orders.update_one(
+            {"id": mo_id},
+            {"$set": {
+                "status": "cancelled",
+                "cancelled_at": datetime.now(timezone.utc),
+                "cancelled_reason": f"Parent SO {order.get('order_number')} cancelled",
+                "updated_at": datetime.now(timezone.utc)
+            }}
+        )
+        cancelled_mos.append(mo_number)
+    
+    # Cancel the sales order itself
+    await db.production_orders.update_one(
+        {"id": order_id},
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": datetime.now(timezone.utc),
+            "cancelled_by": user["id"],
+            "updated_at": datetime.now(timezone.utc)
+        }}
+    )
+    
+    return {
+        "message": f"Sales Order {order.get('order_number')} cancelled successfully",
+        "cancelled_mos": cancelled_mos,
+        "reversed_materials": reversed_materials,
+        "reversed_finished_goods": reversed_finished_goods
+    }
+
 # ================== MRP ROUTES ==================
 
 @mrp_router.get("/demand")
@@ -996,7 +1142,7 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
     """Calculate material requirements based on production orders - recursively explodes all BOM levels"""
     await get_current_user(request)
     
-    query = {"status": {"$in": ["planned", "released", "in_progress"]}}
+    query = {"status": {"$in": ["confirmed", "released", "in_progress"]}}
     if production_order_id:
         query["id"] = production_order_id
     
@@ -1407,7 +1553,7 @@ async def get_dashboard_stats(request: Request):
     active_boms = await db.boms.count_documents({"status": "active"})
     
     # Production orders
-    pending_orders = await db.production_orders.count_documents({"status": {"$in": ["planned", "released"]}})
+    pending_orders = await db.production_orders.count_documents({"status": {"$in": ["draft", "confirmed", "released"]}})
     in_progress = await db.production_orders.count_documents({"status": "in_progress"})
     
     # Quality metrics
