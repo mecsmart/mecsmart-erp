@@ -2409,6 +2409,55 @@ async def receive_purchase_order(po_id: str, request: Request):
         {"$set": {"status": "received", "received_at": datetime.now(timezone.utc), "received_by": user["id"]}}
     )
     
+    # If PO was created from SC order (without material), update SC order received qty + complete it
+    sc_order_id = po.get("reference_sc_order_id")
+    if sc_order_id:
+        sc_order = await db.subcontract_orders.find_one({"id": sc_order_id})
+        if sc_order:
+            # Update received quantities on SC order lines
+            sc_lines = sc_order.get("lines", [])
+            for po_line in po.get("lines", []) + po.get("items", []):
+                for sc_line in sc_lines:
+                    if sc_line["item_id"] == po_line.get("item_id"):
+                        sc_line["received_quantity"] = sc_line.get("received_quantity", 0) + po_line.get("quantity", 0)
+            
+            # Check if all received
+            all_received = all(sl.get("received_quantity", 0) >= sl.get("quantity", 0) for sl in sc_lines)
+            sc_new_status = "completed" if all_received else "in_progress"
+            
+            await db.subcontract_orders.update_one(
+                {"id": sc_order_id},
+                {"$set": {"lines": sc_lines, "status": sc_new_status, "updated_at": datetime.now(timezone.utc)}}
+            )
+            
+            # If SC completed, auto-complete linked MOs
+            if sc_new_status == "completed":
+                ref_wo_ids = sc_order.get("reference_wo_ids", [])
+                if not ref_wo_ids and sc_order.get("reference_wo_id"):
+                    ref_wo_ids = [sc_order["reference_wo_id"]]
+                
+                for ref_wo_id in ref_wo_ids:
+                    ref_wo = await db.work_orders.find_one({"id": ref_wo_id})
+                    if ref_wo and ref_wo.get("is_subcontract") and ref_wo.get("status") != "completed":
+                        ops = ref_wo.get("operations_status", [])
+                        for op in ops:
+                            if op.get("status") != "completed":
+                                op["status"] = "completed"
+                                op["actual_end"] = datetime.now(timezone.utc)
+                                op["quantity_completed"] = ref_wo.get("quantity", 0)
+                                op["quantity_accepted"] = ref_wo.get("quantity", 0)
+                        
+                        await db.work_orders.update_one(
+                            {"id": ref_wo_id},
+                            {"$set": {
+                                "operations_status": ops,
+                                "status": "completed",
+                                "quantity_completed": ref_wo.get("quantity", 0),
+                                "actual_end": datetime.now(timezone.utc),
+                                "updated_at": datetime.now(timezone.utc)
+                            }}
+                        )
+    
     return {"message": "GRN completed successfully"}
 
 # ================== WAREHOUSE ROUTES ==================
@@ -5044,10 +5093,19 @@ async def get_subcontract_orders(request: Request, status: str = None):
     for order in orders:
         supplier = await db.suppliers.find_one({"id": order.get("supplier_id")}, {"_id": 0})
         order["supplier"] = supplier
-        # Include linked MO number
-        if order.get("reference_wo_id"):
+        # Include linked MO numbers (single or bulk)
+        mo_numbers = []
+        if order.get("reference_wo_ids"):
+            for wid in order["reference_wo_ids"]:
+                ref_wo = await db.work_orders.find_one({"id": wid}, {"_id": 0, "wo_number": 1})
+                if ref_wo:
+                    mo_numbers.append(ref_wo["wo_number"])
+        elif order.get("reference_wo_id"):
             ref_wo = await db.work_orders.find_one({"id": order["reference_wo_id"]}, {"_id": 0, "wo_number": 1})
-            order["mo_number"] = ref_wo.get("wo_number") if ref_wo else None
+            if ref_wo:
+                mo_numbers.append(ref_wo["wo_number"])
+        order["mo_number"] = ", ".join(mo_numbers) if mo_numbers else None
+        order["mo_numbers"] = mo_numbers
         for line in order.get("lines", []):
             item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
             line["item"] = item

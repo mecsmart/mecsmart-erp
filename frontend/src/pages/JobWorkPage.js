@@ -361,8 +361,11 @@ export default function JobWorkPage() {
                               {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && o.subcontract_type === 'without_material' && (
                                 <button onClick={() => handleCreatePOFromSC(o)} className="btn-primary text-xs px-2 py-1 bg-[#723B13] hover:bg-[#5A2E0F]" data-testid={`create-po-${o.id}`}><FileText className="w-3 h-3 inline mr-1" />Create PO</button>
                               )}
-                              {canEdit && o.status === 'in_progress' && (o.subcontract_type === 'without_material' || sentQty > recvQty) && (
+                              {canEdit && o.status === 'in_progress' && o.subcontract_type !== 'without_material' && sentQty > recvQty && (
                                 <button onClick={() => openReceiptDialog(o)} className="btn-secondary text-xs px-2 py-1" data-testid={`receive-${o.id}`}><ArrowLeft className="w-3 h-3 inline mr-1" />Receive</button>
+                              )}
+                              {o.subcontract_type === 'without_material' && o.status === 'in_progress' && (
+                                <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded">Receive via GRN</span>
                               )}
                             </div>
                           </td>
