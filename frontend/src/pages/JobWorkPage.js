@@ -220,6 +220,7 @@ export default function JobWorkPage() {
       <div class="info-box">
         <label>Reference</label>
         <span>JW Order: <span class="mono">${dc.order?.order_number || '-'}</span></span>
+        ${dc.fg_item_name || dc.order?.fg_item_name ? `<br/><span class="sub-text">For: <strong>${dc.fg_item_name || dc.order?.fg_item_name}</strong></span>` : ''}
         <br/><span class="sub-text">Status: ${dc.status}</span>
       </div>
     </div>
@@ -539,7 +540,7 @@ export default function JobWorkPage() {
             </div>
             <div className="border rounded-sm overflow-hidden">
               <table className="w-full text-sm">
-                <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs">Recv Qty</th><th className="text-right py-2 px-2 text-xs">Reject</th><th className="text-center py-2 px-2 text-xs">QC</th></tr></thead>
+                <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs">Recv Qty</th><th className="text-right py-2 px-2 text-xs">Reject</th><th className="text-right py-2 px-2 text-xs">Rework</th><th className="text-center py-2 px-2 text-xs">QC</th></tr></thead>
                 <tbody>
                   {recLines.map((l, idx) => {
                     const it = items.find(i => i.id === l.item_id);
@@ -548,6 +549,7 @@ export default function JobWorkPage() {
                         <td className="py-2 px-2"><span className="mono text-xs">{it?.part_number}</span> - {it?.name}</td>
                         <td className="py-2 px-2"><input type="number" min="0" value={l.received_quantity} onChange={e => { const ls = [...recLines]; ls[idx].received_quantity = parseFloat(e.target.value) || 0; setRecLines(ls); }} className="w-20 px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
                         <td className="py-2 px-2"><input type="number" min="0" max={l.received_quantity} value={l.reject_qty} onChange={e => { const ls = [...recLines]; ls[idx].reject_qty = Math.min(parseFloat(e.target.value) || 0, l.received_quantity); setRecLines(ls); }} className="w-16 px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                        <td className="py-2 px-2"><input type="number" min="0" max={l.received_quantity - (l.reject_qty || 0)} value={l.rework_qty || 0} onChange={e => { const ls = [...recLines]; ls[idx].rework_qty = Math.min(parseFloat(e.target.value) || 0, l.received_quantity - (l.reject_qty || 0)); setRecLines(ls); }} className="w-16 px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
                         <td className="py-2 px-2 text-center">
                           <select value={l.quality_result} onChange={e => { const ls = [...recLines]; ls[idx].quality_result = e.target.value; setRecLines(ls); }} className="px-1 py-1 border rounded-sm text-xs">
                             <option value="accept">Accept</option><option value="reject">Reject</option><option value="rework">Rework</option>

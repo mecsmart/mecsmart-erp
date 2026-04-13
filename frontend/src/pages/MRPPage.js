@@ -179,18 +179,23 @@ export default function MRPPage() {
                     <tr>
                       <th>Part Number</th><th>Item Name</th><th className="text-right">Gross Req.</th>
                       <th className="text-right">On Hand</th><th className="text-right">Safety Stock</th>
-                      <th className="text-right">Net Req.</th><th>Sales Orders</th>
+                      <th className="text-right">Net Req.</th><th>PO Status</th><th>Sales Orders</th>
                     </tr>
                   </thead>
                   <tbody>
                     {demand.map((d, index) => (
-                      <tr key={index} className={d.net_requirement > 0 ? 'bg-[#FDE8E8]/30' : ''} data-testid={`demand-row-${index}`}>
+                      <tr key={index} className={d.po_status === 'po_sent' ? 'bg-[#DEF7EC]/30' : d.net_requirement > 0 ? 'bg-[#FDE8E8]/30' : ''} data-testid={`demand-row-${index}`}>
                         <td className="mono font-medium">{d.item?.part_number || '-'}</td>
                         <td>{d.item?.name || '-'}</td>
                         <td className="text-right mono">{d.gross_requirement}</td>
                         <td className="text-right mono">{d.on_hand}</td>
                         <td className="text-right mono">{d.safety_stock}</td>
                         <td className="text-right mono font-medium">{d.net_requirement > 0 ? <span className="text-[#9B1C1C]">{d.net_requirement}</span> : <span className="text-[#03543F]">0</span>}</td>
+                        <td>
+                          {d.po_status === 'po_sent' && <span className="status-badge bg-[#DEF7EC] text-[#03543F]">PO Sent ({d.po_ordered_qty})</span>}
+                          {d.po_status === 'partial_po' && <span className="status-badge bg-[#FDF6B2] text-[#723B13]">Partial ({d.po_ordered_qty}/{d.net_requirement})</span>}
+                          {d.po_status === 'pending' && <span className="status-badge bg-[#FDE8E8] text-[#9B1C1C]">Pending</span>}
+                        </td>
                         <td className="text-xs text-[#4B5563]">
                           {d.orders?.map(o => o.order_number).filter((v, i, a) => a.indexOf(v) === i).join(', ')}
                         </td>

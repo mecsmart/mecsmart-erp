@@ -378,6 +378,7 @@ class SubcontractReceiptLineItem(BaseModel):
     received_quantity: float
     quality_result: Optional[str] = "accept"
     reject_qty: Optional[float] = 0
+    rework_qty: Optional[float] = 0
 
 class SubcontractReceiptCreate(BaseModel):
     subcontract_order_id: str
@@ -1367,13 +1368,13 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                 # Check lines first (preferred format)
                 for pi in po.get("lines", []):
                     if pi.get("item_id") == item_id:
-                        po_qty += pi.get("quantity", 0) - pi.get("received_quantity", 0)
+                        po_qty += max(0, (pi.get("quantity", 0) or 0) - (pi.get("received_quantity", 0) or 0))
                         counted = True
                 # Only check items if not found in lines (avoid double-counting)
                 if not counted:
                     for pi in po.get("items", []):
                         if pi.get("item_id") == item_id:
-                            po_qty += pi.get("quantity", 0) - pi.get("received_quantity", 0)
+                            po_qty += max(0, (pi.get("quantity", 0) or 0) - (pi.get("received_quantity", 0) or 0))
         
         d["po_ordered_qty"] = po_qty
         d["po_status"] = "po_sent" if po_qty >= d["net_requirement"] else ("partial_po" if po_qty > 0 else "pending")
@@ -1453,12 +1454,12 @@ async def get_purchase_suggestions(request: Request):
                 counted = False
                 for pi in po.get("lines", []):
                     if pi.get("item_id") == s_item_id:
-                        s_po_qty += pi.get("quantity", 0) - pi.get("received_quantity", 0)
+                        s_po_qty += max(0, (pi.get("quantity", 0) or 0) - (pi.get("received_quantity", 0) or 0))
                         counted = True
                 if not counted:
                     for pi in po.get("items", []):
                         if pi.get("item_id") == s_item_id:
-                            s_po_qty += pi.get("quantity", 0) - pi.get("received_quantity", 0)
+                            s_po_qty += max(0, (pi.get("quantity", 0) or 0) - (pi.get("received_quantity", 0) or 0))
         s["po_ordered_qty"] = s_po_qty
         suggested = s.get("suggested_quantity", 0)
         s["po_status"] = "po_sent" if s_po_qty >= suggested else ("partial_po" if s_po_qty > 0 else "pending")
@@ -3107,9 +3108,9 @@ async def start_work_order(wo_id: str, request: Request):
     consumed_materials = []
     insufficient_materials = []
     
-    # Skip material consumption for "without_material" subcontract
+    # Skip material consumption for subcontract MOs (materials sent via DC, not consumed in-house)
     sc_type = wo.get("subcontract_type", "with_material")
-    skip_material_consumption = wo.get("is_subcontract") and sc_type == "without_material"
+    skip_material_consumption = wo.get("is_subcontract")
     
     if bom and not skip_material_consumption:
         wo_qty = wo.get("quantity", 1)
@@ -3236,6 +3237,7 @@ async def start_work_order(wo_id: str, request: Request):
         
         # Only create DC for "with_material" type (materials are physically sent)
         if sc_type == "with_material" and sc_material_lines:
+            dc_lines = [{"item_id": m["item_id"], "quantity": m["quantity"], "rate": m.get("unit_cost", 0)} for m in sc_material_lines]
             dc_count = await db.delivery_challans.count_documents({})
             dc_number = f"DC-{str(dc_count + 1).zfill(6)}"
             dc_doc = {
@@ -5108,49 +5110,64 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
     receipt_number = f"SR-{str(count + 1).zfill(6)}"
     
     rec_lines = []
+    total_rework_qty = 0
+    total_reject_qty = 0
     for line in data.lines:
         item = await db.items.find_one({"id": line.item_id})
         if not item:
             continue
         
-        accepted_qty = line.received_quantity - (line.reject_qty or 0)
+        rework_qty = getattr(line, 'rework_qty', 0) or 0
+        reject_qty = line.reject_qty or 0
+        accepted_qty = max(0, line.received_quantity - reject_qty - rework_qty)
+        total_rework_qty += rework_qty
+        total_reject_qty += reject_qty
         
-        # Add stock
-        current_stock = item.get("current_stock", 0)
-        new_stock = current_stock + accepted_qty
-        await db.items.update_one({"id": line.item_id}, {"$set": {"current_stock": new_stock}})
-        
-        tx = {
-            "id": str(uuid.uuid4()),
-            "item_id": line.item_id,
-            "transaction_type": "receive",
-            "quantity": accepted_qty,
-            "reference_type": "job_work_receipt",
-            "reference_id": receipt_number,
-            "previous_stock": current_stock,
-            "new_stock": new_stock,
-            "notes": f"Received from subcontractor - {order.get('order_number')}",
-            "created_at": datetime.now(timezone.utc),
-            "created_by": user["id"]
-        }
-        await db.inventory_transactions.insert_one(tx)
+        # Add only accepted stock
+        if accepted_qty > 0:
+            current_stock = item.get("current_stock", 0)
+            new_stock = current_stock + accepted_qty
+            await db.items.update_one({"id": line.item_id}, {"$set": {"current_stock": new_stock}})
+            
+            tx = {
+                "id": str(uuid.uuid4()),
+                "item_id": line.item_id,
+                "transaction_type": "receive",
+                "quantity": accepted_qty,
+                "reference_type": "job_work_receipt",
+                "reference_id": receipt_number,
+                "previous_stock": current_stock,
+                "new_stock": new_stock,
+                "notes": f"Received from subcontractor - {order.get('order_number')}" + (f" (Rework: {rework_qty}, Reject: {reject_qty})" if rework_qty or reject_qty else ""),
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"]
+            }
+            await db.inventory_transactions.insert_one(tx)
         
         rec_lines.append({
             "item_id": line.item_id,
             "received_quantity": line.received_quantity,
             "accepted_quantity": accepted_qty,
+            "rework_qty": rework_qty,
             "quality_result": line.quality_result or "accept",
-            "reject_qty": line.reject_qty or 0
+            "reject_qty": reject_qty
         })
         
-        # Update received quantity in order
+        # Update received quantity in order (only accepted qty counts toward completion)
         for ol in order.get("lines", []):
             if ol["item_id"] == line.item_id:
                 ol["received_quantity"] = ol.get("received_quantity", 0) + accepted_qty
     
-    # Check if all materials received
-    all_received = all(ol.get("received_quantity", 0) >= ol.get("sent_quantity", 0) for ol in order.get("lines", []))
-    new_status = "completed" if all_received else "in_progress"
+    # Check if all materials received — use 'quantity' for without_material, 'sent_quantity' for with_material
+    sc_type = order.get("subcontract_type", "with_material")
+    if sc_type == "without_material":
+        all_received = all(ol.get("received_quantity", 0) >= ol.get("quantity", 0) for ol in order.get("lines", []))
+    else:
+        all_received = all(ol.get("received_quantity", 0) >= ol.get("sent_quantity", 0) for ol in order.get("lines", []))
+    
+    # If there are rework items, don't mark as completed — wait for rework
+    has_rework = total_rework_qty > 0
+    new_status = "completed" if all_received and not has_rework else "in_progress"
     
     await db.subcontract_orders.update_one({"id": data.subcontract_order_id}, {"$set": {"lines": order["lines"], "status": new_status}})
     
