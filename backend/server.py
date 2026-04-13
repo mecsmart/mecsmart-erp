@@ -615,7 +615,8 @@ async def get_current_user(request: Request) -> dict:
 # Cookie settings helper for production/development
 def get_cookie_settings():
     frontend_url = os.environ.get("FRONTEND_URL", "")
-    is_prod = "emergent.host" in frontend_url or "emergentagent.com" in frontend_url or os.environ.get("ENVIRONMENT") == "production"
+    cors_origins = os.environ.get("CORS_ORIGINS", "")
+    is_prod = any(domain in frontend_url for domain in ["emergent.host", "emergentagent.com"]) or cors_origins == "*" or os.environ.get("ENVIRONMENT") == "production"
     return {"secure": is_prod, "samesite": "none" if is_prod else "lax"}
 
 
@@ -658,43 +659,54 @@ async def register(user_data: UserCreate, response: Response):
 
 @auth_router.post("/login")
 async def login(user_data: UserLogin, response: Response, request: Request):
-    email = user_data.email.lower()
-    client_ip = request.client.host if request.client else "unknown"
-    identifier = f"{client_ip}:{email}"
-    
-    # Check brute force
-    attempt = await db.login_attempts.find_one({"identifier": identifier})
-    if attempt and attempt.get("count", 0) >= 5:
-        lockout_until = attempt.get("lockout_until")
-        if lockout_until and datetime.now(timezone.utc) < lockout_until:
-            raise HTTPException(status_code=429, detail="Account locked. Try again later.")
-        else:
-            await db.login_attempts.delete_one({"identifier": identifier})
-    
-    user = await db.users.find_one({"email": email})
-    if not user or not verify_password(user_data.password, user["password_hash"]):
-        # Increment failed attempts
-        await db.login_attempts.update_one(
-            {"identifier": identifier},
-            {
-                "$inc": {"count": 1},
-                "$set": {"lockout_until": datetime.now(timezone.utc) + timedelta(minutes=15)}
-            },
-            upsert=True
-        )
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    # Clear failed attempts on success
-    await db.login_attempts.delete_one({"identifier": identifier})
-    
-    user_id = str(user["_id"])
-    access_token = create_access_token(user_id, email)
-    refresh_token = create_refresh_token(user_id)
-    
-    response.set_cookie(key="access_token", value=access_token, httponly=True, secure=get_cookie_settings()["secure"], samesite=get_cookie_settings()["samesite"], max_age=900, path="/")
-    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=get_cookie_settings()["secure"], samesite=get_cookie_settings()["samesite"], max_age=604800, path="/")
-    
-    return {"id": user_id, "email": user["email"], "name": user["name"], "role": user["role"], "permissions": user.get("permissions") or get_default_permissions(user["role"])}
+    try:
+        email = user_data.email.lower()
+        client_ip = request.client.host if request.client else "unknown"
+        identifier = f"{client_ip}:{email}"
+        
+        # Check brute force
+        attempt = await db.login_attempts.find_one({"identifier": identifier})
+        if attempt and attempt.get("count", 0) >= 5:
+            lockout_until = attempt.get("lockout_until")
+            if lockout_until and datetime.now(timezone.utc) < lockout_until:
+                raise HTTPException(status_code=429, detail="Account locked. Try again later.")
+            else:
+                await db.login_attempts.delete_one({"identifier": identifier})
+        
+        user = await db.users.find_one({"email": email})
+        if not user:
+            await db.login_attempts.update_one(
+                {"identifier": identifier},
+                {"$inc": {"count": 1}, "$set": {"lockout_until": datetime.now(timezone.utc) + timedelta(minutes=15)}},
+                upsert=True
+            )
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        pw_hash = user.get("password_hash", "")
+        if not pw_hash or not verify_password(user_data.password, pw_hash):
+            await db.login_attempts.update_one(
+                {"identifier": identifier},
+                {"$inc": {"count": 1}, "$set": {"lockout_until": datetime.now(timezone.utc) + timedelta(minutes=15)}},
+                upsert=True
+            )
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        # Clear failed attempts on success
+        await db.login_attempts.delete_one({"identifier": identifier})
+        
+        user_id = str(user["_id"])
+        access_token = create_access_token(user_id, email)
+        refresh_token = create_refresh_token(user_id)
+        
+        response.set_cookie(key="access_token", value=access_token, httponly=True, secure=get_cookie_settings()["secure"], samesite=get_cookie_settings()["samesite"], max_age=900, path="/")
+        response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=get_cookie_settings()["secure"], samesite=get_cookie_settings()["samesite"], max_age=604800, path="/")
+        
+        return {"id": user_id, "email": user["email"], "name": user["name"], "role": user["role"], "permissions": user.get("permissions") or get_default_permissions(user["role"])}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
 
 @auth_router.post("/logout")
 async def logout(response: Response):
