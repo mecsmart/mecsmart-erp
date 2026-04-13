@@ -1359,8 +1359,12 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
         if item_id:
             pos = await db.purchase_orders.find(
                 {"status": {"$in": ["draft", "approved", "sent", "confirmed"]},
-                 "reference_sc_order_id": {"$exists": False},
-                 "$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]},
+                 "$or": [
+                     {"reference_sc_order_id": {"$exists": False}},
+                     {"reference_sc_order_id": None},
+                     {"reference_sc_order_id": ""}
+                 ],
+                 "$and": [{"$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]}]},
                 {"_id": 0, "lines": 1, "items": 1, "po_number": 1}
             ).to_list(100)
             for po in pos:
@@ -1447,8 +1451,12 @@ async def get_purchase_suggestions(request: Request):
         if s_item_id:
             s_pos = await db.purchase_orders.find(
                 {"status": {"$in": ["draft", "approved", "sent", "confirmed"]},
-                 "reference_sc_order_id": {"$exists": False},
-                 "$or": [{"lines.item_id": s_item_id}, {"items.item_id": s_item_id}]},
+                 "$or": [
+                     {"reference_sc_order_id": {"$exists": False}},
+                     {"reference_sc_order_id": None},
+                     {"reference_sc_order_id": ""}
+                 ],
+                 "$and": [{"$or": [{"lines.item_id": s_item_id}, {"items.item_id": s_item_id}]}]},
                 {"_id": 0, "lines": 1, "items": 1}
             ).to_list(100)
             for po in s_pos:
@@ -2086,8 +2094,12 @@ async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
         existing_po_qty = 0
         existing_pos = await db.purchase_orders.find(
             {"status": {"$nin": ["cancelled", "received"]},
-             "reference_sc_order_id": {"$exists": False},
-             "$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]},
+             "$or": [
+                 {"reference_sc_order_id": {"$exists": False}},
+                 {"reference_sc_order_id": None},
+                 {"reference_sc_order_id": ""}
+             ],
+             "$and": [{"$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]}]},
             {"_id": 0, "lines": 1, "items": 1}
         ).to_list(100)
         for epo in existing_pos:
@@ -4341,8 +4353,30 @@ async def delete_po_charge_type(charge_id: str, request: Request):
     user = await get_current_user(request)
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Only admin can manage charge types")
-    await db.po_charge_types.update_one({"id": charge_id}, {"$set": {"is_active": False}})
+    result = await db.po_charge_types.delete_one({"id": charge_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Charge type not found")
     return {"message": "Charge type deleted"}
+
+@settings_router.post("/clear-transactions")
+async def clear_transaction_data(request: Request):
+    """Clear all transactional data. Master data (items, BOMs, routings, suppliers, etc.) is preserved."""
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can clear transaction data")
+    
+    collections = [
+        "purchase_orders", "inventory_transactions", "delivery_challans",
+        "subcontract_orders", "subcontract_receipts", "work_orders",
+        "production_orders", "job_work_orders", "login_attempts",
+        "grn_records", "purchase_invoices", "inspections"
+    ]
+    result = {}
+    for col in collections:
+        r = await db[col].delete_many({})
+        result[col] = r.deleted_count
+    
+    return {"message": "All transaction data cleared", "deleted": result}
 
 # ================== CUSTOMER ROUTES ==================
 
