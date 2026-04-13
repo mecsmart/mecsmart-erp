@@ -3136,6 +3136,7 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
                 "fg_item_id": item_id,
                 "fg_item_name": f"{item.get('part_number', '')} - {item.get('name', '')}",
                 "fg_quantity": wo_data.quantity,
+                "job_work_parts": [{"item_id": item_id, "quantity": wo_data.quantity, "charges": 0}],
                 "lines": sc_lines,
                 "processing_charges": 0,
                 "status": "draft",
@@ -3195,6 +3196,7 @@ async def bulk_subcontract(request: Request, data: dict = Body(...)):
     
     # Mark all MOs as subcontract
     all_sc_lines = []
+    all_job_work_parts = []
     mo_numbers = []
     for wo_id in wo_ids:
         wo = await db.work_orders.find_one({"id": wo_id})
@@ -3212,6 +3214,9 @@ async def bulk_subcontract(request: Request, data: dict = Body(...)):
         # Collect materials for SC order
         routing = await db.routings.find_one({"id": wo.get("routing_id")})
         item_id = routing.get("item_id") if routing else wo.get("item_id")
+        
+        # Add to job work parts (the FG/SA/Part being processed)
+        all_job_work_parts.append({"item_id": item_id, "quantity": wo.get("quantity", 1), "charges": 0, "wo_id": wo_id})
         
         if sc_type == "without_material":
             wo_item = await db.items.find_one({"id": item_id}, {"_id": 0})
@@ -3270,6 +3275,7 @@ async def bulk_subcontract(request: Request, data: dict = Body(...)):
         "fg_item_id": fg_item_id,
         "fg_item_name": f"{fg_item.get('part_number', '')} - {fg_item.get('name', '')}" if fg_item else "",
         "fg_quantity": sum(line["quantity"] for line in sc_lines),
+        "job_work_parts": [{k: v for k, v in p.items() if k != "wo_id"} for p in all_job_work_parts],
         "lines": sc_lines,
         "status": "in_progress",
         "notes": f"Bulk SC for MOs: {', '.join(mo_numbers)} ({sc_type.replace('_', ' ')})",
@@ -5109,6 +5115,9 @@ async def get_subcontract_orders(request: Request, status: str = None):
         for line in order.get("lines", []):
             item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
             line["item"] = item
+        for part in order.get("job_work_parts", []):
+            part_item = await db.items.find_one({"id": part.get("item_id")}, {"_id": 0})
+            part["item"] = part_item
     return orders
 
 @jobwork_router.post("/orders", status_code=201)
@@ -5411,23 +5420,37 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
             "reject_qty": reject_qty
         })
         
-        # Update received quantity in order (only accepted qty counts toward completion)
-        for ol in order.get("lines", []):
-            if ol["item_id"] == line.item_id:
-                ol["received_quantity"] = ol.get("received_quantity", 0) + accepted_qty
+        # Update received quantity in order
+        # For "with material": receipt is FG/SA/Parts from job_work_parts
+        # For lines/without_material: receipt is from lines
+        updated_jw_parts = False
+        for jp in order.get("job_work_parts", []):
+            if jp.get("item_id") == line.item_id:
+                jp["received_quantity"] = jp.get("received_quantity", 0) + accepted_qty
+                updated_jw_parts = True
+        if not updated_jw_parts:
+            for ol in order.get("lines", []):
+                if ol["item_id"] == line.item_id:
+                    ol["received_quantity"] = ol.get("received_quantity", 0) + accepted_qty
     
-    # Check if all materials received — use 'quantity' for without_material, 'sent_quantity' for with_material
+    # Check completion based on SC type
     sc_type = order.get("subcontract_type", "with_material")
-    if sc_type == "without_material":
+    has_rework = total_rework_qty > 0
+    
+    if sc_type != "without_material" and order.get("job_work_parts"):
+        # With material: check job_work_parts completion
+        all_received = all(jp.get("received_quantity", 0) >= jp.get("quantity", 0) for jp in order.get("job_work_parts", []))
+    elif sc_type == "without_material":
         all_received = all(ol.get("received_quantity", 0) >= ol.get("quantity", 0) for ol in order.get("lines", []))
     else:
         all_received = all(ol.get("received_quantity", 0) >= ol.get("sent_quantity", 0) for ol in order.get("lines", []))
     
-    # If there are rework items, don't mark as completed — wait for rework
-    has_rework = total_rework_qty > 0
     new_status = "completed" if all_received and not has_rework else "in_progress"
     
-    await db.subcontract_orders.update_one({"id": data.subcontract_order_id}, {"$set": {"lines": order["lines"], "status": new_status}})
+    update_fields = {"lines": order["lines"], "status": new_status}
+    if order.get("job_work_parts"):
+        update_fields["job_work_parts"] = order["job_work_parts"]
+    await db.subcontract_orders.update_one({"id": data.subcontract_order_id}, {"$set": update_fields})
     
     # If SC order completed and linked to a WO operation, update that operation
     if new_status == "completed" and order.get("reference_wo_id"):

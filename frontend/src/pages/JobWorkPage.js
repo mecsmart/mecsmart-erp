@@ -121,12 +121,12 @@ export default function JobWorkPage() {
   // Receipt
   const openReceiptDialog = (order) => {
     setRecOrder(order);
-    const isWithoutMaterial = order.subcontract_type === 'without_material';
-    setRecLines(order.lines.map(l => {
-      const pendingQty = isWithoutMaterial
-        ? (l.quantity || 0) - (l.received_quantity || 0)
-        : (l.sent_quantity || 0) - (l.received_quantity || 0);
-      return { item_id: l.item_id, received_quantity: Math.max(pendingQty, 0), quality_result: 'accept', reject_qty: 0 };
+    const isWithMaterial = order.subcontract_type !== 'without_material';
+    // For "with material": receive FG/SA/Parts (job_work_parts), NOT RM
+    const sourceLines = (isWithMaterial && order.job_work_parts?.length > 0) ? order.job_work_parts : order.lines;
+    setRecLines(sourceLines.map(l => {
+      const pendingQty = (l.quantity || 0) - (l.received_quantity || 0);
+      return { item_id: l.item_id, received_quantity: Math.max(pendingQty, 0), quality_result: 'accept', reject_qty: 0, rework_qty: 0 };
     }).filter(l => l.received_quantity > 0));
     setRecWarehouse('');
     setRecDialog(true);
@@ -159,10 +159,17 @@ export default function JobWorkPage() {
     const supplierAddr = [supplier.address, supplier.city, supplier.state].filter(Boolean).join(', ') + (supplier.pin_code ? ` - ${supplier.pin_code}` : '');
     const cs = companySettings || {};
     const companyAddr = [cs.address, cs.address_line2, cs.city, cs.state].filter(Boolean).join(', ') + (cs.pin_code ? ` - ${cs.pin_code}` : '');
+    
+    // Job Work Parts (FG/SA/Parts being processed)
+    const jwParts = dc.order?.job_work_parts || [];
+    const totalJobWorkCost = jwParts.reduce((s, p) => s + ((p.quantity || 0) * (p.charges || 0)), 0);
+    
+    // RM lines
     const totalRMCost = dc.lines.reduce((s, l) => {
       const it = l.item || items.find(i => i.id === l.item_id);
       return s + (l.quantity * (it?.unit_cost || l.rate || 0));
     }, 0);
+    
     const html = `<!DOCTYPE html><html><head><title>Delivery Challan - ${dc.dc_number}</title>
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
@@ -180,12 +187,13 @@ export default function JobWorkPage() {
       .info-box label { font-size:9px; color:#888; text-transform:uppercase; display:block; margin-bottom:2px; }
       .info-box span { font-weight:600; font-size:11px; }
       .info-box .sub-text { font-weight:normal; font-size:10px; color:#555; }
-      table { width:100%; border-collapse:collapse; margin-bottom:15px; }
-      th { background:#1D3557; color:white; padding:6px 8px; text-align:left; font-size:10px; text-transform:uppercase; }
+      .section-title { font-size:13px; font-weight:700; color:#1D3557; margin:15px 0 8px; border-bottom:1px solid #1D3557; padding-bottom:4px; }
+      table { width:100%; border-collapse:collapse; margin-bottom:10px; }
+      th { background:#333; color:white; padding:6px 8px; text-align:left; font-size:10px; text-transform:uppercase; }
       td { padding:6px 8px; border-bottom:1px solid #ddd; font-size:11px; }
       .mono { font-family:'Courier New',monospace; }
       .text-right { text-align:right; }
-      .total-row { font-weight:700; background:#f5f5f5; }
+      .total-row { font-weight:700; background:#f0f0f0; }
       .terms-box { border:1px solid #ddd; padding:10px; margin-top:10px; margin-bottom:20px; border-radius:2px; }
       .terms-box h3 { font-size:10px; text-transform:uppercase; color:#1D3557; margin-bottom:6px; font-weight:700; }
       .terms-box ol { padding-left:18px; font-size:10px; color:#444; line-height:1.7; }
@@ -220,33 +228,40 @@ export default function JobWorkPage() {
       <div class="info-box">
         <label>Reference</label>
         <span>JW Order: <span class="mono">${dc.order?.order_number || '-'}</span></span>
-        ${dc.fg_item_name || dc.order?.fg_item_name ? `<br/><span class="sub-text">For: <strong>${dc.fg_item_name || dc.order?.fg_item_name}</strong></span>` : ''}
         <br/><span class="sub-text">Status: ${dc.status}</span>
       </div>
     </div>
+    
+    <div class="section-title">Job Work Part Details</div>
     <table>
-      <thead><tr><th>#</th><th>Part No.</th><th>Item Name</th><th class="text-right">Qty</th><th class="text-right">Rate</th><th class="text-right">RM Cost</th></tr></thead>
+      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th class="text-right">QTY</th><th class="text-right">Charges</th><th class="text-right">Total Amount</th></tr></thead>
       <tbody>
-      ${(dc.fg_item_name || dc.order?.fg_item_name) ? `<tr style="background:#E1EFFE;">
-        <td></td><td colspan="2" style="font-weight:700;color:#1D3557;">For: ${dc.fg_item_name || dc.order?.fg_item_name}</td>
-        <td colspan="3"></td>
-      </tr>` : ''}
+      ${jwParts.length > 0 ? jwParts.map((p, i) => {
+        const pit = p.item || items.find(it => it.id === p.item_id) || {};
+        const charges = p.charges || 0;
+        const total = (p.quantity || 0) * charges;
+        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${total.toFixed(2)}</td></tr>`;
+      }).join('') : `<tr><td colspan="5" style="text-align:center;color:#888;">
+        ${dc.fg_item_name || dc.order?.fg_item_name || '-'} (Qty: ${dc.order?.fg_quantity || '-'})
+      </td></tr>`}
+      <tr class="total-row"><td colspan="4" class="text-right">Total Job Work Cost</td><td class="text-right mono">${currencySymbol}${totalJobWorkCost.toFixed(2)}</td></tr>
+      </tbody>
+    </table>
+    
+    <div class="section-title">Raw Material Issued</div>
+    <table>
+      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th class="text-right">QTY</th><th class="text-right">Rate</th><th class="text-right">Total RM Cost</th></tr></thead>
+      <tbody>
       ${dc.lines.map((l, i) => {
         const it = l.item || {};
         const rate = it.unit_cost || l.rate || 0;
         const cost = l.quantity * rate;
-        return `<tr>
-        <td>${i+1}</td><td class="mono">${it.part_number || '-'}</td><td>${it.name || '-'}</td>
-        <td class="text-right mono">${l.quantity}</td>
-        <td class="text-right mono">${currencySymbol}${rate.toFixed(2)}</td>
-        <td class="text-right mono">${currencySymbol}${cost.toFixed(2)}</td>
-      </tr>`;}).join('')}
-      <tr class="total-row">
-        <td colspan="5" class="text-right">Total RM Cost</td>
-        <td class="text-right mono">${currencySymbol}${totalRMCost.toFixed(2)}</td>
-      </tr>
+        return `<tr><td>${i+1}</td><td>${it.part_number || '-'}, ${it.name || '-'}</td><td class="text-right mono">${l.quantity}</td><td class="text-right mono">${currencySymbol}${rate.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${cost.toFixed(2)}</td></tr>`;
+      }).join('')}
+      <tr class="total-row"><td colspan="4" class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${totalRMCost.toFixed(2)}</td></tr>
       </tbody>
     </table>
+    
     ${dc.notes ? `<p style="margin-bottom:10px;"><strong>Notes:</strong> ${dc.notes}</p>` : ''}
     <div class="terms-box">
       <h3>Terms & Conditions</h3>
