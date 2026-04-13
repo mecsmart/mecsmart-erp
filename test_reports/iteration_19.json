@@ -1,0 +1,99 @@
+{
+  "summary": "Tested SC marking on pending MOs feature. All 12 backend tests passed. Frontend UI verified: SC button visible on pending MOs, 'Start SC' button shows for pending SC MOs, SC badge shows 'SC (No RM)' for without_material and plain 'SC' for with_material. Backend correctly skips material consumption for without_material SC MOs and creates SC orders at start.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "GET /api/work-orders returns pending MOs correctly",
+    "POST /api/work-orders creates normal (non-SC) MO in pending status",
+    "PUT /api/work-orders/{id} marks pending MO as SC 'without_material' - saves correctly",
+    "POST /api/work-orders/{id}/start for without_material SC MO - no materials consumed, no DC, SC order created",
+    "PUT /api/work-orders/{id} marks pending MO as SC 'with_material' - saves correctly",
+    "POST /api/work-orders/{id}/start for with_material SC MO - materials consumed, DC created, SC order created",
+    "SC badge data correct: subcontract_type='without_material' for No RM, 'with_material' for plain SC",
+    "Pending SC MOs have is_subcontract=true (should show 'Start SC' button)",
+    "Pending non-SC MOs have is_subcontract=false (should show regular 'Start' button)",
+    "SC button visible on pending and in_progress non-SC MOs (data supports frontend logic)",
+    "Frontend: 'Start SC' button visible on pending SC MOs (MO-000011, MO-000013)",
+    "Frontend: SC badge shows 'SC (No RM)' for without_material MOs (MO-000019, MO-000020, MO-000017)",
+    "Frontend: SC badge shows plain 'SC' for with_material MOs (MO-000018, MO-000021)"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_sc_pending_mo.py",
+    "/app/test_reports/pytest/pytest_sc_pending_mo.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [],
+
+  "updated_files": [
+    "/app/backend/tests/test_sc_pending_mo.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (12/12 tests passed)",
+    "frontend": "100% (All UI elements verified)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Created test MOs during backend testing via POST /api/work-orders with is_subcontract=false, then marked as SC via PUT",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": true,
+
+  "context_for_next_testing_agent": "SC marking on pending MOs feature verified working. Key findings: (1) SC button visible on pending and in_progress non-SC MOs (line 919 in ManufacturingPage.js), (2) 'Start SC' button shows for pending SC MOs (line 916), regular 'Start' for non-SC (line 915), (3) SC badge shows 'SC (No RM)' for without_material type (line 911), (4) Backend skips material consumption for without_material SC (line 2998-3000 in server.py), (5) SC order created at start for SC MOs (line 3080-3100). Test MOs created: MO-000011, MO-000013 (pending SC), MO-000019, MO-000020 (in_progress, without_material SC).",
+
+  "features_verified": {
+    "sc_button_on_pending_mos": {
+      "status": "WORKING",
+      "details": "SC button visible on pending and in_progress non-SC MOs (line 919: canEdit && !wo.is_subcontract && ['pending', 'in_progress'].includes(wo.status))"
+    },
+    "mark_pending_mo_as_sc_without_material": {
+      "status": "WORKING",
+      "details": "PUT /api/work-orders/{id} with is_subcontract=true, subcontract_type='without_material' saves correctly"
+    },
+    "start_without_material_sc_mo": {
+      "status": "WORKING",
+      "details": "No materials consumed (skip_material_consumption=true), no DC created, SC order created with sent_quantity=0"
+    },
+    "mark_pending_mo_as_sc_with_material": {
+      "status": "WORKING",
+      "details": "PUT /api/work-orders/{id} with is_subcontract=true, subcontract_type='with_material' saves correctly"
+    },
+    "start_with_material_sc_mo": {
+      "status": "WORKING",
+      "details": "Materials consumed from stock, DC created, SC order created with sent_quantity > 0"
+    },
+    "sc_badge_no_rm_label": {
+      "status": "WORKING",
+      "details": "SC badge shows 'SC (No RM)' for without_material type (line 911: wo.subcontract_type === 'without_material' ? ' (No RM)' : '')"
+    },
+    "start_sc_button_text": {
+      "status": "WORKING",
+      "details": "Pending SC MOs show 'Start SC' button (line 916), non-SC show regular 'Start' (line 915)"
+    },
+    "normal_mo_start_button": {
+      "status": "WORKING",
+      "details": "Normal (non-SC) pending MOs show regular 'Start' button"
+    }
+  }
+}
