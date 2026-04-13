@@ -212,9 +212,16 @@ export default function MRPPage() {
           {selectedCount > 0 && (
             <div className="flex items-center justify-between bg-[#E1EFFE] border border-[#93C5FD] rounded-sm px-4 py-3 mb-4" data-testid="selected-banner">
               <span className="text-sm font-medium text-[#1E429F]">{selectedCount} item(s) selected</span>
-              <button className="btn-primary flex items-center space-x-2 text-sm" onClick={() => setPODialogOpen(true)} data-testid="create-po-from-mrp-btn">
-                <ShoppingBag className="w-4 h-4" /><span>Create Purchase Order</span>
-              </button>
+              {Object.values(selectedItems).some(s => {
+                const sugg = suggestions.find(sg => sg.item?.id === (s.item_id || s.id));
+                return !sugg || sugg.po_status !== 'po_sent';
+              }) ? (
+                <button className="btn-primary flex items-center space-x-2 text-sm" onClick={() => setPODialogOpen(true)} data-testid="create-po-from-mrp-btn">
+                  <ShoppingBag className="w-4 h-4" /><span>Create Purchase Order</span>
+                </button>
+              ) : (
+                <span className="text-sm font-medium text-[#03543F] bg-[#DEF7EC] px-3 py-1 rounded">All selected items already have POs</span>
+              )}
             </div>
           )}
           <div className="card-flat overflow-hidden">
@@ -240,7 +247,7 @@ export default function MRPPage() {
                   <tbody>
                     {suggestions.map((s, index) => (
                       <tr key={index} className={s.po_status === 'po_sent' ? 'bg-[#DEF7EC]/30' : selectedItems[s.item?.id] ? 'bg-[#E1EFFE]/30' : ''} data-testid={`suggestion-row-${index}`}>
-                        <td><input type="checkbox" checked={!!selectedItems[s.item?.id]} onChange={() => toggleItem(s.item?.id, s)} className="rounded border-[#D1D5DB]" /></td>
+                        <td><input type="checkbox" checked={!!selectedItems[s.item?.id]} onChange={() => toggleItem(s.item?.id, s)} disabled={s.po_status === 'po_sent'} className="rounded border-[#D1D5DB]" /></td>
                         <td className="mono font-medium">{s.item?.part_number || '-'}</td>
                         <td>{s.item?.name || '-'}</td>
                         <td>

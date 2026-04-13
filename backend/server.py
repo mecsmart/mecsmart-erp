@@ -2057,7 +2057,7 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
 
 @purchase_orders_router.post("/from-mrp", status_code=201)
 async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
-    """Create PO from MRP suggestions"""
+    """Create PO from MRP suggestions — blocks if items already covered by existing POs"""
     user = await get_current_user(request)
     if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
@@ -2066,31 +2066,59 @@ async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
     
-    item_ids = [item.get("item_id") or item for item in data.items] if data.items else []
-    
     lines = []
+    skipped_items = []
     for entry in data.items:
         item_id = entry.get("item_id") if isinstance(entry, dict) else entry
         item = await db.items.find_one({"id": item_id}, {"_id": 0})
-        if item:
-            if isinstance(entry, dict):
-                qty = entry.get("quantity") or entry.get("suggested_quantity") or max(item.get("safety_stock", 0) * 2 - item.get("current_stock", 0), 1)
-                price = entry.get("unit_price") or item.get("unit_cost", 0)
-            else:
-                qty = max(item.get("safety_stock", 0) * 2 - item.get("current_stock", 0), 1)
-                price = item.get("unit_cost", 0)
-            lines.append({
-                "item_id": item_id,
-                "quantity": max(int(qty), 1),
-                "unit_price": price,
-                "hsn_code": item.get("hsn_code", ""),
-                "gst_rate": item.get("gst_rate", 18),
-                "uom": item.get("unit_of_measure", "pcs"),
-                "notes": ""
-            })
+        if not item:
+            continue
+        
+        if isinstance(entry, dict):
+            qty = entry.get("quantity") or entry.get("suggested_quantity") or max(item.get("safety_stock", 0) * 2 - item.get("current_stock", 0), 1)
+            price = entry.get("unit_price") or item.get("unit_cost", 0)
+        else:
+            qty = max(item.get("safety_stock", 0) * 2 - item.get("current_stock", 0), 1)
+            price = item.get("unit_cost", 0)
+        
+        # Check if existing non-cancelled POs already cover this item
+        existing_po_qty = 0
+        existing_pos = await db.purchase_orders.find(
+            {"status": {"$nin": ["cancelled", "received"]},
+             "$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]},
+            {"_id": 0, "lines": 1, "items": 1}
+        ).to_list(100)
+        for epo in existing_pos:
+            found_in_lines = False
+            for pi in epo.get("lines", []):
+                if pi.get("item_id") == item_id:
+                    existing_po_qty += max(0, (pi.get("quantity", 0) or 0) - (pi.get("received_quantity", 0) or 0))
+                    found_in_lines = True
+            if not found_in_lines:
+                for pi in epo.get("items", []):
+                    if pi.get("item_id") == item_id:
+                        existing_po_qty += max(0, (pi.get("quantity", 0) or 0) - (pi.get("received_quantity", 0) or 0))
+        
+        if existing_po_qty >= int(qty):
+            skipped_items.append(f"{item.get('part_number')} (PO already covers {existing_po_qty} >= {int(qty)})")
+            continue
+        
+        # Only order the remaining qty not yet covered by POs
+        remaining_qty = max(int(qty) - existing_po_qty, 1)
+        
+        lines.append({
+            "item_id": item_id,
+            "quantity": remaining_qty,
+            "unit_price": price,
+            "hsn_code": item.get("hsn_code", ""),
+            "gst_rate": item.get("gst_rate", 18),
+            "uom": item.get("unit_of_measure", "pcs"),
+            "notes": ""
+        })
     
     if not lines:
-        raise HTTPException(status_code=400, detail="No valid items to order")
+        skip_msg = "\n".join(skipped_items) if skipped_items else "No valid items."
+        raise HTTPException(status_code=400, detail=f"All items already have POs covering the required quantity.\n{skip_msg}")
     
     # GST calculation
     company_settings = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
