@@ -15,24 +15,23 @@
 - SC Order auto-created at MO start OR when marking in_progress MO as SC
 - MO auto-completes when SC receipt is received
 
-### Sub-Contract Type Selection
-- With Material: RM consumed, sent to vendor via DC
-- Without Material: No RM consumed, vendor sources own materials
-- Radio toggle in Create MO dialog and SC button dialog
+### Sub-Contract Flow (SC marking before/after start)
+- **SC button on pending MOs** — decide With/Without Material BEFORE starting
+- **SC button on in_progress MOs** — mark after start (creates SC order immediately)
+- **With Material**: RM consumed at start, DC auto-created, materials sent to vendor
+- **Without Material**: No RM consumed at start, no DC, vendor sources own materials
+- **Start SC button** — distinct label for SC-marked pending MOs
+- **SC badges**: "SC" for with_material, "SC (No RM)" for without_material
 
 ### Direct SC Order from SO (Skip MO)
-- When "Sub-Contract" checked in Create MO: **SC Order created directly, no MO**
-- SC Order lines = **first-level BOM components** (RM, SA, Parts)
-- No child MOs created for stock items
-- **Consolidation**: Same supplier + same SO → merged into single SC order
-- With Material: DC auto-created; Without Material: no DC
-- Receiving: Each BOM component received individually (disassembled condition)
+- When "Sub-Contract" checked in Create MO dialog: SC Order created directly, no MO
+- SC Order lines = first-level BOM components
+- Consolidation: Same supplier + same SO → merged into single SC order
 
 ### Sales Orders
-- **Search box**: Filter by order number, product name, BOM name
+- Search box: Filter by order number, product name, BOM name
 - Balance quantity in Create MO dialog
 - SO edit blocked when full qty covered by MOs
-- MO QTY column with "Fully covered" indicator
 
 ### Job Work / Subcontracting
 - SC Order with edit, confirm, send DC, receive back
@@ -41,8 +40,7 @@
 
 ### Delivery Challan Print
 - Company header with name, tagline, address, phone, email, GSTIN
-- RM Cost columns (Rate + Cost per item + Total)
-- Terms & Conditions box
+- RM Cost columns + Terms & Conditions box
 
 ### All Other Modules: Routings, Purchase Invoice, BOM, PO, GRN, Quality, Inventory, MRP, Settings, Customers, Suppliers, Stores, User Management
 
