@@ -668,8 +668,13 @@ async def login(user_data: UserLogin, response: Response, request: Request):
         attempt = await db.login_attempts.find_one({"identifier": identifier})
         if attempt and attempt.get("count", 0) >= 5:
             lockout_until = attempt.get("lockout_until")
-            if lockout_until and datetime.now(timezone.utc) < lockout_until:
-                raise HTTPException(status_code=429, detail="Account locked. Try again later.")
+            if lockout_until:
+                # Handle both naive and aware datetimes
+                now = datetime.now(timezone.utc)
+                if lockout_until.tzinfo is None:
+                    lockout_until = lockout_until.replace(tzinfo=timezone.utc)
+                if now < lockout_until:
+                    raise HTTPException(status_code=429, detail="Account locked. Try again later.")
             else:
                 await db.login_attempts.delete_one({"identifier": identifier})
         
