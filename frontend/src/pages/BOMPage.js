@@ -505,7 +505,7 @@ export default function BOMPage() {
         </div>
       </div>
 
-      {/* BOMs List - Collapsible Tree View grouped by Parent Item */}
+      {/* BOMs List - Multi-Level Collapsible Tree View */}
       <div className="card-flat overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center h-48">
@@ -517,87 +517,174 @@ export default function BOMPage() {
             <p>No BOMs found</p>
           </div>
         ) : (
-          <div>
+          <div className="p-4">
             {(() => {
+              // Group BOMs by parent item
               const grouped = {};
               boms.forEach(bom => {
                 const pid = bom.parent_item_id || bom.parent_item?.id || 'unknown';
                 if (!grouped[pid]) grouped[pid] = { item: bom.parent_item, boms: [] };
                 grouped[pid].boms.push(bom);
               });
-              return Object.entries(grouped).map(([pid, group]) => {
-                const pi = group.item;
-                const cat = pi?.category || '';
-                const catLabel = cat === 'finished_good' ? 'FG' : cat === 'sub_assembly' ? 'SA' : cat === 'component' ? 'COMP' : 'PART';
-                const catColor = cat === 'finished_good' ? 'bg-[#1D3557] text-white' : cat === 'sub_assembly' ? 'bg-[#723B13] text-white' : 'bg-[#6B7280] text-white';
+              
+              // Find child BOMs for a given item
+              const findChildBom = (itemId) => boms.find(b => b.parent_item_id === itemId && b.status === 'active');
+              
+              // Recursive tree node renderer
+              const renderTreeNode = (itemData, depth, isLast, parentLines) => {
+                const { item: nodeItem, quantity, uom, bom: nodeBom, components } = itemData;
+                const cat = nodeItem?.category || '';
+                const catLabel = cat === 'finished_good' ? 'FG' : cat === 'sub_assembly' ? 'SA' : cat === 'raw_material' ? 'RM' : cat === 'component' ? 'CP' : 'PT';
+                const catColor = cat === 'finished_good' ? '#1D3557' : cat === 'sub_assembly' ? '#723B13' : cat === 'raw_material' ? '#2563EB' : cat === 'component' ? '#9B1C1C' : '#6B7280';
+                const catBg = cat === 'finished_good' ? 'bg-[#1D3557]' : cat === 'sub_assembly' ? 'bg-[#723B13]' : cat === 'raw_material' ? 'bg-[#DBEAFE]' : cat === 'component' ? 'bg-[#FDE8E8]' : 'bg-[#F3F4F6]';
+                const catText = cat === 'finished_good' || cat === 'sub_assembly' ? 'text-white' : cat === 'raw_material' ? 'text-[#1D4ED8]' : cat === 'component' ? 'text-[#9B1C1C]' : 'text-[#374151]';
+                const hasChildren = components && components.length > 0;
+                const nodeKey = `tree-${nodeItem?.id || 'x'}-${depth}`;
+                const isOpen = expandedItems[nodeKey] !== false; // default open
+                
                 return (
-                  <details key={pid} open className="border-b border-[#E5E7EB] last:border-b-0" data-testid={`bom-group-${pid}`}>
-                    <summary className="flex items-center gap-3 px-4 py-3.5 cursor-pointer hover:bg-[#F3F4F6] select-none [&::-webkit-details-marker]:hidden list-none" onClick={(e) => {
-                      const d = e.currentTarget.parentElement;
-                      const chR = e.currentTarget.querySelector('.chev-r');
-                      const chD = e.currentTarget.querySelector('.chev-d');
-                      if (d.open) { if(chR) chR.style.display='none'; if(chD) chD.style.display='block'; }
-                      else { if(chR) chR.style.display='block'; if(chD) chD.style.display='none'; }
-                    }}>
-                      <ChevronRight className="chev-r w-5 h-5 text-[#6B7280]" style={{display:'none'}} />
-                      <ChevronDown className="chev-d w-5 h-5 text-[#1D3557]" />
-                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${catColor}`}>{catLabel}</span>
-                      <span className="mono font-semibold text-[#1D3557] text-sm">{pi?.part_number || '-'}</span>
-                      <span className="text-[#374151] font-medium">{pi?.name || '-'}</span>
-                      <span className="text-xs text-[#9CA3AF] ml-auto">{group.boms.length} BOM{group.boms.length > 1 ? 's' : ''}</span>
-                    </summary>
-                    <div className="px-3 pb-3">
-                      {group.boms.map(bom => (
-                        <div key={bom.id} className="mb-2 border border-[#E5E7EB] rounded-sm overflow-hidden" data-testid={`bom-row-${bom.id}`}>
-                          <div className="flex items-center justify-between px-4 py-2.5 bg-[#F9FAFB]">
-                            <div className="flex items-center gap-4">
-                              <span className="font-medium text-sm">{bom.name}</span>
-                              <span className="mono text-xs text-[#6B7280]">Rev {bom.revision}</span>
-                              <span className={`status-badge status-${bom.status}`}>{bom.status}</span>
-                              <span className="text-xs text-[#9CA3AF]">{bom.effectivity_date ? new Date(bom.effectivity_date).toLocaleDateString() : ''}</span>
-                            </div>
-                            <div className="flex items-center space-x-1">
-                              <button onClick={() => handleView(bom)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="View Explosion" data-testid={`view-bom-${bom.id}`}><Eye className="w-4 h-4" /></button>
-                              {canEdit && (
-                                <>
-                                  <button onClick={() => handleEdit(bom)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit" data-testid={`edit-bom-${bom.id}`}><Edit2 className="w-4 h-4" /></button>
-                                  <button onClick={() => handleRevise(bom)} className="p-1 text-[#4B5563] hover:text-[#457B9D]" title="Create Revision" data-testid={`revise-bom-${bom.id}`}><GitBranch className="w-4 h-4" /></button>
-                                </>
-                              )}
-                              {user?.role === 'admin' && (
-                                <button onClick={() => handleDelete(bom)} className="p-1 text-[#4B5563] hover:text-[#9B1C1C]" title="Delete" data-testid={`delete-bom-${bom.id}`}><Trash2 className="w-4 h-4" /></button>
-                              )}
-                            </div>
-                          </div>
-                          {bom.components && bom.components.length > 0 && (
-                            <div className="px-4 py-2">
-                              <table className="w-full text-xs">
-                                <thead><tr className="text-[#6B7280]"><th className="text-left py-1 font-medium">Part No.</th><th className="text-left py-1 font-medium">Component Name</th><th className="text-left py-1 font-medium">Category</th><th className="text-right py-1 font-medium">Qty</th><th className="text-left py-1 font-medium">UOM</th></tr></thead>
-                                <tbody>
-                                  {bom.components.map((comp, ci) => {
-                                    const ci_item = items.find(i => i.id === comp.item_id);
-                                    const ci_cat = ci_item?.category || '';
-                                    const ci_badge = ci_cat === 'sub_assembly' ? 'bg-[#FDF6B2] text-[#723B13]' : ci_cat === 'raw_material' ? 'bg-[#E1EFFE] text-[#1D3557]' : ci_cat === 'component' ? 'bg-[#FDE8E8] text-[#9B1C1C]' : 'bg-[#F3F4F6] text-[#4B5563]';
-                                    return (
-                                      <tr key={ci} className="border-t border-[#F3F4F6]">
-                                        <td className="py-1.5 mono font-medium">{ci_item?.part_number || '?'}</td>
-                                        <td className="py-1.5">{ci_item?.name || '-'}</td>
-                                        <td className="py-1.5"><span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${ci_badge}`}>{ci_cat.replace('_',' ')}</span></td>
-                                        <td className="py-1.5 text-right mono font-medium">{comp.quantity}</td>
-                                        <td className="py-1.5 text-[#6B7280]">{comp.uom || ci_item?.unit_of_measure || '-'}</td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
+                  <div key={nodeKey} className="relative">
+                    {/* Connecting lines */}
+                    {depth > 0 && (
+                      <div className="absolute" style={{ left: `${(depth - 1) * 32 + 16}px`, top: 0, bottom: isLast ? '20px' : 0, width: '1px', background: '#D1D5DB' }} />
+                    )}
+                    {depth > 0 && (
+                      <div className="absolute" style={{ left: `${(depth - 1) * 32 + 16}px`, top: '20px', width: '16px', height: '1px', background: '#D1D5DB' }} />
+                    )}
+                    
+                    {/* Node */}
+                    <div className="flex items-center py-1.5 hover:bg-[#F9FAFB] rounded-sm transition-colors" style={{ paddingLeft: `${depth * 32}px` }}>
+                      {/* Chevron / Node icon */}
+                      {hasChildren ? (
+                        <button onClick={() => setExpandedItems(prev => ({ ...prev, [nodeKey]: !isOpen }))} className="w-6 h-6 flex items-center justify-center rounded hover:bg-[#E5E7EB] mr-1 flex-shrink-0">
+                          {isOpen ? <ChevronDown className="w-4 h-4 text-[#4B5563]" /> : <ChevronRight className="w-4 h-4 text-[#4B5563]" />}
+                        </button>
+                      ) : (
+                        <div className="w-6 h-6 flex items-center justify-center mr-1 flex-shrink-0">
+                          <div className="w-2 h-2 rounded-full" style={{ background: catColor }} />
                         </div>
-                      ))}
+                      )}
+                      
+                      {/* Category badge */}
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded mr-2 flex-shrink-0 ${catBg} ${catText}`}>{catLabel}</span>
+                      
+                      {/* Part number + Name */}
+                      <span className="mono font-semibold text-sm text-[#111827] mr-2">{nodeItem?.part_number || '?'}</span>
+                      <span className="text-sm text-[#374151] mr-3">{nodeItem?.name || '-'}</span>
+                      
+                      {/* Quantity (not for root FG) */}
+                      {quantity != null && depth > 0 && (
+                        <span className="mono text-xs text-[#6B7280] bg-[#F3F4F6] px-2 py-0.5 rounded mr-2">x{quantity} {uom || ''}</span>
+                      )}
+                      
+                      {/* Cost */}
+                      {nodeItem?.unit_cost != null && (
+                        <span className="mono text-xs text-[#6B7280] mr-3">{formatCurrency(nodeItem.unit_cost)}</span>
+                      )}
+                      
+                      {/* BOM info (for items that have their own BOM) */}
+                      {nodeBom && depth === 0 && (
+                        <span className="flex items-center gap-2 ml-auto">
+                          <span className={`status-badge status-${nodeBom.status}`}>Rev {nodeBom.revision} - {nodeBom.status}</span>
+                          <button onClick={() => handleView(nodeBom)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="View Explosion"><Eye className="w-3.5 h-3.5" /></button>
+                          {canEdit && <button onClick={() => handleEdit(nodeBom)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit"><Edit2 className="w-3.5 h-3.5" /></button>}
+                          {canEdit && <button onClick={() => handleRevise(nodeBom)} className="p-1 text-[#4B5563] hover:text-[#457B9D]" title="Revise"><GitBranch className="w-3.5 h-3.5" /></button>}
+                          {user?.role === 'admin' && <button onClick={() => handleDelete(nodeBom)} className="p-1 text-[#4B5563] hover:text-[#9B1C1C]" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>}
+                        </span>
+                      )}
                     </div>
-                  </details>
+                    
+                    {/* Children */}
+                    {hasChildren && isOpen && (
+                      <div className="relative">
+                        {components.map((comp, ci) => {
+                          const compItem = items.find(i => i.id === comp.item_id) || comp.item;
+                          const childBom = findChildBom(comp.item_id);
+                          const childComponents = childBom ? childBom.components?.map(cc => ({
+                            item: items.find(i => i.id === cc.item_id),
+                            quantity: cc.quantity,
+                            uom: cc.uom || items.find(i => i.id === cc.item_id)?.unit_of_measure,
+                            components: (() => {
+                              const grandBom = findChildBom(cc.item_id);
+                              return grandBom ? grandBom.components?.map(gc => ({
+                                item: items.find(i => i.id === gc.item_id),
+                                quantity: gc.quantity,
+                                uom: gc.uom,
+                                components: []
+                              })) : [];
+                            })()
+                          })) : [];
+                          
+                          return renderTreeNode({
+                            item: compItem,
+                            quantity: comp.quantity,
+                            uom: comp.uom || compItem?.unit_of_measure,
+                            bom: childBom,
+                            components: childComponents
+                          }, depth + 1, ci === components.length - 1, []);
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
-              });
+              };
+              
+              // Render top-level FG BOMs
+              return Object.entries(grouped)
+                .filter(([, g]) => g.item?.category === 'finished_good' || !Object.values(grouped).some(og => og.boms.some(b => b.components?.some(c => c.item_id === g.item?.id))))
+                .map(([pid, group]) => {
+                  const activeBom = group.boms.find(b => b.status === 'active') || group.boms[0];
+                  const topComponents = activeBom?.components?.map(comp => {
+                    const compItem = items.find(i => i.id === comp.item_id);
+                    const childBom = findChildBom(comp.item_id);
+                    const childComps = childBom ? childBom.components?.map(cc => {
+                      const ccItem = items.find(i => i.id === cc.item_id);
+                      const grandBom = findChildBom(cc.item_id);
+                      return {
+                        item: ccItem,
+                        quantity: cc.quantity,
+                        uom: cc.uom || ccItem?.unit_of_measure,
+                        components: grandBom ? grandBom.components?.map(gc => ({
+                          item: items.find(i => i.id === gc.item_id),
+                          quantity: gc.quantity,
+                          uom: gc.uom,
+                          components: []
+                        })) : []
+                      };
+                    }) : [];
+                    
+                    return {
+                      item: compItem,
+                      quantity: comp.quantity,
+                      uom: comp.uom || compItem?.unit_of_measure,
+                      bom: childBom,
+                      components: childComps
+                    };
+                  }) || [];
+                  
+                  return (
+                    <div key={pid} className="mb-4 border border-[#E5E7EB] rounded-sm p-3" data-testid={`bom-tree-${pid}`}>
+                      {renderTreeNode({
+                        item: group.item,
+                        quantity: null,
+                        uom: null,
+                        bom: activeBom,
+                        components: topComponents
+                      }, 0, true, [])}
+                      {/* Show other revisions if multiple BOMs */}
+                      {group.boms.length > 1 && (
+                        <div className="mt-2 ml-8 text-xs text-[#6B7280]">
+                          Other revisions: {group.boms.filter(b => b.id !== activeBom?.id).map(b => (
+                            <span key={b.id} className="inline-flex items-center gap-1 mr-3">
+                              <span className={`status-badge text-[9px] status-${b.status}`}>Rev {b.revision}</span>
+                              <button onClick={() => handleView(b)} className="hover:underline">{b.name}</button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
             })()}
           </div>
         )}
