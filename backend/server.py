@@ -1359,12 +1359,7 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
         if item_id:
             pos = await db.purchase_orders.find(
                 {"status": {"$in": ["draft", "approved", "sent", "confirmed"]},
-                 "$or": [
-                     {"reference_sc_order_id": {"$exists": False}},
-                     {"reference_sc_order_id": None},
-                     {"reference_sc_order_id": ""}
-                 ],
-                 "$and": [{"$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]}]},
+                 "$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]},
                 {"_id": 0, "lines": 1, "items": 1, "po_number": 1}
             ).to_list(100)
             for po in pos:
@@ -1451,12 +1446,7 @@ async def get_purchase_suggestions(request: Request):
         if s_item_id:
             s_pos = await db.purchase_orders.find(
                 {"status": {"$in": ["draft", "approved", "sent", "confirmed"]},
-                 "$or": [
-                     {"reference_sc_order_id": {"$exists": False}},
-                     {"reference_sc_order_id": None},
-                     {"reference_sc_order_id": ""}
-                 ],
-                 "$and": [{"$or": [{"lines.item_id": s_item_id}, {"items.item_id": s_item_id}]}]},
+                 "$or": [{"lines.item_id": s_item_id}, {"items.item_id": s_item_id}]},
                 {"_id": 0, "lines": 1, "items": 1}
             ).to_list(100)
             for po in s_pos:
@@ -2094,12 +2084,7 @@ async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
         existing_po_qty = 0
         existing_pos = await db.purchase_orders.find(
             {"status": {"$nin": ["cancelled", "received"]},
-             "$or": [
-                 {"reference_sc_order_id": {"$exists": False}},
-                 {"reference_sc_order_id": None},
-                 {"reference_sc_order_id": ""}
-             ],
-             "$and": [{"$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]}]},
+             "$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]},
             {"_id": 0, "lines": 1, "items": 1}
         ).to_list(100)
         for epo in existing_pos:
@@ -3142,6 +3127,133 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
         await create_child_work_orders(routing.get("item_id"), wo_data.quantity, main_wo["id"])
     
     return {"message": f"Created {len(created_work_orders)} work order(s)", "work_orders": created_work_orders}
+
+
+@work_orders_router.post("/bulk-subcontract")
+async def bulk_subcontract(request: Request, data: dict = Body(...)):
+    """Mark multiple MOs as SC and create a single consolidated SC Order + DC"""
+    user = await get_current_user(request)
+    wo_ids = data.get("wo_ids", [])
+    supplier_id = data.get("supplier_id")
+    sc_type = data.get("subcontract_type", "with_material")
+    
+    if not wo_ids or not supplier_id:
+        raise HTTPException(status_code=400, detail="wo_ids and supplier_id required")
+    
+    supplier = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    
+    # Mark all MOs as subcontract
+    all_sc_lines = []
+    mo_numbers = []
+    for wo_id in wo_ids:
+        wo = await db.work_orders.find_one({"id": wo_id})
+        if not wo:
+            continue
+        
+        await db.work_orders.update_one({"id": wo_id}, {"$set": {
+            "is_subcontract": True,
+            "subcontract_supplier_id": supplier_id,
+            "subcontract_type": sc_type,
+            "updated_at": datetime.now(timezone.utc)
+        }})
+        mo_numbers.append(wo.get("wo_number", wo_id))
+        
+        # Collect materials for SC order
+        routing = await db.routings.find_one({"id": wo.get("routing_id")})
+        item_id = routing.get("item_id") if routing else wo.get("item_id")
+        
+        if sc_type == "without_material":
+            wo_item = await db.items.find_one({"id": item_id}, {"_id": 0})
+            if wo_item:
+                all_sc_lines.append({"item_id": item_id, "quantity": wo.get("quantity", 1), "sent_quantity": 0, "received_quantity": 0, "rate": wo_item.get("unit_cost", 0), "wo_id": wo_id})
+        else:
+            consumed = wo.get("consumed_materials", [])
+            if consumed:
+                for m in consumed:
+                    all_sc_lines.append({"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": m["quantity"], "received_quantity": 0, "rate": m.get("unit_cost", 0), "wo_id": wo_id})
+            else:
+                bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"})
+                if bom:
+                    for comp in bom.get("components", []):
+                        if comp.get("is_alternate"):
+                            continue
+                        comp_item = await db.items.find_one({"id": comp["item_id"]}, {"_id": 0})
+                        if comp_item:
+                            qty = int(comp["quantity"] * wo.get("quantity", 1))
+                            all_sc_lines.append({"item_id": comp["item_id"], "quantity": qty, "sent_quantity": qty, "received_quantity": 0, "rate": comp_item.get("unit_cost", 0), "wo_id": wo_id})
+                else:
+                    wo_item = await db.items.find_one({"id": item_id}, {"_id": 0})
+                    if wo_item:
+                        all_sc_lines.append({"item_id": item_id, "quantity": wo.get("quantity", 1), "sent_quantity": wo.get("quantity", 1), "received_quantity": 0, "rate": wo_item.get("unit_cost", 0), "wo_id": wo_id})
+    
+    if not all_sc_lines:
+        raise HTTPException(status_code=400, detail="No materials to create SC order")
+    
+    # Consolidate lines (merge same item_id)
+    consolidated = {}
+    for line in all_sc_lines:
+        iid = line["item_id"]
+        if iid in consolidated:
+            consolidated[iid]["quantity"] += line["quantity"]
+            consolidated[iid]["sent_quantity"] += line["sent_quantity"]
+        else:
+            consolidated[iid] = {k: v for k, v in line.items() if k != "wo_id"}
+    
+    sc_lines = list(consolidated.values())
+    
+    # Get FG item name from first MO
+    first_wo = await db.work_orders.find_one({"id": wo_ids[0]})
+    first_routing = await db.routings.find_one({"id": first_wo.get("routing_id")}) if first_wo else None
+    fg_item_id = first_routing.get("item_id") if first_routing else (first_wo.get("item_id") if first_wo else "")
+    fg_item = await db.items.find_one({"id": fg_item_id}, {"_id": 0}) if fg_item_id else None
+    
+    # Create single SC order
+    sc_count = await db.subcontract_orders.count_documents({})
+    sc_doc = {
+        "id": str(uuid.uuid4()),
+        "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
+        "supplier_id": supplier_id,
+        "reference_wo_ids": wo_ids,
+        "reference_wo_id": wo_ids[0],
+        "subcontract_type": sc_type,
+        "fg_item_id": fg_item_id,
+        "fg_item_name": f"{fg_item.get('part_number', '')} - {fg_item.get('name', '')}" if fg_item else "",
+        "fg_quantity": sum(line["quantity"] for line in sc_lines),
+        "lines": sc_lines,
+        "status": "in_progress",
+        "notes": f"Bulk SC for MOs: {', '.join(mo_numbers)} ({sc_type.replace('_', ' ')})",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.subcontract_orders.insert_one(sc_doc)
+    sc_doc.pop("_id", None)
+    
+    # Create DC if with_material
+    dc_doc = None
+    if sc_type == "with_material" and sc_lines:
+        dc_lines = [{"item_id": l["item_id"], "quantity": l["quantity"], "rate": l["rate"]} for l in sc_lines]
+        dc_count = await db.delivery_challans.count_documents({})
+        dc_doc = {
+            "id": str(uuid.uuid4()),
+            "dc_number": f"DC-{str(dc_count + 1).zfill(6)}",
+            "subcontract_order_id": sc_doc["id"],
+            "lines": dc_lines,
+            "status": "sent",
+            "notes": f"Bulk DC for MOs: {', '.join(mo_numbers)}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"]
+        }
+        await db.delivery_challans.insert_one(dc_doc)
+        dc_doc.pop("_id", None)
+    
+    return {
+        "message": f"Created SC Order {sc_doc['order_number']}" + (f" + DC {dc_doc['dc_number']}" if dc_doc else "") + f" for {len(wo_ids)} MOs",
+        "sc_order": sc_doc,
+        "dc": dc_doc
+    }
+
 
 @work_orders_router.post("/{wo_id}/start")
 async def start_work_order(wo_id: str, request: Request):

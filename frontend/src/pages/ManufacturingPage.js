@@ -52,6 +52,12 @@ export default function ManufacturingPage() {
   const [subcontractSupplier, setSubcontractSupplier] = useState('');
   const [subcontractType, setSubcontractType] = useState('with_material');
   
+  // Bulk SC selection
+  const [selectedMOs, setSelectedMOs] = useState({});
+  const [bulkSCDialog, setBulkSCDialog] = useState(false);
+  const [bulkSCSupplier, setBulkSCSupplier] = useState('');
+  const [bulkSCType, setBulkSCType] = useState('with_material');
+  
   const [workCenterForm, setWorkCenterForm] = useState({
     code: '',
     name: '',
@@ -291,6 +297,33 @@ export default function ManufacturingPage() {
       setSubcontractDialog(false);
       fetchData();
     } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const toggleMOSelect = (woId) => {
+    setSelectedMOs(prev => {
+      const next = { ...prev };
+      if (next[woId]) delete next[woId];
+      else next[woId] = true;
+      return next;
+    });
+  };
+  
+  const selectedMOCount = Object.keys(selectedMOs).length;
+  
+  const handleBulkSC = async () => {
+    if (!bulkSCSupplier) { alert('Select a subcontractor'); return; }
+    const woIds = Object.keys(selectedMOs);
+    try {
+      const { data } = await api.post('/api/work-orders/bulk-subcontract', {
+        wo_ids: woIds,
+        supplier_id: bulkSCSupplier,
+        subcontract_type: bulkSCType
+      });
+      setBulkSCDialog(false);
+      setSelectedMOs({});
+      alert(data.message);
+      fetchData();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to create bulk SC'); }
   };
 
   const handleEditWorkCenter = (wc) => {
@@ -891,7 +924,8 @@ export default function ManufacturingPage() {
                     const children = getChildMOs(wo.id);
                     return (
                       <React.Fragment key={wo.id}>
-                        <tr className={depth > 0 ? 'bg-[#F9FAFB]' : ''} data-testid={`wo-row-${wo.id}`}>
+                        <tr className={`${depth > 0 ? 'bg-[#F9FAFB]' : ''} ${selectedMOs[wo.id] ? 'bg-[#E1EFFE]/40' : ''}`} data-testid={`wo-row-${wo.id}`}>
+                          <td className="text-center"><input type="checkbox" checked={!!selectedMOs[wo.id]} onChange={() => toggleMOSelect(wo.id)} className="rounded" data-testid={`select-mo-${wo.id}`} /></td>
                           <td style={{ paddingLeft: `${12 + depth * 24}px` }}>
                             {depth > 0 && <span className="text-[#1D3557] mr-1">└→</span>}
                             <span className="mono font-medium">{wo.wo_number}</span>
@@ -927,7 +961,20 @@ export default function ManufacturingPage() {
                     );
                   };
 
-                  return [...parentMOs, ...childOnlyMOs].map(parentMO => {
+                  return (
+                    <>
+                    {selectedMOCount > 0 && (
+                      <div className="flex items-center justify-between bg-[#E1EFFE] border border-[#93C5FD] rounded-sm px-4 py-3 mb-3" data-testid="bulk-sc-banner">
+                        <span className="text-sm font-medium text-[#1E429F]">{selectedMOCount} MO(s) selected</span>
+                        <div className="flex gap-2">
+                          <button onClick={() => setSelectedMOs({})} className="btn-secondary text-xs">Clear</button>
+                          <button onClick={() => { setBulkSCSupplier(''); setBulkSCType('with_material'); setBulkSCDialog(true); }} className="btn-primary text-xs flex items-center gap-1" data-testid="bulk-sc-btn">
+                            <Truck className="w-3 h-3" />Create Bulk SC Order
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {[...parentMOs, ...childOnlyMOs].map(parentMO => {
                     const parentItem = parentMO.item || items.find(i => i.id === parentMO.item_id);
                     const children = getChildMOs(parentMO.id);
                     const catColor = getCatColor(parentMO);
@@ -943,12 +990,21 @@ export default function ManufacturingPage() {
                           <span className="text-xs text-[#6B7280] ml-auto">{1 + children.length} MO(s)</span>
                         </summary>
                         <div className="overflow-x-auto">
-                          <table className="w-full data-table"><thead><tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
+                          <table className="w-full data-table"><thead><tr><th className="w-8"><input type="checkbox" className="rounded" onChange={(e) => {
+                            const moIds = [parentMO.id, ...children.map(c => c.id)];
+                            setSelectedMOs(prev => {
+                              const next = { ...prev };
+                              moIds.forEach(id => { if (e.target.checked) next[id] = true; else delete next[id]; });
+                              return next;
+                            });
+                          }} /></th><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
                           <tbody>{renderMORow(parentMO, 0)}</tbody></table>
                         </div>
                       </details>
                     );
-                  });
+                  })}
+                  </>
+                  );
                 })()}
               </div>
             )}
@@ -1781,6 +1837,45 @@ export default function ManufacturingPage() {
             <div className="flex justify-end space-x-3 pt-3 border-t">
               <button onClick={() => setSubcontractDialog(false)} className="btn-secondary">Cancel</button>
               <button onClick={handleConfirmSubcontract} className="btn-primary" disabled={!subcontractSupplier} data-testid="confirm-subcontract-btn">Confirm Sub-Contract</button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {/* Bulk SC Dialog */}
+      <Dialog open={bulkSCDialog} onOpenChange={setBulkSCDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle className="font-[Chivo]">Bulk Sub-Contract — {selectedMOCount} MO(s)</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-3">
+            <div className="text-sm text-[#4B5563] bg-[#F9FAFB] p-2 rounded">
+              {Object.keys(selectedMOs).map(id => {
+                const wo = workOrders.find(w => w.id === id);
+                return wo ? <div key={id} className="mono text-xs">{wo.wo_number} — {wo.item?.part_number} ({wo.quantity})</div> : null;
+              })}
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-[#111827] mb-2">Sub-Contract Type *</label>
+              <div className="flex gap-3">
+                <label className={`flex-1 flex items-start gap-2 p-2.5 border-2 rounded-sm cursor-pointer ${bulkSCType === 'with_material' ? 'border-[#1D3557] bg-[#E1EFFE]/30' : 'border-[#D1D5DB]'}`}>
+                  <input type="radio" value="with_material" checked={bulkSCType === 'with_material'} onChange={() => setBulkSCType('with_material')} className="mt-0.5" />
+                  <div><span className="text-sm font-semibold">With Material</span><p className="text-[11px] text-[#6B7280]">Your RM sent via DC</p></div>
+                </label>
+                <label className={`flex-1 flex items-start gap-2 p-2.5 border-2 rounded-sm cursor-pointer ${bulkSCType === 'without_material' ? 'border-[#1D3557] bg-[#E1EFFE]/30' : 'border-[#D1D5DB]'}`}>
+                  <input type="radio" value="without_material" checked={bulkSCType === 'without_material'} onChange={() => setBulkSCType('without_material')} className="mt-0.5" />
+                  <div><span className="text-sm font-semibold">Without Material</span><p className="text-[11px] text-[#6B7280]">Vendor sources RM</p></div>
+                </label>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-[#111827] mb-1">Subcontractor *</label>
+              <Select value={bulkSCSupplier} onValueChange={setBulkSCSupplier}>
+                <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-[#723B13] bg-[#FDF6B2]/50 p-2 rounded-sm">All selected MOs will be marked as SC and a single consolidated SC Order + DC will be created for the same supplier.</p>
+            <div className="flex justify-end space-x-3 pt-3 border-t">
+              <button onClick={() => setBulkSCDialog(false)} className="btn-secondary">Cancel</button>
+              <button onClick={handleBulkSC} className="btn-primary" disabled={!bulkSCSupplier} data-testid="confirm-bulk-sc-btn">Create Bulk SC</button>
             </div>
           </div>
         </DialogContent>
