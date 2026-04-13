@@ -495,7 +495,7 @@ export default function BOMPage() {
       {/* Status Filter */}
       <div className="card-flat p-4">
         <div className="flex items-center gap-4">
-          <Select value={statusFilter || undefined} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
+          <Select value={statusFilter || 'all'} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
             <SelectTrigger className="w-48" data-testid="bom-status-filter">
               <SelectValue placeholder="All Statuses" />
             </SelectTrigger>
