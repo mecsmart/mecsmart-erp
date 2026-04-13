@@ -226,7 +226,12 @@ export default function JobWorkPage() {
     </div>
     <table>
       <thead><tr><th>#</th><th>Part No.</th><th>Item Name</th><th class="text-right">Qty</th><th class="text-right">Rate</th><th class="text-right">RM Cost</th></tr></thead>
-      <tbody>${dc.lines.map((l, i) => {
+      <tbody>
+      ${(dc.fg_item_name || dc.order?.fg_item_name) ? `<tr style="background:#E1EFFE;">
+        <td></td><td colspan="2" style="font-weight:700;color:#1D3557;">For: ${dc.fg_item_name || dc.order?.fg_item_name}</td>
+        <td colspan="3"></td>
+      </tr>` : ''}
+      ${dc.lines.map((l, i) => {
         const it = l.item || {};
         const rate = it.unit_cost || l.rate || 0;
         const cost = l.quantity * rate;
@@ -388,9 +393,10 @@ export default function JobWorkPage() {
                         <td className="text-sm font-medium">{dc.fg_item_name || '-'}</td>
                         <td>{dc.supplier?.name || '-'}</td>
                         <td className="text-sm">
+                          {dc.fg_item_name && <div className="font-semibold text-[#1D3557] mb-0.5">{dc.fg_item_name}</div>}
                           {dc.lines.map((l, li) => {
                             const it = l.item || items.find(i => i.id === l.item_id);
-                            return <div key={li}><span className="mono">{it?.part_number || '-'}</span> <span className="text-[#4B5563]">{it?.name || ''}</span> <span className="mono text-[#6B7280]">({l.quantity})</span></div>;
+                            return <div key={li} className="text-[#4B5563]"><span className="mono text-[10px]">{it?.part_number || '-'}</span> {it?.name || ''} <span className="mono text-[#6B7280]">({l.quantity})</span></div>;
                           })}
                         </td>
                         <td className="text-right mono">{formatCurrency(dc.lines.reduce((s, l) => { const it = l.item || items.find(i => i.id === l.item_id); return s + (l.quantity * (it?.unit_cost || l.rate || 0)); }, 0))}</td>

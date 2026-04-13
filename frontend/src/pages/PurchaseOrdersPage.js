@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
   Plus, ShoppingCart, FileText, Filter, X, CheckCircle2, Send, 
-  Edit2, History, ChevronDown, ChevronUp, Trash2, Printer
+  Edit2, History, ChevronDown, ChevronUp, Trash2, Printer, XCircle
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -207,6 +207,14 @@ export default function PurchaseOrdersPage() {
 
   const [printPO, setPrintPO] = useState(null);
 
+  const handleCancelPO = async (po) => {
+    if (!window.confirm(`Cancel ${po.po_number}? This action cannot be undone.`)) return;
+    try {
+      await api.post(`/api/purchase-orders/${po.id}/cancel`);
+      fetchData();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to cancel PO'); }
+  };
+
   return (
     <div className="space-y-6" data-testid="purchase-orders-page">
       <div className="flex items-center justify-between">
@@ -333,6 +341,11 @@ export default function PurchaseOrdersPage() {
                         <button onClick={() => setPrintPO(po)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Print PO" data-testid={`print-po-${po.id}`}>
                           <Printer className="w-4 h-4" />
                         </button>
+                        {po.status !== 'received' && po.status !== 'cancelled' && canEdit && (
+                          <button onClick={() => handleCancelPO(po)} className="p-1 text-[#4B5563] hover:text-[#9B1C1C]" title="Cancel PO" data-testid={`cancel-po-${po.id}`}>
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

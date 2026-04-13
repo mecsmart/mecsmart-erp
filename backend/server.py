@@ -1376,7 +1376,7 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                         if pi.get("item_id") == item_id:
                             po_qty += max(0, (pi.get("quantity", 0) or 0) - (pi.get("received_quantity", 0) or 0))
         
-        d["po_ordered_qty"] = po_qty
+        d["po_ordered_qty"] = int(po_qty)
         d["po_status"] = "po_sent" if po_qty >= d["net_requirement"] else ("partial_po" if po_qty > 0 else "pending")
         d["remaining_to_order"] = max(0, d["net_requirement"] - po_qty)
         
@@ -1460,7 +1460,7 @@ async def get_purchase_suggestions(request: Request):
                     for pi in po.get("items", []):
                         if pi.get("item_id") == s_item_id:
                             s_po_qty += max(0, (pi.get("quantity", 0) or 0) - (pi.get("received_quantity", 0) or 0))
-        s["po_ordered_qty"] = s_po_qty
+        s["po_ordered_qty"] = int(s_po_qty)
         suggested = s.get("suggested_quantity", 0)
         s["po_status"] = "po_sent" if s_po_qty >= suggested else ("partial_po" if s_po_qty > 0 else "pending")
     
@@ -2317,6 +2317,29 @@ async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, reques
     po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
     return po
 
+
+@purchase_orders_router.post("/{po_id}/cancel")
+async def cancel_purchase_order(po_id: str, request: Request):
+    """Cancel a PO. Only draft/approved/sent POs can be cancelled."""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    po = await db.purchase_orders.find_one({"id": po_id})
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    
+    if po.get("status") in ["received", "cancelled"]:
+        raise HTTPException(status_code=400, detail=f"Cannot cancel a {po['status']} PO")
+    
+    await db.purchase_orders.update_one(
+        {"id": po_id},
+        {"$set": {"status": "cancelled", "cancelled_at": datetime.now(timezone.utc), "cancelled_by": user["id"]}}
+    )
+    
+    return {"message": f"Purchase Order {po.get('po_number')} cancelled successfully"}
+
+
 @purchase_orders_router.post("/{po_id}/receive")
 async def receive_purchase_order(po_id: str, request: Request):
     """Receive PO and update inventory"""
@@ -3108,9 +3131,10 @@ async def start_work_order(wo_id: str, request: Request):
     consumed_materials = []
     insufficient_materials = []
     
-    # Skip material consumption for subcontract MOs (materials sent via DC, not consumed in-house)
+    # Skip material consumption only for "without_material" subcontract
+    # For "with_material" SC: consume RM from stock (RM is sent to vendor via DC)
     sc_type = wo.get("subcontract_type", "with_material")
-    skip_material_consumption = wo.get("is_subcontract")
+    skip_material_consumption = wo.get("is_subcontract") and sc_type == "without_material"
     
     if bom and not skip_material_consumption:
         wo_qty = wo.get("quantity", 1)
