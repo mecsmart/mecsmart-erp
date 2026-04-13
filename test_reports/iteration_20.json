@@ -1,0 +1,86 @@
+{
+  "summary": "Tested 5 fixes: (1) JW orders FG/SA/PART column, (2) SC direct flow fg_item_name, (3) Child MO stock skip, (4) MRP net_requirement>0 filter, (5) MRP Outstanding SO dropdown. All 9 backend tests passed. Frontend UI verified: JW table has FG/SA/Part column with JW-000022 showing 'SA-001 - Pump Assembly', MRP dropdown shows 'Outstanding Sales Orders' and only lists confirmed/planned/released/in_progress SOs, MRP demand table shows only 2 items with net_requirement > 0.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "GET /api/mrp/demand returns only items with net_requirement > 0",
+    "GET /api/mrp/demand excludes items with net_requirement = 0",
+    "GET /api/production returns orders with status field for filtering",
+    "GET /api/mrp/demand?production_order_id=X filters by specific SO",
+    "GET /api/job-work/orders returns fg_item_name field",
+    "JW-000022 has fg_item_name='SA-001 - Pump Assembly'",
+    "SC orders have fg_item_id, fg_item_name, fg_quantity fields",
+    "create_child_work_orders skips items with current_stock >= required qty",
+    "GET /api/mrp/demand returns only raw_material category items",
+    "Frontend: JW orders table has FG/SA/Part column",
+    "Frontend: MRP dropdown shows 'Outstanding Sales Orders'",
+    "Frontend: MRP dropdown only lists outstanding SOs (confirmed/planned/released/in_progress)"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_five_fixes.py",
+    "/app/test_reports/pytest/pytest_five_fixes.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [],
+
+  "updated_files": [
+    "/app/backend/tests/test_five_fixes.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "100% (All UI elements verified)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "None - used existing data",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": true,
+
+  "context_for_next_testing_agent": "5 fixes verified working: (1) JW orders table has FG/SA/Part column showing fg_item_name - JW-000022 shows 'SA-001 - Pump Assembly', older orders show '-' as they were created before this field was added. (2) SC orders created via direct SC flow include fg_item_id, fg_item_name, fg_quantity fields (line 2930-2932 in server.py). (3) create_child_work_orders skips child MOs if current_stock >= child_qty (line 2846-2850 in server.py). (4) MRP demand filters to only raw_material items with net_requirement > 0 (line 1306-1307 in server.py). (5) MRP dropdown shows 'Outstanding Sales Orders' and filters to confirmed/planned/released/in_progress SOs (line 153-161 in MRPPage.js).",
+
+  "features_verified": {
+    "jw_orders_fg_column": {
+      "status": "WORKING",
+      "details": "FG/SA/Part column in JW orders table shows fg_item_name. JW-000022 shows 'SA-001 - Pump Assembly'. Older orders show '-' as expected."
+    },
+    "sc_direct_flow_fg_fields": {
+      "status": "WORKING",
+      "details": "SC orders created via direct SC flow include fg_item_id, fg_item_name, fg_quantity fields (server.py lines 2930-2932)"
+    },
+    "child_mo_stock_skip": {
+      "status": "WORKING",
+      "details": "create_child_work_orders skips child MOs when current_stock >= required qty (server.py lines 2846-2850)"
+    },
+    "mrp_net_requirement_filter": {
+      "status": "WORKING",
+      "details": "MRP demand only returns items with net_requirement > 0. Items with sufficient stock are excluded (server.py lines 1306-1307)"
+    },
+    "mrp_outstanding_so_dropdown": {
+      "status": "WORKING",
+      "details": "MRP dropdown label says 'Outstanding Sales Orders' and only lists confirmed/planned/released/in_progress SOs (MRPPage.js lines 153-161)"
+    }
+  }
+}

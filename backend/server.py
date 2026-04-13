@@ -1303,8 +1303,8 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
         available = data["on_hand"] - data["safety_stock"]
         data["net_requirement"] = max(0, data["gross_requirement"] - available)
     
-    # Filter to only raw materials (sub-assemblies/components are handled by manufacturing)
-    raw_material_demand = [d for d in demand.values() if d.get("item", {}).get("category") == "raw_material"]
+    # Filter to only raw materials with net_requirement > 0 (items already covered by stock are excluded)
+    raw_material_demand = [d for d in demand.values() if d.get("item", {}).get("category") == "raw_material" and d.get("net_requirement", 0) > 0]
     
     return raw_material_demand
 
@@ -2843,8 +2843,13 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             if not child_item:
                 continue
             
+            # Skip if stock is sufficient for the required quantity
+            current_stock = child_item.get("current_stock", 0)
+            if current_stock >= child_qty:
+                logger.info(f"Skipping child MO for {child_item.get('part_number')} — stock {current_stock} >= required {child_qty}")
+                continue
+            
             # Create work orders for any item that has a routing (can be manufactured)
-            # This includes sub_assemblies, components, and finished_goods
             child_routing = await db.routings.find_one({"item_id": child_item_id, "status": "active"})
             if child_routing:
                 child_wo = await create_wo_for_item(child_item_id, child_qty, parent_wo_id)
@@ -2923,6 +2928,7 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
                 "production_order_id": wo_data.production_order_id,
                 "subcontract_type": wo_data.subcontract_type or "with_material",
                 "fg_item_id": item_id,
+                "fg_item_name": f"{item.get('part_number', '')} - {item.get('name', '')}",
                 "fg_quantity": wo_data.quantity,
                 "lines": sc_lines,
                 "processing_charges": 0,
@@ -3100,12 +3106,16 @@ async def start_work_order(wo_id: str, request: Request):
             sc_count = await db.subcontract_orders.count_documents({})
             # For without_material: sent_quantity=0 (nothing sent to vendor), they source themselves
             sc_sent_qty = lambda m: m["quantity"] if sc_type == "with_material" else 0
+            wo_item_for_name = await db.items.find_one({"id": item_id}, {"_id": 0})
             sc_order_doc = {
                 "id": str(uuid.uuid4()),
                 "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
                 "supplier_id": wo["subcontract_supplier_id"],
                 "reference_wo_id": wo_id,
                 "subcontract_type": sc_type,
+                "fg_item_id": item_id,
+                "fg_item_name": f"{wo_item_for_name.get('part_number', '')} - {wo_item_for_name.get('name', '')}" if wo_item_for_name else "",
+                "fg_quantity": wo.get("quantity", 0),
                 "lines": [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": sc_sent_qty(m), "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_material_lines],
                 "status": "in_progress",
                 "notes": f"Auto-created from sub-contract MO {wo.get('wo_number')} ({sc_type.replace('_', ' ')})",
@@ -3299,12 +3309,19 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
                 if sc_lines_data:
                     sc_count = await db.subcontract_orders.count_documents({})
                     sc_sent_qty = lambda m: m["quantity"] if sc_type == "with_material" else 0
+                    # Get FG item name
+                    upd_routing = await db.routings.find_one({"id": updated_wo_fresh.get("routing_id")})
+                    upd_fg_item_id = upd_routing.get("item_id") if upd_routing else updated_wo_fresh.get("item_id")
+                    upd_fg_item = await db.items.find_one({"id": upd_fg_item_id}, {"_id": 0})
                     sc_doc = {
                         "id": str(uuid.uuid4()),
                         "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
                         "supplier_id": sc_supplier,
                         "reference_wo_id": wo_id,
                         "subcontract_type": sc_type,
+                        "fg_item_id": upd_fg_item_id,
+                        "fg_item_name": f"{upd_fg_item.get('part_number', '')} - {upd_fg_item.get('name', '')}" if upd_fg_item else "",
+                        "fg_quantity": updated_wo_fresh.get("quantity", 0),
                         "lines": [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": sc_sent_qty(m), "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_lines_data],
                         "status": "in_progress",
                         "notes": f"Auto-created from sub-contract MO {updated_wo_fresh.get('wo_number')} ({sc_type.replace('_', ' ')})",

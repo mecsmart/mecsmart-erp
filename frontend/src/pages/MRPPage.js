@@ -155,9 +155,9 @@ export default function MRPPage() {
                 <SelectValue placeholder="All Sales Orders" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Sales Orders</SelectItem>
-                {productionOrders.filter(po => ['confirmed', 'planned', 'released', 'in_progress'].includes(po.status)).map(po => (
-                  <SelectItem key={po.id} value={po.id}>{po.order_number} - {po.item?.name || 'Unknown'}</SelectItem>
+                <SelectItem value="all">Outstanding Sales Orders</SelectItem>
+                {productionOrders.filter(po => ['confirmed', 'planned', 'released', 'in_progress'].includes(po.status) && !['completed', 'cancelled'].includes(po.status)).map(po => (
+                  <SelectItem key={po.id} value={po.id}>{po.order_number} - {po.item?.name || 'Unknown'} (Qty: {po.quantity})</SelectItem>
                 ))}
               </SelectContent>
             </Select>
