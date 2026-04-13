@@ -50,7 +50,8 @@ export function AuthProvider({ children }) {
       setPermissions(data.permissions || {});
       return { success: true, data };
     } catch (error) {
-      const message = formatApiErrorDetail(error.response?.data?.detail) || error.message;
+      const detail = error.response?.data?.detail;
+      const message = detail ? formatApiErrorDetail(detail) : (error.message || "Cannot reach server. Check if backend is running.");
       return { success: false, error: message };
     }
   };
