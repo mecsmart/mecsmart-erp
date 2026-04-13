@@ -505,7 +505,7 @@ export default function BOMPage() {
         </div>
       </div>
 
-      {/* BOMs List */}
+      {/* BOMs List - Collapsible Tree View grouped by Parent Item */}
       <div className="card-flat overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center h-48">
@@ -517,85 +517,88 @@ export default function BOMPage() {
             <p>No BOMs found</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full data-table" data-testid="bom-table">
-              <thead>
-                <tr>
-                  <th>Parent Item</th>
-                  <th>BOM Name</th>
-                  <th>Revision</th>
-                  <th>Status</th>
-                  <th>Components</th>
-                  <th>Effectivity</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {boms.map((bom) => (
-                  <tr key={bom.id} data-testid={`bom-row-${bom.id}`}>
-                    <td>
-                      <div>
-                        <span className="mono text-sm font-medium">{bom.parent_item?.part_number || '-'}</span>
-                        <p className="text-xs text-[#4B5563]">{bom.parent_item?.name || '-'}</p>
-                      </div>
-                    </td>
-                    <td className="font-medium">{bom.name}</td>
-                    <td className="mono">{bom.revision}</td>
-                    <td>
-                      <span className={`status-badge status-${bom.status}`}>
-                        {bom.status}
-                      </span>
-                    </td>
-                    <td className="mono">{bom.components?.length || 0}</td>
-                    <td className="text-sm text-[#4B5563]">
-                      {bom.effectivity_date ? new Date(bom.effectivity_date).toLocaleDateString() : '-'}
-                    </td>
-                    <td>
-                      <div className="flex items-center space-x-1">
-                        <button
-                          onClick={() => handleView(bom)}
-                          className="p-1 text-[#4B5563] hover:text-[#1D3557]"
-                          title="View Explosion"
-                          data-testid={`view-bom-${bom.id}`}
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        {canEdit && (
-                          <>
-                            <button
-                              onClick={() => handleEdit(bom)}
-                              className="p-1 text-[#4B5563] hover:text-[#1D3557]"
-                              title="Edit"
-                              data-testid={`edit-bom-${bom.id}`}
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleRevise(bom)}
-                              className="p-1 text-[#4B5563] hover:text-[#457B9D]"
-                              title="Create Revision"
-                              data-testid={`revise-bom-${bom.id}`}
-                            >
-                              <GitBranch className="w-4 h-4" />
-                            </button>
-                          </>
-                        )}
-                        {user?.role === 'admin' && (
-                          <button
-                            onClick={() => handleDelete(bom)}
-                            className="p-1 text-[#4B5563] hover:text-[#9B1C1C]"
-                            title="Delete"
-                            data-testid={`delete-bom-${bom.id}`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div>
+            {(() => {
+              const grouped = {};
+              boms.forEach(bom => {
+                const pid = bom.parent_item_id || bom.parent_item?.id || 'unknown';
+                if (!grouped[pid]) grouped[pid] = { item: bom.parent_item, boms: [] };
+                grouped[pid].boms.push(bom);
+              });
+              return Object.entries(grouped).map(([pid, group]) => {
+                const pi = group.item;
+                const cat = pi?.category || '';
+                const catLabel = cat === 'finished_good' ? 'FG' : cat === 'sub_assembly' ? 'SA' : cat === 'component' ? 'COMP' : 'PART';
+                const catColor = cat === 'finished_good' ? 'bg-[#1D3557] text-white' : cat === 'sub_assembly' ? 'bg-[#723B13] text-white' : 'bg-[#6B7280] text-white';
+                return (
+                  <details key={pid} open className="border-b border-[#E5E7EB] last:border-b-0" data-testid={`bom-group-${pid}`}>
+                    <summary className="flex items-center gap-3 px-4 py-3.5 cursor-pointer hover:bg-[#F3F4F6] select-none [&::-webkit-details-marker]:hidden list-none" onClick={(e) => {
+                      const d = e.currentTarget.parentElement;
+                      const chR = e.currentTarget.querySelector('.chev-r');
+                      const chD = e.currentTarget.querySelector('.chev-d');
+                      if (d.open) { if(chR) chR.style.display='none'; if(chD) chD.style.display='block'; }
+                      else { if(chR) chR.style.display='block'; if(chD) chD.style.display='none'; }
+                    }}>
+                      <ChevronRight className="chev-r w-5 h-5 text-[#6B7280]" style={{display:'none'}} />
+                      <ChevronDown className="chev-d w-5 h-5 text-[#1D3557]" />
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${catColor}`}>{catLabel}</span>
+                      <span className="mono font-semibold text-[#1D3557] text-sm">{pi?.part_number || '-'}</span>
+                      <span className="text-[#374151] font-medium">{pi?.name || '-'}</span>
+                      <span className="text-xs text-[#9CA3AF] ml-auto">{group.boms.length} BOM{group.boms.length > 1 ? 's' : ''}</span>
+                    </summary>
+                    <div className="px-3 pb-3">
+                      {group.boms.map(bom => (
+                        <div key={bom.id} className="mb-2 border border-[#E5E7EB] rounded-sm overflow-hidden" data-testid={`bom-row-${bom.id}`}>
+                          <div className="flex items-center justify-between px-4 py-2.5 bg-[#F9FAFB]">
+                            <div className="flex items-center gap-4">
+                              <span className="font-medium text-sm">{bom.name}</span>
+                              <span className="mono text-xs text-[#6B7280]">Rev {bom.revision}</span>
+                              <span className={`status-badge status-${bom.status}`}>{bom.status}</span>
+                              <span className="text-xs text-[#9CA3AF]">{bom.effectivity_date ? new Date(bom.effectivity_date).toLocaleDateString() : ''}</span>
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              <button onClick={() => handleView(bom)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="View Explosion" data-testid={`view-bom-${bom.id}`}><Eye className="w-4 h-4" /></button>
+                              {canEdit && (
+                                <>
+                                  <button onClick={() => handleEdit(bom)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit" data-testid={`edit-bom-${bom.id}`}><Edit2 className="w-4 h-4" /></button>
+                                  <button onClick={() => handleRevise(bom)} className="p-1 text-[#4B5563] hover:text-[#457B9D]" title="Create Revision" data-testid={`revise-bom-${bom.id}`}><GitBranch className="w-4 h-4" /></button>
+                                </>
+                              )}
+                              {user?.role === 'admin' && (
+                                <button onClick={() => handleDelete(bom)} className="p-1 text-[#4B5563] hover:text-[#9B1C1C]" title="Delete" data-testid={`delete-bom-${bom.id}`}><Trash2 className="w-4 h-4" /></button>
+                              )}
+                            </div>
+                          </div>
+                          {bom.components && bom.components.length > 0 && (
+                            <div className="px-4 py-2">
+                              <table className="w-full text-xs">
+                                <thead><tr className="text-[#6B7280]"><th className="text-left py-1 font-medium">Part No.</th><th className="text-left py-1 font-medium">Component Name</th><th className="text-left py-1 font-medium">Category</th><th className="text-right py-1 font-medium">Qty</th><th className="text-left py-1 font-medium">UOM</th></tr></thead>
+                                <tbody>
+                                  {bom.components.map((comp, ci) => {
+                                    const ci_item = items.find(i => i.id === comp.item_id);
+                                    const ci_cat = ci_item?.category || '';
+                                    const ci_badge = ci_cat === 'sub_assembly' ? 'bg-[#FDF6B2] text-[#723B13]' : ci_cat === 'raw_material' ? 'bg-[#E1EFFE] text-[#1D3557]' : ci_cat === 'component' ? 'bg-[#FDE8E8] text-[#9B1C1C]' : 'bg-[#F3F4F6] text-[#4B5563]';
+                                    return (
+                                      <tr key={ci} className="border-t border-[#F3F4F6]">
+                                        <td className="py-1.5 mono font-medium">{ci_item?.part_number || '?'}</td>
+                                        <td className="py-1.5">{ci_item?.name || '-'}</td>
+                                        <td className="py-1.5"><span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${ci_badge}`}>{ci_cat.replace('_',' ')}</span></td>
+                                        <td className="py-1.5 text-right mono font-medium">{comp.quantity}</td>
+                                        <td className="py-1.5 text-[#6B7280]">{comp.uom || ci_item?.unit_of_measure || '-'}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                );
+              });
+            })()}
           </div>
         )}
       </div>
