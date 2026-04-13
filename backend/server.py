@@ -353,9 +353,15 @@ class JobWorkLineItem(BaseModel):
     quantity: float
     rate: Optional[float] = 0
 
+class JobWorkPartItem(BaseModel):
+    item_id: str
+    quantity: float = 0
+    charges: float = 0
+
 class SubcontractOrderCreate(BaseModel):
     supplier_id: str
     lines: List[JobWorkLineItem]
+    job_work_parts: Optional[List[JobWorkPartItem]] = []
     expected_return_date: Optional[datetime] = None
     processing_charges: Optional[float] = 0
     notes: Optional[str] = ""
@@ -366,6 +372,7 @@ class SubcontractOrderUpdate(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
     lines: Optional[List[JobWorkLineItem]] = None
+    job_work_parts: Optional[List[JobWorkPartItem]] = None
 
 class DCCreate(BaseModel):
     subcontract_order_id: str
@@ -5151,6 +5158,7 @@ async def create_subcontract_order(data: SubcontractOrderCreate, request: Reques
         "order_number": order_number,
         "supplier_id": data.supplier_id,
         "lines": lines,
+        "job_work_parts": [{"item_id": p.item_id, "quantity": p.quantity, "charges": p.charges, "received_quantity": 0} for p in (data.job_work_parts or [])],
         "expected_return_date": data.expected_return_date,
         "processing_charges": data.processing_charges or 0,
         "status": "draft",
@@ -5183,6 +5191,8 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
         update_data["status"] = data.status
     if data.lines is not None:
         update_data["lines"] = [{"item_id": l.item_id, "quantity": l.quantity, "sent_quantity": 0, "received_quantity": 0, "rate": l.rate or 0} for l in data.lines]
+    if data.job_work_parts is not None:
+        update_data["job_work_parts"] = [{"item_id": p.item_id, "quantity": p.quantity, "charges": p.charges, "received_quantity": 0} for p in data.job_work_parts]
     
     if update_data:
         update_data["updated_at"] = datetime.now(timezone.utc)

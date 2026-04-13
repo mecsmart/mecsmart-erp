@@ -22,7 +22,7 @@ export default function JobWorkPage() {
   // Order dialog
   const [orderDialog, setOrderDialog] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
-  const [orderForm, setOrderForm] = useState({ supplier_id: '', expected_return_date: '', processing_charges: 0, notes: '', lines: [{ item_id: '', quantity: 0, rate: 0 }] });
+  const [orderForm, setOrderForm] = useState({ supplier_id: '', expected_return_date: '', processing_charges: 0, notes: '', lines: [{ item_id: '', quantity: 0, rate: 0 }], job_work_parts: [] });
 
   // DC dialog
   const [dcDialog, setDcDialog] = useState(false);
@@ -64,6 +64,9 @@ export default function JobWorkPage() {
   const addOrderLine = () => setOrderForm({ ...orderForm, lines: [...orderForm.lines, { item_id: '', quantity: 0, rate: 0 }] });
   const removeOrderLine = (idx) => setOrderForm({ ...orderForm, lines: orderForm.lines.filter((_, i) => i !== idx) });
   const updateOrderLine = (idx, field, val) => { const lines = [...orderForm.lines]; lines[idx] = { ...lines[idx], [field]: val }; setOrderForm({ ...orderForm, lines }); };
+  const addJWPart = () => setOrderForm({ ...orderForm, job_work_parts: [...orderForm.job_work_parts, { item_id: '', quantity: 0, charges: 0 }] });
+  const removeJWPart = (idx) => setOrderForm({ ...orderForm, job_work_parts: orderForm.job_work_parts.filter((_, i) => i !== idx) });
+  const updateJWPart = (idx, field, val) => { const parts = [...orderForm.job_work_parts]; parts[idx] = { ...parts[idx], [field]: val }; setOrderForm({ ...orderForm, job_work_parts: parts }); };
 
   const handleCreateOrder = async () => {
     if (!orderForm.supplier_id || orderForm.lines.length === 0) { alert('Select supplier and add items'); return; }
@@ -79,7 +82,7 @@ export default function JobWorkPage() {
       }
       setOrderDialog(false);
       setEditingOrder(null);
-      setOrderForm({ supplier_id: '', expected_return_date: '', processing_charges: 0, notes: '', lines: [{ item_id: '', quantity: 0, rate: 0 }] });
+      setOrderForm({ supplier_id: '', expected_return_date: '', processing_charges: 0, notes: '', lines: [{ item_id: '', quantity: 0, rate: 0 }], job_work_parts: [] });
       fetchData();
     } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
@@ -92,6 +95,7 @@ export default function JobWorkPage() {
       processing_charges: order.processing_charges || 0,
       notes: order.notes || '',
       lines: order.lines?.map(l => ({ item_id: l.item_id, quantity: l.quantity, rate: l.rate || 0 })) || [],
+      job_work_parts: order.job_work_parts?.map(p => ({ item_id: p.item_id, quantity: p.quantity, charges: p.charges || 0 })) || [],
     });
     setOrderDialog(true);
   };
@@ -346,7 +350,10 @@ export default function JobWorkPage() {
                         <tr key={o.id} data-testid={`jw-order-row-${o.id}`}>
                           <td className="mono font-medium">{o.order_number}</td>
                           <td className="mono text-sm text-[#1D3557]">{o.mo_number || '-'}</td>
-                          <td className="text-sm font-medium">{o.fg_item_name || '-'}</td>
+                          <td className="text-sm">{o.job_work_parts && o.job_work_parts.length > 0 ? o.job_work_parts.map((p, pi) => {
+                            const pit = p.item || items.find(i => i.id === p.item_id);
+                            return <div key={pi}><span className="mono font-medium text-[#1D3557]">{pit?.part_number || '?'}</span> {pit?.name || ''} <span className="mono text-[10px] text-[#6B7280]">x{p.quantity}</span>{p.charges ? <span className="text-[10px] text-[#723B13]"> @{formatCurrency(p.charges)}</span> : ''}</div>;
+                          }) : <span className="text-[#6B7280]">{o.fg_item_name || '-'}</span>}</td>
                           <td>{o.supplier?.name || '-'}</td>
                           <td className="text-sm">{o.lines.map((l, li) => {
                             const it = l.item || items.find(i => i.id === l.item_id);
@@ -354,7 +361,7 @@ export default function JobWorkPage() {
                           })}</td>
                           <td className="mono">{sentQty}/{totalQty}</td>
                           <td className="mono">{recvQty}</td>
-                          <td className="text-right mono">{formatCurrency(o.processing_charges || 0)}</td>
+                          <td className="text-right mono">{formatCurrency((o.job_work_parts || []).reduce((s, p) => s + (p.quantity || 0) * (p.charges || 0), 0) || o.processing_charges || 0)}</td>
                           <td>
                             <span className={`status-badge ${getStatusColor(o.status)}`}>{o.status.replace('_', ' ')}</span>
                             {o.subcontract_type === 'without_material' && <span className="ml-1 text-[9px] bg-[#E1EFFE] text-[#1D3557] px-1 rounded">No RM</span>}
@@ -483,14 +490,45 @@ export default function JobWorkPage() {
                 <input type="date" value={orderForm.expected_return_date} onChange={e => setOrderForm({...orderForm, expected_return_date: e.target.value})} className="input-field" data-testid="jw-return-date" />
               </div>
             </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1">Processing Charges</label>
-              <input type="number" min="0" value={orderForm.processing_charges} onChange={e => setOrderForm({...orderForm, processing_charges: parseFloat(e.target.value) || 0})} className="input-field mono w-40" data-testid="jw-charges" />
-            </div>
+            
+            {/* Job Work Parts (FG/SA/Parts being processed) */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-semibold">Materials to Send</label>
-                <button onClick={addOrderLine} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1"><Plus className="w-3 h-3" />Add</button>
+                <label className="text-sm font-semibold text-[#1D3557]">Job Work Parts (FG/SA/Parts)</label>
+                <button onClick={addJWPart} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1"><Plus className="w-3 h-3" />Add Part</button>
+              </div>
+              <div className="border rounded-sm overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead><tr className="bg-[#E1EFFE]"><th className="text-left py-2 px-2 text-xs">Part (FG/SA)</th><th className="text-right py-2 px-2 text-xs w-20">Qty</th><th className="text-right py-2 px-2 text-xs w-28">Charges/pc</th><th className="text-right py-2 px-2 text-xs w-24">Total</th><th className="w-8"></th></tr></thead>
+                  <tbody>
+                    {orderForm.job_work_parts.map((p, idx) => {
+                      const total = (p.quantity || 0) * (p.charges || 0);
+                      return (
+                        <tr key={idx} className="border-t">
+                          <td className="py-1 px-2">
+                            <Select value={p.item_id} onValueChange={v => updateJWPart(idx, 'item_id', v)}>
+                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select part" /></SelectTrigger>
+                              <SelectContent>{items.filter(i => ['finished_good','sub_assembly','component'].includes(i.category)).map(i => <SelectItem key={i.id} value={i.id}>{i.part_number} - {i.name}</SelectItem>)}</SelectContent>
+                            </Select>
+                          </td>
+                          <td className="py-1 px-2"><input type="number" min="1" value={p.quantity} onChange={e => updateJWPart(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                          <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={p.charges} onChange={e => updateJWPart(idx, 'charges', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                          <td className="py-1 px-2 mono text-right text-xs font-medium">{formatCurrency(total)}</td>
+                          <td className="py-1 px-1"><button onClick={() => removeJWPart(idx)} className="text-[#9B1C1C] p-1"><X className="w-3 h-3" /></button></td>
+                        </tr>
+                      );
+                    })}
+                    {orderForm.job_work_parts.length === 0 && <tr><td colSpan="5" className="text-center py-2 text-xs text-[#9CA3AF]">No parts added</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            {/* Raw Materials to Send */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-semibold text-[#723B13]">Raw Materials to Send</label>
+                <button onClick={addOrderLine} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1"><Plus className="w-3 h-3" />Add RM</button>
               </div>
               <div className="border rounded-sm overflow-hidden">
                 <table className="w-full text-sm">
