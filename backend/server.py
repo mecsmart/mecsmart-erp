@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Body
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -1322,10 +1322,23 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
             continue
         await explode_bom_demand(bom_id, order.get("quantity", 0), order)
     
-    # Calculate net requirements
+    # Calculate net requirements and filter SO numbers to only show shortage-contributing SOs
     for item_id, data in demand.items():
         available = data["on_hand"] - data["safety_stock"]
         data["net_requirement"] = max(0, data["gross_requirement"] - available)
+        
+        # Only keep SOs that contribute to the shortage
+        if data["net_requirement"] > 0:
+            shortage_orders = []
+            running_available = max(available, 0)
+            for order_entry in data["orders"]:
+                qty_needed = order_entry.get("quantity_needed", 0)
+                if running_available >= qty_needed:
+                    running_available -= qty_needed
+                else:
+                    shortage_orders.append(order_entry)
+                    running_available = 0
+            data["orders"] = shortage_orders
     
     # Filter to only raw materials with net_requirement > 0 (items already covered by stock are excluded)
     raw_material_demand = [d for d in demand.values() if d.get("item", {}).get("category") == "raw_material" and d.get("net_requirement", 0) > 0]
@@ -2873,10 +2886,13 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
                 logger.info(f"Skipping child MO for {child_item.get('part_number')} — stock {current_stock} >= required {child_qty}")
                 continue
             
+            # Create MO only for shortage qty (required - stock on hand)
+            shortage_qty = child_qty - int(current_stock)
+            
             # Create work orders for any item that has a routing (can be manufactured)
             child_routing = await db.routings.find_one({"item_id": child_item_id, "status": "active"})
             if child_routing:
-                child_wo = await create_wo_for_item(child_item_id, child_qty, parent_wo_id)
+                child_wo = await create_wo_for_item(child_item_id, shortage_qty, parent_wo_id)
                 if child_wo:
                     created_work_orders.append(child_wo)
                     # Recursively create work orders for this child's children
@@ -4849,6 +4865,64 @@ async def confirm_subcontract_order(order_id: str, request: Request):
         raise HTTPException(status_code=400, detail="Only draft orders can be confirmed")
     await db.subcontract_orders.update_one({"id": order_id}, {"$set": {"status": "confirmed", "confirmed_at": datetime.now(timezone.utc)}})
     return await db.subcontract_orders.find_one({"id": order_id}, {"_id": 0})
+
+
+@jobwork_router.post("/create-po")
+async def create_po_from_sc(request: Request, data: dict = Body(...)):
+    """Create a Purchase Order from a 'without material' SC order"""
+    user = await get_current_user(request)
+    
+    sc_order_id = data.get("subcontract_order_id")
+    sc_order = await db.subcontract_orders.find_one({"id": sc_order_id})
+    if not sc_order:
+        raise HTTPException(status_code=404, detail="Subcontract order not found")
+    
+    # Check if PO already exists for this SC order
+    existing_po = await db.purchase_orders.find_one({"reference_sc_order_id": sc_order_id})
+    if existing_po:
+        raise HTTPException(status_code=400, detail=f"Purchase Order {existing_po.get('po_number')} already exists for this SC order")
+    
+    supplier = await db.suppliers.find_one({"id": sc_order.get("supplier_id")}, {"_id": 0})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    
+    # Build PO items from SC order lines
+    po_items = []
+    total_amount = 0
+    for line in sc_order.get("lines", []):
+        item = await db.items.find_one({"id": line["item_id"]}, {"_id": 0})
+        if item:
+            unit_cost = item.get("unit_cost", line.get("rate", 0))
+            line_total = line["quantity"] * unit_cost
+            total_amount += line_total
+            po_items.append({
+                "item_id": line["item_id"],
+                "quantity": line["quantity"],
+                "unit_price": unit_cost,
+                "total_price": line_total,
+                "received_quantity": 0
+            })
+    
+    # Create PO
+    po_count = await db.purchase_orders.count_documents({})
+    po_number = f"PO-{str(po_count + 1).zfill(6)}"
+    po_doc = {
+        "id": str(uuid.uuid4()),
+        "po_number": po_number,
+        "supplier_id": sc_order.get("supplier_id"),
+        "reference_sc_order_id": sc_order_id,
+        "items": po_items,
+        "total_amount": total_amount,
+        "status": "approved",
+        "notes": f"Auto-created from SC Order {sc_order.get('order_number')} (without material)",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.purchase_orders.insert_one(po_doc)
+    po_doc.pop("_id", None)
+    
+    return {"po_number": po_number, "po_id": po_doc["id"], "total_amount": total_amount}
+
 
 @jobwork_router.get("/challans")
 async def get_delivery_challans(request: Request):

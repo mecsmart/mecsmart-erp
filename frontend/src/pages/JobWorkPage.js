@@ -121,7 +121,13 @@ export default function JobWorkPage() {
   // Receipt
   const openReceiptDialog = (order) => {
     setRecOrder(order);
-    setRecLines(order.lines.map(l => ({ item_id: l.item_id, received_quantity: (l.sent_quantity || 0) - (l.received_quantity || 0), quality_result: 'accept', reject_qty: 0 })).filter(l => l.received_quantity > 0));
+    const isWithoutMaterial = order.subcontract_type === 'without_material';
+    setRecLines(order.lines.map(l => {
+      const pendingQty = isWithoutMaterial
+        ? (l.quantity || 0) - (l.received_quantity || 0)
+        : (l.sent_quantity || 0) - (l.received_quantity || 0);
+      return { item_id: l.item_id, received_quantity: Math.max(pendingQty, 0), quality_result: 'accept', reject_qty: 0 };
+    }).filter(l => l.received_quantity > 0));
     setRecWarehouse('');
     setRecDialog(true);
   };
@@ -133,6 +139,19 @@ export default function JobWorkPage() {
       setRecDialog(false);
       fetchData();
     } catch (e) { alert(e.response?.data?.detail || 'Failed to create receipt'); }
+  };
+
+  // Create PO from SC order (without material - vendor sources items)
+  const handleCreatePOFromSC = async (order) => {
+    try {
+      const { data } = await api.post('/api/job-work/create-po', { subcontract_order_id: order.id });
+      alert(`Purchase Order ${data.po_number} created for ${order.order_number}.\nGo to Purchase Orders to manage.`);
+      // Update SC order status to in_progress
+      if (order.status === 'draft' || order.status === 'confirmed') {
+        await api.put(`/api/job-work/orders/${order.id}`, { status: 'in_progress' });
+      }
+      fetchData();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to create PO'); }
   };
 
   const printDC = (dc) => {
@@ -315,7 +334,10 @@ export default function JobWorkPage() {
                           <td className="mono">{sentQty}/{totalQty}</td>
                           <td className="mono">{recvQty}</td>
                           <td className="text-right mono">{formatCurrency(o.processing_charges || 0)}</td>
-                          <td><span className={`status-badge ${getStatusColor(o.status)}`}>{o.status.replace('_', ' ')}</span></td>
+                          <td>
+                            <span className={`status-badge ${getStatusColor(o.status)}`}>{o.status.replace('_', ' ')}</span>
+                            {o.subcontract_type === 'without_material' && <span className="ml-1 text-[9px] bg-[#E1EFFE] text-[#1D3557] px-1 rounded">No RM</span>}
+                          </td>
                           <td className="text-sm">{o.expected_return_date ? new Date(o.expected_return_date).toLocaleDateString() : '-'}</td>
                           <td>
                             <div className="flex items-center space-x-1">
@@ -327,10 +349,13 @@ export default function JobWorkPage() {
                               {canEdit && o.status === 'draft' && (
                                 <button onClick={() => handleConfirmOrder(o.id)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`confirm-jw-${o.id}`}><CheckCircle2 className="w-3 h-3 inline mr-1" />Confirm</button>
                               )}
-                              {canEdit && ['confirmed', 'in_progress'].includes(o.status) && sentQty < totalQty && (
+                              {canEdit && ['confirmed', 'in_progress'].includes(o.status) && sentQty < totalQty && o.subcontract_type !== 'without_material' && (
                                 <button onClick={() => openDCDialog(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
                               )}
-                              {canEdit && o.status === 'in_progress' && sentQty > recvQty && (
+                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && o.subcontract_type === 'without_material' && (
+                                <button onClick={() => handleCreatePOFromSC(o)} className="btn-primary text-xs px-2 py-1 bg-[#723B13] hover:bg-[#5A2E0F]" data-testid={`create-po-${o.id}`}><FileText className="w-3 h-3 inline mr-1" />Create PO</button>
+                              )}
+                              {canEdit && o.status === 'in_progress' && (o.subcontract_type === 'without_material' || sentQty > recvQty) && (
                                 <button onClick={() => openReceiptDialog(o)} className="btn-secondary text-xs px-2 py-1" data-testid={`receive-${o.id}`}><ArrowLeft className="w-3 h-3 inline mr-1" />Receive</button>
                               )}
                             </div>

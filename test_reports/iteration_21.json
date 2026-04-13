@@ -1,0 +1,100 @@
+{
+  "summary": "Tested 3 fixes: (1) MRP Sales Orders column only shows SOs contributing to shortage, (2) Child MO creation uses shortage qty (required - stock), (3) Without Material SC orders show 'Create PO' button instead of 'Send DC'. All 12 backend tests passed. Frontend UI verified all 3 fixes working correctly.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "MRP demand returns only items with net_requirement > 0",
+    "MRP demand orders are shortage-contributing SOs only",
+    "MRP demand only returns raw_material category items",
+    "Child MO uses shortage qty logic (required - stock)",
+    "Work orders endpoint returns data including child MOs",
+    "Without material SC orders exist in system",
+    "POST /api/job-work/create-po endpoint exists",
+    "Create PO rejects duplicate (JW-000020 already has PO-000019)",
+    "Without material orders have subcontract_type field for 'No RM' badge",
+    "With material orders have correct subcontract_type",
+    "Without material receive logic uses quantity not sent_quantity",
+    "PO has reference_sc_order_id linking to SC order",
+    "Frontend: JW-000020 shows 'No RM' badge + 'Create PO' button (no 'Send DC')",
+    "Frontend: JW-000018 shows 'No RM' badge + 'Create PO' button (no 'Send DC')",
+    "Frontend: JW-000021 shows 'Receive' button (with_material order)",
+    "Frontend: MRP page shows 'Outstanding Sales Orders' dropdown",
+    "Frontend: MRP demand table shows only 2 items with net_requirement > 0",
+    "Frontend: RM-002 shows SOs: SO-000005, SO-000006, PO-000001",
+    "Frontend: RM-001 shows SOs: PO-000001"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_three_fixes_v2.py",
+    "/app/test_reports/pytest/pytest_three_fixes_v2.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [],
+
+  "updated_files": [
+    "/app/backend/tests/test_three_fixes_v2.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (12/12 tests passed)",
+    "frontend": "100% (All UI elements verified)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Created PO-000020 for JW-000018 during testing",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": true,
+
+  "context_for_next_testing_agent": "3 fixes verified working: (1) MRP Sales Orders column filters to only show SOs that contribute to shortage - implemented in server.py lines 1325-1341 using running_available logic. (2) Child MO creation uses shortage_qty = child_qty - current_stock (server.py lines 2889-2895). (3) Without Material SC orders show 'Create PO' button (brown color) instead of 'Send DC' - implemented in JobWorkPage.js lines 352-357 with condition o.subcontract_type !== 'without_material' for Send DC and o.subcontract_type === 'without_material' for Create PO.",
+
+  "features_verified": {
+    "mrp_so_filtering": {
+      "status": "WORKING",
+      "details": "MRP demand only shows SOs that contribute to shortage. Uses running_available logic to filter out SOs covered by stock. RM-002 shows SO-000005, SO-000006, PO-000001. RM-001 shows PO-000001."
+    },
+    "child_mo_shortage_qty": {
+      "status": "WORKING",
+      "details": "Child MO creation uses shortage_qty = child_qty - current_stock. If stock >= required, child MO is skipped entirely (server.py lines 2883-2895)"
+    },
+    "without_material_create_po": {
+      "status": "WORKING",
+      "details": "Without Material SC orders (JW-000020, JW-000018) show 'Create PO' button (brown) instead of 'Send DC'. 'No RM' badge displayed. POST /api/job-work/create-po creates PO with reference_sc_order_id. Duplicate PO creation rejected."
+    },
+    "without_material_receive": {
+      "status": "WORKING",
+      "details": "Without Material SC orders show 'Receive' button. Pending qty calculated as quantity - received_quantity (not sent_quantity since nothing is sent for without_material orders)"
+    }
+  },
+
+  "test_data_used": {
+    "without_material_orders": [
+      {"order": "JW-000020", "status": "in_progress", "has_po": "PO-000019"},
+      {"order": "JW-000018", "status": "in_progress", "has_po": "PO-000020 (created during test)"}
+    ],
+    "with_material_orders": [
+      {"order": "JW-000021", "status": "in_progress"},
+      {"order": "JW-000019", "status": "in_progress"}
+    ]
+  }
+}
