@@ -1357,9 +1357,9 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
         item_id = item.get("id")
         po_qty = 0
         if item_id:
-            # Search in both 'lines' (new format) and 'items' (legacy format)
             pos = await db.purchase_orders.find(
-                {"status": {"$in": ["draft", "approved", "sent", "confirmed"]}, 
+                {"status": {"$in": ["draft", "approved", "sent", "confirmed"]},
+                 "reference_sc_order_id": {"$exists": False},
                  "$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]},
                 {"_id": 0, "lines": 1, "items": 1, "po_number": 1}
             ).to_list(100)
@@ -1447,6 +1447,7 @@ async def get_purchase_suggestions(request: Request):
         if s_item_id:
             s_pos = await db.purchase_orders.find(
                 {"status": {"$in": ["draft", "approved", "sent", "confirmed"]},
+                 "reference_sc_order_id": {"$exists": False},
                  "$or": [{"lines.item_id": s_item_id}, {"items.item_id": s_item_id}]},
                 {"_id": 0, "lines": 1, "items": 1}
             ).to_list(100)
@@ -2085,6 +2086,7 @@ async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
         existing_po_qty = 0
         existing_pos = await db.purchase_orders.find(
             {"status": {"$nin": ["cancelled", "received"]},
+             "reference_sc_order_id": {"$exists": False},
              "$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]},
             {"_id": 0, "lines": 1, "items": 1}
         ).to_list(100)
