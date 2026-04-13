@@ -1363,14 +1363,17 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                 {"_id": 0, "lines": 1, "items": 1, "po_number": 1}
             ).to_list(100)
             for po in pos:
-                # Check lines (new format)
+                counted = False
+                # Check lines first (preferred format)
                 for pi in po.get("lines", []):
                     if pi.get("item_id") == item_id:
                         po_qty += pi.get("quantity", 0) - pi.get("received_quantity", 0)
-                # Check items (legacy format)
-                for pi in po.get("items", []):
-                    if pi.get("item_id") == item_id:
-                        po_qty += pi.get("quantity", 0) - pi.get("received_quantity", 0)
+                        counted = True
+                # Only check items if not found in lines (avoid double-counting)
+                if not counted:
+                    for pi in po.get("items", []):
+                        if pi.get("item_id") == item_id:
+                            po_qty += pi.get("quantity", 0) - pi.get("received_quantity", 0)
         
         d["po_ordered_qty"] = po_qty
         d["po_status"] = "po_sent" if po_qty >= d["net_requirement"] else ("partial_po" if po_qty > 0 else "pending")
@@ -1435,6 +1438,30 @@ async def get_purchase_suggestions(request: Request):
                     "lead_time_days": item.get("lead_time_days", 0),
                     "estimated_cost": mrp_qty * item.get("unit_cost", 0)
                 })
+    
+    # Add PO status to each suggestion
+    for s in suggestions:
+        s_item_id = s.get("item", {}).get("id")
+        s_po_qty = 0
+        if s_item_id:
+            s_pos = await db.purchase_orders.find(
+                {"status": {"$in": ["draft", "approved", "sent", "confirmed"]},
+                 "$or": [{"lines.item_id": s_item_id}, {"items.item_id": s_item_id}]},
+                {"_id": 0, "lines": 1, "items": 1}
+            ).to_list(100)
+            for po in s_pos:
+                counted = False
+                for pi in po.get("lines", []):
+                    if pi.get("item_id") == s_item_id:
+                        s_po_qty += pi.get("quantity", 0) - pi.get("received_quantity", 0)
+                        counted = True
+                if not counted:
+                    for pi in po.get("items", []):
+                        if pi.get("item_id") == s_item_id:
+                            s_po_qty += pi.get("quantity", 0) - pi.get("received_quantity", 0)
+        s["po_ordered_qty"] = s_po_qty
+        suggested = s.get("suggested_quantity", 0)
+        s["po_status"] = "po_sent" if s_po_qty >= suggested else ("partial_po" if s_po_qty > 0 else "pending")
     
     return suggestions
 
@@ -4970,6 +4997,7 @@ async def get_delivery_challans(request: Request):
     for dc in challans:
         order = await db.subcontract_orders.find_one({"id": dc.get("subcontract_order_id")}, {"_id": 0})
         dc["order"] = order
+        dc["fg_item_name"] = order.get("fg_item_name", "") if order else ""
         supplier = await db.suppliers.find_one({"id": order.get("supplier_id") if order else ""}, {"_id": 0})
         dc["supplier"] = supplier
         for line in dc.get("lines", []):

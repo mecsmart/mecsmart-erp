@@ -378,12 +378,13 @@ export default function JobWorkPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full data-table" data-testid="challans-table">
-                  <thead><tr><th>DC #</th><th>Order #</th><th>Supplier</th><th>Items</th><th className="text-right">RM Price</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+                  <thead><tr><th>DC #</th><th>Order #</th><th>FG/SA/Part</th><th>Supplier</th><th>Items</th><th className="text-right">RM Price</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
                   <tbody>
                     {challans.map(dc => (
                       <tr key={dc.id} data-testid={`dc-row-${dc.id}`}>
                         <td className="mono font-medium">{dc.dc_number}</td>
                         <td className="mono">{dc.order?.order_number || '-'}</td>
+                        <td className="text-sm font-medium">{dc.fg_item_name || '-'}</td>
                         <td>{dc.supplier?.name || '-'}</td>
                         <td className="text-sm">
                           {dc.lines.map((l, li) => {
@@ -496,7 +497,7 @@ export default function JobWorkPage() {
       {/* Send DC Dialog */}
       <Dialog open={dcDialog} onOpenChange={setDcDialog}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle className="font-[Chivo]">Send Materials (DC) - {dcOrder?.order_number}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-[Chivo]">Send Materials (DC) - {dcOrder?.order_number}{dcOrder?.fg_item_name ? ` — ${dcOrder.fg_item_name}` : ''}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3">
             <div><label className="block text-sm font-semibold mb-1">From Warehouse</label>
               <Select value={dcWarehouse} onValueChange={setDcWarehouse}>

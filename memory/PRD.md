@@ -6,25 +6,29 @@
 
 ## Implemented Features
 
-### MRP (Material Requirements Planning)
-- **Stock available = hidden**: Items with on_hand >= gross_requirement excluded from MRP
-- **PO Status tracking**: "PO Sent" (green), "Partial PO" (yellow), "Pending" (red) badges
-- **Auto-remove after receipt**: GRN replenishes stock → item disappears from MRP
-- Sales Orders column: only shows SOs contributing to shortage
-- Dropdown: "Outstanding Sales Orders" only
-- Purchase Suggestions with create PO flow
+### MRP
+- Stock available = hidden from Material Demand
+- **PO Status in Purchase Suggestions**: "PO Sent (qty)" green, "Partial (x/y)" yellow, "Pending" red
+- Auto-remove after GRN receipt
+- Sales Orders column: only shortage-contributing SOs
+- Outstanding SOs only in dropdown
 
 ### Manufacturing Orders
-- Collapsible FG->SA->PART tree view, Job Card, SC marking on pending/in_progress MOs
+- Job Card, SC marking on pending/in_progress MOs, tree view
 - MO completion validation, auto-complete on SC receipt
 - Child MOs: shortage qty only, skip if stock sufficient
 - SC Type: With Material / Without Material
+- Improved SC start error message with tip
 
-### Direct SC Order from SO, Consolidation
-### Job Work: FG/SA/PART column, "Create PO" for without_material, "No RM" badge
-### DC Print: Company header, RM Cost, Terms & Conditions
+### Job Work / Subcontracting
+- FG/SA/PART column in SC orders and **Delivery Challans table**
+- FG/SA/Part name in DC dialog title
+- Create PO for without_material, No RM badge
+- Receipt auto-completes linked MO
+
+### DC Print: Company header, RM Cost, FG name, Terms & Conditions
 ### Sales Orders: Search, balance qty, SO edit lock
-### All Other: Routings, Purchase Invoice, BOM, PO, GRN, Quality, Inventory, Settings, Customers, Suppliers, Stores, User Management
+### All Other Modules: BOM, PO, GRN, Quality, Inventory, Settings, etc.
 
 ## Backlog
 - [ ] GST Phase 2: Sales Invoicing
