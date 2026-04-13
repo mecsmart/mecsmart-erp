@@ -38,6 +38,7 @@ export default function BOMPage() {
   const [viewBom, setViewBom] = useState(null);
   const [bomExplosion, setBomExplosion] = useState(null);
   const [expandedItems, setExpandedItems] = useState({});
+  const [allExplosions, setAllExplosions] = useState({});
   
   const [formData, setFormData] = useState({
     parent_item_id: '',
@@ -61,6 +62,15 @@ export default function BOMPage() {
       const params = statusFilter ? `?status=${statusFilter}` : '';
       const { data } = await api.get(`/api/bom${params}`);
       setBoms(data);
+      // Fetch explosions for all active BOMs
+      const explosions = {};
+      for (const bom of data.filter(b => b.status === 'active')) {
+        try {
+          const { data: expData } = await api.get(`/api/bom/${bom.id}/explode`);
+          explosions[bom.id] = expData;
+        } catch (e) { /* skip */ }
+      }
+      setAllExplosions(explosions);
     } catch (error) {
       console.error('Failed to fetch BOMs:', error);
     } finally {
@@ -505,7 +515,7 @@ export default function BOMPage() {
         </div>
       </div>
 
-      {/* BOMs List - Multi-Level Collapsible Tree View */}
+      {/* BOMs List - Multi-Level Explosion Table View */}
       <div className="card-flat overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center h-48">
@@ -517,174 +527,148 @@ export default function BOMPage() {
             <p>No BOMs found</p>
           </div>
         ) : (
-          <div className="p-4">
+          <div className="p-3 space-y-4">
             {(() => {
-              // Group BOMs by parent item
+              // Group by parent and show only top-level (FG) BOMs
               const grouped = {};
               boms.forEach(bom => {
-                const pid = bom.parent_item_id || bom.parent_item?.id || 'unknown';
+                const pid = bom.parent_item_id || 'x';
                 if (!grouped[pid]) grouped[pid] = { item: bom.parent_item, boms: [] };
                 grouped[pid].boms.push(bom);
               });
               
-              // Find child BOMs for a given item
-              const findChildBom = (itemId) => boms.find(b => b.parent_item_id === itemId && b.status === 'active');
+              // Row color by category
+              const rowColor = (cat, level) => {
+                if (cat === 'finished_good') return 'bg-[#1D3557]/5 border-l-4 border-l-[#1D3557]';
+                if (cat === 'sub_assembly') return 'bg-[#723B13]/5 border-l-4 border-l-[#723B13]';
+                if (cat === 'raw_material') return 'bg-[#2563EB]/5 border-l-4 border-l-[#2563EB]';
+                if (cat === 'component') return 'bg-[#9B1C1C]/5 border-l-4 border-l-[#9B1C1C]';
+                return 'bg-[#F3F4F6] border-l-4 border-l-[#6B7280]';
+              };
+              const catBadge = (cat) => {
+                if (cat === 'finished_good') return 'bg-[#1D3557] text-white';
+                if (cat === 'sub_assembly') return 'bg-[#723B13] text-white';
+                if (cat === 'raw_material') return 'bg-[#DBEAFE] text-[#1D4ED8]';
+                if (cat === 'component') return 'bg-[#FDE8E8] text-[#9B1C1C]';
+                return 'bg-[#F3F4F6] text-[#374151]';
+              };
+              const catLabel = (cat) => cat === 'finished_good' ? 'FG' : cat === 'sub_assembly' ? 'SG' : cat === 'raw_material' ? 'RM' : cat === 'component' ? 'CP' : 'PT';
               
-              // Recursive tree node renderer
-              const renderTreeNode = (itemData, depth, isLast, parentLines) => {
-                const { item: nodeItem, quantity, uom, bom: nodeBom, components } = itemData;
-                const cat = nodeItem?.category || '';
-                const catLabel = cat === 'finished_good' ? 'FG' : cat === 'sub_assembly' ? 'SA' : cat === 'raw_material' ? 'RM' : cat === 'component' ? 'CP' : 'PT';
-                const catColor = cat === 'finished_good' ? '#1D3557' : cat === 'sub_assembly' ? '#723B13' : cat === 'raw_material' ? '#2563EB' : cat === 'component' ? '#9B1C1C' : '#6B7280';
-                const catBg = cat === 'finished_good' ? 'bg-[#1D3557]' : cat === 'sub_assembly' ? 'bg-[#723B13]' : cat === 'raw_material' ? 'bg-[#DBEAFE]' : cat === 'component' ? 'bg-[#FDE8E8]' : 'bg-[#F3F4F6]';
-                const catText = cat === 'finished_good' || cat === 'sub_assembly' ? 'text-white' : cat === 'raw_material' ? 'text-[#1D4ED8]' : cat === 'component' ? 'text-[#9B1C1C]' : 'text-[#374151]';
-                const hasChildren = components && components.length > 0;
-                const nodeKey = `tree-${nodeItem?.id || 'x'}-${depth}`;
-                const isOpen = expandedItems[nodeKey] !== false; // default open
+              // Recursive flatten explosion into table rows
+              const flattenRows = (nodes, level = 1, parentKey = '') => {
+                const rows = [];
+                (nodes || []).forEach((node, idx) => {
+                  const item = node.item || {};
+                  const cat = item.category || '';
+                  const key = `${parentKey}-${idx}`;
+                  const hasChildren = node.children && node.children.length > 0;
+                  const isExpanded = expandedItems[key] !== false;
+                  
+                  rows.push({
+                    key,
+                    level,
+                    item,
+                    cat,
+                    quantity: node.quantity,
+                    unit_cost: node.unit_cost || 0,
+                    extended_cost: node.extended_cost || 0,
+                    hasChildren,
+                    isExpanded,
+                    is_alternate: node.is_alternate
+                  });
+                  
+                  if (hasChildren && isExpanded) {
+                    rows.push(...flattenRows(node.children, level + 1, key));
+                  }
+                });
+                return rows;
+              };
+              
+              return Object.entries(grouped).map(([pid, group]) => {
+                const parentItem = group.item;
+                const activeBom = group.boms.find(b => b.status === 'active') || group.boms[0];
+                const explosion = allExplosions[activeBom?.id];
+                const explosionRows = explosion ? flattenRows(explosion.explosion) : [];
+                const totalCost = explosion?.total_rollup_cost || 0;
                 
                 return (
-                  <div key={nodeKey} className="relative">
-                    {/* Connecting lines */}
-                    {depth > 0 && (
-                      <div className="absolute" style={{ left: `${(depth - 1) * 32 + 16}px`, top: 0, bottom: isLast ? '20px' : 0, width: '1px', background: '#D1D5DB' }} />
-                    )}
-                    {depth > 0 && (
-                      <div className="absolute" style={{ left: `${(depth - 1) * 32 + 16}px`, top: '20px', width: '16px', height: '1px', background: '#D1D5DB' }} />
-                    )}
-                    
-                    {/* Node */}
-                    <div className="flex items-center py-1.5 hover:bg-[#F9FAFB] rounded-sm transition-colors" style={{ paddingLeft: `${depth * 32}px` }}>
-                      {/* Chevron / Node icon */}
-                      {hasChildren ? (
-                        <button onClick={() => setExpandedItems(prev => ({ ...prev, [nodeKey]: !isOpen }))} className="w-6 h-6 flex items-center justify-center rounded hover:bg-[#E5E7EB] mr-1 flex-shrink-0">
-                          {isOpen ? <ChevronDown className="w-4 h-4 text-[#4B5563]" /> : <ChevronRight className="w-4 h-4 text-[#4B5563]" />}
-                        </button>
-                      ) : (
-                        <div className="w-6 h-6 flex items-center justify-center mr-1 flex-shrink-0">
-                          <div className="w-2 h-2 rounded-full" style={{ background: catColor }} />
-                        </div>
-                      )}
-                      
-                      {/* Category badge */}
-                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded mr-2 flex-shrink-0 ${catBg} ${catText}`}>{catLabel}</span>
-                      
-                      {/* Part number + Name */}
-                      <span className="mono font-semibold text-sm text-[#111827] mr-2">{nodeItem?.part_number || '?'}</span>
-                      <span className="text-sm text-[#374151] mr-3">{nodeItem?.name || '-'}</span>
-                      
-                      {/* Quantity (not for root FG) */}
-                      {quantity != null && depth > 0 && (
-                        <span className="mono text-xs text-[#6B7280] bg-[#F3F4F6] px-2 py-0.5 rounded mr-2">x{quantity} {uom || ''}</span>
-                      )}
-                      
-                      {/* Cost */}
-                      {nodeItem?.unit_cost != null && (
-                        <span className="mono text-xs text-[#6B7280] mr-3">{formatCurrency(nodeItem.unit_cost)}</span>
-                      )}
-                      
-                      {/* BOM info (for items that have their own BOM) */}
-                      {nodeBom && depth === 0 && (
-                        <span className="flex items-center gap-2 ml-auto">
-                          <span className={`status-badge status-${nodeBom.status}`}>Rev {nodeBom.revision} - {nodeBom.status}</span>
-                          <button onClick={() => handleView(nodeBom)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="View Explosion"><Eye className="w-3.5 h-3.5" /></button>
-                          {canEdit && <button onClick={() => handleEdit(nodeBom)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit"><Edit2 className="w-3.5 h-3.5" /></button>}
-                          {canEdit && <button onClick={() => handleRevise(nodeBom)} className="p-1 text-[#4B5563] hover:text-[#457B9D]" title="Revise"><GitBranch className="w-3.5 h-3.5" /></button>}
-                          {user?.role === 'admin' && <button onClick={() => handleDelete(nodeBom)} className="p-1 text-[#4B5563] hover:text-[#9B1C1C]" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>}
-                        </span>
-                      )}
+                  <div key={pid} className="border border-[#D1D5DB] rounded-sm overflow-hidden" data-testid={`bom-tree-${pid}`}>
+                    {/* FG Header Row */}
+                    <div className={`flex items-center justify-between px-4 py-3 bg-[#1D3557] text-white`}>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded">{catLabel(parentItem?.category)}</span>
+                        <span className="mono font-bold text-sm">{parentItem?.part_number || '-'}</span>
+                        <span className="font-medium">{parentItem?.name || '-'}</span>
+                        {activeBom && <span className="text-xs bg-white/15 px-2 py-0.5 rounded">Rev {activeBom.revision} - {activeBom.status}</span>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="mono text-sm font-bold">Total: {formatCurrency(totalCost)}</span>
+                        <button onClick={() => handleView(activeBom)} className="p-1 hover:bg-white/20 rounded" title="View"><Eye className="w-4 h-4" /></button>
+                        {canEdit && <button onClick={() => handleEdit(activeBom)} className="p-1 hover:bg-white/20 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>}
+                        {canEdit && <button onClick={() => handleRevise(activeBom)} className="p-1 hover:bg-white/20 rounded" title="Revise"><GitBranch className="w-4 h-4" /></button>}
+                        {user?.role === 'admin' && <button onClick={() => handleDelete(activeBom)} className="p-1 hover:bg-white/20 rounded" title="Delete"><Trash2 className="w-4 h-4" /></button>}
+                      </div>
                     </div>
                     
-                    {/* Children */}
-                    {hasChildren && isOpen && (
-                      <div className="relative">
-                        {components.map((comp, ci) => {
-                          const compItem = items.find(i => i.id === comp.item_id) || comp.item;
-                          const childBom = findChildBom(comp.item_id);
-                          const childComponents = childBom ? childBom.components?.map(cc => ({
-                            item: items.find(i => i.id === cc.item_id),
-                            quantity: cc.quantity,
-                            uom: cc.uom || items.find(i => i.id === cc.item_id)?.unit_of_measure,
-                            components: (() => {
-                              const grandBom = findChildBom(cc.item_id);
-                              return grandBom ? grandBom.components?.map(gc => ({
-                                item: items.find(i => i.id === gc.item_id),
-                                quantity: gc.quantity,
-                                uom: gc.uom,
-                                components: []
-                              })) : [];
-                            })()
-                          })) : [];
-                          
-                          return renderTreeNode({
-                            item: compItem,
-                            quantity: comp.quantity,
-                            uom: comp.uom || compItem?.unit_of_measure,
-                            bom: childBom,
-                            components: childComponents
-                          }, depth + 1, ci === components.length - 1, []);
-                        })}
+                    {/* Explosion Table */}
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-[#F3F4F6] text-[#374151] text-xs uppercase">
+                          <th className="text-left py-2 px-3 w-8"></th>
+                          <th className="text-left py-2 px-2">Type</th>
+                          <th className="text-left py-2 px-2">Part Number</th>
+                          <th className="text-left py-2 px-2">Description</th>
+                          <th className="text-right py-2 px-2">QTY</th>
+                          <th className="text-left py-2 px-2">UOM</th>
+                          <th className="text-right py-2 px-2">Unit Cost</th>
+                          <th className="text-right py-2 px-3">Extended Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {explosionRows.length === 0 && (
+                          <tr><td colSpan="8" className="text-center py-4 text-[#9CA3AF] text-xs">Loading explosion data...</td></tr>
+                        )}
+                        {explosionRows.map((row) => (
+                          <tr key={row.key} className={`${rowColor(row.cat, row.level)} transition-colors hover:brightness-95 ${row.is_alternate ? 'opacity-60 italic' : ''}`}>
+                            <td className="py-2 px-3" style={{ paddingLeft: `${row.level * 20}px` }}>
+                              {row.hasChildren ? (
+                                <button onClick={() => setExpandedItems(p => ({ ...p, [row.key]: !row.isExpanded }))} className="w-5 h-5 flex items-center justify-center rounded hover:bg-black/10" data-testid={`toggle-${row.key}`}>
+                                  {row.isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                                </button>
+                              ) : (
+                                <div className="w-5 h-5 flex items-center justify-center">
+                                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: row.cat === 'raw_material' ? '#2563EB' : row.cat === 'component' ? '#9B1C1C' : '#6B7280' }} />
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-2 px-2">
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${catBadge(row.cat)}`}>{catLabel(row.cat)}</span>
+                            </td>
+                            <td className="py-2 px-2 mono font-semibold text-[#111827]">{row.item?.part_number || '?'}</td>
+                            <td className="py-2 px-2 text-[#374151]">{row.item?.name || '-'}{row.is_alternate ? ' (alt)' : ''}</td>
+                            <td className="py-2 px-2 text-right mono font-medium">{row.quantity}</td>
+                            <td className="py-2 px-2 text-[#6B7280]">{row.item?.unit_of_measure || '-'}</td>
+                            <td className="py-2 px-2 text-right mono">{formatCurrency(row.unit_cost)}</td>
+                            <td className="py-2 px-3 text-right mono font-medium">{formatCurrency(row.extended_cost)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    
+                    {/* Other revisions */}
+                    {group.boms.length > 1 && (
+                      <div className="px-4 py-2 bg-[#F9FAFB] border-t text-xs text-[#6B7280] flex items-center gap-2">
+                        <span>Other revisions:</span>
+                        {group.boms.filter(b => b.id !== activeBom?.id).map(b => (
+                          <button key={b.id} onClick={() => handleView(b)} className="inline-flex items-center gap-1 hover:underline">
+                            <span className={`status-badge text-[9px] status-${b.status}`}>Rev {b.revision}</span>{b.name}
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
                 );
-              };
-              
-              // Render top-level FG BOMs
-              return Object.entries(grouped)
-                .filter(([, g]) => g.item?.category === 'finished_good' || !Object.values(grouped).some(og => og.boms.some(b => b.components?.some(c => c.item_id === g.item?.id))))
-                .map(([pid, group]) => {
-                  const activeBom = group.boms.find(b => b.status === 'active') || group.boms[0];
-                  const topComponents = activeBom?.components?.map(comp => {
-                    const compItem = items.find(i => i.id === comp.item_id);
-                    const childBom = findChildBom(comp.item_id);
-                    const childComps = childBom ? childBom.components?.map(cc => {
-                      const ccItem = items.find(i => i.id === cc.item_id);
-                      const grandBom = findChildBom(cc.item_id);
-                      return {
-                        item: ccItem,
-                        quantity: cc.quantity,
-                        uom: cc.uom || ccItem?.unit_of_measure,
-                        components: grandBom ? grandBom.components?.map(gc => ({
-                          item: items.find(i => i.id === gc.item_id),
-                          quantity: gc.quantity,
-                          uom: gc.uom,
-                          components: []
-                        })) : []
-                      };
-                    }) : [];
-                    
-                    return {
-                      item: compItem,
-                      quantity: comp.quantity,
-                      uom: comp.uom || compItem?.unit_of_measure,
-                      bom: childBom,
-                      components: childComps
-                    };
-                  }) || [];
-                  
-                  return (
-                    <div key={pid} className="mb-4 border border-[#E5E7EB] rounded-sm p-3" data-testid={`bom-tree-${pid}`}>
-                      {renderTreeNode({
-                        item: group.item,
-                        quantity: null,
-                        uom: null,
-                        bom: activeBom,
-                        components: topComponents
-                      }, 0, true, [])}
-                      {/* Show other revisions if multiple BOMs */}
-                      {group.boms.length > 1 && (
-                        <div className="mt-2 ml-8 text-xs text-[#6B7280]">
-                          Other revisions: {group.boms.filter(b => b.id !== activeBom?.id).map(b => (
-                            <span key={b.id} className="inline-flex items-center gap-1 mr-3">
-                              <span className={`status-badge text-[9px] status-${b.status}`}>Rev {b.revision}</span>
-                              <button onClick={() => handleView(b)} className="hover:underline">{b.name}</button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                });
+              });
             })()}
           </div>
         )}
