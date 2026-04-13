@@ -2100,15 +2100,15 @@ async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
                         existing_po_qty += max(0, (pi.get("quantity", 0) or 0) - (pi.get("received_quantity", 0) or 0))
         
         if existing_po_qty >= int(qty):
-            skipped_items.append(f"{item.get('part_number')} (PO already covers {existing_po_qty} >= {int(qty)})")
+            skipped_items.append(f"{item.get('part_number')} (PO already covers {int(existing_po_qty)} >= {int(qty)})")
             continue
         
-        # Only order the remaining qty not yet covered by POs
-        remaining_qty = max(int(qty) - existing_po_qty, 1)
+        # Use the full user-requested qty (user already sees suggested amount and confirmed it)
+        final_qty = max(int(qty), 1)
         
         lines.append({
             "item_id": item_id,
-            "quantity": remaining_qty,
+            "quantity": final_qty,
             "unit_price": price,
             "hsn_code": item.get("hsn_code", ""),
             "gst_rate": item.get("gst_rate", 18),
