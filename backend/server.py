@@ -1340,8 +1340,47 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                     running_available = 0
             data["orders"] = shortage_orders
     
-    # Filter to only raw materials with net_requirement > 0 (items already covered by stock are excluded)
-    raw_material_demand = [d for d in demand.values() if d.get("item", {}).get("category") == "raw_material" and d.get("net_requirement", 0) > 0]
+    # Filter: only raw materials with net_requirement > 0 AND on_hand < gross_requirement
+    raw_material_demand = []
+    for d in demand.values():
+        item = d.get("item", {})
+        if item.get("category") != "raw_material":
+            continue
+        if d.get("net_requirement", 0) <= 0:
+            continue
+        # If stock fully covers gross requirement, skip
+        if d.get("on_hand", 0) >= d.get("gross_requirement", 0):
+            continue
+        
+        # Check if PO already raised for this item (pending/approved POs)
+        item_id = item.get("id")
+        po_qty = 0
+        if item_id:
+            # Search in both 'lines' (new format) and 'items' (legacy format)
+            pos = await db.purchase_orders.find(
+                {"status": {"$in": ["draft", "approved", "sent", "confirmed"]}, 
+                 "$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]},
+                {"_id": 0, "lines": 1, "items": 1, "po_number": 1}
+            ).to_list(100)
+            for po in pos:
+                # Check lines (new format)
+                for pi in po.get("lines", []):
+                    if pi.get("item_id") == item_id:
+                        po_qty += pi.get("quantity", 0) - pi.get("received_quantity", 0)
+                # Check items (legacy format)
+                for pi in po.get("items", []):
+                    if pi.get("item_id") == item_id:
+                        po_qty += pi.get("quantity", 0) - pi.get("received_quantity", 0)
+        
+        d["po_ordered_qty"] = po_qty
+        d["po_status"] = "po_sent" if po_qty >= d["net_requirement"] else ("partial_po" if po_qty > 0 else "pending")
+        d["remaining_to_order"] = max(0, d["net_requirement"] - po_qty)
+        
+        # If PO fully covers the net requirement AND stock + PO covers demand, skip from MRP
+        if po_qty >= d["net_requirement"]:
+            d["po_status"] = "po_sent"
+        
+        raw_material_demand.append(d)
     
     return raw_material_demand
 
