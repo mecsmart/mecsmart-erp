@@ -81,9 +81,6 @@ memory/test_credentials.md
 # Mobile development
 android-sdk/-e 
 # Environment and credential files
-.env
-.env.*
-*.env
 credentials.json
 *.pem
 *.key
@@ -91,9 +88,6 @@ credentials.json
 frontend/node_modules/.cache/default-development/0.pack
 -e 
 # Environment and credential files
-.env
-.env.*
-*.env
 credentials.json
 *.pem
 *.key
@@ -111,9 +105,6 @@ frontend/node_modules/.cache/default-development/59.pack
 frontend/node_modules/.cache/default-development/57.pack
 -e 
 # Environment and credential files
-.env
-.env.*
-*.env
 credentials.json
 *.pem
 *.key
@@ -122,9 +113,6 @@ frontend/node_modules/.cache/default-development/61.pack
 frontend/node_modules/.cache/default-development/62.pack
 -e 
 # Environment and credential files
-.env
-.env.*
-*.env
 credentials.json
 *.pem
 *.key
