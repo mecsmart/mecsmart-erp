@@ -11,31 +11,29 @@
 3. Sales Orders
 4. Inventory (collapsible) → Stock, Suppliers, MRP, Purchase Orders, Purchase Invoices
 5. Production (collapsible) → Items & Parts, BOM, Manufacturing Orders
-6. Stores
+6. Stores (collapsible) → Stock, Transfer History, GRN
 7. Quality
 8. Job Work
 9. Settings
 10. User Management (admin only)
 
 ## Key Features Implemented
-- Multi-Level BOM with revision control, effectivity dates, alternate components
-- BOM Explosion Tree View — FG-only top-level, color-coded rows, search bar, print button, 75% header opacity
-- MRP with demand calculation, PO suggestions, stock filtering
-- Manufacturing Orders — consumes ALL BOM components (RM + SA + Parts)
-- Subcontracting: With/Without Material, Bulk SC, DC creation/print
-- SC Orders auto-prefill job_work_parts with parent item (qty + editable charges)
-- DC Print: Editable T&C dialog, Job Work Part Details table, Raw Materials table
-- Sales Orders: Draft/Confirm/Cancel workflow
-- Purchase Orders: Create, Cancel, Recreate
-- GRN, Inventory/Stock, Warehouse/Location management
-- Customers, Suppliers, Items management
-- Company Settings, User Management, Quality inspection
+- Multi-Level BOM: FG-only top-level view, color-coded rows, search, print, 75% header opacity
+- MRP: demand analysis, PO suggestions, stock filtering + search
+- MO: consumes ALL BOM components (RM + SA + Parts) + search
+- SC Orders: auto-prefill job_work_parts, editable charges
+- DC Print: editable T&C dialog, Job Work Part Details table
+- Sales Orders, Purchase Orders (+ search), Purchase Invoices (+ search)
+- GRN, Inventory/Stock (+ search), Warehouses, Transfers
+- Stores: collapsible sidebar with Stock tab (inventory view + search)
+- Suppliers management + search
+- Routings + search
+- Customers, Company Settings, User Management, Quality
 
 ## Completed (Latest - Apr 2026)
-- Sidebar restructured: Dashboard > Customers > Sales Orders > Inventory > Production > Stores > Quality > Job Work > Settings
-- Production collapsible group: Items & Parts, BOM, Manufacturing Orders
-- BOM: Search bar, print button, header opacity 75%
-- DC: T&C edit dialog before printing
+- Search added to: Inventory Stock, Suppliers, MRP, Purchase Orders, Purchase Invoices, Manufacturing Orders, Routings
+- Stores converted to collapsible sidebar: Stock, Transfer History, GRN
+- Stock tab under Stores shows same inventory data with search
 
 ## Backlog
 - [ ] P1: GST Phase 2 - GST-compliant invoice generation + tax breakup reports
