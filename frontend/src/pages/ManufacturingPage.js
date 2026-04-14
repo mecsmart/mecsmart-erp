@@ -951,6 +951,11 @@ export default function ManufacturingPage() {
                     const ops = wo.operations_status || [];
                     const completedOps = ops.filter(op => op.status === 'completed').length;
                     const children = getChildMOs(wo.id);
+                    // Check if parent MO is reserved — hide reserve on children if so
+                    const parentMO = wo.parent_wo_id ? workOrders.find(w => w.id === wo.parent_wo_id) : null;
+                    const parentIsReserved = parentMO?.materials_reserved === true;
+                    const showReserve = canEdit && wo.status === 'pending' && !wo.materials_reserved && !parentIsReserved;
+                    const showUnreserve = canEdit && wo.status === 'pending' && wo.materials_reserved && !parentIsReserved;
                     return (
                       <React.Fragment key={wo.id}>
                         <tr className={`${depth > 0 ? 'bg-[#F9FAFB]' : ''} ${selectedMOs[wo.id] ? 'bg-[#E1EFFE]/40' : ''}`} data-testid={`wo-row-${wo.id}`}>
@@ -977,10 +982,10 @@ export default function ManufacturingPage() {
                           </td>
                           <td>
                             <div className="flex items-center flex-wrap gap-1">
-                              {canEdit && wo.status === 'pending' && !wo.materials_reserved && (
+                              {showReserve && (
                                 <button onClick={() => handleReserveMaterials(wo.id, false)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`reserve-wo-${wo.id}`}><PackageCheck className="w-3 h-3 inline mr-0.5" />Reserve</button>
                               )}
-                              {canEdit && wo.status === 'pending' && wo.materials_reserved && (
+                              {showUnreserve && (
                                 <button onClick={() => handleReserveMaterials(wo.id, true)} className="btn-secondary text-xs px-2 py-1 text-[#9B1C1C] border-[#9B1C1C]" data-testid={`unreserve-wo-${wo.id}`}><PackageX className="w-3 h-3 inline mr-0.5" />Unreserve</button>
                               )}
                               {canEdit && wo.status === 'pending' && !wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')} className="btn-secondary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Start</button>}

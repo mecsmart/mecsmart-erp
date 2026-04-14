@@ -3397,23 +3397,26 @@ async def reserve_materials_for_wo(wo_id: str, request: Request):
                 "quantity": comp_qty,
                 "uom": comp_item.get("unit_of_measure", "pcs")
             })
-            # Recurse into child BOMs
+            # Recurse into child BOMs to find more RM
             child_visited = set(visited)
             await collect_bom_materials(comp_item_id, comp_qty, child_visited)
     
     await collect_bom_materials(item_id, wo_qty)
     
+    # Only keep raw_material items in reservation
+    rm_reserved = [r for r in reserved if r.get("category") == "raw_material"]
+    
     await db.work_orders.update_one({"id": wo_id}, {"$set": {
         "materials_reserved": True,
-        "reserved_materials": reserved,
+        "reserved_materials": rm_reserved,
         "reserved_at": datetime.now(timezone.utc),
         "reserved_by": user["id"]
     }})
     
     return {
         "success": True,
-        "message": f"Materials reserved for {wo.get('wo_number')} ({len(reserved)} items)",
-        "reserved_materials": reserved
+        "message": f"Materials reserved for {wo.get('wo_number')} ({len(rm_reserved)} RM items)",
+        "reserved_materials": rm_reserved
     }
 
 
