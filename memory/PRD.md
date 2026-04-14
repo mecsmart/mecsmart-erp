@@ -6,17 +6,17 @@
 - Auth: Custom JWT with roles
 
 ## MRP Logic (Updated Apr 2026)
-- Shows ONLY Raw Materials
-- Calculates RM demand by netting off SA/Part available stock:
-  - For each SO, explode FG BOM
-  - For SA/Parts: Available Stock - Reserved (running MOs) = Net Available
-  - If SA/Part stock covers need → no RM demand from that path
-  - If shortage → explode shortage qty through SA/Part BOM to find RM needs
+- Shows ONLY Raw Materials (RM)
+- Formula: Net = SO Gross Req - max(Current Stock - Reserved for MOs - Safety Stock, 0)
+- Reserve flow: Pending MO → Reserve button → BOM exploded recursively → reserved_materials stored on MO
+- MRP reads reserved_materials from all reserved MOs to compute reserved_for_mo per RM item
+- "Reserved (MO)" column in MRP demand table shows reserved qty
 - Suggestions also filtered to RM only
 
 ## Key Features
-- Multi-Level BOM, MRP (smart RM netting), Quality, Manufacturing Orders
-- SC Consolidation per supplier, DC draft flow, PO from SC with proper pricing
+- Multi-Level BOM, MRP (smart RM with MO reservation), Quality
+- MO Reserve/Unreserve material functionality
+- SC Consolidation per supplier, DC draft flow, PO from SC
 - Sales Orders, Purchase Orders/Invoices, GRN, Inventory, Stores
 - Search on all major pages, Collapsible sidebar groups
 
