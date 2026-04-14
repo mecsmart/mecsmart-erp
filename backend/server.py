@@ -3627,9 +3627,10 @@ async def start_work_order(wo_id: str, request: Request):
     insufficient_materials = []
     reserved_conflicts = []
     
-    # Skip material consumption only for "without_material" subcontract
-    sc_type = wo.get("subcontract_type", "with_material")
-    skip_material_consumption = wo.get("is_subcontract") and sc_type == "without_material"
+    # Skip material consumption for ALL subcontract MOs:
+    # - "without_material": vendor sources own RM
+    # - "with_material": RM sent via DC (stock deducted at DC Send, not MO Start)
+    skip_material_consumption = bool(wo.get("is_subcontract"))
     
     # Check if materials are reserved by OTHER MOs (exclude own ancestor chain)
     if not wo.get("materials_reserved"):
