@@ -1271,8 +1271,10 @@ async def cancel_production_order(order_id: str, request: Request):
 
 @mrp_router.get("/demand")
 async def calculate_demand(request: Request, production_order_id: Optional[str] = None):
-    """Calculate RM demand: SO Required QTY - (Present Stock - Material reserved for MOs).
-    Formula per RM item: Net = Gross SO Requirement - (Current Stock - Total Reserved Across MOs - Safety Stock)
+    """Calculate RM demand: Only for SOs WITHOUT reserved MOs.
+    If an MO is reserved for an SO, that SO's demand is covered — skip it.
+    For remaining SOs: Net = Gross - (Available Stock after reservations).
+    Available = Current Stock - Reserved for MOs - Safety Stock.
     Only Raw Materials are returned."""
     await get_current_user(request)
     
@@ -1282,20 +1284,28 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
     
     orders = await db.production_orders.find(query, {"_id": 0}).to_list(1000)
     
-    # Step 1: Calculate total reserved qty per item from ALL reserved MOs
+    # Step 1: Find which SOs already have reserved MOs (fully covered)
     reserved_mos = await db.work_orders.find(
         {"materials_reserved": True, "status": {"$in": ["pending", "in_progress"]}},
-        {"_id": 0, "reserved_materials": 1}
+        {"_id": 0, "reserved_materials": 1, "production_order_id": 1, "quantity": 1}
     ).to_list(5000)
     
-    reserved_stock = {}  # item_id -> total qty reserved across all MOs
+    # Track reserved qty per SO — an SO may have partial reservation
+    so_reserved_qty = {}  # production_order_id -> total reserved MO qty
+    for mo in reserved_mos:
+        po_id = mo.get("production_order_id")
+        if po_id:
+            so_reserved_qty[po_id] = so_reserved_qty.get(po_id, 0) + mo.get("quantity", 0)
+    
+    # Total reserved RM qty across all reserved MOs
+    reserved_stock = {}  # item_id -> total qty reserved
     for mo in reserved_mos:
         for rm in mo.get("reserved_materials", []):
             rid = rm.get("item_id")
             if rid:
                 reserved_stock[rid] = reserved_stock.get(rid, 0) + rm.get("quantity", 0)
     
-    # Cache for items and BOMs
+    # Cache
     item_cache = {}
     async def get_item(item_id):
         if item_id not in item_cache:
@@ -1308,11 +1318,9 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
             bom_cache[parent_item_id] = await db.boms.find_one({"parent_item_id": parent_item_id, "status": "active"}, {"_id": 0})
         return bom_cache[parent_item_id]
     
-    # Step 2: Explode SO BOM fully into RM demand (flat explosion, all levels)
     rm_demand = {}
     
     async def explode_all_rm(parent_item_id: str, parent_qty: float, order_info: dict, visited: set = None):
-        """Fully explode BOM through all levels to collect leaf-level RM demand."""
         if visited is None:
             visited = set()
         if parent_item_id in visited:
@@ -1333,10 +1341,7 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
             if not comp_item:
                 continue
             
-            category = comp_item.get("category", "")
-            
-            if category == "raw_material":
-                # Leaf RM: accumulate gross demand
+            if comp_item.get("category") == "raw_material":
                 if comp_item_id not in rm_demand:
                     rm_demand[comp_item_id] = {
                         "item": comp_item,
@@ -1355,19 +1360,28 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                     "due_date": order_info.get("due_date")
                 })
             else:
-                # SA/Part: always recurse into its BOM to find ultimate RM needs
                 child_visited = set(visited)
                 await explode_all_rm(comp_item_id, qty_needed, order_info, child_visited)
     
+    # Step 2: Only explode SOs that are NOT fully covered by reserved MOs
     for order in orders:
+        so_id = order.get("id")
+        so_qty = order.get("quantity", 0)
+        reserved_qty_for_so = so_reserved_qty.get(so_id, 0)
+        
+        # Calculate unreserved qty for this SO
+        unreserved_qty = max(0, so_qty - reserved_qty_for_so)
+        if unreserved_qty <= 0:
+            continue  # This SO is fully covered by reserved MOs — skip
+        
         bom = await db.boms.find_one({"id": order.get("bom_id")}, {"_id": 0})
         if not bom:
             continue
         parent_item_id = bom.get("parent_item_id")
         if parent_item_id:
-            await explode_all_rm(parent_item_id, order.get("quantity", 0), order)
+            await explode_all_rm(parent_item_id, unreserved_qty, order)
     
-    # Step 3: Calculate net = gross - (stock - reserved - safety)
+    # Step 3: Net = Gross - max(Stock - Reserved - Safety, 0)
     for item_id, data in rm_demand.items():
         available = data["on_hand"] - data["reserved_for_mo"] - data["safety_stock"]
         data["net_requirement"] = max(0, data["gross_requirement"] - max(available, 0))
