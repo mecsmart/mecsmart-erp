@@ -5572,30 +5572,29 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
         update_data["notes"] = data.notes
     if data.status is not None:
         update_data["status"] = data.status
-    if data.lines is not None:
-        update_data["lines"] = [{"item_id": l.item_id, "quantity": l.quantity, "sent_quantity": 0, "received_quantity": 0, "rate": l.rate or 0} for l in data.lines]
     if data.job_work_parts is not None:
         update_data["job_work_parts"] = [{"item_id": p.item_id, "quantity": p.quantity, "charges": p.charges, "received_quantity": 0} for p in data.job_work_parts]
         
-        # Auto-recalculate RM lines from BOM of all parts (only if lines not explicitly provided)
-        if data.lines is None:
-            new_rm_lines = {}
-            for part in data.job_work_parts:
-                part_bom = await db.boms.find_one({"parent_item_id": part.item_id, "status": "active"}, {"_id": 0})
-                if part_bom:
-                    for comp in part_bom.get("components", []):
-                        if comp.get("is_alternate"):
-                            continue
-                        comp_item = await db.items.find_one({"id": comp.get("item_id")}, {"_id": 0})
-                        if comp_item and comp_item.get("category") in ["raw_material", "component", "sub_assembly"]:
-                            cid = comp["item_id"]
-                            qty = int(comp.get("quantity", 1) * part.quantity)
-                            rate = comp_item.get("unit_cost", 0)
-                            if cid in new_rm_lines:
-                                new_rm_lines[cid]["quantity"] += qty
-                            else:
-                                new_rm_lines[cid] = {"item_id": cid, "quantity": qty, "sent_quantity": 0, "received_quantity": 0, "rate": rate}
-            update_data["lines"] = list(new_rm_lines.values())
+        # Always auto-recalculate RM lines from BOM of all parts
+        new_rm_lines = {}
+        for part in data.job_work_parts:
+            part_bom = await db.boms.find_one({"parent_item_id": part.item_id, "status": "active"}, {"_id": 0})
+            if part_bom:
+                for comp in part_bom.get("components", []):
+                    if comp.get("is_alternate"):
+                        continue
+                    comp_item = await db.items.find_one({"id": comp.get("item_id")}, {"_id": 0})
+                    if comp_item and comp_item.get("category") in ["raw_material", "component", "sub_assembly"]:
+                        cid = comp["item_id"]
+                        qty = int(comp.get("quantity", 1) * part.quantity)
+                        rate = comp_item.get("unit_cost", 0)
+                        if cid in new_rm_lines:
+                            new_rm_lines[cid]["quantity"] += qty
+                        else:
+                            new_rm_lines[cid] = {"item_id": cid, "quantity": qty, "sent_quantity": 0, "received_quantity": 0, "rate": rate}
+        update_data["lines"] = list(new_rm_lines.values())
+    elif data.lines is not None:
+        update_data["lines"] = [{"item_id": l.item_id, "quantity": l.quantity, "sent_quantity": 0, "received_quantity": 0, "rate": l.rate or 0} for l in data.lines]
     
     if update_data:
         update_data["updated_at"] = datetime.now(timezone.utc)

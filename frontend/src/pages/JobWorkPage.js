@@ -191,6 +191,13 @@ export default function JobWorkPage() {
     const moNumbers = dc.order?.mo_numbers || [];
     const numMOs = moNumbers.length;
     
+    // Build clean part names from job_work_parts items
+    const partNames = jwParts.map(p => {
+      const pit = p.item || items.find(it => it.id === p.item_id) || {};
+      return pit.part_number ? `${pit.part_number} - ${pit.name || ''}` : '';
+    }).filter(Boolean);
+    const partTitle = partNames.length > 0 ? partNames.join(', ') : (parentItemName || '');
+    
     // RM lines
     const totalRMCost = dc.lines.reduce((s, l) => {
       const it = l.item || items.find(i => i.id === l.item_id);
@@ -259,7 +266,7 @@ export default function JobWorkPage() {
       </div>
     </div>
     
-    <div class="section-title">Job Work Part Details${parentItemName ? ` — ${parentItemName}` : ''}${numMOs > 1 ? ` (${numMOs} MOs)` : ''}</div>
+    <div class="section-title">Job Work Part Details${partTitle ? ` — ${partTitle}` : ''}${numMOs > 1 ? ` (${numMOs} MOs)` : ''}</div>
     <table>
       <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th class="text-right">QTY</th><th class="text-right">Charges</th><th class="text-right">Total Amount</th></tr></thead>
       <tbody>
