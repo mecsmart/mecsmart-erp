@@ -3778,17 +3778,31 @@ async def start_work_order(wo_id: str, request: Request):
     # Auto-create SC Order + DC for sub-contract MO
     auto_dc = None
     if wo.get("is_subcontract") and wo.get("subcontract_supplier_id"):
+        sc_type = wo.get("subcontract_type", "with_material")
+        wo_item_for_name = await db.items.find_one({"id": item_id}, {"_id": 0})
+        
         # For "without_material": SC order line = the finished item itself (no RM sent)
-        # For "with_material": SC order lines = consumed materials (RM sent to vendor)
+        # For "with_material": SC order lines = BOM materials (sent via DC later)
         if sc_type == "without_material":
-            wo_item = await db.items.find_one({"id": item_id}, {"_id": 0})
-            sc_material_lines = [{"item_id": item_id, "quantity": wo.get("quantity", 1), "unit_cost": wo_item.get("unit_cost", 0)}] if wo_item else []
+            sc_material_lines = [{"item_id": item_id, "quantity": wo.get("quantity", 1), "unit_cost": wo_item_for_name.get("unit_cost", 0)}] if wo_item_for_name else []
         else:
-            sc_material_lines = consumed_materials
-            if not sc_material_lines:
-                wo_item = await db.items.find_one({"id": item_id}, {"_id": 0})
-                if wo_item:
-                    sc_material_lines = [{"item_id": item_id, "quantity": wo.get("quantity", 1), "unit_cost": wo_item.get("unit_cost", 0)}]
+            # Get BOM materials for SC lines (not consumed yet, will be sent via DC)
+            sc_material_lines = []
+            if bom:
+                wo_qty = wo.get("quantity", 1)
+                for component in bom.get("components", []):
+                    if component.get("is_alternate"):
+                        continue
+                    comp_item_id = component.get("item_id")
+                    comp_item = await db.items.find_one({"id": comp_item_id}, {"_id": 0})
+                    if comp_item and comp_item.get("category") in ["raw_material", "component", "sub_assembly"]:
+                        sc_material_lines.append({
+                            "item_id": comp_item_id,
+                            "quantity": int(component.get("quantity", 1) * wo_qty),
+                            "unit_cost": comp_item.get("unit_cost", 0)
+                        })
+            if not sc_material_lines and wo_item_for_name:
+                sc_material_lines = [{"item_id": item_id, "quantity": wo.get("quantity", 1), "unit_cost": wo_item_for_name.get("unit_cost", 0)}]
         
         # Find or create a subcontract order — consolidate per supplier
         sc_order = await db.subcontract_orders.find_one({
@@ -3802,7 +3816,7 @@ async def start_work_order(wo_id: str, request: Request):
             existing_parts = sc_order.get("job_work_parts", [])
             existing_parts.append({"item_id": item_id, "quantity": wo.get("quantity", 1), "charges": 0, "received_quantity": 0})
             existing_lines = sc_order.get("lines", [])
-            for new_line in [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": (m["quantity"] if sc_type == "with_material" else 0), "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_material_lines]:
+            for new_line in [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": 0, "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_material_lines]:
                 found = False
                 for el in existing_lines:
                     if el["item_id"] == new_line["item_id"]:
@@ -3830,9 +3844,7 @@ async def start_work_order(wo_id: str, request: Request):
             sc_order_id = sc_order["id"]
         else:
             sc_count = await db.subcontract_orders.count_documents({})
-            # For without_material: sent_quantity=0 (nothing sent to vendor), they source themselves
-            sc_sent_qty = lambda m: m["quantity"] if sc_type == "with_material" else 0
-            wo_item_for_name = await db.items.find_one({"id": item_id}, {"_id": 0})
+            sc_sent_qty = lambda m: 0  # sent_quantity starts at 0, updated when DC is sent
             sc_order_doc = {
                 "id": str(uuid.uuid4()),
                 "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
@@ -3854,34 +3866,14 @@ async def start_work_order(wo_id: str, request: Request):
             sc_order_doc.pop("_id", None)
             sc_order_id = sc_order_doc["id"]
         
-        # Only create DC for "with_material" type (materials are physically sent)
-        # Create DC as draft - user will send from JW page
-        if sc_type == "with_material" and sc_material_lines:
-            dc_lines = [{"item_id": m["item_id"], "quantity": m["quantity"], "rate": m.get("unit_cost", 0)} for m in sc_material_lines]
-            dc_count = await db.delivery_challans.count_documents({})
-            dc_number = f"DC-{str(dc_count + 1).zfill(6)}"
-            dc_doc = {
-                "id": str(uuid.uuid4()),
-                "dc_number": dc_number,
-                "subcontract_order_id": sc_order_id,
-                "reference_wo_id": wo_id,
-                "lines": dc_lines,
-                "status": "draft",
-                "notes": f"Auto-DC for sub-contract MO {wo.get('wo_number')}",
-                "created_at": datetime.now(timezone.utc),
-                "created_by": user["id"]
-            }
-            await db.delivery_challans.insert_one(dc_doc)
-            dc_doc.pop("_id", None)
-            auto_dc = dc_doc
+        # NO auto-DC creation — DC is created only when user presses "Send DC" on SC order
     
     sc_type_label = f" ({sc_type.replace('_', ' ')})" if wo.get("is_subcontract") else ""
     return {
         "success": True,
-        "message": ("Work order started" + (", materials consumed" if consumed_materials else ", no materials consumed (without material SC)") + (" + DC created for sub-contract" if auto_dc else "") + sc_type_label),
+        "message": ("Work order started" + (", materials consumed" if consumed_materials else "") + (f" + SC order created{sc_type_label}" if wo.get("is_subcontract") else "")),
         "consumed_materials": consumed_materials,
-        "wo_number": wo.get("wo_number"),
-        "auto_dc": auto_dc
+        "wo_number": wo.get("wo_number")
     }
 
 
