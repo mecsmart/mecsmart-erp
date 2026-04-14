@@ -951,11 +951,19 @@ export default function ManufacturingPage() {
                     const ops = wo.operations_status || [];
                     const completedOps = ops.filter(op => op.status === 'completed').length;
                     const children = getChildMOs(wo.id);
-                    // Check if parent MO is reserved — hide reserve on children if so
-                    const parentMO = wo.parent_wo_id ? workOrders.find(w => w.id === wo.parent_wo_id) : null;
-                    const parentIsReserved = parentMO?.materials_reserved === true;
-                    const showReserve = canEdit && wo.status === 'pending' && !wo.materials_reserved && !parentIsReserved;
-                    const showUnreserve = canEdit && wo.status === 'pending' && wo.materials_reserved && !parentIsReserved;
+                    // Check if ANY ancestor MO is reserved — hide reserve on all descendants
+                    const ancestorIsReserved = (() => {
+                      let current = wo;
+                      while (current.parent_wo_id) {
+                        const parent = workOrders.find(w => w.id === current.parent_wo_id);
+                        if (!parent) break;
+                        if (parent.materials_reserved) return true;
+                        current = parent;
+                      }
+                      return false;
+                    })();
+                    const showReserve = canEdit && wo.status === 'pending' && !wo.materials_reserved && !ancestorIsReserved;
+                    const showUnreserve = canEdit && wo.status === 'pending' && wo.materials_reserved && !ancestorIsReserved;
                     return (
                       <React.Fragment key={wo.id}>
                         <tr className={`${depth > 0 ? 'bg-[#F9FAFB]' : ''} ${selectedMOs[wo.id] ? 'bg-[#E1EFFE]/40' : ''}`} data-testid={`wo-row-${wo.id}`}>
@@ -988,7 +996,7 @@ export default function ManufacturingPage() {
                               {showUnreserve && (
                                 <button onClick={() => handleReserveMaterials(wo.id, true)} className="btn-secondary text-xs px-2 py-1 text-[#9B1C1C] border-[#9B1C1C]" data-testid={`unreserve-wo-${wo.id}`}><PackageX className="w-3 h-3 inline mr-0.5" />Unreserve</button>
                               )}
-                              {canEdit && wo.status === 'pending' && !wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')} className="btn-secondary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Start</button>}
+                              {canEdit && wo.status === 'pending' && !wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')} className="btn-secondary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Inhouse Start</button>}
                               {canEdit && wo.status === 'pending' && wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')} className="btn-primary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Start SC</button>}
                               {canEdit && wo.status === 'in_progress' && !wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'completed')} className="btn-secondary text-xs px-2 py-1" data-testid={`complete-wo-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />Complete</button>}
                               {['in_progress','pending'].includes(wo.status) && ops.length > 0 && !wo.is_subcontract && <button onClick={() => openJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`jobcard-wo-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Job Card</button>}
