@@ -389,7 +389,7 @@ export default function JobWorkPage() {
                             <span className={`status-badge ${getStatusColor(o.status)}`}>{o.status.replace('_', ' ')}</span>
                             {o.subcontract_type === 'without_material' && <span className="ml-1 text-[9px] bg-[#E1EFFE] text-[#1D3557] px-1 rounded">No RM</span>}
                           </td>
-                          <td className="text-sm">{o.expected_return_date ? new Date(o.expected_return_date).toLocaleDateString() : '-'}</td>
+                          <td className="text-sm">{o.last_receipt_date ? new Date(o.last_receipt_date).toLocaleDateString() : o.expected_return_date ? new Date(o.expected_return_date).toLocaleDateString() : '-'}</td>
                           <td>
                             <div className="flex items-center space-x-1">
                               {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && (

@@ -3888,6 +3888,7 @@ async def start_work_order(wo_id: str, request: Request):
         
         # NO auto-DC creation — DC is created only when user presses "Send DC" on SC order
     
+    sc_type = wo.get("subcontract_type", "with_material")
     sc_type_label = f" ({sc_type.replace('_', ' ')})" if wo.get("is_subcontract") else ""
     return {
         "success": True,
@@ -5941,7 +5942,9 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
     
     new_status = "completed" if all_received and not has_rework else "in_progress"
     
-    update_fields = {"lines": order["lines"], "status": new_status}
+    update_fields = {"lines": order["lines"], "status": new_status, "last_receipt_date": datetime.now(timezone.utc).isoformat()}
+    if new_status == "completed":
+        update_fields["completed_at"] = datetime.now(timezone.utc).isoformat()
     if order.get("job_work_parts"):
         update_fields["job_work_parts"] = order["job_work_parts"]
     await db.subcontract_orders.update_one({"id": data.subcontract_order_id}, {"$set": update_fields})
