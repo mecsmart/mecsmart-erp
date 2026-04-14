@@ -11,7 +11,8 @@ import {
   Mail,
   MapPin,
   Filter,
-  X
+  X,
+  Search
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -21,6 +22,7 @@ export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  const [supplierSearch, setSupplierSearch] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState(null);
   
@@ -398,6 +400,10 @@ export default function SuppliersPage() {
             </button>
           )}
         </div>
+        <div className="relative w-72">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+          <input type="text" value={supplierSearch} onChange={(e) => setSupplierSearch(e.target.value)} placeholder="Search suppliers..." className="input-field pl-9 text-sm" data-testid="supplier-search-input" />
+        </div>
       </div>
 
       {/* Suppliers Grid */}
@@ -412,7 +418,11 @@ export default function SuppliersPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {suppliers.map((supplier) => (
+          {suppliers.filter(s => {
+            if (!supplierSearch.trim()) return true;
+            const q = supplierSearch.toLowerCase();
+            return s.name?.toLowerCase().includes(q) || s.code?.toLowerCase().includes(q) || s.contact_person?.toLowerCase().includes(q);
+          }).map((supplier) => (
             <div key={supplier.id} className="card-flat p-4" data-testid={`supplier-card-${supplier.code}`}>
               <div className="flex items-start justify-between mb-3">
                 <div>

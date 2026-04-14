@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
-import { Plus, FileText, CheckCircle2, DollarSign, X } from 'lucide-react';
+import { Plus, FileText, CheckCircle2, DollarSign, X, Search } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 
@@ -14,6 +14,7 @@ export default function PurchaseInvoicePage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  const [invoiceSearch, setInvoiceSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
     supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '',
@@ -141,6 +142,11 @@ export default function PurchaseInvoicePage() {
         {statusFilter && <button onClick={() => setStatusFilter('')} className="text-xs text-[#4B5563] hover:text-[#1D3557]">Clear</button>}
         <span className="text-xs text-[#6B7280]">{invoices.length} invoices</span>
         {pendingGRNs.length > 0 && <span className="text-xs text-[#723B13] bg-[#FDF6B2] px-2 py-0.5 rounded">{pendingGRNs.length} GRN(s) pending invoice</span>}
+        <div className="flex-1" />
+        <div className="relative w-72">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+          <input type="text" value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="Search invoice, supplier..." className="input-field pl-9 text-sm" data-testid="invoice-search-input" />
+        </div>
       </div>
 
       {/* KPI cards */}
@@ -162,7 +168,11 @@ export default function PurchaseInvoicePage() {
             <table className="w-full data-table" data-testid="invoice-table">
               <thead><tr><th>Invoice #</th><th>Supplier Inv.</th><th>Supplier</th><th>PO Ref</th><th>GRN Ref</th><th>Date</th><th>Due Date</th><th className="text-right">Amount</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
-                {invoices.map(inv => (
+                {invoices.filter(inv => {
+                  if (!invoiceSearch.trim()) return true;
+                  const q = invoiceSearch.toLowerCase();
+                  return inv.invoice_number?.toLowerCase().includes(q) || inv.invoice_no?.toLowerCase().includes(q) || inv.supplier?.name?.toLowerCase().includes(q);
+                }).map(inv => (
                   <tr key={inv.id} data-testid={`invoice-row-${inv.id}`}>
                     <td className="mono font-medium">{inv.invoice_number}</td>
                     <td className="mono">{inv.invoice_no}</td>

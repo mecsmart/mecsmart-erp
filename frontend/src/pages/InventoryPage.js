@@ -10,7 +10,8 @@ import {
   RotateCcw,
   AlertTriangle,
   Filter,
-  X
+  X,
+  Search
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -31,6 +32,7 @@ export default function InventoryPage() {
   const [activeTab, setActiveTab] = useState('stock');
   const [showLowStock, setShowLowStock] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [stockSearch, setStockSearch] = useState('');
   
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false);
   const [transactionForm, setTransactionForm] = useState({
@@ -284,6 +286,13 @@ export default function InventoryPage() {
             </div>
           </div>
 
+          <div className="card-flat p-3">
+            <div className="relative w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+              <input type="text" value={stockSearch} onChange={(e) => setStockSearch(e.target.value)} placeholder="Search by part number or name..." className="input-field pl-9 text-sm" data-testid="stock-search-input" />
+            </div>
+          </div>
+
           <div className="card-flat overflow-hidden">
             {loading ? (
               <div className="flex items-center justify-center h-48">
@@ -310,7 +319,11 @@ export default function InventoryPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {inventory.map((item) => (
+                    {inventory.filter(item => {
+                      if (!stockSearch.trim()) return true;
+                      const q = stockSearch.toLowerCase();
+                      return item.part_number?.toLowerCase().includes(q) || item.name?.toLowerCase().includes(q);
+                    }).map((item) => (
                       <tr key={item.id} className={isLowStock(item) ? 'bg-[#FDE8E8]/30' : ''} data-testid={`inventory-row-${item.part_number}`}>
                         <td className="mono font-medium">{item.part_number}</td>
                         <td>

@@ -31,8 +31,13 @@ const productionGroupItems = [
   { name: 'Manufacturing Orders', href: '/manufacturing', icon: Settings2, module: 'manufacturing' },
 ];
 
+const storesGroupItems = [
+  { name: 'Stock', href: '/warehouses?tab=stock', icon: Package, module: 'stores' },
+  { name: 'Transfer History', href: '/warehouses?tab=transfers', icon: Truck, module: 'stores' },
+  { name: 'GRN', href: '/warehouses?tab=grn', icon: FileText, module: 'stores' },
+];
+
 const afterGroupNavItems = [
-  { name: 'Stores', href: '/warehouses', icon: Warehouse, module: 'stores' },
   { name: 'Quality', href: '/quality', icon: ClipboardCheck, module: 'quality' },
   { name: 'Job Work', href: '/job-work', icon: Wrench, module: 'manufacturing' },
 ];
@@ -52,6 +57,9 @@ export default function Layout() {
   const [productionOpen, setProductionOpen] = useState(() => {
     return productionGroupItems.some(item => location.pathname === item.href);
   });
+  const [storesOpen, setStoresOpen] = useState(() => {
+    return location.pathname === '/warehouses';
+  });
 
   const canView = (module) => user?.role === 'admin' || hasPermission(module, 'view');
 
@@ -59,9 +67,11 @@ export default function Layout() {
   const filteredInventory = inventoryGroupItems.filter(item => canView(item.module));
   const filteredProduction = productionGroupItems.filter(item => canView(item.module));
   const filteredAfterGroup = afterGroupNavItems.filter(item => canView(item.module));
+  const filteredStores = storesGroupItems.filter(item => canView(item.module));
   const filteredBottom = bottomNavItems.filter(item => canView(item.module));
   const showInventoryGroup = filteredInventory.length > 0;
   const showProductionGroup = filteredProduction.length > 0;
+  const showStoresGroup = filteredStores.length > 0;
 
   const allNavItems = user?.role === 'admin'
     ? [...filteredBottom, { name: 'User Management', href: '/users', icon: Shield, module: 'users' }]
@@ -84,6 +94,7 @@ export default function Layout() {
 
   const isInventoryActive = inventoryGroupItems.some(item => location.pathname === item.href);
   const isProductionActive = productionGroupItems.some(item => location.pathname === item.href);
+  const isStoresActive = location.pathname === '/warehouses';
 
   const renderNavItem = (item) => (
     <li key={item.name}>
@@ -180,6 +191,42 @@ export default function Layout() {
                             onClick={() => setSidebarOpen(false)}
                             className={({ isActive }) =>
                               `flex items-center space-x-2 px-3 py-1.5 text-sm rounded-sm transition-colors ${isActive ? 'text-white bg-[#1D3557]' : 'text-[#9CA3AF] hover:text-white hover:bg-[#1F2937]'}`
+                            }
+                            data-testid={`nav-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
+                          >
+                            <item.icon className="w-4 h-4" />
+                            <span>{item.name}</span>
+                          </NavLink>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              )}
+
+              {/* Stores Group */}
+              {showStoresGroup && (
+                <li>
+                  <button
+                    onClick={() => setStoresOpen(!storesOpen)}
+                    className={`sidebar-link w-full justify-between ${isStoresActive ? 'text-white bg-[#1F2937]' : ''}`}
+                    data-testid="nav-stores-group"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Warehouse className="w-5 h-5" />
+                      <span>Stores</span>
+                    </div>
+                    {storesOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+                  {storesOpen && (
+                    <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
+                      {filteredStores.map(item => (
+                        <li key={item.name}>
+                          <NavLink
+                            to={item.href}
+                            onClick={() => setSidebarOpen(false)}
+                            className={({ isActive }) =>
+                              `flex items-center space-x-2 px-3 py-1.5 text-sm rounded-sm transition-colors ${location.pathname + location.search === item.href || (isActive && item.href.includes(location.search)) ? 'text-white bg-[#1D3557]' : 'text-[#9CA3AF] hover:text-white hover:bg-[#1F2937]'}`
                             }
                             data-testid={`nav-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
                           >

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
@@ -13,7 +14,9 @@ import {
   Eye,
   FileText,
   ClipboardCheck,
-  Printer
+  Printer,
+  Search,
+  AlertTriangle
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -23,11 +26,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 export default function WarehousesPage() {
   const { user } = useAuth();
   const { formatCurrency } = useCompanySettings();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [warehouses, setWarehouses] = useState([]);
   const [transfers, setTransfers] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('warehouses');
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'stock');
+  const [storesStockSearch, setStoresStockSearch] = useState('');
+  const [inventory, setInventory] = useState([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
   const [warehouseStock, setWarehouseStock] = useState([]);
   
@@ -74,18 +80,20 @@ export default function WarehousesPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [warehousesRes, transfersRes, itemsRes, grnRes, pendingRes] = await Promise.all([
+      const [warehousesRes, transfersRes, itemsRes, grnRes, pendingRes, inventoryRes] = await Promise.all([
         api.get('/api/warehouses'),
         api.get('/api/warehouses/transfers/history'),
         api.get('/api/items'),
         api.get('/api/grn'),
         api.get('/api/grn/pending-pos'),
+        api.get('/api/inventory'),
       ]);
       setWarehouses(warehousesRes.data);
       setTransfers(transfersRes.data);
       setItems(itemsRes.data);
       setGrnList(grnRes.data);
       setPendingPOs(pendingRes.data);
+      setInventory(inventoryRes.data);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -440,8 +448,15 @@ export default function WarehousesPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setSearchParams({ tab: v }); }} className="space-y-4">
         <TabsList className="bg-[#F3F4F6] p-1 rounded-sm">
+          <TabsTrigger 
+            value="stock" 
+            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
+            data-testid="tab-stock"
+          >
+            Stock
+          </TabsTrigger>
           <TabsTrigger 
             value="warehouses" 
             className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
@@ -464,6 +479,61 @@ export default function WarehousesPage() {
             GRN
           </TabsTrigger>
         </TabsList>
+
+        {/* Stock Tab - Inventory Overview */}
+        <TabsContent value="stock" className="mt-4">
+          <div className="card-flat p-3 mb-4">
+            <div className="relative w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+              <input type="text" value={storesStockSearch} onChange={(e) => setStoresStockSearch(e.target.value)} placeholder="Search by part number or name..." className="input-field pl-9 text-sm" data-testid="stores-stock-search" />
+            </div>
+          </div>
+          <div className="card-flat overflow-hidden">
+            {loading ? (
+              <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div></div>
+            ) : inventory.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><Package className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No stock items found</p></div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full data-table" data-testid="stores-stock-table">
+                  <thead>
+                    <tr>
+                      <th>Part Number</th><th>Name</th><th>Category</th>
+                      <th className="text-right">Current Stock</th><th className="text-right">Safety Stock</th>
+                      <th className="text-right">Reorder Point</th><th className="text-right">Unit Cost</th><th className="text-right">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inventory.filter(item => {
+                      if (!storesStockSearch.trim()) return true;
+                      const q = storesStockSearch.toLowerCase();
+                      return item.part_number?.toLowerCase().includes(q) || item.name?.toLowerCase().includes(q);
+                    }).map(item => {
+                      const isLow = item.current_stock <= (item.reorder_point || item.safety_stock || 0);
+                      return (
+                        <tr key={item.id} className={isLow ? 'bg-[#FDE8E8]/30' : ''} data-testid={`stores-stock-row-${item.part_number}`}>
+                          <td className="mono font-medium">{item.part_number}</td>
+                          <td>
+                            <div className="flex items-center space-x-2">
+                              {isLow && <AlertTriangle className="w-4 h-4 text-[#9B1C1C]" />}
+                              <span>{item.name}</span>
+                            </div>
+                          </td>
+                          <td><span className={`status-badge ${item.category === 'raw_material' ? 'bg-[#E1EFFE] text-[#1E429F]' : item.category === 'component' ? 'bg-[#DEF7EC] text-[#03543F]' : item.category === 'sub_assembly' ? 'bg-[#FDF6B2] text-[#723B13]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>{item.category?.replace('_', ' ')}</span></td>
+                          <td className={`text-right mono font-semibold ${isLow ? 'text-[#9B1C1C]' : ''}`}>{item.current_stock}</td>
+                          <td className="text-right mono">{item.safety_stock || '-'}</td>
+                          <td className="text-right mono">{item.reorder_point || '-'}</td>
+                          <td className="text-right mono">{formatCurrency(item.unit_cost || 0)}</td>
+                          <td className="text-right mono font-semibold">{formatCurrency((item.current_stock || 0) * (item.unit_cost || 0))}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </TabsContent>
 
         <TabsContent value="warehouses" className="mt-4">
           {loading ? (

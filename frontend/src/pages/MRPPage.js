@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
-import { Package, ShoppingCart, AlertTriangle, DollarSign, TrendingUp, ShoppingBag } from 'lucide-react';
+import { Package, ShoppingCart, AlertTriangle, DollarSign, TrendingUp, ShoppingBag, Search } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -21,6 +21,7 @@ export default function MRPPage() {
   const [poDialogOpen, setPODialogOpen] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState('');
   const [creating, setCreating] = useState(false);
+  const [mrpSearch, setMrpSearch] = useState('');
 
   useEffect(() => { fetchData(); }, [selectedPO]);
 
@@ -142,6 +143,13 @@ export default function MRPPage() {
         </div>
       </div>
 
+      <div className="card-flat p-3">
+        <div className="relative w-72">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+          <input type="text" value={mrpSearch} onChange={(e) => setMrpSearch(e.target.value)} placeholder="Search by part number or name..." className="input-field pl-9 text-sm" data-testid="mrp-search-input" />
+        </div>
+      </div>
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="bg-[#F3F4F6] p-1 rounded-sm">
           <TabsTrigger value="demand" className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium" data-testid="tab-demand">Material Demand</TabsTrigger>
@@ -183,7 +191,11 @@ export default function MRPPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {demand.map((d, index) => (
+                    {demand.filter(d => {
+                      if (!mrpSearch.trim()) return true;
+                      const q = mrpSearch.toLowerCase();
+                      return d.item?.part_number?.toLowerCase().includes(q) || d.item?.name?.toLowerCase().includes(q);
+                    }).map((d, index) => (
                       <tr key={index} className={d.po_status === 'po_sent' ? 'bg-[#DEF7EC]/30' : d.net_requirement > 0 ? 'bg-[#FDE8E8]/30' : ''} data-testid={`demand-row-${index}`}>
                         <td className="mono font-medium">{d.item?.part_number || '-'}</td>
                         <td>{d.item?.name || '-'}</td>
@@ -245,7 +257,11 @@ export default function MRPPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {suggestions.map((s, index) => (
+                    {suggestions.filter(s => {
+                      if (!mrpSearch.trim()) return true;
+                      const q = mrpSearch.toLowerCase();
+                      return s.item?.part_number?.toLowerCase().includes(q) || s.item?.name?.toLowerCase().includes(q);
+                    }).map((s, index) => (
                       <tr key={index} className={s.po_status === 'po_sent' ? 'bg-[#DEF7EC]/30' : selectedItems[s.item?.id] ? 'bg-[#E1EFFE]/30' : ''} data-testid={`suggestion-row-${index}`}>
                         <td><input type="checkbox" checked={!!selectedItems[s.item?.id]} onChange={() => toggleItem(s.item?.id, s)} disabled={s.po_status === 'po_sent'} className="rounded border-[#D1D5DB]" /></td>
                         <td className="mono font-medium">{s.item?.part_number || '-'}</td>

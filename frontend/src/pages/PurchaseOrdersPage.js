@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
   Plus, ShoppingCart, FileText, Filter, X, CheckCircle2, Send, 
-  Edit2, History, ChevronDown, ChevronUp, Trash2, Printer, XCircle
+  Edit2, History, ChevronDown, ChevronUp, Trash2, Printer, XCircle, Search
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -41,6 +41,7 @@ export default function PurchaseOrdersPage() {
   const [formData, setFormData] = useState({ ...emptyForm });
 
   const [allOrders, setAllOrders] = useState([]);
+  const [poSearch, setPoSearch] = useState('');
 
   const canEdit = ['admin', 'production_manager', 'inventory_manager'].includes(user?.role);
 
@@ -68,7 +69,11 @@ export default function PurchaseOrdersPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const filteredOrders = statusFilter ? allOrders.filter(po => po.status === statusFilter) : allOrders;
+  const filteredOrders = (statusFilter ? allOrders.filter(po => po.status === statusFilter) : allOrders).filter(po => {
+    if (!poSearch.trim()) return true;
+    const q = poSearch.toLowerCase();
+    return po.po_number?.toLowerCase().includes(q) || po.supplier?.name?.toLowerCase().includes(q) || po.lines?.some(l => l.item?.part_number?.toLowerCase().includes(q) || l.item?.name?.toLowerCase().includes(q));
+  });
 
   const openCreateDialog = () => {
     setEditingPO(null);
@@ -249,6 +254,11 @@ export default function PurchaseOrdersPage() {
               <X className="w-4 h-4" /><span>Clear</span>
             </button>
           )}
+          <div className="flex-1" />
+          <div className="relative w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+            <input type="text" value={poSearch} onChange={(e) => setPoSearch(e.target.value)} placeholder="Search PO, supplier, item..." className="input-field pl-9 text-sm" data-testid="po-search-input" />
+          </div>
         </div>
       </div>
 

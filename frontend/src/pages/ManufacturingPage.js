@@ -17,7 +17,8 @@ import {
   RotateCcw,
   XCircle,
   Truck,
-  ChevronRight
+  ChevronRight,
+  Search
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -41,6 +42,7 @@ export default function ManufacturingPage() {
   const [jobCardWO, setJobCardWO] = useState(null);
   const [editingWorkCenter, setEditingWorkCenter] = useState(null);
   const [woStatusFilter, setWoStatusFilter] = useState('');
+  const [moSearch, setMoSearch] = useState('');
   
   // Operation start/stop dialog
   const [opDialog, setOpDialog] = useState({ open: false, mode: '', sequence: 0 });
@@ -464,9 +466,13 @@ export default function ManufacturingPage() {
     return '#D1D5DB';
   };
 
-  const filteredWorkOrders = woStatusFilter
+  const filteredWorkOrders = (woStatusFilter
     ? workOrders.filter(wo => wo.status === woStatusFilter)
-    : workOrders;
+    : workOrders).filter(wo => {
+      if (!moSearch.trim()) return true;
+      const q = moSearch.toLowerCase();
+      return wo.wo_number?.toLowerCase().includes(q) || wo.item?.part_number?.toLowerCase().includes(q) || wo.item?.name?.toLowerCase().includes(q);
+    });
 
   const printWorkOrder = async (wo) => {
     try {
@@ -718,6 +724,11 @@ export default function ManufacturingPage() {
               )}
               <span className="text-xs text-[#6B7280]">{filteredWorkOrders.length} of {workOrders.length} orders</span>
             </div>
+            <div className="flex items-center gap-2">
+              <div className="relative w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+                <input type="text" value={moSearch} onChange={(e) => setMoSearch(e.target.value)} placeholder="Search MO, item..." className="input-field pl-9 text-sm" data-testid="mo-search-input" />
+              </div>
             {canEdit && (
               <Dialog open={isWorkOrderDialogOpen} onOpenChange={setIsWorkOrderDialogOpen}>
                 <DialogTrigger asChild>
@@ -895,6 +906,7 @@ export default function ManufacturingPage() {
                 </DialogContent>
               </Dialog>
             )}
+            </div>
           </div>
 
           <div className="card-flat overflow-hidden">
@@ -1013,7 +1025,11 @@ export default function ManufacturingPage() {
 
         {/* Routings Tab */}
         <TabsContent value="routings" className="mt-4">
-          <div className="flex justify-end mb-4">
+          <div className="flex items-center justify-between mb-4">
+            <div className="relative w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+              <input type="text" value={moSearch} onChange={(e) => setMoSearch(e.target.value)} placeholder="Search routings..." className="input-field pl-9 text-sm" data-testid="routing-search-input" />
+            </div>
             {canEdit && (
               <Dialog open={isRoutingDialogOpen} onOpenChange={setIsRoutingDialogOpen}>
                 <DialogTrigger asChild>
@@ -1276,7 +1292,11 @@ export default function ManufacturingPage() {
                       { key: 'sub_assembly', label: 'Sub-Assemblies (SA)', color: '#1E429F' },
                       { key: 'component', label: 'Parts / Components', color: '#723B13' },
                     ].map(group => {
-                      const groupRoutings = routings.filter(r => r.item?.category === group.key);
+                      const groupRoutings = routings.filter(r => r.item?.category === group.key).filter(r => {
+                        if (!moSearch.trim()) return true;
+                        const q = moSearch.toLowerCase();
+                        return r.name?.toLowerCase().includes(q) || r.item?.part_number?.toLowerCase().includes(q) || r.item?.name?.toLowerCase().includes(q);
+                      });
                       if (groupRoutings.length === 0) return null;
                       return (
                         <details key={group.key} open className="border rounded-sm overflow-hidden">
