@@ -3162,7 +3162,7 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
                     "dc_number": f"DC-{str(dc_count + 1).zfill(6)}",
                     "subcontract_order_id": sc_doc["id"],
                     "lines": dc_lines,
-                    "status": "sent",
+                    "status": "draft",
                     "notes": f"Auto-DC for direct SC {sc_doc['order_number']}",
                     "created_at": datetime.now(timezone.utc),
                     "created_by": user["id"]
@@ -3300,7 +3300,7 @@ async def bulk_subcontract(request: Request, data: dict = Body(...)):
             "dc_number": f"DC-{str(dc_count + 1).zfill(6)}",
             "subcontract_order_id": sc_doc["id"],
             "lines": dc_lines,
-            "status": "sent",
+            "status": "draft",
             "notes": f"Bulk DC for MOs: {', '.join(mo_numbers)}",
             "created_at": datetime.now(timezone.utc),
             "created_by": user["id"]
@@ -3724,7 +3724,7 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
                                 "subcontract_order_id": sc_doc["id"],
                                 "reference_wo_id": wo_id,
                                 "lines": dc_lines,
-                                "status": "sent",
+                                "status": "draft",
                                 "notes": f"Auto-DC for sub-contract MO {updated_wo_fresh.get('wo_number')}",
                                 "created_at": datetime.now(timezone.utc),
                                 "created_by": user["id"]
@@ -3834,7 +3834,7 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                     "subcontract_order_id": sc_order_doc["id"],
                     "reference_wo_id": wo_id,
                     "lines": dc_lines,
-                    "status": "sent",
+                    "status": "draft",
                     "notes": f"Auto-DC for outsourced operation: {target_op.get('operation_name')}",
                     "created_at": datetime.now(timezone.utc),
                     "created_by": user["id"]
