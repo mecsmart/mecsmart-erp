@@ -1278,6 +1278,9 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
     Only Raw Materials are returned."""
     await get_current_user(request)
     
+    # Recalculate reservations based on current stock first
+    await recalculate_all_reservations()
+    
     query = {"status": {"$in": ["confirmed", "planned", "released", "in_progress"]}}
     if production_order_id:
         query["id"] = production_order_id
@@ -2975,9 +2978,65 @@ async def update_routing(routing_id: str, routing_data: RoutingUpdate, request: 
 
 # ================== WORK ORDER ROUTES ==================
 
+async def recalculate_all_reservations():
+    """Recalculate allocated_qty and shortfall_qty for ALL reserved MOs based on current stock.
+    Uses FIFO (reserved_at order) to allocate stock fairly."""
+    reserved_mos = await db.work_orders.find(
+        {"materials_reserved": True, "status": {"$in": ["pending", "in_progress"]}},
+        {"_id": 0}
+    ).sort("reserved_at", 1).to_list(5000)  # FIFO by reservation time
+    
+    if not reserved_mos:
+        return
+    
+    # Get current stock for all RM items across all reservations
+    all_rm_ids = set()
+    for mo in reserved_mos:
+        for rm in mo.get("reserved_materials", []):
+            all_rm_ids.add(rm.get("item_id"))
+    
+    stock_map = {}
+    for rid in all_rm_ids:
+        item = await db.items.find_one({"id": rid}, {"_id": 0, "id": 1, "current_stock": 1})
+        if item:
+            stock_map[rid] = item.get("current_stock", 0)
+    
+    # Remaining pool per item (starts at current stock, decremented as we allocate FIFO)
+    remaining = dict(stock_map)
+    
+    for mo in reserved_mos:
+        updated_materials = []
+        total_shortfall = 0
+        changed = False
+        for rm in mo.get("reserved_materials", []):
+            rid = rm.get("item_id")
+            needed = rm.get("quantity", 0)
+            avail = max(0, remaining.get(rid, 0))
+            new_alloc = min(avail, needed)
+            new_shortfall = max(0, needed - new_alloc)
+            remaining[rid] = remaining.get(rid, 0) - new_alloc
+            
+            if rm.get("allocated_qty") != new_alloc or rm.get("shortfall_qty") != new_shortfall:
+                changed = True
+            
+            rm_copy = dict(rm)
+            rm_copy["allocated_qty"] = new_alloc
+            rm_copy["shortfall_qty"] = new_shortfall
+            updated_materials.append(rm_copy)
+            total_shortfall += new_shortfall
+        
+        if changed:
+            await db.work_orders.update_one({"id": mo["id"]}, {"$set": {
+                "reserved_materials": updated_materials,
+                "reservation_shortfall": total_shortfall
+            }})
+
+
 @work_orders_router.get("")
 async def get_work_orders(request: Request, status: Optional[str] = None, production_order_id: Optional[str] = None):
     await get_current_user(request)
+    # Recalculate reservations based on current stock before returning
+    await recalculate_all_reservations()
     query = {}
     if status:
         query["status"] = status
