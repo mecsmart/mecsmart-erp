@@ -222,7 +222,13 @@ export default function ManufacturingPage() {
         alert('Material reservation removed.');
       } else {
         const { data } = await api.post(`/api/work-orders/${woId}/reserve`);
-        alert(`${data.message}\n\n${data.reserved_materials?.map(m => `- ${m.part_number} (${m.category?.replace('_',' ')}): ${m.quantity} ${m.uom}`).join('\n') || ''}`);
+        const lines = data.reserved_materials?.map(m => {
+          let line = `- ${m.part_number}: need ${m.quantity} ${m.uom}`;
+          if (m.shortfall_qty > 0) line += ` | Allocated: ${m.allocated_qty}, SHORTFALL: ${m.shortfall_qty}`;
+          else line += ` | Fully allocated from stock`;
+          return line;
+        }).join('\n') || '';
+        alert(`${data.message}\n\n${lines}`);
       }
       fetchData();
     } catch (error) {
@@ -986,7 +992,11 @@ export default function ManufacturingPage() {
                           <td>
                             <span className={`status-badge ${getStatusColor(wo.status)}`}>{wo.status?.replace('_',' ')}</span>
                             {wo.is_subcontract && <span className="ml-1 text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">SC{wo.subcontract_type === 'without_material' ? ' (No RM)' : ''}</span>}
-                            {wo.materials_reserved && <span className="ml-1 text-[10px] bg-[#DEF7EC] text-[#03543F] px-1 rounded">Reserved</span>}
+                            {wo.materials_reserved && (
+                              wo.reservation_shortfall > 0 
+                                ? <span className="ml-1 text-[10px] bg-[#FDE8E8] text-[#9B1C1C] px-1 rounded">Reserved (Shortfall)</span>
+                                : <span className="ml-1 text-[10px] bg-[#DEF7EC] text-[#03543F] px-1 rounded">Reserved</span>
+                            )}
                           </td>
                           <td>
                             <div className="flex items-center flex-wrap gap-1">

@@ -1284,26 +1284,28 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
     
     orders = await db.production_orders.find(query, {"_id": 0}).to_list(1000)
     
-    # Step 1: Find which SOs already have reserved MOs (fully covered)
+    # Step 1: Compute reservation data from ALL reserved MOs
     reserved_mos = await db.work_orders.find(
         {"materials_reserved": True, "status": {"$in": ["pending", "in_progress"]}},
         {"_id": 0, "reserved_materials": 1, "production_order_id": 1, "quantity": 1}
     ).to_list(5000)
     
-    # Track reserved qty per SO — an SO may have partial reservation
-    so_reserved_qty = {}  # production_order_id -> total reserved MO qty
+    # SOs fully covered by reserved MOs → skip from gross demand
+    so_reserved_qty = {}
     for mo in reserved_mos:
         po_id = mo.get("production_order_id")
         if po_id:
             so_reserved_qty[po_id] = so_reserved_qty.get(po_id, 0) + mo.get("quantity", 0)
     
-    # Total reserved RM qty across all reserved MOs
-    reserved_stock = {}  # item_id -> total qty reserved
+    # Per-RM: total allocated (locked stock) and total shortfall (purchase need)
+    total_allocated = {}   # item_id -> stock locked by reservations
+    total_shortfall = {}   # item_id -> shortfall needing purchase
     for mo in reserved_mos:
         for rm in mo.get("reserved_materials", []):
             rid = rm.get("item_id")
             if rid:
-                reserved_stock[rid] = reserved_stock.get(rid, 0) + rm.get("quantity", 0)
+                total_allocated[rid] = total_allocated.get(rid, 0) + rm.get("allocated_qty", 0)
+                total_shortfall[rid] = total_shortfall.get(rid, 0) + rm.get("shortfall_qty", 0)
     
     # Cache
     item_cache = {}
@@ -1348,7 +1350,9 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                         "gross_requirement": 0,
                         "on_hand": comp_item.get("current_stock", 0),
                         "safety_stock": comp_item.get("safety_stock", 0),
-                        "reserved_for_mo": reserved_stock.get(comp_item_id, 0),
+                        "allocated_for_mo": total_allocated.get(comp_item_id, 0),
+                        "shortfall_from_mo": total_shortfall.get(comp_item_id, 0),
+                        "reserved_for_mo": total_allocated.get(comp_item_id, 0) + total_shortfall.get(comp_item_id, 0),
                         "net_requirement": 0,
                         "orders": []
                     }
@@ -1381,14 +1385,17 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
         if parent_item_id:
             await explode_all_rm(parent_item_id, unreserved_qty, order)
     
-    # Step 3: Net = Gross - max(Stock - Reserved - Safety, 0)
+    # Step 3: Net = reservation shortfall + unreserved SO shortfall
+    # Available for unreserved SOs = Stock - Allocated(locked) - Safety
     for item_id, data in rm_demand.items():
-        available = data["on_hand"] - data["reserved_for_mo"] - data["safety_stock"]
-        data["net_requirement"] = max(0, data["gross_requirement"] - max(available, 0))
+        available_for_new = max(0, data["on_hand"] - data["allocated_for_mo"] - data["safety_stock"])
+        unreserved_shortfall = max(0, data["gross_requirement"] - available_for_new)
+        reservation_shortfall = data["shortfall_from_mo"]
+        data["net_requirement"] = reservation_shortfall + unreserved_shortfall
         
         if data["net_requirement"] > 0:
             shortage_orders = []
-            running_available = max(available, 0)
+            running_available = max(available_for_new, 0)
             for order_entry in data["orders"]:
                 qty_needed = order_entry.get("quantity_needed", 0)
                 if running_available >= qty_needed:
@@ -1398,6 +1405,23 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                     running_available = 0
             data["orders"] = shortage_orders
     
+    # Step 3b: Also add RM items that have reservation shortfall but no unreserved SO demand
+    for item_id, sf_qty in total_shortfall.items():
+        if sf_qty > 0 and item_id not in rm_demand:
+            item = await get_item(item_id)
+            if item and item.get("category") == "raw_material":
+                rm_demand[item_id] = {
+                    "item": item,
+                    "gross_requirement": 0,
+                    "on_hand": item.get("current_stock", 0),
+                    "safety_stock": item.get("safety_stock", 0),
+                    "allocated_for_mo": total_allocated.get(item_id, 0),
+                    "shortfall_from_mo": sf_qty,
+                    "reserved_for_mo": total_allocated.get(item_id, 0) + sf_qty,
+                    "net_requirement": sf_qty,
+                    "orders": [{"order_id": "reservation", "order_number": "MO Reservation Shortfall", "quantity_needed": sf_qty}]
+                }
+
     # Step 4: Filter and enrich with PO status
     result = []
     for d in rm_demand.values():
@@ -3417,20 +3441,77 @@ async def reserve_materials_for_wo(wo_id: str, request: Request):
     
     await collect_bom_materials(item_id, wo_qty)
     
-    # Only keep raw_material items in reservation
-    rm_reserved = [r for r in reserved if r.get("category") == "raw_material"]
+    # Only keep raw_material items
+    rm_needed = [r for r in reserved if r.get("category") == "raw_material"]
+    
+    # Consolidate duplicates (same RM may appear from different BOM paths)
+    consolidated = {}
+    for r in rm_needed:
+        rid = r["item_id"]
+        if rid in consolidated:
+            consolidated[rid]["quantity"] += r["quantity"]
+        else:
+            consolidated[rid] = dict(r)
+    rm_needed = list(consolidated.values())
+    
+    # Calculate already-allocated stock from OTHER reserved MOs (FIFO priority)
+    other_reserved = await db.work_orders.find(
+        {"materials_reserved": True, "id": {"$ne": wo_id}, "status": {"$in": ["pending", "in_progress"]}},
+        {"_id": 0, "reserved_materials": 1}
+    ).to_list(5000)
+    already_allocated = {}  # item_id -> qty already locked by other MOs
+    for other_mo in other_reserved:
+        for orm in other_mo.get("reserved_materials", []):
+            orid = orm.get("item_id")
+            if orid:
+                already_allocated[orid] = already_allocated.get(orid, 0) + orm.get("allocated_qty", 0)
+    
+    # Allocate from available stock (stock - already_allocated_by_others)
+    rm_reserved = []
+    shortfall_items = []
+    for r in rm_needed:
+        rid = r["item_id"]
+        item = await db.items.find_one({"id": rid}, {"_id": 0})
+        current_stock = item.get("current_stock", 0) if item else 0
+        other_alloc = already_allocated.get(rid, 0)
+        available = max(0, current_stock - other_alloc)
+        needed = r["quantity"]
+        allocated = min(available, needed)
+        shortfall = max(0, needed - allocated)
+        
+        entry = {
+            "item_id": rid,
+            "part_number": r.get("part_number", ""),
+            "name": r.get("name", ""),
+            "category": "raw_material",
+            "quantity": needed,
+            "allocated_qty": allocated,
+            "shortfall_qty": shortfall,
+            "uom": r.get("uom", "pcs")
+        }
+        rm_reserved.append(entry)
+        if shortfall > 0:
+            shortfall_items.append(f"{r.get('part_number','')}: need {needed}, allocated {allocated}, shortfall {shortfall}")
+    
+    total_shortfall = sum(r["shortfall_qty"] for r in rm_reserved)
     
     await db.work_orders.update_one({"id": wo_id}, {"$set": {
         "materials_reserved": True,
         "reserved_materials": rm_reserved,
+        "reservation_shortfall": total_shortfall,
         "reserved_at": datetime.now(timezone.utc),
         "reserved_by": user["id"]
     }})
     
+    msg = f"Materials reserved for {wo.get('wo_number')} ({len(rm_reserved)} RM items)"
+    if total_shortfall > 0:
+        msg += f"\n\nShortfall (purchase needed):\n" + "\n".join(shortfall_items)
+    
     return {
         "success": True,
-        "message": f"Materials reserved for {wo.get('wo_number')} ({len(rm_reserved)} RM items)",
-        "reserved_materials": rm_reserved
+        "message": msg,
+        "reserved_materials": rm_reserved,
+        "total_shortfall": total_shortfall
     }
 
 
