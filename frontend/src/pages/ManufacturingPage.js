@@ -48,6 +48,9 @@ export default function ManufacturingPage() {
   
   // Operation start/stop dialog
   const [opDialog, setOpDialog] = useState({ open: false, mode: '', sequence: 0 });
+  
+  // MO Start result dialog (replaces browser alert)
+  const [startResultDialog, setStartResultDialog] = useState({ open: false, success: null, data: null });
   const [opForm, setOpForm] = useState({ operator: '', quantity: 0, quality_result: 'accept', reject_qty: 0, rework_qty: 0, notes: '', is_outsource: false, outsource_supplier_id: '', outsource_charges: 0 });
 
   // Subcontract dialog
@@ -194,14 +197,16 @@ export default function ManufacturingPage() {
   const handleUpdateWorkOrderStatus = async (woId, newStatus) => {
     try {
       if (newStatus === 'in_progress') {
-        // Use the start endpoint which consumes materials
         const { data } = await api.post(`/api/work-orders/${woId}/start`);
-        if (data.success === false) {
-          const insuffList = data.insufficient_materials?.map(m => `- ${m.item} - ${m.name || ''}: need ${m.required}, have ${m.available}`).join('\n') || '';
-          alert(`Cannot start manufacturing order: ${data.message}\n\n${insuffList ? `Insufficient materials:\n${insuffList}\n\n` : ''}Tip: If outsourcing, mark as SC "Without Material" so vendor sources their own RM.`);
+        if (data.reserved_conflicts) {
+          setStartResultDialog({ open: true, success: false, data: { type: 'reserved', message: data.message, conflicts: data.reserved_conflicts } });
           return;
         }
-        alert(`Manufacturing order started!\n\nMaterials consumed:\n${data.consumed_materials?.map(m => `- ${m.item} - ${m.name || ''}: ${m.quantity} ${m.uom || 'pcs'}`).join('\n') || 'None'}`);
+        if (data.success === false) {
+          setStartResultDialog({ open: true, success: false, data: { type: 'insufficient', message: data.message, materials: data.insufficient_materials } });
+          return;
+        }
+        setStartResultDialog({ open: true, success: true, data: { message: 'Manufacturing order started!', consumed: data.consumed_materials } });
       } else {
         await api.put(`/api/work-orders/${woId}`, { status: newStatus });
         if (newStatus === 'completed') {
@@ -1943,6 +1948,83 @@ export default function ManufacturingPage() {
             <div className="flex justify-end space-x-3 pt-3 border-t">
               <button onClick={() => setBulkSCDialog(false)} className="btn-secondary">Cancel</button>
               <button onClick={handleBulkSC} className="btn-primary" disabled={!bulkSCSupplier} data-testid="confirm-bulk-sc-btn">Create Bulk SC</button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* MO Start Result Dialog */}
+      <Dialog open={startResultDialog.open} onOpenChange={(o) => { if (!o) setStartResultDialog({ open: false, success: null, data: null }); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-[Chivo] flex items-center gap-2">
+              {startResultDialog.success ? (
+                <><CheckCircle2 className="w-5 h-5 text-[#03543F]" /> Manufacturing Order Started</>
+              ) : startResultDialog.data?.type === 'reserved' ? (
+                <><AlertCircle className="w-5 h-5 text-[#9B1C1C]" /> Materials Reserved by Other MOs</>
+              ) : (
+                <><AlertCircle className="w-5 h-5 text-[#9B1C1C]" /> Insufficient Materials</>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-3 space-y-3">
+            {startResultDialog.success && startResultDialog.data && (
+              <>
+                <p className="text-sm text-[#03543F] font-medium">{startResultDialog.data.message}</p>
+                <div className="bg-[#F3F4F6] rounded p-3 max-h-48 overflow-y-auto">
+                  <p className="text-xs font-semibold mb-2 text-[#4B5563]">Materials Consumed:</p>
+                  {(startResultDialog.data.consumed || []).map((m, i) => (
+                    <div key={i} className="text-sm flex justify-between py-0.5 border-b border-[#E5E7EB] last:border-0">
+                      <span className="mono text-xs">{m.item} - {m.name || ''}</span>
+                      <span className="mono font-medium">{m.quantity} {m.uom || 'pcs'}</span>
+                    </div>
+                  ))}
+                  {(!startResultDialog.data.consumed || startResultDialog.data.consumed.length === 0) && <p className="text-xs text-[#9CA3AF]">No materials consumed</p>}
+                </div>
+              </>
+            )}
+            {!startResultDialog.success && startResultDialog.data?.type === 'reserved' && (
+              <>
+                <p className="text-sm text-[#9B1C1C] font-medium">{startResultDialog.data.message}</p>
+                <div className="bg-[#FDE8E8]/50 rounded p-3 max-h-60 overflow-y-auto">
+                  <p className="text-xs font-semibold mb-2 text-[#9B1C1C]">Reservation Conflicts:</p>
+                  <table className="w-full text-xs">
+                    <thead><tr className="text-[#4B5563]"><th className="text-left py-1">Item</th><th className="text-right">Need</th><th className="text-right">Stock</th><th className="text-right">Reserved</th><th className="text-right">Free</th><th className="text-left pl-2">Reserved By</th></tr></thead>
+                    <tbody>
+                      {(startResultDialog.data.conflicts || []).map((c, i) => (
+                        <tr key={i} className="border-t border-[#FECACA]">
+                          <td className="py-1 mono font-medium">{c.item} <span className="text-[#6B7280] font-normal">{c.name}</span></td>
+                          <td className="text-right mono">{c.required}</td>
+                          <td className="text-right mono">{c.total_stock}</td>
+                          <td className="text-right mono text-[#9B1C1C] font-bold">{c.reserved_by}</td>
+                          <td className="text-right mono">{c.free_stock}</td>
+                          <td className="pl-2 text-[#723B13]">{c.reserved_mos}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-[#6B7280]">Reserve this MO first, or wait until reserved stock is consumed by the other MOs.</p>
+              </>
+            )}
+            {!startResultDialog.success && startResultDialog.data?.type === 'insufficient' && (
+              <>
+                <p className="text-sm text-[#9B1C1C] font-medium">{startResultDialog.data.message}</p>
+                <div className="bg-[#FDE8E8]/50 rounded p-3 max-h-48 overflow-y-auto">
+                  <p className="text-xs font-semibold mb-2 text-[#9B1C1C]">Insufficient Materials:</p>
+                  {(startResultDialog.data.materials || []).map((m, i) => (
+                    <div key={i} className="text-sm flex justify-between py-0.5 border-b border-[#FECACA] last:border-0">
+                      <span className="mono text-xs">{m.item} - {m.name || ''}</span>
+                      <span className="mono">Need: <span className="font-bold">{m.required}</span>, Have: <span className={m.available < m.required ? 'text-[#9B1C1C] font-bold' : ''}>{m.available}</span></span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            <div className="flex justify-end pt-3 border-t">
+              <button onClick={() => setStartResultDialog({ open: false, success: null, data: null })} className={startResultDialog.success ? 'btn-primary' : 'btn-secondary'} data-testid="mo-start-result-close">
+                {startResultDialog.success ? 'OK' : 'Cancel'}
+              </button>
             </div>
           </div>
         </DialogContent>

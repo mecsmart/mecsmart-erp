@@ -3566,11 +3566,64 @@ async def start_work_order(wo_id: str, request: Request):
     
     consumed_materials = []
     insufficient_materials = []
+    reserved_conflicts = []
     
     # Skip material consumption only for "without_material" subcontract
-    # For "with_material" SC: consume RM from stock (RM is sent to vendor via DC)
     sc_type = wo.get("subcontract_type", "with_material")
     skip_material_consumption = wo.get("is_subcontract") and sc_type == "without_material"
+    
+    # Check if materials are reserved by OTHER MOs
+    if not wo.get("materials_reserved"):
+        other_reserved_mos = await db.work_orders.find(
+            {"materials_reserved": True, "id": {"$ne": wo_id}, "status": {"$in": ["pending", "in_progress"]}},
+            {"_id": 0, "wo_number": 1, "reserved_materials": 1}
+        ).to_list(5000)
+        
+        # Build map: item_id -> [{mo_number, allocated_qty}]
+        reserved_by_others = {}
+        for other_mo in other_reserved_mos:
+            for rm in other_mo.get("reserved_materials", []):
+                rid = rm.get("item_id")
+                alloc = rm.get("allocated_qty", 0)
+                if rid and alloc > 0:
+                    if rid not in reserved_by_others:
+                        reserved_by_others[rid] = {"total": 0, "mos": []}
+                    reserved_by_others[rid]["total"] += alloc
+                    reserved_by_others[rid]["mos"].append({"mo": other_mo.get("wo_number"), "qty": alloc})
+        
+        # Check each BOM component against reserved stock
+        if bom and not skip_material_consumption:
+            wo_qty_check = wo.get("quantity", 1)
+            for component in bom.get("components", []):
+                if component.get("is_alternate"):
+                    continue
+                comp_item_id = component.get("item_id")
+                comp_item = await db.items.find_one({"id": comp_item_id}, {"_id": 0})
+                if not comp_item or comp_item.get("category") not in ["raw_material", "component", "sub_assembly"]:
+                    continue
+                required_qty = int(component.get("quantity", 1) * wo_qty_check)
+                current_stock = comp_item.get("current_stock", 0)
+                reserved_info = reserved_by_others.get(comp_item_id)
+                if reserved_info:
+                    free_stock = max(0, current_stock - reserved_info["total"])
+                    if free_stock < required_qty:
+                        mo_details = ", ".join([f"{m['mo']}({m['qty']})" for m in reserved_info["mos"]])
+                        reserved_conflicts.append({
+                            "item": comp_item.get("part_number"),
+                            "name": comp_item.get("name"),
+                            "required": required_qty,
+                            "total_stock": current_stock,
+                            "reserved_by": reserved_info["total"],
+                            "free_stock": free_stock,
+                            "reserved_mos": mo_details
+                        })
+        
+        if reserved_conflicts:
+            return {
+                "success": False,
+                "message": "Cannot start — materials are reserved by other MOs. Reserve this MO first or wait for stock.",
+                "reserved_conflicts": reserved_conflicts
+            }
     
     if bom and not skip_material_consumption:
         wo_qty = wo.get("quantity", 1)
