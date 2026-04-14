@@ -3823,9 +3823,18 @@ async def start_work_order(wo_id: str, request: Request):
         
         sc_order_id = ""
         if sc_order:
-            # Consolidate: add this MO's parts + lines to existing SC order
+            # Consolidate: merge same-item parts (update qty), merge RM lines
             existing_parts = sc_order.get("job_work_parts", [])
-            existing_parts.append({"item_id": item_id, "quantity": wo.get("quantity", 1), "charges": 0, "received_quantity": 0})
+            # Check if same item already exists in parts — merge qty
+            part_found = False
+            for ep in existing_parts:
+                if ep.get("item_id") == item_id:
+                    ep["quantity"] = ep.get("quantity", 0) + wo.get("quantity", 1)
+                    part_found = True
+                    break
+            if not part_found:
+                existing_parts.append({"item_id": item_id, "quantity": wo.get("quantity", 1), "charges": 0, "received_quantity": 0})
+            
             existing_lines = sc_order.get("lines", [])
             for new_line in [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": 0, "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_material_lines]:
                 found = False
@@ -5937,29 +5946,32 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
         update_fields["job_work_parts"] = order["job_work_parts"]
     await db.subcontract_orders.update_one({"id": data.subcontract_order_id}, {"$set": update_fields})
     
-    # If SC order completed and linked to a WO operation, update that operation
-    if new_status == "completed" and order.get("reference_wo_id"):
-        ref_wo_id = order["reference_wo_id"]
-        ref_seq = order.get("reference_operation_seq")
-        ref_wo = await db.work_orders.find_one({"id": ref_wo_id})
-        if ref_wo:
+    # If SC order completed, complete ALL linked MOs
+    if new_status == "completed":
+        # Collect all linked WO IDs
+        all_wo_ids = list(set(filter(None, [
+            order.get("reference_wo_id"),
+            *(order.get("reference_wo_ids", []))
+        ])))
+        
+        for ref_wo_id in all_wo_ids:
+            ref_wo = await db.work_orders.find_one({"id": ref_wo_id})
+            if not ref_wo or ref_wo.get("status") == "completed":
+                continue
+            
             ops = ref_wo.get("operations_status", [])
-            updated_ops = False
+            ref_seq = order.get("reference_operation_seq")
             
             if ref_seq:
-                # Operation-level outsource: update the specific operation
                 for op in ops:
                     if op.get("sequence") == ref_seq:
                         op["outsource_status"] = "received"
                         op["status"] = "completed"
                         op["actual_end"] = datetime.now(timezone.utc)
-                        total_recv = sum(ol.get("received_quantity", 0) for ol in order.get("lines", []))
-                        op["quantity_completed"] = ref_wo.get("quantity", total_recv)
-                        op["quantity_accepted"] = ref_wo.get("quantity", total_recv)
-                        updated_ops = True
+                        op["quantity_completed"] = ref_wo.get("quantity", 0)
+                        op["quantity_accepted"] = ref_wo.get("quantity", 0)
                         break
             else:
-                # Check for operation-level match by SC order ID
                 for op in ops:
                     if op.get("is_job_work") and op.get("outsource_sc_order_id") == data.subcontract_order_id:
                         op["outsource_status"] = "received"
@@ -5967,10 +5979,8 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
                         op["actual_end"] = datetime.now(timezone.utc)
                         op["quantity_completed"] = ref_wo.get("quantity", 0)
                         op["quantity_accepted"] = ref_wo.get("quantity", 0)
-                        updated_ops = True
                         break
             
-            # For MO-level subcontract: mark ALL operations completed and auto-complete the MO
             if ref_wo.get("is_subcontract"):
                 for op in ops:
                     if op.get("status") != "completed":
@@ -5978,7 +5988,6 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
                         op["actual_end"] = datetime.now(timezone.utc)
                         op["quantity_completed"] = ref_wo.get("quantity", 0)
                         op["quantity_accepted"] = ref_wo.get("quantity", 0)
-                updated_ops = True
                 
                 # Auto-complete the MO and add finished goods to stock
                 mo_qty = ref_wo.get("quantity", 0)
@@ -5989,8 +5998,6 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
                     current_stock = fg_item.get("current_stock", 0)
                     new_fg_stock = current_stock + mo_qty
                     await db.items.update_one({"id": fg_item_id}, {"$set": {"current_stock": new_fg_stock}})
-                    
-                    # Inventory transaction for produced items
                     fg_tx = {
                         "id": str(uuid.uuid4()),
                         "item_id": fg_item_id,
@@ -6016,7 +6023,7 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
                         "updated_at": datetime.now(timezone.utc)
                     }}
                 )
-            elif updated_ops:
+            else:
                 await db.work_orders.update_one({"id": ref_wo_id}, {"$set": {"operations_status": ops, "updated_at": datetime.now(timezone.utc)}})
     
     rec_doc = {

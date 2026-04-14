@@ -266,7 +266,7 @@ export default function JobWorkPage() {
       </div>
     </div>
     
-    <div class="section-title">Job Work Part Details${partTitle ? ` — ${partTitle}` : ''}${numMOs > 1 ? ` (${numMOs} MOs)` : ''}</div>
+    <div class="section-title">Job Work Part Details</div>
     <table>
       <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th class="text-right">QTY</th><th class="text-right">Charges</th><th class="text-right">Total Amount</th></tr></thead>
       <tbody>
