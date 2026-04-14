@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { 
   Factory, LayoutDashboard, Package, FileStack, Calculator, ClipboardCheck,
   Warehouse, LogOut, Menu, X, User, ChevronDown, ChevronRight,
-  Truck, ShoppingCart, Settings2, Users, Building2, Shield, FileText, Wrench
+  Truck, ShoppingCart, Settings2, Users, Building2, Shield, FileText, Wrench, Cog
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -13,22 +13,28 @@ import {
 
 const topNavItems = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, module: 'dashboard' },
-  { name: 'Bill of Materials', href: '/bom', icon: FileStack, module: 'bom' },
-  { name: 'Sales Orders', href: '/production', icon: Factory, module: 'production' },
-  { name: 'Manufacturing Orders', href: '/manufacturing', icon: Settings2, module: 'manufacturing' },
-  { name: 'Quality', href: '/quality', icon: ClipboardCheck, module: 'quality' },
   { name: 'Customers', href: '/customers', icon: Users, module: 'customers' },
-  { name: 'Job Work', href: '/job-work', icon: Wrench, module: 'manufacturing' },
-  { name: 'Stores', href: '/warehouses', icon: Warehouse, module: 'stores' },
+  { name: 'Sales Orders', href: '/production', icon: Factory, module: 'production' },
 ];
 
 const inventoryGroupItems = [
   { name: 'Stock', href: '/inventory', icon: Warehouse, module: 'inventory' },
-  { name: 'Items & Parts', href: '/items', icon: Package, module: 'items' },
   { name: 'Suppliers', href: '/suppliers', icon: Truck, module: 'suppliers' },
   { name: 'MRP', href: '/mrp', icon: Calculator, module: 'mrp' },
   { name: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart, module: 'purchase_orders' },
   { name: 'Purchase Invoices', href: '/purchase-invoices', icon: FileText, module: 'purchase_orders' },
+];
+
+const productionGroupItems = [
+  { name: 'Items & Parts', href: '/items', icon: Package, module: 'items' },
+  { name: 'BOM', href: '/bom', icon: FileStack, module: 'bom' },
+  { name: 'Manufacturing Orders', href: '/manufacturing', icon: Settings2, module: 'manufacturing' },
+];
+
+const afterGroupNavItems = [
+  { name: 'Stores', href: '/warehouses', icon: Warehouse, module: 'stores' },
+  { name: 'Quality', href: '/quality', icon: ClipboardCheck, module: 'quality' },
+  { name: 'Job Work', href: '/job-work', icon: Wrench, module: 'manufacturing' },
 ];
 
 const bottomNavItems = [
@@ -43,13 +49,19 @@ export default function Layout() {
   const [inventoryOpen, setInventoryOpen] = useState(() => {
     return inventoryGroupItems.some(item => location.pathname === item.href);
   });
+  const [productionOpen, setProductionOpen] = useState(() => {
+    return productionGroupItems.some(item => location.pathname === item.href);
+  });
 
   const canView = (module) => user?.role === 'admin' || hasPermission(module, 'view');
 
   const filteredTop = topNavItems.filter(item => canView(item.module));
   const filteredInventory = inventoryGroupItems.filter(item => canView(item.module));
+  const filteredProduction = productionGroupItems.filter(item => canView(item.module));
+  const filteredAfterGroup = afterGroupNavItems.filter(item => canView(item.module));
   const filteredBottom = bottomNavItems.filter(item => canView(item.module));
   const showInventoryGroup = filteredInventory.length > 0;
+  const showProductionGroup = filteredProduction.length > 0;
 
   const allNavItems = user?.role === 'admin'
     ? [...filteredBottom, { name: 'User Management', href: '/users', icon: Shield, module: 'users' }]
@@ -71,6 +83,7 @@ export default function Layout() {
   };
 
   const isInventoryActive = inventoryGroupItems.some(item => location.pathname === item.href);
+  const isProductionActive = productionGroupItems.some(item => location.pathname === item.href);
 
   const renderNavItem = (item) => (
     <li key={item.name}>
@@ -143,6 +156,44 @@ export default function Layout() {
                   )}
                 </li>
               )}
+
+              {/* Production Group */}
+              {showProductionGroup && (
+                <li>
+                  <button
+                    onClick={() => setProductionOpen(!productionOpen)}
+                    className={`sidebar-link w-full justify-between ${isProductionActive ? 'text-white bg-[#1F2937]' : ''}`}
+                    data-testid="nav-production-group"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Cog className="w-5 h-5" />
+                      <span>Production</span>
+                    </div>
+                    {productionOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+                  {productionOpen && (
+                    <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
+                      {filteredProduction.map(item => (
+                        <li key={item.name}>
+                          <NavLink
+                            to={item.href}
+                            onClick={() => setSidebarOpen(false)}
+                            className={({ isActive }) =>
+                              `flex items-center space-x-2 px-3 py-1.5 text-sm rounded-sm transition-colors ${isActive ? 'text-white bg-[#1D3557]' : 'text-[#9CA3AF] hover:text-white hover:bg-[#1F2937]'}`
+                            }
+                            data-testid={`nav-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
+                          >
+                            <item.icon className="w-4 h-4" />
+                            <span>{item.name}</span>
+                          </NavLink>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              )}
+
+              {filteredAfterGroup.map(renderNavItem)}
 
               {allNavItems.map(renderNavItem)}
             </ul>

@@ -30,6 +30,18 @@ export default function JobWorkPage() {
   const [dcLines, setDcLines] = useState([]);
   const [dcWarehouse, setDcWarehouse] = useState('');
 
+  // DC Print T&C dialog
+  const [dcPrintDialog, setDcPrintDialog] = useState(false);
+  const [dcPrintTarget, setDcPrintTarget] = useState(null);
+  const defaultTC = [
+    'Materials listed above are sent on returnable basis for job work / processing only.',
+    'The subcontractor shall process and return the materials within the agreed timeline.',
+    'Any damage, loss, or shortage of materials shall be the responsibility of the subcontractor.',
+    'Quality of processed goods must meet the specifications agreed upon in the work order.',
+    'This challan must accompany the materials during transit and be produced on demand.',
+  ];
+  const [dcTerms, setDcTerms] = useState(defaultTC.join('\n'));
+
   // Receipt dialog
   const [recDialog, setRecDialog] = useState(false);
   const [recOrder, setRecOrder] = useState(null);
@@ -158,7 +170,12 @@ export default function JobWorkPage() {
     } catch (e) { alert(e.response?.data?.detail || 'Failed to create PO'); }
   };
 
-  const printDC = (dc) => {
+  const openPrintDC = (dc) => {
+    setDcPrintTarget(dc);
+    setDcPrintDialog(true);
+  };
+
+  const printDC = (dc, customTerms) => {
     const supplier = dc.supplier || {};
     const supplierAddr = [supplier.address, supplier.city, supplier.state].filter(Boolean).join(', ') + (supplier.pin_code ? ` - ${supplier.pin_code}` : '');
     const cs = companySettings || {};
@@ -274,12 +291,7 @@ export default function JobWorkPage() {
     <div class="terms-box">
       <h3>Terms & Conditions</h3>
       <ol>
-        <li>Materials listed above are sent on returnable basis for job work / processing only.</li>
-        <li>The subcontractor shall process and return the materials within the agreed timeline.</li>
-        <li>Any damage, loss, or shortage of materials shall be the responsibility of the subcontractor.</li>
-        <li>Quality of processed goods must meet the specifications agreed upon in the work order.</li>
-        <li>This challan must accompany the materials during transit and be produced on demand.</li>
-        <li>Materials remain the property of ${cs.company_name || 'the company'} until received back.</li>
+        ${(customTerms || '').split('\n').filter(l => l.trim()).map(l => `<li>${l.trim()}</li>`).join('')}
       </ol>
     </div>
     <div class="footer">
@@ -432,7 +444,7 @@ export default function JobWorkPage() {
                         <td className="text-sm">{dc.created_at ? new Date(dc.created_at).toLocaleDateString() : '-'}</td>
                         <td>
                           <div className="flex items-center space-x-1">
-                            <button onClick={() => printDC(dc)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-dc-${dc.id}`}>
+                            <button onClick={() => openPrintDC(dc)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-dc-${dc.id}`}>
                               <Printer className="w-3 h-3 inline mr-1" />Print
                             </button>
                           </div>
@@ -627,6 +639,32 @@ export default function JobWorkPage() {
               </table>
             </div>
             <div className="flex justify-end space-x-3 pt-3 border-t"><button onClick={() => setRecDialog(false)} className="btn-secondary">Cancel</button><button onClick={handleCreateReceipt} className="btn-primary" data-testid="jw-receive">Receive Materials</button></div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* DC Print T&C Edit Dialog */}
+      <Dialog open={dcPrintDialog} onOpenChange={setDcPrintDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle className="font-[Chivo]">Print Delivery Challan — {dcPrintTarget?.dc_number}</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-3">
+            <div>
+              <label className="block text-sm font-semibold mb-1">Terms & Conditions</label>
+              <p className="text-xs text-[#6B7280] mb-2">Edit the terms below (one per line). These will appear on the printed DC.</p>
+              <textarea
+                value={dcTerms}
+                onChange={(e) => setDcTerms(e.target.value)}
+                className="input-field text-sm"
+                rows={7}
+                data-testid="dc-terms-textarea"
+              />
+            </div>
+            <div className="flex justify-end space-x-3 pt-3 border-t">
+              <button onClick={() => setDcPrintDialog(false)} className="btn-secondary">Cancel</button>
+              <button onClick={() => { setDcPrintDialog(false); if (dcPrintTarget) printDC(dcPrintTarget, dcTerms); }} className="btn-primary flex items-center space-x-2" data-testid="dc-print-confirm">
+                <Printer className="w-4 h-4" /><span>Print DC</span>
+              </button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

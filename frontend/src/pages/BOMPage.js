@@ -15,7 +15,9 @@ import {
   GitBranch,
   AlertCircle,
   Download,
-  Upload
+  Upload,
+  Search,
+  Printer
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -39,6 +41,7 @@ export default function BOMPage() {
   const [bomExplosion, setBomExplosion] = useState(null);
   const [expandedItems, setExpandedItems] = useState({});
   const [allExplosions, setAllExplosions] = useState({});
+  const [bomSearch, setBomSearch] = useState('');
   
   const [formData, setFormData] = useState({
     parent_item_id: '',
@@ -234,6 +237,48 @@ export default function BOMPage() {
 
   const toggleExpanded = (key) => {
     setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const printBomExplosion = (parentItem, explosion, totalCost, bomInfo) => {
+    const catLabel = (cat) => cat === 'finished_good' ? 'FG' : cat === 'sub_assembly' ? 'SG' : cat === 'raw_material' ? 'RM' : cat === 'component' ? 'CP' : 'PT';
+    const renderPrintRows = (nodes, level = 0) => {
+      let html = '';
+      (nodes || []).forEach((node, idx) => {
+        const item = node.item || {};
+        const indent = level * 20;
+        const bgColor = item.category === 'sub_assembly' ? '#FEF3C7' : item.category === 'raw_material' ? '#DBEAFE' : item.category === 'component' ? '#FEE2E2' : '#F3F4F6';
+        html += `<tr style="background:${bgColor}">
+          <td style="padding:4px 8px;padding-left:${indent + 8}px;font-size:10px;font-weight:600;">${catLabel(item.category || '')}</td>
+          <td style="padding:4px 8px;font-family:monospace;font-size:11px;">${item.part_number || '-'}</td>
+          <td style="padding:4px 8px;font-size:11px;">${item.name || '-'}${node.is_alternate ? ' (alt)' : ''}</td>
+          <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;">${node.quantity}</td>
+          <td style="padding:4px 8px;font-size:11px;">${item.unit_of_measure || '-'}</td>
+          <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;">${node.unit_cost != null ? node.unit_cost.toFixed(2) : '-'}</td>
+          <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;font-weight:600;">${node.extended_cost != null ? node.extended_cost.toFixed(2) : '-'}</td>
+        </tr>`;
+        if (node.children && node.children.length > 0) {
+          html += renderPrintRows(node.children, level + 1);
+        }
+      });
+      return html;
+    };
+    const html = `<!DOCTYPE html><html><head><title>BOM - ${parentItem?.part_number || ''}</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',sans-serif;font-size:11px;padding:20px}
+    h1{font-size:16px;color:#1D3557;margin-bottom:4px}h2{font-size:12px;color:#555;margin-bottom:12px}
+    table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#1D3557;color:white;padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase}
+    td{border-bottom:1px solid #ddd;font-size:11px}.total{font-size:13px;font-weight:700;text-align:right;margin-top:12px;color:#1D3557}
+    @media print{body{padding:10px}}</style></head><body>
+    <h1>${parentItem?.part_number || ''} - ${parentItem?.name || ''}</h1>
+    <h2>BOM Explosion | Rev ${bomInfo?.revision || '-'} | ${bomInfo?.status || '-'}</h2>
+    <table><thead><tr><th>Type</th><th>Part Number</th><th>Description</th><th style="text-align:right">QTY</th><th>UOM</th><th style="text-align:right">Unit Cost</th><th style="text-align:right">Extended Cost</th></tr></thead>
+    <tbody>${renderPrintRows(explosion)}</tbody></table>
+    <p class="total">Total Rollup Cost: ${formatCurrency(totalCost)}</p>
+    <p style="text-align:center;font-size:9px;color:#aaa;margin-top:30px">Printed on ${new Date().toLocaleString()}</p>
+    </body></html>`;
+    const w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
+    w.onload = () => w.print();
   };
 
   const renderExplosionTree = (items, parentKey = '', level = 0) => {
@@ -492,7 +537,7 @@ export default function BOMPage() {
         </div>
       </div>
 
-      {/* Status Filter */}
+      {/* Status Filter & Search */}
       <div className="card-flat p-4">
         <div className="flex items-center gap-4">
           <Select value={statusFilter || 'all'} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
@@ -512,6 +557,18 @@ export default function BOMPage() {
               <span>Clear</span>
             </button>
           )}
+          <div className="flex-1" />
+          <div className="relative w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+            <input
+              type="text"
+              value={bomSearch}
+              onChange={(e) => setBomSearch(e.target.value)}
+              placeholder="Search BOM by part number or name..."
+              className="input-field pl-9 text-sm"
+              data-testid="bom-search-input"
+            />
+          </div>
         </div>
       </div>
 
@@ -584,7 +641,25 @@ export default function BOMPage() {
                 return rows;
               };
               
-              return Object.entries(grouped).map(([pid, group]) => {
+              return Object.entries(grouped).filter(([pid, group]) => {
+                if (!bomSearch.trim()) return true;
+                const q = bomSearch.toLowerCase();
+                const pi = group.item;
+                if (pi?.part_number?.toLowerCase().includes(q)) return true;
+                if (pi?.name?.toLowerCase().includes(q)) return true;
+                // Also search in explosion children
+                const searchNodes = (nodes) => {
+                  for (const n of (nodes || [])) {
+                    if (n.item?.part_number?.toLowerCase().includes(q)) return true;
+                    if (n.item?.name?.toLowerCase().includes(q)) return true;
+                    if (n.children && searchNodes(n.children)) return true;
+                  }
+                  return false;
+                };
+                const activeBom = group.boms.find(b => b.status === 'active') || group.boms[0];
+                const exp = allExplosions[activeBom?.id];
+                return exp ? searchNodes(exp.explosion) : false;
+              }).map(([pid, group]) => {
                 const parentItem = group.item;
                 const activeBom = group.boms.find(b => b.status === 'active') || group.boms[0];
                 const explosion = allExplosions[activeBom?.id];
@@ -594,7 +669,7 @@ export default function BOMPage() {
                 return (
                   <div key={pid} className="border border-[#D1D5DB] rounded-sm overflow-hidden" data-testid={`bom-tree-${pid}`}>
                     {/* FG Header Row */}
-                    <div className={`flex items-center justify-between px-4 py-3 bg-[#1D3557] text-white`}>
+                    <div className={`flex items-center justify-between px-4 py-3 text-white`} style={{ backgroundColor: 'rgba(29, 53, 87, 0.75)' }}>
                       <div className="flex items-center gap-3">
                         <span className="text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded">{catLabel(parentItem?.category)}</span>
                         <span className="mono font-bold text-sm">{parentItem?.part_number || '-'}</span>
@@ -603,6 +678,7 @@ export default function BOMPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="mono text-sm font-bold">Total: {formatCurrency(totalCost)}</span>
+                        {explosion && <button onClick={() => printBomExplosion(parentItem, explosion.explosion, totalCost, activeBom)} className="p-1 hover:bg-white/20 rounded" title="Print BOM" data-testid={`print-bom-${pid}`}><Printer className="w-4 h-4" /></button>}
                         <button onClick={() => handleView(activeBom)} className="p-1 hover:bg-white/20 rounded" title="View"><Eye className="w-4 h-4" /></button>
                         {canEdit && <button onClick={() => handleEdit(activeBom)} className="p-1 hover:bg-white/20 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>}
                         {canEdit && <button onClick={() => handleRevise(activeBom)} className="p-1 hover:bg-white/20 rounded" title="Revise"><GitBranch className="w-4 h-4" /></button>}
