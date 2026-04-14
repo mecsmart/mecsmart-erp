@@ -3631,10 +3631,21 @@ async def start_work_order(wo_id: str, request: Request):
     sc_type = wo.get("subcontract_type", "with_material")
     skip_material_consumption = wo.get("is_subcontract") and sc_type == "without_material"
     
-    # Check if materials are reserved by OTHER MOs
+    # Check if materials are reserved by OTHER MOs (exclude own ancestor chain)
     if not wo.get("materials_reserved"):
+        # Walk up the parent chain to find all ancestor MO IDs
+        ancestor_ids = set()
+        current = wo
+        while current.get("parent_wo_id"):
+            ancestor_ids.add(current["parent_wo_id"])
+            current = await db.work_orders.find_one({"id": current["parent_wo_id"]}, {"_id": 0, "id": 1, "parent_wo_id": 1})
+            if not current:
+                break
+        
+        # Exclude self AND all ancestors from the "other reserved" check
+        exclude_ids = {wo_id} | ancestor_ids
         other_reserved_mos = await db.work_orders.find(
-            {"materials_reserved": True, "id": {"$ne": wo_id}, "status": {"$in": ["pending", "in_progress"]}},
+            {"materials_reserved": True, "id": {"$nin": list(exclude_ids)}, "status": {"$in": ["pending", "in_progress"]}},
             {"_id": 0, "wo_number": 1, "reserved_materials": 1}
         ).to_list(5000)
         
