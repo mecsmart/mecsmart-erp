@@ -168,6 +168,12 @@ export default function JobWorkPage() {
     const jwParts = dc.order?.job_work_parts || [];
     const totalJobWorkCost = jwParts.reduce((s, p) => s + ((p.quantity || 0) * (p.charges || 0)), 0);
     
+    // Build parent item info line for print header
+    const parentItemName = dc.fg_item_name || dc.order?.fg_item_name || '';
+    const parentItemQty = dc.order?.fg_quantity || '';
+    const moNumbers = dc.order?.mo_numbers || [];
+    const numMOs = moNumbers.length;
+    
     // RM lines
     const totalRMCost = dc.lines.reduce((s, l) => {
       const it = l.item || items.find(i => i.id === l.item_id);
@@ -236,7 +242,7 @@ export default function JobWorkPage() {
       </div>
     </div>
     
-    <div class="section-title">Job Work Part Details</div>
+    <div class="section-title">Job Work Part Details${parentItemName ? ` — ${parentItemName}` : ''}${numMOs > 1 ? ` (${numMOs} MOs)` : ''}</div>
     <table>
       <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th class="text-right">QTY</th><th class="text-right">Charges</th><th class="text-right">Total Amount</th></tr></thead>
       <tbody>
@@ -245,9 +251,7 @@ export default function JobWorkPage() {
         const charges = p.charges || 0;
         const total = (p.quantity || 0) * charges;
         return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${total.toFixed(2)}</td></tr>`;
-      }).join('') : `<tr><td colspan="5" style="text-align:center;color:#888;">
-        ${dc.fg_item_name || dc.order?.fg_item_name || '-'} (Qty: ${dc.order?.fg_quantity || '-'})
-      </td></tr>`}
+      }).join('') : `<tr><td>1</td><td>${parentItemName || '-'}</td><td class="text-right mono">${parentItemQty || '-'}</td><td class="text-right mono">-</td><td class="text-right mono">-</td></tr>`}
       <tr class="total-row"><td colspan="4" class="text-right">Total Job Work Cost</td><td class="text-right mono">${currencySymbol}${totalJobWorkCost.toFixed(2)}</td></tr>
       </tbody>
     </table>
@@ -418,7 +422,6 @@ export default function JobWorkPage() {
                         <td className="text-sm font-medium">{dc.fg_item_name || '-'}</td>
                         <td>{dc.supplier?.name || '-'}</td>
                         <td className="text-sm">
-                          {dc.fg_item_name && <div className="font-semibold text-[#1D3557] mb-0.5">{dc.fg_item_name}</div>}
                           {dc.lines.map((l, li) => {
                             const it = l.item || items.find(i => i.id === l.item_id);
                             return <div key={li} className="text-[#4B5563]"><span className="mono text-[10px]">{it?.part_number || '-'}</span> {it?.name || ''} <span className="mono text-[#6B7280]">({l.quantity})</span></div>;

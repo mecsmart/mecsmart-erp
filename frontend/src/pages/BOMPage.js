@@ -62,9 +62,9 @@ export default function BOMPage() {
       const params = statusFilter ? `?status=${statusFilter}` : '';
       const { data } = await api.get(`/api/bom${params}`);
       setBoms(data);
-      // Fetch explosions for all active BOMs
+      // Fetch explosions for all active FG BOMs only
       const explosions = {};
-      for (const bom of data.filter(b => b.status === 'active')) {
+      for (const bom of data.filter(b => b.status === 'active' && b.parent_item?.category === 'finished_good')) {
         try {
           const { data: expData } = await api.get(`/api/bom/${bom.id}/explode`);
           explosions[bom.id] = expData;
@@ -529,9 +529,9 @@ export default function BOMPage() {
         ) : (
           <div className="p-3 space-y-4">
             {(() => {
-              // Group by parent and show only top-level (FG) BOMs
+              // Group by parent and show only FG (Finished Good) BOMs as top-level
               const grouped = {};
-              boms.forEach(bom => {
+              boms.filter(bom => bom.parent_item?.category === 'finished_good').forEach(bom => {
                 const pid = bom.parent_item_id || 'x';
                 if (!grouped[pid]) grouped[pid] = { item: bom.parent_item, boms: [] };
                 grouped[pid].boms.push(bom);

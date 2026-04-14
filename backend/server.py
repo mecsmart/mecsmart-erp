@@ -3364,8 +3364,8 @@ async def start_work_order(wo_id: str, request: Request):
             if not comp_item:
                 continue
             
-            # Only consume raw materials and components (not sub-assemblies that have their own WO)
-            if comp_item.get("category") in ["raw_material", "component"]:
+            # Consume ALL BOM components (RM, components, sub-assemblies) from stock
+            if comp_item.get("category") in ["raw_material", "component", "sub_assembly"]:
                 required_qty = int(component.get("quantity", 1) * wo_qty)
                 current_stock = comp_item.get("current_stock", 0)
                 
@@ -3463,6 +3463,7 @@ async def start_work_order(wo_id: str, request: Request):
                 "fg_item_id": item_id,
                 "fg_item_name": f"{wo_item_for_name.get('part_number', '')} - {wo_item_for_name.get('name', '')}" if wo_item_for_name else "",
                 "fg_quantity": wo.get("quantity", 0),
+                "job_work_parts": [{"item_id": item_id, "quantity": wo.get("quantity", 1), "charges": 0, "received_quantity": 0}],
                 "lines": [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": sc_sent_qty(m), "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_material_lines],
                 "status": "in_progress",
                 "notes": f"Auto-created from sub-contract MO {wo.get('wo_number')} ({sc_type.replace('_', ' ')})",
@@ -5282,6 +5283,11 @@ async def get_delivery_challans(request: Request):
         for line in dc.get("lines", []):
             item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
             line["item"] = item
+        # Enrich job_work_parts with item details for DC print
+        if order:
+            for part in order.get("job_work_parts", []):
+                part_item = await db.items.find_one({"id": part.get("item_id")}, {"_id": 0})
+                part["item"] = part_item
     return challans
 
 @jobwork_router.post("/challans", status_code=201)

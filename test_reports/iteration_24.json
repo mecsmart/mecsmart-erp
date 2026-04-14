@@ -1,0 +1,85 @@
+{
+  "summary": "Tested 5 fixes for Manufacturing ERP. All fixes verified working correctly via backend API tests and frontend UI tests.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Fix 1: MO for FG consumes ALL BOM components (RM + SA + Parts) - VERIFIED via API. MO-000001 for FG-001 consumed: RM-001 (Steel Sheet), SA-001 (Pump Assembly), CP-002 (Control Valve), CP-003 (Electric Motor), SA-002 (Control Panel)",
+    "Fix 2: SC Order auto-prefills parent item in job_work_parts - VERIFIED. JW-000001 shows job_work_parts with CP-001 Hydraulic Cylinder x10 @₹50.00",
+    "Fix 3: DC Challans ITEMS column shows only RM items, not parent FG/SA - VERIFIED. DC-000001 shows RM-001 Steel Sheet 4mm (20) in ITEMS column, FG/SA/Part shown in separate column",
+    "Fix 4: DC Print shows proper Job Work Part Details table - VERIFIED. Print preview contains 'Job Work Part Details' section with Sl. No., Part, QTY, Charges, Total columns and 'Raw Material Issued' section",
+    "Fix 5: BOM page shows only FG BOMs as top-level - VERIFIED. Only FG-001 Hydraulic Press 50T shown as top-level BOM group. SA-001, SA-002 appear as expandable children in the tree, not as separate top-level sections"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_five_fixes_v2.py",
+    "/app/test_reports/pytest/pytest_five_fixes_v2.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "Backend server.py line 3368: Correctly includes 'sub_assembly' in consumed categories alongside 'raw_material' and 'component'",
+    "Backend server.py line 3466: SC order auto-creation correctly populates job_work_parts with parent item",
+    "Backend server.py line 5286-5290: DC challans endpoint correctly enriches job_work_parts with item details for print",
+    "Frontend BOMPage.js line 67: Only fetches explosions for FG active BOMs",
+    "Frontend BOMPage.js line 534: Groups filtered to finished_good parent items only",
+    "Frontend JobWorkPage.js line 421-428: DC ITEMS column correctly shows only RM lines, not parent item",
+    "Frontend JobWorkPage.js line 245-257: DC print Job Work Part Details section has proper table format"
+  ],
+
+  "updated_files": [],
+
+  "success_rate": {
+    "backend": "100% (10/10 tests passed)",
+    "frontend": "100% (all 5 fixes verified)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Created SO-000001 (Sales Order for FG-001) and MO-000001 (Manufacturing Order) to test material consumption fix",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": true,
+
+  "context_for_next_testing_agent": "All 5 fixes verified working: (1) MO material consumption now includes SA and CP items - tested with MO-000001 which consumed RM-001, SA-001, SA-002, CP-002, CP-003. (2) SC orders have job_work_parts populated - JW-000001 shows CP-001 with charges. (3) DC ITEMS column shows only RM items. (4) DC Print has proper Job Work Part Details table. (5) BOM page shows only FG BOMs as top-level groups. Test data: SO-000001, MO-000001, JW-000001, DC-000001.",
+
+  "features_verified": {
+    "mo_material_consumption": {
+      "status": "WORKING",
+      "details": "MO-000001 for FG-001 consumed all BOM components: RM-001 (raw_material), SA-001 (sub_assembly), SA-002 (sub_assembly), CP-002 (component), CP-003 (component). Backend code at line 3368 correctly includes sub_assembly in consumed categories."
+    },
+    "sc_order_job_work_parts": {
+      "status": "WORKING",
+      "details": "JW-000001 shows job_work_parts with parent item (CP-001 Hydraulic Cylinder x10 @₹50.00). Backend auto-creates job_work_parts when SC order is created."
+    },
+    "dc_items_column": {
+      "status": "WORKING",
+      "details": "DC Challans table has separate FG/SA/Part column and ITEMS column. ITEMS column shows only RM lines (RM-001 Steel Sheet 4mm), not the parent FG/SA item."
+    },
+    "dc_print_job_work_details": {
+      "status": "WORKING",
+      "details": "DC Print preview contains 'Job Work Part Details' section with proper table (Sl. No., Part Name, QTY, Charges, Total) and 'Raw Material Issued' section."
+    },
+    "bom_page_fg_only": {
+      "status": "WORKING",
+      "details": "BOM page shows only FG-001 Hydraulic Press 50T as top-level BOM group. SA-001 Pump Assembly and SA-002 Control Panel appear as expandable children in the explosion tree, not as separate top-level sections."
+    }
+  }
+}
