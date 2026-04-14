@@ -1348,12 +1348,10 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                     running_available = 0
             data["orders"] = shortage_orders
     
-    # Filter: only raw materials with net_requirement > 0 AND on_hand < gross_requirement
-    raw_material_demand = []
+    # Filter: include all items with net_requirement > 0 (RM, SA, Components)
+    filtered_demand = []
     for d in demand.values():
         item = d.get("item", {})
-        if item.get("category") != "raw_material":
-            continue
         if d.get("net_requirement", 0) <= 0:
             continue
         # If stock fully covers gross requirement, skip
@@ -1390,9 +1388,9 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
         if po_qty >= d["net_requirement"]:
             d["po_status"] = "po_sent"
         
-        raw_material_demand.append(d)
+        filtered_demand.append(d)
     
-    return raw_material_demand
+    return filtered_demand
 
 @mrp_router.get("/suggestions")
 async def get_purchase_suggestions(request: Request):
@@ -3446,10 +3444,45 @@ async def start_work_order(wo_id: str, request: Request):
                 if wo_item:
                     sc_material_lines = [{"item_id": item_id, "quantity": wo.get("quantity", 1), "unit_cost": wo_item.get("unit_cost", 0)}]
         
-        # Find or create a subcontract order
-        sc_order = await db.subcontract_orders.find_one({"reference_wo_id": wo_id})
+        # Find or create a subcontract order — consolidate per supplier
+        sc_order = await db.subcontract_orders.find_one({
+            "supplier_id": wo["subcontract_supplier_id"],
+            "status": {"$in": ["draft", "in_progress"]},
+            "subcontract_type": sc_type
+        }, sort=[("created_at", -1)])
         sc_order_id = ""
-        if not sc_order:
+        if sc_order:
+            # Consolidate: add this MO's parts + lines to existing SC order
+            existing_parts = sc_order.get("job_work_parts", [])
+            existing_parts.append({"item_id": item_id, "quantity": wo.get("quantity", 1), "charges": 0, "received_quantity": 0})
+            existing_lines = sc_order.get("lines", [])
+            for new_line in [{"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": (m["quantity"] if sc_type == "with_material" else 0), "received_quantity": 0, "rate": m.get("unit_cost", 0)} for m in sc_material_lines]:
+                found = False
+                for el in existing_lines:
+                    if el["item_id"] == new_line["item_id"]:
+                        el["quantity"] += new_line["quantity"]
+                        el["sent_quantity"] = el.get("sent_quantity", 0) + new_line.get("sent_quantity", 0)
+                        found = True
+                        break
+                if not found:
+                    existing_lines.append(new_line)
+            # Update existing SC with merged data
+            ref_wo_ids = sc_order.get("reference_wo_ids", [])
+            if sc_order.get("reference_wo_id") and sc_order["reference_wo_id"] not in ref_wo_ids:
+                ref_wo_ids.append(sc_order["reference_wo_id"])
+            ref_wo_ids.append(wo_id)
+            fg_names = [sc_order.get("fg_item_name", "")]
+            fg_names.append(f"{wo_item_for_name.get('part_number', '')} - {wo_item_for_name.get('name', '')}" if wo_item_for_name else "")
+            await db.subcontract_orders.update_one({"id": sc_order["id"]}, {"$set": {
+                "job_work_parts": existing_parts,
+                "lines": existing_lines,
+                "reference_wo_ids": ref_wo_ids,
+                "fg_item_name": ", ".join(filter(None, fg_names)),
+                "notes": sc_order.get("notes", "") + f"\nConsolidated MO {wo.get('wo_number')}",
+                "updated_at": datetime.now(timezone.utc)
+            }})
+            sc_order_id = sc_order["id"]
+        else:
             sc_count = await db.subcontract_orders.count_documents({})
             # For without_material: sent_quantity=0 (nothing sent to vendor), they source themselves
             sc_sent_qty = lambda m: m["quantity"] if sc_type == "with_material" else 0
@@ -3459,6 +3492,7 @@ async def start_work_order(wo_id: str, request: Request):
                 "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
                 "supplier_id": wo["subcontract_supplier_id"],
                 "reference_wo_id": wo_id,
+                "reference_wo_ids": [wo_id],
                 "subcontract_type": sc_type,
                 "fg_item_id": item_id,
                 "fg_item_name": f"{wo_item_for_name.get('part_number', '')} - {wo_item_for_name.get('name', '')}" if wo_item_for_name else "",
@@ -3473,10 +3507,9 @@ async def start_work_order(wo_id: str, request: Request):
             await db.subcontract_orders.insert_one(sc_order_doc)
             sc_order_doc.pop("_id", None)
             sc_order_id = sc_order_doc["id"]
-        else:
-            sc_order_id = sc_order["id"]
         
         # Only create DC for "with_material" type (materials are physically sent)
+        # Create DC as draft - user will send from JW page
         if sc_type == "with_material" and sc_material_lines:
             dc_lines = [{"item_id": m["item_id"], "quantity": m["quantity"], "rate": m.get("unit_cost", 0)} for m in sc_material_lines]
             dc_count = await db.delivery_challans.count_documents({})
@@ -3487,7 +3520,7 @@ async def start_work_order(wo_id: str, request: Request):
                 "subcontract_order_id": sc_order_id,
                 "reference_wo_id": wo_id,
                 "lines": dc_lines,
-                "status": "sent",
+                "status": "draft",
                 "notes": f"Auto-DC for sub-contract MO {wo.get('wo_number')}",
                 "created_at": datetime.now(timezone.utc),
                 "created_by": user["id"]
@@ -5232,21 +5265,35 @@ async def create_po_from_sc(request: Request, data: dict = Body(...)):
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
     
-    # Build PO items from SC order lines
-    po_items = []
+    # Build PO lines from SC order lines + job_work_parts
+    po_lines = []
     total_amount = 0
-    for line in sc_order.get("lines", []):
+    
+    # For "without material": use job_work_parts (the FG/SA items the vendor will produce)
+    source_items = sc_order.get("job_work_parts", [])
+    if not source_items:
+        source_items = sc_order.get("lines", [])
+    
+    for line in source_items:
         item = await db.items.find_one({"id": line["item_id"]}, {"_id": 0})
         if item:
-            unit_cost = item.get("unit_cost", line.get("rate", 0))
-            line_total = line["quantity"] * unit_cost
+            unit_cost = line.get("charges", 0) or item.get("unit_cost", 0) or line.get("rate", 0)
+            qty = line.get("quantity", 0)
+            line_total = qty * unit_cost
             total_amount += line_total
-            po_items.append({
+            po_lines.append({
                 "item_id": line["item_id"],
-                "quantity": line["quantity"],
+                "quantity": qty,
                 "unit_price": unit_cost,
                 "total_price": line_total,
-                "received_quantity": 0
+                "received_quantity": 0,
+                "description": f"{item.get('part_number', '')} - {item.get('name', '')}",
+                "uom": item.get("unit_of_measure", "pcs"),
+                "hsn_code": item.get("hsn_code", ""),
+                "gst_rate": item.get("gst_rate", 18),
+                "discount_type": "percentage",
+                "discount_value": 0,
+                "notes": ""
             })
     
     # Create PO
@@ -5257,7 +5304,8 @@ async def create_po_from_sc(request: Request, data: dict = Body(...)):
         "po_number": po_number,
         "supplier_id": sc_order.get("supplier_id"),
         "reference_sc_order_id": sc_order_id,
-        "items": po_items,
+        "lines": po_lines,
+        "additional_charges": [],
         "total_amount": total_amount,
         "status": "approved",
         "notes": f"Auto-created from SC Order {sc_order.get('order_number')} (without material)",
@@ -5363,6 +5411,59 @@ async def create_delivery_challan(data: DCCreate, request: Request):
     await db.delivery_challans.insert_one(dc_doc)
     del dc_doc["_id"]
     return dc_doc
+
+@jobwork_router.post("/challans/{dc_id}/send")
+async def send_draft_dc(dc_id: str, request: Request):
+    """Send a draft DC - deducts stock and marks as sent"""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    dc = await db.delivery_challans.find_one({"id": dc_id})
+    if not dc:
+        raise HTTPException(status_code=404, detail="Delivery challan not found")
+    if dc.get("status") != "draft":
+        raise HTTPException(status_code=400, detail="DC is not in draft status")
+    
+    order = await db.subcontract_orders.find_one({"id": dc.get("subcontract_order_id")})
+    
+    # Deduct stock for each line
+    for line in dc.get("lines", []):
+        item = await db.items.find_one({"id": line["item_id"]})
+        if not item:
+            continue
+        current_stock = item.get("current_stock", 0)
+        qty = line.get("quantity", 0)
+        if current_stock < qty:
+            raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.get('part_number')}: need {qty}, have {current_stock}")
+        new_stock = current_stock - qty
+        await db.items.update_one({"id": line["item_id"]}, {"$set": {"current_stock": new_stock}})
+        # Inventory transaction
+        tx = {
+            "id": str(uuid.uuid4()),
+            "item_id": line["item_id"],
+            "transaction_type": "issue",
+            "quantity": qty,
+            "reference_type": "job_work_dc",
+            "reference_id": dc.get("dc_number"),
+            "previous_stock": current_stock,
+            "new_stock": new_stock,
+            "notes": f"Sent to subcontractor - {order.get('order_number', '') if order else ''}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"]
+        }
+        await db.inventory_transactions.insert_one(tx)
+        # Update sent_quantity in order
+        if order:
+            for ol in order.get("lines", []):
+                if ol["item_id"] == line["item_id"]:
+                    ol["sent_quantity"] = ol.get("sent_quantity", 0) + qty
+    
+    if order:
+        await db.subcontract_orders.update_one({"id": order["id"]}, {"$set": {"lines": order["lines"], "status": "in_progress"}})
+    
+    await db.delivery_challans.update_one({"id": dc_id}, {"$set": {"status": "sent", "sent_at": datetime.now(timezone.utc)}})
+    return {"message": f"DC {dc.get('dc_number')} sent successfully"}
 
 @jobwork_router.get("/receipts")
 async def get_subcontract_receipts(request: Request):

@@ -444,6 +444,15 @@ export default function JobWorkPage() {
                         <td className="text-sm">{dc.created_at ? new Date(dc.created_at).toLocaleDateString() : '-'}</td>
                         <td>
                           <div className="flex items-center space-x-1">
+                            {dc.status === 'draft' && canEdit && (
+                              <button onClick={async () => {
+                                if (!window.confirm(`Send DC ${dc.dc_number}? This will deduct stock.`)) return;
+                                try { await api.post(`/api/job-work/challans/${dc.id}/send`); fetchData(); }
+                                catch (e) { alert(e.response?.data?.detail || 'Failed to send DC'); }
+                              }} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-btn-${dc.id}`}>
+                                <Truck className="w-3 h-3 inline mr-1" />Send
+                              </button>
+                            )}
                             <button onClick={() => openPrintDC(dc)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-dc-${dc.id}`}>
                               <Printer className="w-3 h-3 inline mr-1" />Print
                             </button>
