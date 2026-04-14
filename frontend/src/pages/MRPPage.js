@@ -186,7 +186,7 @@ export default function MRPPage() {
                   <thead>
                     <tr>
                       <th>Part Number</th><th>Item Name</th><th className="text-right">Gross Req.</th>
-                      <th className="text-right">On Hand</th><th className="text-right">Safety Stock</th>
+                      <th className="text-right">On Hand</th><th className="text-right">Reserved (MO)</th><th className="text-right">Safety Stock</th>
                       <th className="text-right">Net Req.</th><th>PO Status</th><th>Sales Orders</th>
                     </tr>
                   </thead>
@@ -201,6 +201,7 @@ export default function MRPPage() {
                         <td>{d.item?.name || '-'}</td>
                         <td className="text-right mono">{d.gross_requirement}</td>
                         <td className="text-right mono">{d.on_hand}</td>
+                        <td className="text-right mono">{d.reserved_for_mo ? <span className="text-[#723B13] font-medium">{d.reserved_for_mo}</span> : <span className="text-[#9CA3AF]">0</span>}</td>
                         <td className="text-right mono">{d.safety_stock}</td>
                         <td className="text-right mono font-medium">{d.net_requirement > 0 ? <span className="text-[#9B1C1C]">{d.net_requirement}</span> : <span className="text-[#03543F]">0</span>}</td>
                         <td>

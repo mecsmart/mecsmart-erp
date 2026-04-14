@@ -1,0 +1,108 @@
+{
+  "summary": "Tested MRP Reserve/Unreserve functionality. All 7 features verified working: reserve endpoint, unreserve endpoint, MRP demand only shows RM items, reserved_for_mo column, net calculation formula, Reserve/Unreserve buttons on MO page, Reserved badge.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Backend: POST /api/work-orders/{wo_id}/reserve - creates reserved_materials array with all BOM items (RM, SA, CP)",
+    "Backend: POST /api/work-orders/{wo_id}/unreserve - removes reservation, sets materials_reserved=false",
+    "Backend: GET /api/mrp/demand - returns ONLY raw_material category items",
+    "Backend: MRP demand includes reserved_for_mo field showing total reserved qty across all MOs",
+    "Backend: MRP net calculation: net = gross_req - max(on_hand - reserved_for_mo - safety_stock, 0) - verified correct",
+    "Backend: Cannot reserve already reserved MO - returns 400 error",
+    "Backend: GET /api/mrp/suggestions - returns ONLY raw_material category items",
+    "Frontend MO page: Pending MOs show 'Reserve' button (data-testid='reserve-wo-{id}')",
+    "Frontend MO page: Reserved MOs show 'Reserved' badge and 'Unreserve' button",
+    "Frontend MO page: After unreserve, 'Reserve' button appears again",
+    "Frontend MRP page: Demand table has 'Reserved (MO)' column showing reserved_for_mo value",
+    "Frontend MRP page: Reserved values highlighted in orange/yellow color",
+    "Frontend MRP page: Only raw_material items shown (RM-001, RM-002), no SA/CP items"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_mrp_reserve.py",
+    "/app/test_reports/pytest/pytest_mrp_reserve.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "Reserve endpoint correctly explodes BOM recursively and stores ALL materials (RM, SA, CP) in reserved_materials array",
+    "MRP demand correctly filters to only show raw_material category items",
+    "MRP aggregates reserved quantities from all MOs with materials_reserved=True and status in ['pending', 'in_progress']",
+    "Net calculation formula correctly implemented: net = gross - max(available, 0) where available = on_hand - reserved - safety"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_mrp_reserve.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (14/14 tests passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Created SO-000003 (qty=2, confirmed) and MO-000002 (pending) for FG-001 to test reserve flow. MO-000002 was reserved and unreserved during testing.",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "MRP Reserve/Unreserve feature fully tested and working. Test data: SO-000003 (confirmed), MO-000002 (pending, unreserved). MRP shows 2 RM items with demand. Reserve flow: create pending MO -> reserve -> MRP shows reserved_for_mo -> unreserve -> reserved_for_mo becomes 0.",
+
+  "features_verified": {
+    "reserve_endpoint": {
+      "status": "WORKING",
+      "details": "POST /api/work-orders/{wo_id}/reserve creates reserved_materials array with 8 items (RM-001, RM-002, RM-003, SA-001, SA-002, CP-001, CP-002, CP-003)"
+    },
+    "unreserve_endpoint": {
+      "status": "WORKING",
+      "details": "POST /api/work-orders/{wo_id}/unreserve removes reservation, sets materials_reserved=false and clears reserved_materials array"
+    },
+    "mrp_demand_rm_only": {
+      "status": "WORKING",
+      "details": "GET /api/mrp/demand returns only raw_material category items (RM-001, RM-002), not SA or CP items"
+    },
+    "mrp_reserved_for_mo_field": {
+      "status": "WORKING",
+      "details": "MRP demand response includes reserved_for_mo field showing total reserved qty across all MOs"
+    },
+    "mrp_net_calculation": {
+      "status": "WORKING",
+      "details": "Formula: net = gross_req - max(on_hand - reserved_for_mo - safety_stock, 0). Verified with RM-001: 30 = 30 - max(28-20-50, 0)"
+    },
+    "frontend_reserve_button": {
+      "status": "WORKING",
+      "details": "Pending MOs show 'Reserve' button with data-testid='reserve-wo-{id}'"
+    },
+    "frontend_reserved_badge": {
+      "status": "WORKING",
+      "details": "Reserved MOs show green 'Reserved' badge next to status and 'Unreserve' button"
+    },
+    "frontend_mrp_reserved_column": {
+      "status": "WORKING",
+      "details": "MRP demand table has 'Reserved (MO)' column header with values highlighted in orange/yellow"
+    },
+    "mrp_suggestions_rm_only": {
+      "status": "WORKING",
+      "details": "GET /api/mrp/suggestions returns only raw_material category items"
+    }
+  }
+}

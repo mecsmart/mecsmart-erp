@@ -1271,9 +1271,9 @@ async def cancel_production_order(order_id: str, request: Request):
 
 @mrp_router.get("/demand")
 async def calculate_demand(request: Request, production_order_id: Optional[str] = None):
-    """Calculate RM requirements based on SO demand, netting off available SA/Part stock and running MO reservations.
-    Logic: For each BOM level, check if SA/Part stock covers the need. Only explode shortage qty into child BOM for RM.
-    Result: Only Raw Materials are returned."""
+    """Calculate RM demand: SO Required QTY - (Present Stock - Material reserved for MOs).
+    Formula per RM item: Net = Gross SO Requirement - (Current Stock - Total Reserved Across MOs - Safety Stock)
+    Only Raw Materials are returned."""
     await get_current_user(request)
     
     query = {"status": {"$in": ["confirmed", "planned", "released", "in_progress"]}}
@@ -1282,14 +1282,18 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
     
     orders = await db.production_orders.find(query, {"_id": 0}).to_list(1000)
     
-    # Step 1: Calculate reserved stock per item from running MOs (in_progress)
-    running_mos = await db.work_orders.find({"status": "in_progress"}, {"_id": 0}).to_list(1000)
-    reserved_stock = {}  # item_id -> qty reserved by running MOs
-    for mo in running_mos:
-        mo_item_id = mo.get("item_id")
-        mo_qty = mo.get("quantity", 0)
-        if mo_item_id:
-            reserved_stock[mo_item_id] = reserved_stock.get(mo_item_id, 0) + mo_qty
+    # Step 1: Calculate total reserved qty per item from ALL reserved MOs
+    reserved_mos = await db.work_orders.find(
+        {"materials_reserved": True, "status": {"$in": ["pending", "in_progress"]}},
+        {"_id": 0, "reserved_materials": 1}
+    ).to_list(5000)
+    
+    reserved_stock = {}  # item_id -> total qty reserved across all MOs
+    for mo in reserved_mos:
+        for rm in mo.get("reserved_materials", []):
+            rid = rm.get("item_id")
+            if rid:
+                reserved_stock[rid] = reserved_stock.get(rid, 0) + rm.get("quantity", 0)
     
     # Cache for items and BOMs
     item_cache = {}
@@ -1304,11 +1308,11 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
             bom_cache[parent_item_id] = await db.boms.find_one({"parent_item_id": parent_item_id, "status": "active"}, {"_id": 0})
         return bom_cache[parent_item_id]
     
-    rm_demand = {}  # item_id -> { item, gross_requirement, on_hand, safety_stock, orders }
+    # Step 2: Explode SO BOM fully into RM demand (flat explosion, all levels)
+    rm_demand = {}
     
-    async def explode_for_rm(parent_item_id: str, parent_qty: float, order_info: dict, visited: set = None):
-        """Recursively explode BOM. For SA/Parts, net off available stock and only explode the shortage.
-        For RM, accumulate demand directly."""
+    async def explode_all_rm(parent_item_id: str, parent_qty: float, order_info: dict, visited: set = None):
+        """Fully explode BOM through all levels to collect leaf-level RM demand."""
         if visited is None:
             visited = set()
         if parent_item_id in visited:
@@ -1323,8 +1327,7 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
             if comp.get("is_alternate"):
                 continue
             comp_item_id = comp.get("item_id")
-            comp_qty_per = comp.get("quantity", 0)
-            qty_needed = comp_qty_per * parent_qty
+            qty_needed = comp.get("quantity", 0) * parent_qty
             
             comp_item = await get_item(comp_item_id)
             if not comp_item:
@@ -1333,13 +1336,14 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
             category = comp_item.get("category", "")
             
             if category == "raw_material":
-                # RM: accumulate demand directly
+                # Leaf RM: accumulate gross demand
                 if comp_item_id not in rm_demand:
                     rm_demand[comp_item_id] = {
                         "item": comp_item,
                         "gross_requirement": 0,
                         "on_hand": comp_item.get("current_stock", 0),
                         "safety_stock": comp_item.get("safety_stock", 0),
+                        "reserved_for_mo": reserved_stock.get(comp_item_id, 0),
                         "net_requirement": 0,
                         "orders": []
                     }
@@ -1351,35 +1355,23 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                     "due_date": order_info.get("due_date")
                 })
             else:
-                # SA / Component / Part: check available stock, net off, explode shortage
-                available_stock = comp_item.get("current_stock", 0)
-                reserved = reserved_stock.get(comp_item_id, 0)
-                net_available = max(0, available_stock - reserved)
-                
-                if net_available >= qty_needed:
-                    # Stock covers this need — no RM required from this path
-                    continue
-                else:
-                    # Shortage qty needs to be manufactured → explode its BOM for RM
-                    shortage_qty = qty_needed - net_available
-                    child_visited = set(visited)  # copy to allow same item in different paths
-                    await explode_for_rm(comp_item_id, shortage_qty, order_info, child_visited)
+                # SA/Part: always recurse into its BOM to find ultimate RM needs
+                child_visited = set(visited)
+                await explode_all_rm(comp_item_id, qty_needed, order_info, child_visited)
     
-    # Process each SO
     for order in orders:
         bom = await db.boms.find_one({"id": order.get("bom_id")}, {"_id": 0})
         if not bom:
             continue
         parent_item_id = bom.get("parent_item_id")
         if parent_item_id:
-            await explode_for_rm(parent_item_id, order.get("quantity", 0), order)
+            await explode_all_rm(parent_item_id, order.get("quantity", 0), order)
     
-    # Step 3: Calculate net requirements for RM items
+    # Step 3: Calculate net = gross - (stock - reserved - safety)
     for item_id, data in rm_demand.items():
-        available = data["on_hand"] - data["safety_stock"]
-        data["net_requirement"] = max(0, data["gross_requirement"] - available)
+        available = data["on_hand"] - data["reserved_for_mo"] - data["safety_stock"]
+        data["net_requirement"] = max(0, data["gross_requirement"] - max(available, 0))
         
-        # Only keep SOs that contribute to the shortage
         if data["net_requirement"] > 0:
             shortage_orders = []
             running_available = max(available, 0)
@@ -1397,8 +1389,6 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
     for d in rm_demand.values():
         item = d.get("item", {})
         if d.get("net_requirement", 0) <= 0:
-            continue
-        if d.get("on_hand", 0) >= d.get("gross_requirement", 0):
             continue
         
         item_id = item.get("id")
@@ -1423,9 +1413,6 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
         d["po_ordered_qty"] = int(po_qty)
         d["po_status"] = "po_sent" if po_qty >= d["net_requirement"] else ("partial_po" if po_qty > 0 else "pending")
         d["remaining_to_order"] = max(0, d["net_requirement"] - po_qty)
-        
-        if po_qty >= d["net_requirement"]:
-            d["po_status"] = "po_sent"
         
         result.append(d)
     
@@ -3354,6 +3341,102 @@ async def bulk_subcontract(request: Request, data: dict = Body(...)):
         "sc_order": sc_doc,
         "dc": dc_doc
     }
+
+
+@work_orders_router.post("/{wo_id}/reserve")
+async def reserve_materials_for_wo(wo_id: str, request: Request):
+    """Reserve materials for an MO by computing its full BOM requirement recursively.
+    Stores reserved_materials on the MO. MRP uses this to calculate net RM demand."""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    wo = await db.work_orders.find_one({"id": wo_id})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    
+    if wo.get("status") not in ["pending", "in_progress"]:
+        raise HTTPException(status_code=400, detail="Can only reserve for pending or in-progress MOs")
+    
+    if wo.get("materials_reserved"):
+        raise HTTPException(status_code=400, detail="Materials already reserved for this MO")
+    
+    routing = await db.routings.find_one({"id": wo.get("routing_id")})
+    if not routing:
+        raise HTTPException(status_code=404, detail="Routing not found")
+    
+    item_id = routing.get("item_id")
+    wo_qty = wo.get("quantity", 1)
+    
+    # Recursively explode BOM and collect ALL material requirements (RM, SA, Parts)
+    reserved = []
+    
+    async def collect_bom_materials(parent_item_id: str, parent_qty: float, visited: set = None):
+        if visited is None:
+            visited = set()
+        if parent_item_id in visited:
+            return
+        visited.add(parent_item_id)
+        
+        bom = await db.boms.find_one({"parent_item_id": parent_item_id, "status": "active"}, {"_id": 0})
+        if not bom:
+            return
+        for comp in bom.get("components", []):
+            if comp.get("is_alternate"):
+                continue
+            comp_item_id = comp.get("item_id")
+            comp_qty = comp.get("quantity", 0) * parent_qty
+            comp_item = await db.items.find_one({"id": comp_item_id}, {"_id": 0})
+            if not comp_item:
+                continue
+            reserved.append({
+                "item_id": comp_item_id,
+                "part_number": comp_item.get("part_number", ""),
+                "name": comp_item.get("name", ""),
+                "category": comp_item.get("category", ""),
+                "quantity": comp_qty,
+                "uom": comp_item.get("unit_of_measure", "pcs")
+            })
+            # Recurse into child BOMs
+            child_visited = set(visited)
+            await collect_bom_materials(comp_item_id, comp_qty, child_visited)
+    
+    await collect_bom_materials(item_id, wo_qty)
+    
+    await db.work_orders.update_one({"id": wo_id}, {"$set": {
+        "materials_reserved": True,
+        "reserved_materials": reserved,
+        "reserved_at": datetime.now(timezone.utc),
+        "reserved_by": user["id"]
+    }})
+    
+    return {
+        "success": True,
+        "message": f"Materials reserved for {wo.get('wo_number')} ({len(reserved)} items)",
+        "reserved_materials": reserved
+    }
+
+
+@work_orders_router.post("/{wo_id}/unreserve")
+async def unreserve_materials_for_wo(wo_id: str, request: Request):
+    """Remove material reservation from an MO"""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    wo = await db.work_orders.find_one({"id": wo_id})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    
+    if not wo.get("materials_reserved"):
+        raise HTTPException(status_code=400, detail="No reservation exists for this MO")
+    
+    await db.work_orders.update_one({"id": wo_id}, {"$set": {
+        "materials_reserved": False,
+        "reserved_materials": [],
+    }, "$unset": {"reserved_at": "", "reserved_by": ""}})
+    
+    return {"success": True, "message": f"Reservation removed for {wo.get('wo_number')}"}
 
 
 @work_orders_router.post("/{wo_id}/start")
