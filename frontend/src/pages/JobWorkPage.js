@@ -444,7 +444,13 @@ export default function JobWorkPage() {
                       <tr key={dc.id} data-testid={`dc-row-${dc.id}`}>
                         <td className="mono font-medium">{dc.dc_number}</td>
                         <td className="mono">{dc.order?.order_number || '-'}</td>
-                        <td className="text-sm font-medium">{dc.fg_item_name || '-'}</td>
+                        <td className="text-sm font-medium">
+                          {(dc.order?.job_work_parts || []).map((p, pi) => {
+                            const pit = p.item || items.find(i => i.id === p.item_id);
+                            return <div key={pi}>{pit?.part_number || '-'} - {pit?.name || ''} <span className="text-[#6B7280] font-normal">({p.quantity})</span></div>;
+                          })}
+                          {!(dc.order?.job_work_parts?.length) && (dc.fg_item_name || '-')}
+                        </td>
                         <td>{dc.supplier?.name || '-'}</td>
                         <td className="text-sm">
                           {dc.lines.map((l, li) => {
