@@ -3500,47 +3500,53 @@ async def create_sc_for_wo(wo_id: str, request: Request):
         "supplier_id": wo["subcontract_supplier_id"],
         "subcontract_type": sc_type,
         "status": {"$in": ["draft", "in_progress"]},
-        "po_created": {"$ne": True}
     }, sort=[("created_at", -1)])
     
+    # Skip if it already has PO or sent DC
     if consolidate_sc:
-        sent_dc = await db.delivery_challans.find_one({"subcontract_order_id": consolidate_sc["id"], "status": "sent"})
-        if not sent_dc:
-            # Merge parts and lines
-            parts = consolidate_sc.get("job_work_parts", [])
-            part_found = False
-            for ep in parts:
-                if ep.get("item_id") == item_id:
-                    ep["quantity"] = ep.get("quantity", 0) + qty
-                    part_found = True
+        if consolidate_sc.get("po_created"):
+            consolidate_sc = None
+        else:
+            sent_dc = await db.delivery_challans.find_one({"subcontract_order_id": consolidate_sc["id"], "status": "sent"})
+            if sent_dc:
+                consolidate_sc = None
+    
+    if consolidate_sc:
+        # Merge parts and lines into existing SC
+        parts = consolidate_sc.get("job_work_parts", [])
+        part_found = False
+        for ep in parts:
+            if ep.get("item_id") == item_id:
+                ep["quantity"] = ep.get("quantity", 0) + qty
+                part_found = True
+                break
+        if not part_found:
+            parts.append({"item_id": item_id, "quantity": qty, "charges": 0, "received_quantity": 0})
+        
+        lines = consolidate_sc.get("lines", [])
+        for nl in sc_lines:
+            found = False
+            for el in lines:
+                if el["item_id"] == nl["item_id"]:
+                    el["quantity"] += nl["quantity"]
+                    found = True
                     break
-            if not part_found:
-                parts.append({"item_id": item_id, "quantity": qty, "charges": 0, "received_quantity": 0})
-            
-            lines = consolidate_sc.get("lines", [])
-            for nl in sc_lines:
-                found = False
-                for el in lines:
-                    if el["item_id"] == nl["item_id"]:
-                        el["quantity"] += nl["quantity"]
-                        found = True
-                        break
-                if not found:
-                    lines.append(nl)
-            
-            ref_ids = consolidate_sc.get("reference_wo_ids", [])
-            ref_ids.append(wo_id)
-            
-            await db.subcontract_orders.update_one({"id": consolidate_sc["id"]}, {"$set": {
-                "job_work_parts": parts, "lines": lines, "reference_wo_ids": ref_ids,
-                "updated_at": datetime.now(timezone.utc)
-            }})
-            
-            if wo.get("status") == "pending":
-                await db.work_orders.update_one({"id": wo_id}, {"$set": {"status": "in_progress", "actual_start": datetime.now(timezone.utc)}})
-            
-            consolidate_sc.pop("_id", None)
-            return {"success": True, "message": f"Consolidated into {consolidate_sc.get('order_number')}", "sc_order": consolidate_sc}
+            if not found:
+                lines.append(nl)
+        
+        ref_ids = consolidate_sc.get("reference_wo_ids", [])
+        ref_ids.append(wo_id)
+        
+        await db.subcontract_orders.update_one({"id": consolidate_sc["id"]}, {"$set": {
+            "job_work_parts": parts, "lines": lines, "reference_wo_ids": ref_ids,
+            "updated_at": datetime.now(timezone.utc)
+        }})
+        
+        if wo.get("status") == "pending":
+            await db.work_orders.update_one({"id": wo_id}, {"$set": {"status": "in_progress", "actual_start": datetime.now(timezone.utc)}})
+        
+        consolidate_sc.pop("_id", None)
+        return {"success": True, "message": f"Consolidated into {consolidate_sc.get('order_number')}", "sc_order": consolidate_sc}
     
     # Create SC order
     sc_count = await db.subcontract_orders.count_documents({})
@@ -5597,7 +5603,7 @@ async def create_po_from_sc(request: Request, data: dict = Body(...)):
         "subtotal": total_amount,
         "additional_charges": [],
         "total_amount": total_amount,
-        "status": "approved",
+        "status": "draft",
         "notes": f"Auto-created from SC Orders: {', '.join(sc_refs)}",
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
