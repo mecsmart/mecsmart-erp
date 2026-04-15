@@ -2684,10 +2684,10 @@ async def get_grn_list(request: Request):
 
 @grn_router.get("/pending-pos")
 async def get_pending_grn_pos(request: Request):
-    """Get POs that are sent/partial and ready for GRN"""
+    """Get POs that are approved/sent/partial and ready for GRN"""
     await get_current_user(request)
     pos = await db.purchase_orders.find(
-        {"status": {"$in": ["sent", "partial"]}}, {"_id": 0}
+        {"status": {"$in": ["approved", "sent", "partial"]}}, {"_id": 0}
     ).sort("created_at", -1).to_list(1000)
     for po in pos:
         supplier = await db.suppliers.find_one({"id": po.get("supplier_id")}, {"_id": 0})
@@ -3552,7 +3552,7 @@ async def create_sc_for_wo(wo_id: str, request: Request):
     if not wo.get("subcontract_supplier_id"):
         raise HTTPException(status_code=400, detail="No supplier set for this SC MO")
     
-    # Check if SC already exists for this MO
+    # Check if SC already exists for THIS specific MO
     existing = await db.subcontract_orders.find_one({
         "$or": [
             {"reference_wo_id": wo_id},
@@ -3583,6 +3583,53 @@ async def create_sc_for_wo(wo_id: str, request: Request):
                     sc_lines.append({"item_id": comp["item_id"], "quantity": int(comp["quantity"] * qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
         if not sc_lines:
             sc_lines = [{"item_id": item_id, "quantity": qty, "sent_quantity": 0, "received_quantity": 0, "rate": item.get("unit_cost", 0) if item else 0}]
+    
+    # Try to consolidate into existing SC for same supplier (no sent DC, no PO created)
+    consolidate_sc = await db.subcontract_orders.find_one({
+        "supplier_id": wo["subcontract_supplier_id"],
+        "subcontract_type": sc_type,
+        "status": {"$in": ["draft", "in_progress"]},
+        "po_created": {"$ne": True}
+    }, sort=[("created_at", -1)])
+    
+    if consolidate_sc:
+        sent_dc = await db.delivery_challans.find_one({"subcontract_order_id": consolidate_sc["id"], "status": "sent"})
+        if not sent_dc:
+            # Merge parts and lines
+            parts = consolidate_sc.get("job_work_parts", [])
+            part_found = False
+            for ep in parts:
+                if ep.get("item_id") == item_id:
+                    ep["quantity"] = ep.get("quantity", 0) + qty
+                    part_found = True
+                    break
+            if not part_found:
+                parts.append({"item_id": item_id, "quantity": qty, "charges": 0, "received_quantity": 0})
+            
+            lines = consolidate_sc.get("lines", [])
+            for nl in sc_lines:
+                found = False
+                for el in lines:
+                    if el["item_id"] == nl["item_id"]:
+                        el["quantity"] += nl["quantity"]
+                        found = True
+                        break
+                if not found:
+                    lines.append(nl)
+            
+            ref_ids = consolidate_sc.get("reference_wo_ids", [])
+            ref_ids.append(wo_id)
+            
+            await db.subcontract_orders.update_one({"id": consolidate_sc["id"]}, {"$set": {
+                "job_work_parts": parts, "lines": lines, "reference_wo_ids": ref_ids,
+                "updated_at": datetime.now(timezone.utc)
+            }})
+            
+            if wo.get("status") == "pending":
+                await db.work_orders.update_one({"id": wo_id}, {"$set": {"status": "in_progress", "actual_start": datetime.now(timezone.utc)}})
+            
+            consolidate_sc.pop("_id", None)
+            return {"success": True, "message": f"Consolidated into {consolidate_sc.get('order_number')}", "sc_order": consolidate_sc}
     
     # Create SC order
     sc_count = await db.subcontract_orders.count_documents({})

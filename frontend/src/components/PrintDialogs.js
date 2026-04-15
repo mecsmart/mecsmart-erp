@@ -97,6 +97,26 @@ export function POPrintDialog({ po, open, onClose }) {
     const supplier = d.supplier || {};
     const lines = d.lines || [];
     const charges = d.additional_charges || [];
+    
+    // Compute GST totals from line items if not already set
+    if (!d.total_cgst && !d.total_sgst && !d.total_igst) {
+      let totalTax = 0;
+      lines.forEach(l => {
+        const gross = (l.quantity||0) * (l.unit_price||0);
+        const disc = l.discount_amount || (l.discount_type === 'percentage' ? gross * (l.discount_value||0)/100 : (l.discount_value||0));
+        const net = gross - disc;
+        totalTax += net * (l.gst_rate||0)/100;
+      });
+      if (d.is_inter_state) {
+        d.total_igst = totalTax;
+      } else {
+        d.total_cgst = totalTax / 2;
+        d.total_sgst = totalTax / 2;
+      }
+      d.total_tax = totalTax;
+      if (!d.subtotal) d.subtotal = lines.reduce((s, l) => s + ((l.quantity||0) * (l.unit_price||0)), 0);
+      if (!d.total_amount || d.total_amount === d.subtotal) d.total_amount = (d.subtotal||0) + totalTax;
+    }
     const paper = PAPER_SIZES.find(p => p.id === opts.paperSize) || PAPER_SIZES[0];
     const isModern = opts.template === 'modern';
     const accent = '#1D3557';
