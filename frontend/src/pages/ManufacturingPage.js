@@ -245,6 +245,21 @@ export default function ManufacturingPage() {
     }
   };
 
+  const handleStartSC = async (woId) => {
+    try {
+      const { data } = await api.post(`/api/work-orders/${woId}/create-sc`);
+      if (data.success) {
+        setStartResultDialog({ open: true, success: true, data: { message: data.message } });
+      } else {
+        setStartResultDialog({ open: true, success: false, data: { type: 'error', message: data.message || 'Failed' } });
+      }
+      fetchData();
+    } catch (error) {
+      const msg = error.response?.data?.detail || error.response?.data?.message || 'Failed to create SC order';
+      setStartResultDialog({ open: true, success: false, data: { type: 'error', message: msg } });
+    }
+  };
+
   const openJobCard = (wo) => {
     setJobCardWO(wo);
     setIsJobCardOpen(true);
@@ -1016,8 +1031,8 @@ export default function ManufacturingPage() {
                                 <button onClick={() => handleReserveMaterials(wo.id, true)} className="btn-secondary text-xs px-2 py-1 text-[#9B1C1C] border-[#9B1C1C]" data-testid={`unreserve-wo-${wo.id}`}><PackageX className="w-3 h-3 inline mr-0.5" />Unreserve</button>
                               )}
                               {canEdit && wo.status === 'pending' && !wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')} className="btn-secondary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Inhouse Start</button>}
-                              {canEdit && wo.status === 'pending' && wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')} className="btn-primary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Start SC</button>}
-                              {canEdit && wo.status === 'in_progress' && wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')} className="btn-primary text-xs px-2 py-1" title="Retry SC order creation" data-testid={`retry-sc-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Retry SC</button>}
+                              {canEdit && wo.status === 'pending' && wo.is_subcontract && <button onClick={() => handleStartSC(wo.id)} className="btn-primary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Start SC</button>}
+                              {canEdit && wo.status === 'in_progress' && wo.is_subcontract && <button onClick={() => handleStartSC(wo.id)} className="btn-primary text-xs px-2 py-1" data-testid={`retry-sc-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Create SC</button>}
                               {canEdit && wo.status === 'in_progress' && !wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'completed')} className="btn-secondary text-xs px-2 py-1" data-testid={`complete-wo-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />Complete</button>}
                               {['in_progress','pending'].includes(wo.status) && ops.length > 0 && !wo.is_subcontract && <button onClick={() => openJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`jobcard-wo-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Job Card</button>}
                               {canEdit && !wo.is_subcontract && ['pending', 'in_progress'].includes(wo.status) && !selectedMOs[wo.id] && <button onClick={() => handleMarkSubcontract(wo)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`subcontract-wo-${wo.id}`}><Truck className="w-3 h-3 inline mr-0.5" />SC</button>}

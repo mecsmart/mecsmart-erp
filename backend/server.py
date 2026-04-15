@@ -3531,6 +3531,84 @@ async def reserve_materials_for_wo(wo_id: str, request: Request):
     }
 
 
+@work_orders_router.post("/{wo_id}/create-sc")
+async def create_sc_for_wo(wo_id: str, request: Request):
+    """Dedicated endpoint: create SC order for a subcontract MO. Simple and direct."""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    wo = await db.work_orders.find_one({"id": wo_id})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    
+    if not wo.get("is_subcontract"):
+        raise HTTPException(status_code=400, detail="This MO is not marked as subcontract")
+    
+    if not wo.get("subcontract_supplier_id"):
+        raise HTTPException(status_code=400, detail="No supplier set for this SC MO")
+    
+    # Check if SC already exists for this MO
+    existing = await db.subcontract_orders.find_one({
+        "$or": [
+            {"reference_wo_id": wo_id},
+            {"reference_wo_ids": wo_id}
+        ]
+    })
+    if existing:
+        existing.pop("_id", None)
+        return {"success": True, "message": f"SC order already exists: {existing.get('order_number')}", "sc_order": existing}
+    
+    sc_type = wo.get("subcontract_type", "with_material")
+    item_id = wo.get("item_id")
+    item = await db.items.find_one({"id": item_id}, {"_id": 0}) if item_id else None
+    qty = wo.get("quantity", 1)
+    
+    # Build lines
+    sc_lines = []
+    if sc_type == "without_material":
+        sc_lines = [{"item_id": item_id, "quantity": qty, "sent_quantity": 0, "received_quantity": 0, "rate": item.get("unit_cost", 0) if item else 0}]
+    else:
+        bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
+        if bom:
+            for comp in bom.get("components", []):
+                if comp.get("is_alternate"):
+                    continue
+                ci = await db.items.find_one({"id": comp["item_id"]}, {"_id": 0})
+                if ci and ci.get("category") in ["raw_material", "component", "sub_assembly"]:
+                    sc_lines.append({"item_id": comp["item_id"], "quantity": int(comp["quantity"] * qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
+        if not sc_lines:
+            sc_lines = [{"item_id": item_id, "quantity": qty, "sent_quantity": 0, "received_quantity": 0, "rate": item.get("unit_cost", 0) if item else 0}]
+    
+    # Create SC order
+    sc_count = await db.subcontract_orders.count_documents({})
+    sc_doc = {
+        "id": str(uuid.uuid4()),
+        "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
+        "supplier_id": wo["subcontract_supplier_id"],
+        "reference_wo_id": wo_id,
+        "reference_wo_ids": [wo_id],
+        "subcontract_type": sc_type,
+        "fg_item_id": item_id,
+        "fg_item_name": f"{item.get('part_number', '')} - {item.get('name', '')}" if item else "",
+        "fg_quantity": qty,
+        "job_work_parts": [{"item_id": item_id, "quantity": qty, "charges": 0, "received_quantity": 0}],
+        "lines": sc_lines,
+        "status": "in_progress",
+        "notes": f"SC for MO {wo.get('wo_number')} ({sc_type.replace('_', ' ')})",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.subcontract_orders.insert_one(sc_doc)
+    sc_doc.pop("_id", None)
+    
+    # Update MO status to in_progress if still pending
+    if wo.get("status") == "pending":
+        await db.work_orders.update_one({"id": wo_id}, {"$set": {"status": "in_progress", "actual_start": datetime.now(timezone.utc)}})
+    
+    return {"success": True, "message": f"SC Order {sc_doc['order_number']} created", "sc_order": sc_doc}
+
+
 @work_orders_router.post("/{wo_id}/unreserve")
 async def unreserve_materials_for_wo(wo_id: str, request: Request):
     """Remove material reservation from an MO"""
