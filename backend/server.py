@@ -2783,6 +2783,73 @@ async def create_grn(grn_data: GRNCreate, request: Request):
         }}
     )
     
+    # If this PO is linked to SC order(s), mark SC as completed and complete linked MOs
+    sc_order_ids = po.get("reference_sc_order_ids", [])
+    if not sc_order_ids and po.get("reference_sc_order_id"):
+        sc_order_ids = [po["reference_sc_order_id"]]
+    
+    for sc_id in sc_order_ids:
+        sc_order = await db.subcontract_orders.find_one({"id": sc_id})
+        if not sc_order or sc_order.get("status") == "completed":
+            continue
+        
+        # Update received quantities on job_work_parts
+        for p in sc_order.get("job_work_parts", []):
+            for gl in grn_lines:
+                if gl["item_id"] == p.get("item_id"):
+                    p["received_quantity"] = p.get("received_quantity", 0) + gl["received_quantity"]
+        
+        # Mark SC as completed
+        await db.subcontract_orders.update_one({"id": sc_id}, {"$set": {
+            "status": "completed",
+            "job_work_parts": sc_order.get("job_work_parts", []),
+            "last_receipt_date": datetime.now(timezone.utc).isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat()
+        }})
+        
+        # Complete ALL linked MOs
+        all_wo_ids = list(set(filter(None, [
+            sc_order.get("reference_wo_id"),
+            *(sc_order.get("reference_wo_ids", []))
+        ])))
+        
+        for ref_wo_id in all_wo_ids:
+            ref_wo = await db.work_orders.find_one({"id": ref_wo_id})
+            if not ref_wo or ref_wo.get("status") == "completed":
+                continue
+            
+            # Mark all ops as completed
+            ops = ref_wo.get("operations_status", [])
+            for op in ops:
+                if op.get("status") != "completed":
+                    op["status"] = "completed"
+                    op["actual_end"] = datetime.now(timezone.utc)
+                    op["quantity_completed"] = ref_wo.get("quantity", 0)
+                    op["quantity_accepted"] = ref_wo.get("quantity", 0)
+            
+            # Add FG to stock
+            mo_qty = ref_wo.get("quantity", 0)
+            routing = await db.routings.find_one({"id": ref_wo.get("routing_id")})
+            fg_item_id = routing.get("item_id") if routing else ref_wo.get("item_id")
+            fg_item = await db.items.find_one({"id": fg_item_id})
+            if fg_item:
+                cs = fg_item.get("current_stock", 0)
+                ns = cs + mo_qty
+                await db.items.update_one({"id": fg_item_id}, {"$set": {"current_stock": ns}})
+                await db.inventory_transactions.insert_one({
+                    "id": str(uuid.uuid4()), "item_id": fg_item_id,
+                    "transaction_type": "receive", "quantity": mo_qty,
+                    "reference_type": "work_order", "reference_id": ref_wo_id,
+                    "previous_stock": cs, "new_stock": ns,
+                    "notes": f"SC GRN receipt - MO {ref_wo.get('wo_number')} completed",
+                    "created_at": datetime.now(timezone.utc), "created_by": user["id"]
+                })
+            
+            await db.work_orders.update_one({"id": ref_wo_id}, {"$set": {
+                "operations_status": ops, "status": "completed",
+                "quantity_completed": mo_qty, "actual_end": datetime.now(timezone.utc)
+            }})
+    
     return grn_doc
 
 @grn_router.get("/{grn_id}/print-data")
@@ -5503,6 +5570,24 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
     if update_data:
         update_data["updated_at"] = datetime.now(timezone.utc)
         await db.subcontract_orders.update_one({"id": order_id}, {"$set": update_data})
+    
+    # Sync changes to linked draft PO if job_work_parts changed
+    if data.job_work_parts is not None and order.get("po_created"):
+        draft_po = await db.purchase_orders.find_one({
+            "$or": [{"reference_sc_order_id": order_id}, {"reference_sc_order_ids": order_id}],
+            "status": "draft"
+        })
+        if draft_po:
+            po_lines = []
+            total = 0
+            for p in data.job_work_parts:
+                item = await db.items.find_one({"id": p.item_id}, {"_id": 0})
+                if item:
+                    unit_cost = p.charges or item.get("unit_cost", 0)
+                    line_total = p.quantity * unit_cost
+                    total += line_total
+                    po_lines.append({"item_id": p.item_id, "quantity": p.quantity, "unit_price": unit_cost, "total_price": line_total, "received_quantity": 0, "description": f"{item.get('part_number','')} - {item.get('name','')}", "uom": item.get("unit_of_measure","pcs"), "hsn_code": item.get("hsn_code",""), "gst_rate": item.get("gst_rate",18), "discount_type": "percentage", "discount_value": 0, "notes": ""})
+            await db.purchase_orders.update_one({"id": draft_po["id"]}, {"$set": {"lines": po_lines, "subtotal": total, "total_amount": total, "updated_at": datetime.now(timezone.utc)}})
     
     return await db.subcontract_orders.find_one({"id": order_id}, {"_id": 0})
 

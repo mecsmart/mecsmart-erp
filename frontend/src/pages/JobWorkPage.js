@@ -378,10 +378,10 @@ export default function JobWorkPage() {
                             return <div key={pi}><span className="mono font-medium text-[#1D3557]">{pit?.part_number || '?'}</span> {pit?.name || ''} <span className="mono text-[10px] text-[#6B7280]">x{p.quantity}</span>{p.charges ? <span className="text-[10px] text-[#723B13]"> @{formatCurrency(p.charges)}</span> : ''}</div>;
                           }) : <span className="text-[#6B7280]">{o.fg_item_name || '-'}</span>}</td>
                           <td>{o.supplier?.name || '-'}</td>
-                          <td className="text-sm">{o.lines.map((l, li) => {
+                          <td className="text-sm">{o.subcontract_type !== 'without_material' && o.lines.map((l, li) => {
                             const it = l.item || items.find(i => i.id === l.item_id);
                             return <div key={li}><span className="mono">{it?.part_number || l.item_id}</span> <span className="text-[#4B5563]">{it?.name || ''}</span></div>;
-                          })}</td>
+                          })}{o.subcontract_type === 'without_material' && <span className="text-[#9CA3AF] text-xs">No RM</span>}</td>
                           <td className="mono">{sentQty}/{totalQty}</td>
                           <td className="mono">{recvQty}</td>
                           <td className="text-right mono">{formatCurrency((o.job_work_parts || []).reduce((s, p) => s + (p.quantity || 0) * (p.charges || 0), 0) || o.processing_charges || 0)}</td>
@@ -392,7 +392,7 @@ export default function JobWorkPage() {
                           <td className="text-sm">{o.last_receipt_date ? new Date(o.last_receipt_date).toLocaleDateString() : o.expected_return_date ? new Date(o.expected_return_date).toLocaleDateString() : '-'}</td>
                           <td>
                             <div className="flex items-center space-x-1">
-                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && (
+                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && (
                                 <button onClick={() => handleEditOrder(o)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit" data-testid={`edit-jw-${o.id}`}>
                                   <Edit2 className="w-4 h-4" />
                                 </button>
@@ -412,8 +412,11 @@ export default function JobWorkPage() {
                               {canEdit && o.status === 'in_progress' && o.subcontract_type !== 'without_material' && sentQty > recvQty && (
                                 <button onClick={() => openReceiptDialog(o)} className="btn-secondary text-xs px-2 py-1" data-testid={`receive-${o.id}`}><ArrowLeft className="w-3 h-3 inline mr-1" />Receive</button>
                               )}
-                              {o.subcontract_type === 'without_material' && o.status === 'in_progress' && (
+                              {o.subcontract_type === 'without_material' && o.status === 'in_progress' && o.po_created && (
                                 <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded">Receive via GRN</span>
+                              )}
+                              {o.status === 'completed' && (
+                                <span className="text-[10px] text-[#03543F] bg-[#DEF7EC] px-2 py-1 rounded font-medium">Completed</span>
                               )}
                             </div>
                           </td>
