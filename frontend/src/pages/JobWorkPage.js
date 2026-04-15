@@ -403,8 +403,11 @@ export default function JobWorkPage() {
                               {canEdit && ['confirmed', 'in_progress'].includes(o.status) && sentQty < totalQty && o.subcontract_type !== 'without_material' && (
                                 <button onClick={() => openDCDialog(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
                               )}
-                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && o.subcontract_type === 'without_material' && (
+                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && o.subcontract_type === 'without_material' && !o.po_created && (
                                 <button onClick={() => handleCreatePOFromSC(o)} className="btn-primary text-xs px-2 py-1 bg-[#723B13] hover:bg-[#5A2E0F]" data-testid={`create-po-${o.id}`}><FileText className="w-3 h-3 inline mr-1" />Create PO</button>
+                              )}
+                              {o.po_created && o.po_number && (
+                                <span className="text-[10px] text-[#03543F] bg-[#DEF7EC] px-2 py-1 rounded">{o.po_number}</span>
                               )}
                               {canEdit && o.status === 'in_progress' && o.subcontract_type !== 'without_material' && sentQty > recvQty && (
                                 <button onClick={() => openReceiptDialog(o)} className="btn-secondary text-xs px-2 py-1" data-testid={`receive-${o.id}`}><ArrowLeft className="w-3 h-3 inline mr-1" />Receive</button>
@@ -555,7 +558,8 @@ export default function JobWorkPage() {
               </div>
             </div>
             
-            {/* Raw Materials to Send */}
+            {/* Raw Materials to Send - only for "with_material" SC */}
+            {(!editingOrder || editingOrder.subcontract_type !== 'without_material') && (
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-semibold text-[#723B13]">Raw Materials to Send</label>
@@ -582,6 +586,7 @@ export default function JobWorkPage() {
                 </table>
               </div>
             </div>
+            )}
             <div><label className="block text-sm font-semibold mb-1">Notes</label><textarea value={orderForm.notes} onChange={e => setOrderForm({...orderForm, notes: e.target.value})} className="input-field" rows={2} /></div>
             <div className="flex justify-end space-x-3 pt-3 border-t"><button onClick={() => { setOrderDialog(false); setEditingOrder(null); }} className="btn-secondary">Cancel</button><button onClick={handleCreateOrder} className="btn-primary" data-testid="jw-save-order">{editingOrder ? 'Update Order' : 'Create Order'}</button></div>
           </div>

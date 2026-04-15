@@ -1920,10 +1920,14 @@ async def get_purchase_orders(request: Request, status: Optional[str] = None, su
     for order in orders:
         supplier = await db.suppliers.find_one({"id": order.get("supplier_id")}, {"_id": 0})
         order["supplier"] = supplier
-        # Enrich lines with item details
+        # Enrich lines with item details and compute subtotal
+        subtotal = 0
         for line in order.get("lines", []):
             item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
             line["item"] = item
+            subtotal += line.get("total_price", 0) or (line.get("quantity", 0) * line.get("unit_price", 0))
+        if not order.get("subtotal"):
+            order["subtotal"] = subtotal
     return orders
 
 @purchase_orders_router.get("/{po_id}")
@@ -5686,72 +5690,100 @@ async def confirm_subcontract_order(order_id: str, request: Request):
 
 @jobwork_router.post("/create-po")
 async def create_po_from_sc(request: Request, data: dict = Body(...)):
-    """Create a Purchase Order from a 'without material' SC order"""
+    """Create a single PO from one or multiple SC orders (same supplier)"""
     user = await get_current_user(request)
     
-    sc_order_id = data.get("subcontract_order_id")
-    sc_order = await db.subcontract_orders.find_one({"id": sc_order_id})
-    if not sc_order:
-        raise HTTPException(status_code=404, detail="Subcontract order not found")
+    # Support single or multiple SC order IDs
+    sc_order_ids = data.get("subcontract_order_ids", [])
+    if not sc_order_ids:
+        single_id = data.get("subcontract_order_id")
+        if single_id:
+            sc_order_ids = [single_id]
     
-    # Check if PO already exists for this SC order
-    existing_po = await db.purchase_orders.find_one({"reference_sc_order_id": sc_order_id})
-    if existing_po:
-        raise HTTPException(status_code=400, detail=f"Purchase Order {existing_po.get('po_number')} already exists for this SC order")
+    if not sc_order_ids:
+        raise HTTPException(status_code=400, detail="No SC order IDs provided")
     
-    supplier = await db.suppliers.find_one({"id": sc_order.get("supplier_id")}, {"_id": 0})
-    if not supplier:
-        raise HTTPException(status_code=404, detail="Supplier not found")
+    # Collect all SC orders and verify same supplier
+    sc_orders = []
+    supplier_id = None
+    for sc_id in sc_order_ids:
+        sc = await db.subcontract_orders.find_one({"id": sc_id})
+        if not sc:
+            raise HTTPException(status_code=404, detail=f"SC order {sc_id} not found")
+        # Check if PO already exists
+        existing_po = await db.purchase_orders.find_one({"reference_sc_order_id": sc_id})
+        if existing_po:
+            raise HTTPException(status_code=400, detail=f"PO {existing_po.get('po_number')} already exists for SC {sc.get('order_number')}")
+        if supplier_id and sc.get("supplier_id") != supplier_id:
+            raise HTTPException(status_code=400, detail="All SC orders must be from the same supplier")
+        supplier_id = sc.get("supplier_id")
+        sc_orders.append(sc)
     
-    # Build PO lines from SC order lines + job_work_parts
+    # Build consolidated PO lines from all SC orders
     po_lines = []
     total_amount = 0
+    sc_refs = []
     
-    # For "without material": use job_work_parts (the FG/SA items the vendor will produce)
-    source_items = sc_order.get("job_work_parts", [])
-    if not source_items:
-        source_items = sc_order.get("lines", [])
+    for sc_order in sc_orders:
+        sc_refs.append(sc_order.get("order_number", ""))
+        source_items = sc_order.get("job_work_parts", [])
+        if not source_items:
+            source_items = sc_order.get("lines", [])
+        
+        for line in source_items:
+            item = await db.items.find_one({"id": line["item_id"]}, {"_id": 0})
+            if item:
+                unit_cost = line.get("charges", 0) or item.get("unit_cost", 0) or line.get("rate", 0)
+                qty = line.get("quantity", 0)
+                line_total = qty * unit_cost
+                total_amount += line_total
+                # Merge same item
+                found = False
+                for pl in po_lines:
+                    if pl["item_id"] == line["item_id"]:
+                        pl["quantity"] += qty
+                        pl["total_price"] += line_total
+                        found = True
+                        break
+                if not found:
+                    po_lines.append({
+                        "item_id": line["item_id"],
+                        "quantity": qty,
+                        "unit_price": unit_cost,
+                        "total_price": line_total,
+                        "received_quantity": 0,
+                        "description": f"{item.get('part_number', '')} - {item.get('name', '')}",
+                        "uom": item.get("unit_of_measure", "pcs"),
+                        "hsn_code": item.get("hsn_code", ""),
+                        "gst_rate": item.get("gst_rate", 18),
+                        "discount_type": "percentage",
+                        "discount_value": 0,
+                        "notes": ""
+                    })
     
-    for line in source_items:
-        item = await db.items.find_one({"id": line["item_id"]}, {"_id": 0})
-        if item:
-            unit_cost = line.get("charges", 0) or item.get("unit_cost", 0) or line.get("rate", 0)
-            qty = line.get("quantity", 0)
-            line_total = qty * unit_cost
-            total_amount += line_total
-            po_lines.append({
-                "item_id": line["item_id"],
-                "quantity": qty,
-                "unit_price": unit_cost,
-                "total_price": line_total,
-                "received_quantity": 0,
-                "description": f"{item.get('part_number', '')} - {item.get('name', '')}",
-                "uom": item.get("unit_of_measure", "pcs"),
-                "hsn_code": item.get("hsn_code", ""),
-                "gst_rate": item.get("gst_rate", 18),
-                "discount_type": "percentage",
-                "discount_value": 0,
-                "notes": ""
-            })
-    
-    # Create PO
     po_count = await db.purchase_orders.count_documents({})
     po_number = f"PO-{str(po_count + 1).zfill(6)}"
     po_doc = {
         "id": str(uuid.uuid4()),
         "po_number": po_number,
-        "supplier_id": sc_order.get("supplier_id"),
-        "reference_sc_order_id": sc_order_id,
+        "supplier_id": supplier_id,
+        "reference_sc_order_id": sc_order_ids[0],
+        "reference_sc_order_ids": sc_order_ids,
         "lines": po_lines,
+        "subtotal": total_amount,
         "additional_charges": [],
         "total_amount": total_amount,
         "status": "approved",
-        "notes": f"Auto-created from SC Order {sc_order.get('order_number')} (without material)",
+        "notes": f"Auto-created from SC Orders: {', '.join(sc_refs)}",
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
     await db.purchase_orders.insert_one(po_doc)
     po_doc.pop("_id", None)
+    
+    # Mark all SC orders as having PO
+    for sc_id in sc_order_ids:
+        await db.subcontract_orders.update_one({"id": sc_id}, {"$set": {"po_created": True, "po_number": po_number}})
     
     return {"po_number": po_number, "po_id": po_doc["id"], "total_amount": total_amount}
 
