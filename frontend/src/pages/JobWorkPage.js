@@ -33,6 +33,8 @@ export default function JobWorkPage() {
   // DC Print T&C dialog
   const [dcPrintDialog, setDcPrintDialog] = useState(false);
   const [dcPrintTarget, setDcPrintTarget] = useState(null);
+  // DC Send result dialog
+  const [dcSendResult, setDcSendResult] = useState({ open: false, data: null });
   const defaultTC = [
     'Materials listed above are sent on returnable basis for job work / processing only.',
     'The subcontractor shall process and return the materials within the agreed timeline.',
@@ -372,7 +374,7 @@ export default function JobWorkPage() {
                       return (
                         <tr key={o.id} data-testid={`jw-order-row-${o.id}`}>
                           <td className="mono font-medium">{o.order_number}</td>
-                          <td className="mono text-sm text-[#1D3557]">{o.mo_number || '-'}</td>
+                          <td className="mono text-sm text-[#1D3557]">{o.mo_numbers ? o.mo_numbers.join(', ') : o.mo_number || '-'}</td>
                           <td className="text-sm">{o.job_work_parts && o.job_work_parts.length > 0 ? o.job_work_parts.map((p, pi) => {
                             const pit = p.item || items.find(i => i.id === p.item_id);
                             return <div key={pi}><span className="mono font-medium text-[#1D3557]">{pit?.part_number || '?'}</span> {pit?.name || ''} <span className="mono text-[10px] text-[#6B7280]">x{p.quantity}</span>{p.charges ? <span className="text-[10px] text-[#723B13]"> @{formatCurrency(p.charges)}</span> : ''}</div>;
@@ -466,8 +468,11 @@ export default function JobWorkPage() {
                             {dc.status === 'draft' && canEdit && (
                               <button onClick={async () => {
                                 if (!window.confirm(`Send DC ${dc.dc_number}? This will deduct stock.`)) return;
-                                try { await api.post(`/api/job-work/challans/${dc.id}/send`); fetchData(); }
-                                catch (e) { alert(e.response?.data?.detail || 'Failed to send DC'); }
+                                try {
+                                  const { data } = await api.post(`/api/job-work/challans/${dc.id}/send`);
+                                  setDcSendResult({ open: true, data: { message: data.message, consumed: data.consumed_materials || [] } });
+                                  fetchData();
+                                } catch (e) { alert(e.response?.data?.detail || 'Failed to send DC'); }
                               }} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-btn-${dc.id}`}>
                                 <Truck className="w-3 h-3 inline mr-1" />Send
                               </button>
@@ -694,6 +699,34 @@ export default function JobWorkPage() {
               <button onClick={() => { setDcPrintDialog(false); if (dcPrintTarget) printDC(dcPrintTarget, dcTerms); }} className="btn-primary flex items-center space-x-2" data-testid="dc-print-confirm">
                 <Printer className="w-4 h-4" /><span>Print DC</span>
               </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* DC Send Material Consumption Dialog */}
+      <Dialog open={dcSendResult.open} onOpenChange={(o) => { if (!o) setDcSendResult({ open: false, data: null }); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle className="font-[Chivo] flex items-center gap-2 text-[#03543F]"><CheckCircle2 className="w-5 h-5" /> DC Sent — Materials Consumed</DialogTitle></DialogHeader>
+          <div className="mt-3 space-y-3">
+            <p className="text-sm text-[#03543F] font-medium">{dcSendResult.data?.message}</p>
+            <div className="bg-[#F3F4F6] rounded p-3 max-h-60 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="text-[#4B5563] border-b"><th className="text-left py-1">Item</th><th className="text-right">Qty</th><th className="text-right">Prev Stock</th><th className="text-right">New Stock</th></tr></thead>
+                <tbody>
+                  {(dcSendResult.data?.consumed || []).map((m, i) => (
+                    <tr key={i} className="border-t border-[#E5E7EB]">
+                      <td className="py-1"><span className="mono font-medium">{m.item}</span> <span className="text-[#6B7280]">{m.name}</span></td>
+                      <td className="text-right mono font-bold text-[#9B1C1C]">-{m.quantity} {m.uom}</td>
+                      <td className="text-right mono">{m.previous_stock}</td>
+                      <td className="text-right mono font-medium">{m.new_stock}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex justify-end pt-2 border-t">
+              <button onClick={() => setDcSendResult({ open: false, data: null })} className="btn-primary" data-testid="dc-send-ok">OK</button>
             </div>
           </div>
         </DialogContent>

@@ -490,6 +490,7 @@ export default function ManufacturingPage() {
       case 'in_progress': return 'bg-[#E1EFFE] text-[#1E429F]';
       case 'pending': return 'bg-[#FDF6B2] text-[#723B13]';
       case 'cancelled': return 'bg-[#FDE8E8] text-[#9B1C1C]';
+      case 'outsourced': return 'bg-[#E5E7EB] text-[#6B7280]';
       default: return 'bg-[#F3F4F6] text-[#4B5563]';
     }
   };
@@ -996,8 +997,7 @@ export default function ManufacturingPage() {
                     const showUnreserve = canEdit && wo.status === 'pending' && wo.materials_reserved && !ancestorIsReserved;
                     return (
                       <React.Fragment key={wo.id}>
-                        <tr className={`${depth > 0 ? 'bg-[#F9FAFB]' : ''} ${selectedMOs[wo.id] ? 'bg-[#E1EFFE]/40' : ''}`} data-testid={`wo-row-${wo.id}`}>
-                          <td className="text-center"><input type="checkbox" checked={!!selectedMOs[wo.id]} onChange={() => toggleMOSelect(wo.id)} className="rounded" data-testid={`select-mo-${wo.id}`} /></td>
+                        <tr className={`${depth > 0 ? 'bg-[#F9FAFB]' : ''}`} data-testid={`wo-row-${wo.id}`}>
                           <td style={{ paddingLeft: `${12 + depth * 24}px` }}>
                             {depth > 0 && <span className="text-[#1D3557] mr-1">└→</span>}
                             <span className="mono font-medium">{wo.wo_number}</span>
@@ -1021,8 +1021,12 @@ export default function ManufacturingPage() {
                                 ? <span className="ml-1 text-[10px] bg-[#FDE8E8] text-[#9B1C1C] px-1 rounded">Reserved (Shortfall)</span>
                                 : <span className="ml-1 text-[10px] bg-[#DEF7EC] text-[#03543F] px-1 rounded">Reserved</span>
                             )}
+                            {wo.outsourced_by_parent && <span className="ml-1 text-[10px] bg-[#E5E7EB] text-[#6B7280] px-1 rounded">via {wo.outsourced_sc_order}</span>}
                           </td>
                           <td>
+                            {wo.status === 'outsourced' ? (
+                              <span className="text-xs text-[#6B7280]">Covered by parent SC</span>
+                            ) : (
                             <div className="flex items-center flex-wrap gap-1">
                               {showReserve && (
                                 <button onClick={() => handleReserveMaterials(wo.id, false)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`reserve-wo-${wo.id}`}><PackageCheck className="w-3 h-3 inline mr-0.5" />Reserve</button>
@@ -1035,9 +1039,10 @@ export default function ManufacturingPage() {
                               {canEdit && wo.status === 'in_progress' && wo.is_subcontract && <button onClick={() => handleStartSC(wo.id)} className="btn-primary text-xs px-2 py-1" data-testid={`retry-sc-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Create SC</button>}
                               {canEdit && wo.status === 'in_progress' && !wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'completed')} className="btn-secondary text-xs px-2 py-1" data-testid={`complete-wo-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />Complete</button>}
                               {['in_progress','pending'].includes(wo.status) && ops.length > 0 && !wo.is_subcontract && <button onClick={() => openJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`jobcard-wo-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Job Card</button>}
-                              {canEdit && !wo.is_subcontract && ['pending', 'in_progress'].includes(wo.status) && !selectedMOs[wo.id] && <button onClick={() => handleMarkSubcontract(wo)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`subcontract-wo-${wo.id}`}><Truck className="w-3 h-3 inline mr-0.5" />SC</button>}
+                              {canEdit && !wo.is_subcontract && ['pending', 'in_progress'].includes(wo.status) && <button onClick={() => handleMarkSubcontract(wo)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`subcontract-wo-${wo.id}`}><Truck className="w-3 h-3 inline mr-0.5" />SC</button>}
                               {wo.status === 'completed' && <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-wo-${wo.id}`}><Printer className="w-3 h-3 inline mr-0.5" />Print</button>}
                             </div>
+                            )}
                           </td>
                         </tr>
                         {children.map(c => renderMORow(c, depth + 1))}
@@ -1047,17 +1052,6 @@ export default function ManufacturingPage() {
 
                   return (
                     <>
-                    {selectedMOCount > 0 && (
-                      <div className="flex items-center justify-between bg-[#E1EFFE] border border-[#93C5FD] rounded-sm px-4 py-3 mb-3" data-testid="bulk-sc-banner">
-                        <span className="text-sm font-medium text-[#1E429F]">{selectedMOCount} MO(s) selected</span>
-                        <div className="flex gap-2">
-                          <button onClick={() => setSelectedMOs({})} className="btn-secondary text-xs">Clear</button>
-                          <button onClick={() => { setBulkSCSupplier(''); setBulkSCType('with_material'); setBulkSCDialog(true); }} className="btn-primary text-xs flex items-center gap-1" data-testid="bulk-sc-btn">
-                            <Truck className="w-3 h-3" />Create Bulk SC Order
-                          </button>
-                        </div>
-                      </div>
-                    )}
                     {[...parentMOs, ...childOnlyMOs].map(parentMO => {
                     const parentItem = parentMO.item || items.find(i => i.id === parentMO.item_id);
                     const children = getChildMOs(parentMO.id);
@@ -1074,14 +1068,7 @@ export default function ManufacturingPage() {
                           <span className="text-xs text-[#6B7280] ml-auto">{1 + children.length} MO(s)</span>
                         </summary>
                         <div className="overflow-x-auto">
-                          <table className="w-full data-table"><thead><tr><th className="w-8"><input type="checkbox" className="rounded" onChange={(e) => {
-                            const moIds = [parentMO.id, ...children.map(c => c.id)];
-                            setSelectedMOs(prev => {
-                              const next = { ...prev };
-                              moIds.forEach(id => { if (e.target.checked) next[id] = true; else delete next[id]; });
-                              return next;
-                            });
-                          }} /></th><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
+                          <table className="w-full data-table"><thead><tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
                           <tbody>{renderMORow(parentMO, 0)}</tbody></table>
                         </div>
                       </details>

@@ -3612,6 +3612,19 @@ async def create_sc_for_wo(wo_id: str, request: Request):
         if wo.get("status") == "pending":
             await db.work_orders.update_one({"id": wo_id}, {"$set": {"status": "in_progress", "actual_start": datetime.now(timezone.utc)}})
         
+        # Mark child MOs as outsourced
+        async def mark_children_outsourced_c(parent_id):
+            children = await db.work_orders.find({"parent_wo_id": parent_id}, {"_id": 0}).to_list(500)
+            for child in children:
+                if child.get("status") not in ["completed", "cancelled"]:
+                    await db.work_orders.update_one({"id": child["id"]}, {"$set": {
+                        "outsourced_by_parent": True,
+                        "outsourced_sc_order": consolidate_sc.get("order_number", ""),
+                        "status": "outsourced"
+                    }})
+                    await mark_children_outsourced_c(child["id"])
+        await mark_children_outsourced_c(wo_id)
+        
         consolidate_sc.pop("_id", None)
         return {"success": True, "message": f"Consolidated into {consolidate_sc.get('order_number')}", "sc_order": consolidate_sc}
     
@@ -3640,6 +3653,20 @@ async def create_sc_for_wo(wo_id: str, request: Request):
     # Update MO status to in_progress if still pending
     if wo.get("status") == "pending":
         await db.work_orders.update_one({"id": wo_id}, {"$set": {"status": "in_progress", "actual_start": datetime.now(timezone.utc)}})
+    
+    # Mark ALL child MOs as outsourced (recursively) — they're covered by parent's SC
+    async def mark_children_outsourced(parent_id):
+        children = await db.work_orders.find({"parent_wo_id": parent_id}, {"_id": 0}).to_list(500)
+        for child in children:
+            if child.get("status") not in ["completed", "cancelled"]:
+                await db.work_orders.update_one({"id": child["id"]}, {"$set": {
+                    "outsourced_by_parent": True,
+                    "outsourced_sc_order": sc_doc.get("order_number", ""),
+                    "status": "outsourced"
+                }})
+                await mark_children_outsourced(child["id"])
+    
+    await mark_children_outsourced(wo_id)
     
     return {"success": True, "message": f"SC Order {sc_doc['order_number']} created", "sc_order": sc_doc}
 
@@ -5812,7 +5839,8 @@ async def send_draft_dc(dc_id: str, request: Request):
     
     order = await db.subcontract_orders.find_one({"id": dc.get("subcontract_order_id")})
     
-    # Deduct stock for each line
+    # Deduct stock for each line and track consumed materials
+    consumed_materials = []
     for line in dc.get("lines", []):
         item = await db.items.find_one({"id": line["item_id"]})
         if not item:
@@ -5823,7 +5851,14 @@ async def send_draft_dc(dc_id: str, request: Request):
             raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.get('part_number')}: need {qty}, have {current_stock}")
         new_stock = current_stock - qty
         await db.items.update_one({"id": line["item_id"]}, {"$set": {"current_stock": new_stock}})
-        # Inventory transaction
+        consumed_materials.append({
+            "item": item.get("part_number", ""),
+            "name": item.get("name", ""),
+            "quantity": qty,
+            "uom": item.get("unit_of_measure", "pcs"),
+            "previous_stock": current_stock,
+            "new_stock": new_stock
+        })
         tx = {
             "id": str(uuid.uuid4()),
             "item_id": line["item_id"],
@@ -5838,7 +5873,6 @@ async def send_draft_dc(dc_id: str, request: Request):
             "created_by": user["id"]
         }
         await db.inventory_transactions.insert_one(tx)
-        # Update sent_quantity in order
         if order:
             for ol in order.get("lines", []):
                 if ol["item_id"] == line["item_id"]:
@@ -5848,7 +5882,7 @@ async def send_draft_dc(dc_id: str, request: Request):
         await db.subcontract_orders.update_one({"id": order["id"]}, {"$set": {"lines": order["lines"], "status": "in_progress"}})
     
     await db.delivery_challans.update_one({"id": dc_id}, {"$set": {"status": "sent", "sent_at": datetime.now(timezone.utc)}})
-    return {"message": f"DC {dc.get('dc_number')} sent successfully"}
+    return {"message": f"DC {dc.get('dc_number')} sent successfully", "consumed_materials": consumed_materials}
 
 @jobwork_router.get("/receipts")
 async def get_subcontract_receipts(request: Request):
