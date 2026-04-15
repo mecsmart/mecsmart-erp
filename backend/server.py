@@ -669,43 +669,14 @@ async def register(user_data: UserCreate, response: Response):
 async def login(user_data: UserLogin, response: Response, request: Request):
     try:
         email = user_data.email.lower()
-        client_ip = request.client.host if request.client else "unknown"
-        identifier = f"{client_ip}:{email}"
-        
-        # Check brute force
-        attempt = await db.login_attempts.find_one({"identifier": identifier})
-        if attempt and attempt.get("count", 0) >= 5:
-            lockout_until = attempt.get("lockout_until")
-            if lockout_until:
-                # Handle both naive and aware datetimes
-                now = datetime.now(timezone.utc)
-                if lockout_until.tzinfo is None:
-                    lockout_until = lockout_until.replace(tzinfo=timezone.utc)
-                if now < lockout_until:
-                    raise HTTPException(status_code=429, detail="Account locked. Try again later.")
-            else:
-                await db.login_attempts.delete_one({"identifier": identifier})
         
         user = await db.users.find_one({"email": email})
         if not user:
-            await db.login_attempts.update_one(
-                {"identifier": identifier},
-                {"$inc": {"count": 1}, "$set": {"lockout_until": datetime.now(timezone.utc) + timedelta(minutes=15)}},
-                upsert=True
-            )
             raise HTTPException(status_code=401, detail="Invalid credentials")
         
         pw_hash = user.get("password_hash", "")
         if not pw_hash or not verify_password(user_data.password, pw_hash):
-            await db.login_attempts.update_one(
-                {"identifier": identifier},
-                {"$inc": {"count": 1}, "$set": {"lockout_until": datetime.now(timezone.utc) + timedelta(minutes=15)}},
-                upsert=True
-            )
             raise HTTPException(status_code=401, detail="Invalid credentials")
-        
-        # Clear failed attempts on success
-        await db.login_attempts.delete_one({"identifier": identifier})
         
         user_id = str(user["_id"])
         access_token = create_access_token(user_id, email)
