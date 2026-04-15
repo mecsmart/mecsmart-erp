@@ -3593,10 +3593,12 @@ async def start_work_order(wo_id: str, request: Request):
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
     
-    if wo.get("status") != "pending":
-        raise HTTPException(status_code=400, detail="Work order is not in pending status")
+    if wo.get("status") not in ["pending", "in_progress"]:
+        raise HTTPException(status_code=400, detail="Work order is not in pending/in-progress status")
     
-    if wo.get("materials_consumed"):
+    already_started = wo.get("status") == "in_progress"
+    
+    if wo.get("materials_consumed") and not wo.get("is_subcontract"):
         raise HTTPException(status_code=400, detail="Materials already consumed for this work order")
     
     # Get the routing and item
@@ -3748,24 +3750,26 @@ async def start_work_order(wo_id: str, request: Request):
             "insufficient_materials": insufficient_materials
         }
     
-    # Update work order status to in_progress
-    # Do NOT auto-start the first operation — let user pick operator/supplier via Job Card
-    await db.work_orders.update_one(
-        {"id": wo_id},
-        {"$set": {
-            "status": "in_progress",
-            "actual_start": datetime.now(timezone.utc),
-            "materials_consumed": True,
-            "consumed_materials": consumed_materials,
-            "updated_at": datetime.now(timezone.utc)
-        }}
-    )
+    # Update work order status to in_progress (skip if already started)
+    if not already_started:
+        await db.work_orders.update_one(
+            {"id": wo_id},
+            {"$set": {
+                "status": "in_progress",
+                "actual_start": datetime.now(timezone.utc),
+                "materials_consumed": True,
+                "consumed_materials": consumed_materials,
+                "updated_at": datetime.now(timezone.utc)
+            }}
+        )
     
     # Auto-create SC Order + DC for sub-contract MO
     auto_dc = None
+    sc_created = False
     if wo.get("is_subcontract") and wo.get("subcontract_supplier_id"):
         sc_type = wo.get("subcontract_type", "with_material")
         wo_item_for_name = await db.items.find_one({"id": item_id}, {"_id": 0})
+        logger.info(f"SC Start: wo_id={wo_id} sc_type={sc_type} supplier={wo.get('subcontract_supplier_id')}")
         
         # For "without_material": SC order line = the finished item itself (no RM sent)
         # For "with_material": SC order lines = BOM materials (sent via DC later)
@@ -3848,6 +3852,8 @@ async def start_work_order(wo_id: str, request: Request):
                 "updated_at": datetime.now(timezone.utc)
             }})
             sc_order_id = sc_order["id"]
+            sc_created = True
+            logger.info(f"SC Consolidated into {sc_order.get('order_number')} for wo={wo_id}")
         else:
             sc_count = await db.subcontract_orders.count_documents({})
             sc_sent_qty = lambda m: 0  # sent_quantity starts at 0, updated when DC is sent
@@ -3871,14 +3877,18 @@ async def start_work_order(wo_id: str, request: Request):
             await db.subcontract_orders.insert_one(sc_order_doc)
             sc_order_doc.pop("_id", None)
             sc_order_id = sc_order_doc["id"]
+            sc_created = True
+            logger.info(f"SC Created: {sc_order_doc.get('order_number')} for wo={wo_id}")
         
         # NO auto-DC creation — DC is created only when user presses "Send DC" on SC order
+    else:
+        logger.info(f"SC Skip: is_sc={wo.get('is_subcontract')} supplier={wo.get('subcontract_supplier_id')}")
     
     sc_type = wo.get("subcontract_type", "with_material")
     sc_type_label = f" ({sc_type.replace('_', ' ')})" if wo.get("is_subcontract") else ""
     return {
         "success": True,
-        "message": ("Work order started" + (", materials consumed" if consumed_materials else "") + (f" + SC order created{sc_type_label}" if wo.get("is_subcontract") else "")),
+        "message": ("Work order started" + (", materials consumed" if consumed_materials else "") + (f" + SC order created{sc_type_label}" if sc_created else "")),
         "consumed_materials": consumed_materials,
         "wo_number": wo.get("wo_number")
     }
