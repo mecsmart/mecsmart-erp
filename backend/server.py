@@ -3734,18 +3734,20 @@ async def start_work_order(wo_id: str, request: Request):
             }}
         )
     
-    # Auto-create SC Order + DC for sub-contract MO
+    # Auto-create SC Order for sub-contract MO
     auto_dc = None
     sc_created = False
     if wo.get("is_subcontract") and wo.get("subcontract_supplier_id"):
+      try:
         sc_type = wo.get("subcontract_type", "with_material")
         wo_item_for_name = await db.items.find_one({"id": item_id}, {"_id": 0})
-        logger.info(f"SC Start: wo_id={wo_id} sc_type={sc_type} supplier={wo.get('subcontract_supplier_id')}")
+        logger.info(f"SC Start: wo_id={wo_id} sc_type={sc_type} supplier={wo.get('subcontract_supplier_id')} item={item_id} bom={'YES' if bom else 'NO'}")
         
         # For "without_material": SC order line = the finished item itself (no RM sent)
         # For "with_material": SC order lines = BOM materials (sent via DC later)
         if sc_type == "without_material":
-            sc_material_lines = [{"item_id": item_id, "quantity": wo.get("quantity", 1), "unit_cost": wo_item_for_name.get("unit_cost", 0)}] if wo_item_for_name else []
+            sc_material_lines = [{"item_id": item_id, "quantity": wo.get("quantity", 1), "unit_cost": wo_item_for_name.get("unit_cost", 0) if wo_item_for_name else 0}]
+            logger.info(f"SC without_material: lines={len(sc_material_lines)}")
         else:
             # Get BOM materials for SC lines (not consumed yet, will be sent via DC)
             sc_material_lines = []
@@ -3852,6 +3854,10 @@ async def start_work_order(wo_id: str, request: Request):
             logger.info(f"SC Created: {sc_order_doc.get('order_number')} for wo={wo_id}")
         
         # NO auto-DC creation — DC is created only when user presses "Send DC" on SC order
+      except Exception as sc_err:
+        logger.error(f"SC creation failed for wo={wo_id}: {str(sc_err)}")
+        import traceback
+        logger.error(traceback.format_exc())
     else:
         logger.info(f"SC Skip: is_sc={wo.get('is_subcontract')} supplier={wo.get('subcontract_supplier_id')}")
     
