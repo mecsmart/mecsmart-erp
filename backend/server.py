@@ -3858,6 +3858,12 @@ async def start_work_order(wo_id: str, request: Request):
         logger.error(f"SC creation failed for wo={wo_id}: {str(sc_err)}")
         import traceback
         logger.error(traceback.format_exc())
+        return {
+            "success": False,
+            "message": f"SC order creation failed: {str(sc_err)}",
+            "consumed_materials": consumed_materials,
+            "wo_number": wo.get("wo_number")
+        }
     else:
         logger.info(f"SC Skip: is_sc={wo.get('is_subcontract')} supplier={wo.get('subcontract_supplier_id')}")
     

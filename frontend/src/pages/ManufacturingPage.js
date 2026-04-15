@@ -203,10 +203,10 @@ export default function ManufacturingPage() {
           return;
         }
         if (data.success === false) {
-          setStartResultDialog({ open: true, success: false, data: { type: 'insufficient', message: data.message, materials: data.insufficient_materials } });
+          setStartResultDialog({ open: true, success: false, data: { type: 'error', message: data.message || 'Failed to start/create SC order' } });
           return;
         }
-        setStartResultDialog({ open: true, success: true, data: { message: 'Manufacturing order started!', consumed: data.consumed_materials } });
+        setStartResultDialog({ open: true, success: true, data: { message: data.message || 'Manufacturing order started!', consumed: data.consumed_materials } });
       } else {
         await api.put(`/api/work-orders/${woId}`, { status: newStatus });
         if (newStatus === 'completed') {
@@ -2021,6 +2021,9 @@ export default function ManufacturingPage() {
                   ))}
                 </div>
               </>
+            )}
+            {!startResultDialog.success && startResultDialog.data?.type === 'error' && (
+              <p className="text-sm text-[#9B1C1C] font-medium bg-[#FDE8E8]/50 rounded p-4">{startResultDialog.data.message}</p>
             )}
             <div className="flex justify-end pt-3 border-t">
               <button onClick={() => setStartResultDialog({ open: false, success: null, data: null })} className={startResultDialog.success ? 'btn-primary' : 'btn-secondary'} data-testid="mo-start-result-close">
