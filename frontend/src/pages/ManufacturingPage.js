@@ -200,23 +200,27 @@ export default function ManufacturingPage() {
         const { data } = await api.post(`/api/work-orders/${woId}/start`);
         if (data.reserved_conflicts) {
           setStartResultDialog({ open: true, success: false, data: { type: 'reserved', message: data.message, conflicts: data.reserved_conflicts } });
+          fetchData();
           return;
         }
         if (data.success === false) {
           setStartResultDialog({ open: true, success: false, data: { type: 'error', message: data.message || 'Failed to start/create SC order' } });
+          fetchData();
           return;
         }
         setStartResultDialog({ open: true, success: true, data: { message: data.message || 'Manufacturing order started!', consumed: data.consumed_materials } });
+        fetchData();
       } else {
         await api.put(`/api/work-orders/${woId}`, { status: newStatus });
+        fetchData();
         if (newStatus === 'completed') {
           alert('Manufacturing order completed! Finished goods added to inventory.');
         }
       }
-      fetchData();
     } catch (error) {
       console.error('Failed to update work order:', error);
-      alert(error.response?.data?.detail || 'Failed to update manufacturing order');
+      const detail = error.response?.data?.detail || error.response?.data?.message || 'Failed to update manufacturing order';
+      setStartResultDialog({ open: true, success: false, data: { type: 'error', message: detail } });
     }
   };
 

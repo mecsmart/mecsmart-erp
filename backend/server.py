@@ -3575,12 +3575,15 @@ async def start_work_order(wo_id: str, request: Request):
     # Get the routing and item
     routing = await db.routings.find_one({"id": wo.get("routing_id")})
     if not routing:
-        raise HTTPException(status_code=404, detail="Routing not found")
-    
-    item_id = routing.get("item_id")
-    
-    # Find BOM for this item to get required materials
-    bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"})
+        if wo.get("is_subcontract"):
+            # For SC MOs without routing, use item_id directly
+            item_id = wo.get("item_id")
+            bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}) if item_id else None
+        else:
+            raise HTTPException(status_code=404, detail="Routing not found")
+    else:
+        item_id = routing.get("item_id")
+        bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"})
     
     consumed_materials = []
     insufficient_materials = []
@@ -3591,8 +3594,8 @@ async def start_work_order(wo_id: str, request: Request):
     # - "with_material": RM sent via DC (stock deducted at DC Send, not MO Start)
     skip_material_consumption = bool(wo.get("is_subcontract"))
     
-    # Check if materials are reserved by OTHER MOs (exclude own ancestor chain)
-    if not wo.get("materials_reserved"):
+    # Check if materials are reserved by OTHER MOs (only for non-SC inhouse MOs)
+    if not wo.get("materials_reserved") and not skip_material_consumption:
         # Walk up the parent chain to find all ancestor MO IDs
         ancestor_ids = set()
         current = wo
