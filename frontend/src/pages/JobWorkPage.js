@@ -365,7 +365,19 @@ export default function JobWorkPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full data-table" data-testid="jw-orders-table">
-                  <thead><tr><th>Order #</th><th>MO #</th><th>FG/SA/Part</th><th>Supplier</th><th>RM</th><th>Sent/Total</th><th>Received</th><th className="text-right">Charges</th><th>Status</th><th>Return Date</th><th>Actions</th></tr></thead>
+                  <thead><tr>
+                    <th style={{width:'90px'}}>Order #</th>
+                    <th style={{width:'80px'}}>MO #</th>
+                    <th style={{minWidth:'160px'}}>FG/SA/Part</th>
+                    <th style={{width:'100px'}}>Supplier</th>
+                    <th style={{minWidth:'140px'}}>RM</th>
+                    <th style={{width:'70px'}}>Sent/Total</th>
+                    <th style={{width:'60px'}}>Received</th>
+                    <th style={{width:'80px'}} className="text-right">Charges</th>
+                    <th style={{width:'80px'}}>Status</th>
+                    <th style={{width:'80px'}}>Return Date</th>
+                    <th style={{width:'100px'}}>Actions</th>
+                  </tr></thead>
                   <tbody>
                     {orders.map(o => {
                       const totalQty = o.lines.reduce((s, l) => s + l.quantity, 0);
@@ -374,15 +386,15 @@ export default function JobWorkPage() {
                       return (
                         <tr key={o.id} data-testid={`jw-order-row-${o.id}`}>
                           <td className="mono font-medium">{o.order_number}</td>
-                          <td className="mono text-sm text-[#1D3557]">{o.mo_numbers ? o.mo_numbers.join(', ') : o.mo_number || '-'}</td>
+                          <td className="text-sm">{(o.mo_numbers || []).map((m, mi) => <div key={mi} className="mono text-[#1D3557]">{m}</div>)}{!o.mo_numbers?.length && <span className="mono text-[#1D3557]">{o.mo_number || '-'}</span>}</td>
                           <td className="text-sm">{o.job_work_parts && o.job_work_parts.length > 0 ? o.job_work_parts.map((p, pi) => {
                             const pit = p.item || items.find(i => i.id === p.item_id);
-                            return <div key={pi} className="font-medium"><span className="text-[#1D3557]">{pit?.part_number || '?'} - {pit?.name || ''}</span> <span className="text-[#6B7280]">({p.quantity})</span>{p.charges ? <div className="text-[10px] text-[#723B13]">@{formatCurrency(p.charges)}</div> : ''}</div>;
+                            return <div key={pi} className="mb-1"><div className="font-semibold text-[#1D3557]">{pit?.part_number} - {pit?.name || ''}</div><div className="text-[#6B7280] text-[11px]">Qty: {p.quantity}{p.charges ? <span className="text-[#723B13] ml-1">@{formatCurrency(p.charges)}</span> : ''}</div></div>;
                           }) : <span className="text-[#6B7280]">{o.fg_item_name || '-'}</span>}</td>
-                          <td>{o.supplier?.name || '-'}</td>
-                          <td className="text-sm">{o.subcontract_type === 'without_material' ? <span className="text-[#9CA3AF] text-xs">No RM</span> : o.lines.map((l, li) => {
+                          <td className="text-sm">{o.supplier?.name || '-'}</td>
+                          <td className="text-sm">{o.subcontract_type === 'without_material' ? <span className="text-[#9CA3AF] text-xs italic">No RM</span> : o.lines.map((l, li) => {
                             const it = l.item || items.find(i => i.id === l.item_id);
-                            return <div key={li} className="text-[#4B5563]"><span className="mono text-[10px]">{it?.part_number || '-'}</span> {it?.name || ''} <span className="mono text-[#6B7280]">({l.quantity})</span></div>;
+                            return <div key={li} className="mb-0.5"><div className="mono text-[11px] font-medium">{it?.part_number || '-'}</div><div className="text-[#4B5563] text-[11px]">{it?.name || ''} ({l.quantity})</div></div>;
                           })}</td>
                           <td className="mono">{sentQty}/{totalQty}</td>
                           <td className="mono">{recvQty}</td>
@@ -470,8 +482,7 @@ export default function JobWorkPage() {
                                 if (!window.confirm(`Send DC ${dc.dc_number}? This will deduct stock.`)) return;
                                 try {
                                   const { data } = await api.post(`/api/job-work/challans/${dc.id}/send`);
-                                  setDcSendResult({ open: true, data: { message: data.message, consumed: data.consumed_materials || [] } });
-                                  fetchData();
+                                  setDcSendResult({ open: true, data: { message: data.message, consumed: data.consumed_materials || [], dcNumber: dc.dc_number } });
                                 } catch (e) { alert(e.response?.data?.detail || 'Failed to send DC'); }
                               }} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-btn-${dc.id}`}>
                                 <Truck className="w-3 h-3 inline mr-1" />Send
@@ -705,9 +716,9 @@ export default function JobWorkPage() {
       </Dialog>
 
       {/* DC Send Material Consumption Dialog */}
-      <Dialog open={dcSendResult.open} onOpenChange={(o) => { if (!o) setDcSendResult({ open: false, data: null }); }}>
+      <Dialog open={dcSendResult.open} onOpenChange={(o) => { if (!o) { setDcSendResult({ open: false, data: null }); fetchData(); } }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle className="font-[Chivo] flex items-center gap-2 text-[#03543F]"><CheckCircle2 className="w-5 h-5" /> DC Sent — Materials Consumed</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-[Chivo] flex items-center gap-2 text-[#03543F]"><CheckCircle2 className="w-5 h-5" /> Materials Consumed — {dcSendResult.data?.dcNumber || 'DC'}</DialogTitle></DialogHeader>
           <div className="mt-3 space-y-3">
             <p className="text-sm text-[#03543F] font-medium">{dcSendResult.data?.message}</p>
             <div className="bg-[#F3F4F6] rounded p-3 max-h-60 overflow-y-auto">
@@ -722,11 +733,14 @@ export default function JobWorkPage() {
                       <td className="text-right mono font-medium">{m.new_stock}</td>
                     </tr>
                   ))}
+                  {(!dcSendResult.data?.consumed || dcSendResult.data.consumed.length === 0) && (
+                    <tr><td colSpan="4" className="text-center py-3 text-[#9CA3AF]">No materials consumed</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
             <div className="flex justify-end pt-2 border-t">
-              <button onClick={() => setDcSendResult({ open: false, data: null })} className="btn-primary" data-testid="dc-send-ok">OK</button>
+              <button onClick={() => { setDcSendResult({ open: false, data: null }); fetchData(); }} className="btn-primary" data-testid="dc-send-ok">OK</button>
             </div>
           </div>
         </DialogContent>
