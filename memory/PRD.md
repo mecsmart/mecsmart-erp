@@ -5,24 +5,24 @@
 - Frontend: React 19 + Shadcn/UI + Tailwind CSS
 - Auth: Custom JWT with roles
 
-## MO Process Rules (Feb 2026)
-- SC button hidden when MO started inhouse. Complete only for MOs with no routing ops.
-- SC dialog: Choose type → Choose supplier → Confirm → Auto-creates SC order → Shows JW order details in dialog
-- Smart RM Resolution: Completed child parts → sent as-is; uncompleted → resolved to RM. Lines preserved during SC edit.
-- SC Type Lock: "without_material" disabled when child items already processed.
-- Auto-Complete: Last job card op completion auto-completes MO and adds stock.
-- DC Shortage: Shows ALL insufficient items with part number, name, required, available, shortage.
-
-## SC Receipt Stock Rules
-- Receipt adds FG/SA stock ONCE at receipt line processing level
+## SC Receipt Stock Rules (CRITICAL - Feb 2026)
+- For with_material SC: Receipt ONLY adds stock for job_work_parts items (FG/SA/Parts)
+- RM items from SC lines are BLOCKED from stock addition during receipt (backend safeguard)
 - MO completion during receipt does NOT add FG stock again (prevents double-counting)
-- RM stock is deducted on DC send, never added back (consumed by vendor)
+- DC Send correctly deducts RM/component stock
+- without_material SC receipt works normally (no filtering)
+
+## MO Process Rules
+- SC button hidden when MO started inhouse. Complete only for MOs with no routing ops.
+- SC dialog: auto-creates SC order on confirm, shows JW order details in dialog
+- Smart RM Resolution: Completed child parts → sent as-is; uncompleted → resolved to RM
+- SC Type Lock: "without_material" disabled when child items already processed
+- Auto-Complete: Last job card op completion auto-completes MO and adds stock
 
 ## Key Features
 - Multi-Level BOM, MRP (smart RM with MO reservation), Quality
 - MO Reserve/Unreserve, SC Consolidation, DC draft flow, PO from SC
 - Sales Orders, Purchase Orders/Invoices, GRN, Inventory, Stores
-- Search on all major pages, Collapsible sidebar groups
 
 ## Backlog
 - [ ] P1: GST Phase 2 - invoice generation + tax breakup reports
