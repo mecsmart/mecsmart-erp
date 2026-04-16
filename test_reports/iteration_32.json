@@ -1,0 +1,86 @@
+{
+  "summary": "Tested Bug 1 (SC Update Preserve Lines) and Bug 2 (hasActiveChild Skip Outsourced Children) fixes for Manufacturing ERP. Both bugs are VERIFIED FIXED. Bug 1: SC orders created via create-sc endpoint (with reference_wo_ids) now preserve their smart-resolved lines during update - charges can be changed without overwriting RM lines. Bug 2: Children with outsourced_by_parent=true are correctly skipped in hasActiveChild check and display 'Covered by parent SC' in UI.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Bug 1: test_sc_update_preserves_smart_resolved_lines - SC lines (PT-1 + RM-1 + RM-2) preserved after PUT /api/job-work/orders/{id} with changed charges",
+    "Bug 1: test_manual_sc_order_recalculates_lines_on_update - Manual SC orders (no reference_wo_ids) still recalculate lines correctly",
+    "Bug 2: test_children_marked_outsourced_by_parent_on_sc_creation - Child MOs marked with outsourced_by_parent=true after parent SC creation",
+    "Bug 2: test_fg_mo_can_show_sc_button_after_sa_outsourced - hasActiveChild correctly skips children with outsourced_by_parent=true",
+    "Frontend: Job Work page loads correctly with SC orders showing smart-resolved RM items",
+    "Frontend: Manufacturing page shows 'Covered by parent SC' for outsourced children with outsourced_by_parent=true",
+    "Frontend: Login with admin@erp.com / Admin@123 works correctly",
+    "Regression: create-sc endpoint still works correctly with smart resolution"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_sc_update_preserve_lines.py",
+    "/app/test_reports/pytest/pytest_sc_update_preserve_lines.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "Lines 5700-5723 (server.py): update_subcontract_order correctly checks for reference_wo_ids/reference_wo_id before auto-recalculating lines - VERIFIED WORKING",
+    "Lines 997-1011 (ManufacturingPage.js): hasActiveChild correctly has 'if (kid.outsourced_by_parent) continue;' to skip covered children - VERIFIED WORKING",
+    "Lines 3785-3796 (server.py): mark_children_outsourced function correctly sets outsourced_by_parent=true on child MOs - VERIFIED WORKING"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_sc_update_preserve_lines.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (4/4 tests passed)",
+    "frontend": "100% (Job Work and Manufacturing pages working correctly)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Test items, BOMs, routings, production orders, work orders, and SC orders created during E2E testing with unique UUID suffixes for isolation.",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Both Bug 1 and Bug 2 fixes verified working. Bug 1: SC orders with reference_wo_ids preserve smart-resolved lines during update (PUT /api/job-work/orders/{id}). Bug 2: hasActiveChild skips children with outsourced_by_parent=true, and UI shows 'Covered by parent SC' for these MOs. Test file: /app/backend/tests/test_sc_update_preserve_lines.py",
+
+  "features_verified": {
+    "bug1_sc_update_preserve_lines": {
+      "status": "FIXED",
+      "details": "SC orders created via create-sc (with reference_wo_ids) preserve their smart-resolved lines when job_work_parts are updated with changed charges"
+    },
+    "bug1_manual_sc_recalculates": {
+      "status": "WORKING",
+      "details": "Manual SC orders (without reference_wo_ids) still correctly recalculate lines from BOM when job_work_parts are updated"
+    },
+    "bug2_outsourced_by_parent_marking": {
+      "status": "FIXED",
+      "details": "Child MOs are correctly marked with outsourced_by_parent=true when parent SC is created via create-sc endpoint"
+    },
+    "bug2_hasActiveChild_skip": {
+      "status": "FIXED",
+      "details": "hasActiveChild correctly skips children with outsourced_by_parent=true, allowing SC button on parent MO"
+    },
+    "bug2_ui_covered_by_parent_sc": {
+      "status": "WORKING",
+      "details": "UI correctly displays 'Covered by parent SC' for MOs with outsourced_by_parent=true"
+    }
+  }
+}

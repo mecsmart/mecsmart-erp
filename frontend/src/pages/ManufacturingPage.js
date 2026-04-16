@@ -999,6 +999,8 @@ export default function ManufacturingPage() {
                       const checkChildren = (parentId) => {
                         const kids = workOrders.filter(w => w.parent_wo_id === parentId);
                         for (const kid of kids) {
+                          // Skip children outsourced by parent SC — they're covered
+                          if (kid.outsourced_by_parent) continue;
                           if (['in_progress', 'outsourced'].includes(kid.status)) return true;
                           if (kid.is_subcontract && !['pending', 'completed', 'cancelled'].includes(kid.status)) return true;
                           if (checkChildren(kid.id)) return true;
