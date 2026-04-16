@@ -10,15 +10,15 @@
 - Formula: Net = SO Gross Req - max(Current Stock - Reserved for MOs - Safety Stock, 0)
 - Reserve flow: Pending MO -> Reserve button -> BOM exploded recursively -> reserved_materials stored on MO
 - MRP reads reserved_materials from all reserved MOs to compute reserved_for_mo per RM item
-- "Reserved (MO)" column in MRP demand table shows reserved qty
-- Suggestions also filtered to RM only
 
 ## MO Process Rules (Feb 2026)
-- Rule 1: SC button on parent MO is hidden if any child MO is started inhouse (in_progress) or actively outsourced. SC only visible when all children are pending/completed/cancelled.
-- Rule 2 (Smart Resolution): When SA outsourced with_material:
-  - Completed child part MO → part itself appears in SC lines (already manufactured, sent as-is)
-  - Unprocessed child part → recursively resolved to leaf-level RM (vendor needs raw materials)
+- Rule 1: SC button on parent MO is hidden if any child MO is started inhouse (in_progress) or actively outsourced
+- Rule 2 (Smart RM Resolution): When SA/FG outsourced with_material:
+  - Walks UP parent chain to find root FG MO, collects ALL MOs in the work order tree
+  - Completed child part MOs → part itself appears in SC lines (already manufactured, sent as-is)
+  - Uncompleted child parts (component or sub_assembly) → recursively resolved to leaf-level RM via BOM
   - RM deduplicated by item_id with quantities summed
+  - Existing SC orders recalculated when create-sc called again (if no DC sent yet)
   - Applied to both create-sc and bulk-subcontract endpoints
 
 ## Key Features
@@ -27,7 +27,6 @@
 - SC Consolidation per supplier, DC draft flow, PO from SC
 - Sales Orders, Purchase Orders/Invoices, GRN, Inventory, Stores
 - Search on all major pages, Collapsible sidebar groups
-- Smart RM resolution for SA outsourcing (child-MO-status-aware)
 
 ## Backlog
 - [ ] P1: GST Phase 2 - invoice generation + tax breakup reports
