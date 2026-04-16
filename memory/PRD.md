@@ -14,8 +14,12 @@
 - Suggestions also filtered to RM only
 
 ## MO Process Rules (Feb 2026)
-- Rule 1: SC button on parent MO is hidden if any child MO is started inhouse (in_progress) or actively outsourced
-- Rule 2: When SA outsourced with_material, SC lines contain only leaf-level RM (recursively resolving through child SA BOMs, deduplicating by item_id)
+- Rule 1: SC button on parent MO is hidden if any child MO is started inhouse (in_progress) or actively outsourced. SC only visible when all children are pending/completed/cancelled.
+- Rule 2 (Smart Resolution): When SA outsourced with_material:
+  - Completed child part MO → part itself appears in SC lines (already manufactured, sent as-is)
+  - Unprocessed child part → recursively resolved to leaf-level RM (vendor needs raw materials)
+  - RM deduplicated by item_id with quantities summed
+  - Applied to both create-sc and bulk-subcontract endpoints
 
 ## Key Features
 - Multi-Level BOM, MRP (smart RM with MO reservation), Quality
@@ -23,7 +27,7 @@
 - SC Consolidation per supplier, DC draft flow, PO from SC
 - Sales Orders, Purchase Orders/Invoices, GRN, Inventory, Stores
 - Search on all major pages, Collapsible sidebar groups
-- Manufacturing process rules: SC visibility control, recursive RM resolution for SA outsourcing
+- Smart RM resolution for SA outsourcing (child-MO-status-aware)
 
 ## Backlog
 - [ ] P1: GST Phase 2 - invoice generation + tax breakup reports
