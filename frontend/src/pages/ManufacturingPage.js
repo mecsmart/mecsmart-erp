@@ -58,6 +58,7 @@ export default function ManufacturingPage() {
   const [subcontractWO, setSubcontractWO] = useState(null);
   const [subcontractSupplier, setSubcontractSupplier] = useState('');
   const [subcontractType, setSubcontractType] = useState('with_material');
+  const [scResult, setScResult] = useState(null); // {order_number, message} after SC created
   
   // Bulk SC selection
   const [selectedMOs, setSelectedMOs] = useState({});
@@ -365,13 +366,12 @@ export default function ManufacturingPage() {
       try {
         const { data } = await api.post(`/api/work-orders/${subcontractWO.id}/create-sc`);
         if (data.sc_order) {
-          alert(`SC Order ${data.sc_order.order_number} created successfully`);
+          setScResult({ order_number: data.sc_order.order_number, message: data.message, lines: data.sc_order.lines || [] });
         }
       } catch (scErr) {
-        // SC creation might fail but MO is already marked — that's ok
         console.warn('Auto SC creation:', scErr.response?.data?.detail || scErr.message);
+        setSubcontractDialog(false);
       }
-      setSubcontractDialog(false);
       fetchData();
     } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
@@ -1925,8 +1925,34 @@ export default function ManufacturingPage() {
         </DialogContent>
       </Dialog>
       {/* Subcontract Dialog */}
-      <Dialog open={subcontractDialog} onOpenChange={setSubcontractDialog}>
+      <Dialog open={subcontractDialog} onOpenChange={(o) => { if (!o) { setSubcontractDialog(false); setScResult(null); } }}>
         <DialogContent className="max-w-md">
+          {scResult ? (
+            <>
+              <DialogHeader><DialogTitle className="font-[Chivo] text-[#03543F] flex items-center gap-2"><CheckCircle2 className="w-5 h-5" /> SC Order Created</DialogTitle></DialogHeader>
+              <div className="space-y-3 mt-3">
+                <div className="bg-[#DEF7EC]/50 rounded p-3">
+                  <p className="text-sm font-semibold text-[#03543F]">{scResult.order_number}</p>
+                  <p className="text-xs text-[#4B5563] mt-1">{scResult.message}</p>
+                  <p className="text-xs text-[#4B5563] mt-1">MO: {subcontractWO?.wo_number} — {subcontractWO?.item?.part_number || ''} {subcontractWO?.item?.name || ''}</p>
+                  {scResult.lines?.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-[#D1FAE5]">
+                      <p className="text-[11px] font-semibold text-[#03543F] mb-1">RM / Materials ({scResult.lines.length} items):</p>
+                      {scResult.lines.map((l, i) => {
+                        const it = items.find(x => x.id === l.item_id);
+                        return <p key={i} className="text-[11px] text-[#4B5563]">{it?.part_number || '-'} — {it?.name || '-'} (Qty: {l.quantity})</p>;
+                      })}
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-[#723B13] bg-[#FDF6B2]/50 p-2 rounded-sm">Go to Job Work page to Send DC and manage this SC order.</p>
+                <div className="flex justify-end pt-3 border-t">
+                  <button onClick={() => { setSubcontractDialog(false); setScResult(null); }} className="btn-primary" data-testid="sc-result-close-btn">Done</button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
           <DialogHeader><DialogTitle className="font-[Chivo]">Mark as Sub-Contract — {subcontractWO?.wo_number}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3">
             {/* SC Type Radio */}
@@ -1964,10 +1990,12 @@ export default function ManufacturingPage() {
                 : 'No materials sent. Vendor sources and manufactures. Only finished item received back.'}
             </p>
             <div className="flex justify-end space-x-3 pt-3 border-t">
-              <button onClick={() => setSubcontractDialog(false)} className="btn-secondary">Cancel</button>
+              <button onClick={() => { setSubcontractDialog(false); setScResult(null); }} className="btn-secondary">Cancel</button>
               <button onClick={handleConfirmSubcontract} className="btn-primary" disabled={!subcontractSupplier} data-testid="confirm-subcontract-btn">Confirm Sub-Contract</button>
             </div>
           </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
       {/* Bulk SC Dialog */}

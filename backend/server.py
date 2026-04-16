@@ -6201,22 +6201,8 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
         if qty_completed >= mo_qty:
             mo_update["status"] = "completed"
             mo_update["actual_end"] = datetime.now(timezone.utc)
-            # Add FG to stock
-            routing = await db.routings.find_one({"id": ref_wo.get("routing_id")})
-            fg_item_id = routing.get("item_id") if routing else mo_item_id
-            fg_item = await db.items.find_one({"id": fg_item_id})
-            if fg_item:
-                cs = fg_item.get("current_stock", 0)
-                ns = cs + mo_qty
-                await db.items.update_one({"id": fg_item_id}, {"$set": {"current_stock": ns}})
-                await db.inventory_transactions.insert_one({
-                    "id": str(uuid.uuid4()), "item_id": fg_item_id,
-                    "transaction_type": "receive", "quantity": mo_qty,
-                    "reference_type": "work_order", "reference_id": ref_wo_id,
-                    "previous_stock": cs, "new_stock": ns,
-                    "notes": f"SC receipt - MO {ref_wo.get('wo_number')} completed",
-                    "created_at": datetime.now(timezone.utc), "created_by": user["id"]
-                })
+            # NOTE: Stock for FG/SA is already added at receipt time (line-by-line above)
+            # Do NOT add FG stock again here to prevent double-counting
         
         await db.work_orders.update_one({"id": ref_wo_id}, {"$set": mo_update})
             
