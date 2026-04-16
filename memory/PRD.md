@@ -5,12 +5,12 @@
 - Frontend: React 19 + Shadcn/UI + Tailwind CSS
 - Auth: Custom JWT with roles
 
-## SC Receipt Stock Rules (CRITICAL - Feb 2026)
+## SC Receipt & DC Stock Rules (CRITICAL - Feb 2026)
+- DC Creation: Each item's stock deducted from ITS OWN current_stock (no cross-contamination)
+- DC Send (draft→sent): Same per-item stock deduction logic
 - For with_material SC: Receipt ONLY adds stock for job_work_parts items (FG/SA/Parts)
-- RM items from SC lines are BLOCKED from stock addition during receipt (backend safeguard)
+- RM items from SC lines BLOCKED from stock addition during receipt
 - MO completion during receipt does NOT add FG stock again (prevents double-counting)
-- DC Send correctly deducts RM/component stock
-- without_material SC receipt works normally (no filtering)
 
 ## MO Process Rules
 - SC button hidden when MO started inhouse. Complete only for MOs with no routing ops.
