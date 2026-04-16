@@ -5,16 +5,18 @@
 - Frontend: React 19 + Shadcn/UI + Tailwind CSS
 - Auth: Custom JWT with roles
 
-## SC Receipt & DC Stock Rules (CRITICAL - Feb 2026)
+## Stock Accounting Rules (CRITICAL - Feb 2026)
 - DC Creation: Each item's stock deducted from ITS OWN current_stock (no cross-contamination)
-- DC Send (draft→sent): Same per-item stock deduction logic
-- For with_material SC: Receipt ONLY adds stock for job_work_parts items (FG/SA/Parts)
-- RM items from SC lines BLOCKED from stock addition during receipt
-- MO completion during receipt does NOT add FG stock again (prevents double-counting)
+- with_material SC Receipt: ONLY adds stock for job_work_parts items (FG/SA), NOT RM lines
+- without_material SC via GRN: Stock added at GRN line level only, NOT again at MO completion
+- MO completion during receipt/GRN does NOT add FG stock again (prevents double-counting)
+- WIP Stock: Completed child MOs of active parent MOs = WIP (not available for new MOs)
+  - free_stock = current_stock - wip_qty
+  - Parent cancelled → WIP released → stock becomes free for new MOs
 
 ## MO Process Rules
 - SC button hidden when MO started inhouse. Complete only for MOs with no routing ops.
-- SC dialog: auto-creates SC order on confirm, shows JW order details in dialog
+- SC dialog: auto-creates SC order, shows JW order details in dialog
 - Smart RM Resolution: Completed child parts → sent as-is; uncompleted → resolved to RM
 - SC Type Lock: "without_material" disabled when child items already processed
 - Auto-Complete: Last job card op completion auto-completes MO and adds stock
