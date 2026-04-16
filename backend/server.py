@@ -6072,7 +6072,7 @@ async def get_subcontract_receipts(request: Request):
 
 @jobwork_router.post("/receipts", status_code=201)
 async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Request):
-    """Receive materials back from subcontractor. Adds stock."""
+    """Receive materials back from subcontractor. Adds stock for FG/SA items only."""
     user = await get_current_user(request)
     if user["role"] not in ["admin", "production_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
@@ -6080,6 +6080,14 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
     order = await db.subcontract_orders.find_one({"id": data.subcontract_order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Subcontract order not found")
+    
+    sc_type = order.get("subcontract_type", "with_material")
+    
+    # For with_material SC: only allow receiving job_work_parts items (FG/SA/Parts)
+    # NOT the RM lines that were sent to vendor
+    valid_receipt_item_ids = set()
+    if sc_type != "without_material" and order.get("job_work_parts"):
+        valid_receipt_item_ids = {jp["item_id"] for jp in order.get("job_work_parts", []) if jp.get("item_id")}
     
     count = await db.subcontract_receipts.count_documents({})
     receipt_number = f"SR-{str(count + 1).zfill(6)}"
@@ -6098,8 +6106,13 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
         total_rework_qty += rework_qty
         total_reject_qty += reject_qty
         
-        # Add only accepted stock
-        if accepted_qty > 0:
+        # Add only accepted stock — but for with_material SC, only for job_work_parts items
+        should_add_stock = accepted_qty > 0
+        if should_add_stock and valid_receipt_item_ids and line.item_id not in valid_receipt_item_ids:
+            # This item is from RM lines, not job_work_parts — do NOT add to stock
+            should_add_stock = False
+        
+        if should_add_stock:
             current_stock = item.get("current_stock", 0)
             new_stock = current_stock + accepted_qty
             await db.items.update_one({"id": line.item_id}, {"$set": {"current_stock": new_stock}})

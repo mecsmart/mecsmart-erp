@@ -1,0 +1,86 @@
+{
+  "summary": "Tested CRITICAL stock accounting bug fix for SC with_material flow. All 7 new tests + 4 regression tests passed. Backend safeguard correctly blocks RM stock addition during receipt for with_material SC.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Login works with admin@erp.com / Admin@123",
+    "CRITICAL: Receipt blocks RM stock addition for with_material SC - FG stock increases, RM stock does NOT increase",
+    "without_material SC receipt still adds stock for received items normally",
+    "MO auto-completes when all job_work_parts are received",
+    "MO completion does NOT add FG stock again (double-count prevention verified)",
+    "received_quantity correctly updated on job_work_parts across multiple receipts",
+    "Complex BOM scenario: SA→PT1+PT2 - SA stock increases, PT1/PT2 stock does NOT increase during receipt",
+    "Regression: DC Send correctly deducts RM/component stock",
+    "Regression: SC receipt no double stock E2E (from iteration 35)",
+    "Regression: Partial receipt test (from iteration 35)",
+    "Regression: create-sc endpoint returns order details for frontend dialog"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_sc_rm_stock_safeguard.py",
+    "/app/backend/tests/test_sc_double_stock_fix.py",
+    "/app/test_reports/pytest/pytest_sc_rm_stock_safeguard.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "Backend (server.py lines 6086-6090): valid_receipt_item_ids correctly built from job_work_parts for with_material SC",
+    "Backend (server.py lines 6109-6113): should_add_stock flag correctly blocks RM items from stock addition",
+    "Backend (server.py lines 6217-6218): MO completion block correctly does NOT add FG stock again - comment explains double-count prevention",
+    "Fix is well-implemented: For with_material SC, only items in job_work_parts (FG/SA/Parts) get stock added during receipt. Items from SC lines (RM) are blocked."
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_sc_rm_stock_safeguard.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (11/11 tests passed - 7 new + 4 regression)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Test items (FG, SA, PT, RM), BOMs, routings, suppliers, production orders, MOs, SC orders, DCs, and receipts created during backend testing with unique UUID suffixes for isolation.",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "CRITICAL stock accounting bug fix verified. For with_material SC: (1) DC Send correctly deducts RM from stock, (2) Receipt ONLY adds stock for job_work_parts items (FG/SA), NOT for RM items from SC lines. Backend safeguard uses valid_receipt_item_ids set built from job_work_parts. If receipt accidentally includes RM item_ids, backend blocks stock addition for those items. MO auto-completes when all job_work_parts received, but does NOT add FG stock again (double-count prevention). without_material SC still works normally.",
+
+  "features_verified": {
+    "critical_rm_stock_safeguard": {
+      "status": "VERIFIED",
+      "details": "Receipt endpoint validates items against job_work_parts. RM items from SC lines are blocked from stock addition. Tested with simple FG→RM BOM and complex SA→PT1+PT2 BOM scenarios."
+    },
+    "mo_auto_completion": {
+      "status": "VERIFIED",
+      "details": "MO auto-completes when all job_work_parts are received. Does NOT add FG stock again at completion."
+    },
+    "without_material_sc": {
+      "status": "VERIFIED",
+      "details": "without_material SC receipt still adds stock for received items normally (valid_receipt_item_ids is empty, so all items can receive stock)."
+    },
+    "dc_send_deduction": {
+      "status": "VERIFIED (regression)",
+      "details": "DC Send correctly deducts RM/component stock from inventory."
+    }
+  }
+}
