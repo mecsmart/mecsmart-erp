@@ -9,17 +9,16 @@
 - Shows ONLY Raw Materials (RM)
 - Formula: Net = SO Gross Req - max(Current Stock - Reserved for MOs - Safety Stock, 0)
 - Reserve flow: Pending MO -> Reserve button -> BOM exploded recursively -> reserved_materials stored on MO
-- MRP reads reserved_materials from all reserved MOs to compute reserved_for_mo per RM item
 
 ## MO Process Rules (Feb 2026)
-- Rule 1: SC button on parent MO is hidden if any child MO is started inhouse (in_progress) or actively outsourced
+- Rule 1: SC button on parent MO hidden if any child MO is started inhouse (in_progress) or actively outsourced. Children with outsourced_by_parent=true are skipped (they're covered by parent SC).
 - Rule 2 (Smart RM Resolution): When SA/FG outsourced with_material:
-  - Walks UP parent chain to find root FG MO, collects ALL MOs in the work order tree
-  - Completed child part MOs → part itself appears in SC lines (already manufactured, sent as-is)
-  - Uncompleted child parts (component or sub_assembly) → recursively resolved to leaf-level RM via BOM
+  - Walks UP parent chain to root FG MO, collects ALL MOs in the work order tree
+  - Completed child part MOs -> part itself in SC lines
+  - Uncompleted child parts -> recursively resolved to leaf-level RM via BOM
   - RM deduplicated by item_id with quantities summed
-  - Existing SC orders recalculated when create-sc called again (if no DC sent yet)
-  - Applied to both create-sc and bulk-subcontract endpoints
+  - Lines preserved during SC edit (not overwritten by flat BOM recalc)
+  - Existing SC orders recalculated when create-sc called again (if no DC sent)
 
 ## Key Features
 - Multi-Level BOM, MRP (smart RM with MO reservation), Quality
