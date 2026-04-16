@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
-import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, FileText, Edit2, Printer } from 'lucide-react';
+import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, FileText, Edit2, Printer, AlertCircle } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -479,11 +479,13 @@ export default function JobWorkPage() {
                           <div className="flex items-center space-x-1">
                             {dc.status === 'draft' && canEdit && (
                               <button onClick={async () => {
-                                if (!window.confirm(`Send DC ${dc.dc_number}? This will deduct stock.`)) return;
                                 try {
                                   const { data } = await api.post(`/api/job-work/challans/${dc.id}/send`);
                                   setDcSendResult({ open: true, data: { message: data.message, consumed: data.consumed_materials || [], dcNumber: dc.dc_number } });
-                                } catch (e) { alert(e.response?.data?.detail || 'Failed to send DC'); }
+                                } catch (e) {
+                                  const errMsg = e.response?.data?.detail || 'Failed to send DC';
+                                  setDcSendResult({ open: true, data: { message: errMsg, consumed: [], dcNumber: dc.dc_number, isError: true } });
+                                }
                               }} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-btn-${dc.id}`}>
                                 <Truck className="w-3 h-3 inline mr-1" />Send
                               </button>
@@ -718,7 +720,7 @@ export default function JobWorkPage() {
       {/* DC Send Material Consumption Dialog */}
       <Dialog open={dcSendResult.open} onOpenChange={(o) => { if (!o) { setDcSendResult({ open: false, data: null }); fetchData(); } }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle className="font-[Chivo] flex items-center gap-2 text-[#03543F]"><CheckCircle2 className="w-5 h-5" /> Materials Consumed — {dcSendResult.data?.dcNumber || 'DC'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-[Chivo] flex items-center gap-2" style={{color: dcSendResult.data?.isError ? '#9B1C1C' : '#03543F'}}>{dcSendResult.data?.isError ? <AlertCircle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />} {dcSendResult.data?.isError ? 'DC Send Failed' : `Materials Consumed — ${dcSendResult.data?.dcNumber || 'DC'}`}</DialogTitle></DialogHeader>
           <div className="mt-3 space-y-3">
             <p className="text-sm text-[#03543F] font-medium">{dcSendResult.data?.message}</p>
             <div className="bg-[#F3F4F6] rounded p-3 max-h-60 overflow-y-auto">

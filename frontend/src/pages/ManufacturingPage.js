@@ -204,7 +204,8 @@ export default function ManufacturingPage() {
           return;
         }
         if (data.success === false) {
-          setStartResultDialog({ open: true, success: false, data: { type: 'error', message: data.message || 'Failed to start/create SC order' } });
+          const dtype = data.insufficient_materials?.length > 0 ? 'insufficient' : 'error';
+          setStartResultDialog({ open: true, success: false, data: { type: dtype, message: data.message, materials: data.insufficient_materials || [] } });
           fetchData();
           return;
         }
