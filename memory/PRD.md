@@ -11,14 +11,14 @@
 - Reserve flow: Pending MO -> Reserve button -> BOM exploded recursively -> reserved_materials stored on MO
 
 ## MO Process Rules (Feb 2026)
-- Rule 1: SC button on parent MO hidden if any child MO is started inhouse (in_progress) or actively outsourced. Children with outsourced_by_parent=true are skipped (they're covered by parent SC).
+- Rule 1: SC button on parent MO hidden if any child MO is started inhouse (in_progress) or actively outsourced. Children with outsourced_by_parent=true are skipped.
 - Rule 2 (Smart RM Resolution): When SA/FG outsourced with_material:
   - Walks UP parent chain to root FG MO, collects ALL MOs in the work order tree
   - Completed child part MOs -> part itself in SC lines
   - Uncompleted child parts -> recursively resolved to leaf-level RM via BOM
-  - RM deduplicated by item_id with quantities summed
   - Lines preserved during SC edit (not overwritten by flat BOM recalc)
-  - Existing SC orders recalculated when create-sc called again (if no DC sent)
+- SC Type Lock: If any child/descendant MO is completed/in_progress, only "with_material" is allowed (without_material disabled)
+- DC Shortage: Shows ALL insufficient items with part number, name, required qty, available qty, and shortage
 
 ## Key Features
 - Multi-Level BOM, MRP (smart RM with MO reservation), Quality
