@@ -994,12 +994,13 @@ export default function ManufacturingPage() {
                       }
                       return false;
                     })();
-                    // Check if ANY child MO is in active SC (not completed) — hide SC on parent until children done
-                    const hasActiveChildSC = (() => {
+                    // Check if ANY child MO is actively started (inhouse or outsourced) — hide SC on parent
+                    const hasActiveChild = (() => {
                       const checkChildren = (parentId) => {
                         const kids = workOrders.filter(w => w.parent_wo_id === parentId);
                         for (const kid of kids) {
-                          if ((kid.is_subcontract || kid.status === 'outsourced') && kid.status !== 'completed') return true;
+                          if (['in_progress', 'outsourced'].includes(kid.status)) return true;
+                          if (kid.is_subcontract && !['pending', 'completed', 'cancelled'].includes(kid.status)) return true;
                           if (checkChildren(kid.id)) return true;
                         }
                         return false;
@@ -1012,7 +1013,7 @@ export default function ManufacturingPage() {
                       if (kids.length === 0) return true;
                       return kids.every(k => k.status === 'completed' || k.status === 'cancelled');
                     })();
-                    const canShowSC = canEdit && !wo.is_subcontract && ['pending', 'in_progress'].includes(wo.status) && !hasActiveChildSC;
+                    const canShowSC = canEdit && !wo.is_subcontract && ['pending', 'in_progress'].includes(wo.status) && !hasActiveChild;
                     const showReserve = canEdit && wo.status === 'pending' && !wo.materials_reserved && !ancestorIsReserved;
                     const showUnreserve = canEdit && wo.status === 'pending' && wo.materials_reserved && !ancestorIsReserved;
                     return (

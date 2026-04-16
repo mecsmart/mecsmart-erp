@@ -3546,19 +3546,47 @@ async def create_sc_for_wo(wo_id: str, request: Request):
     item = await db.items.find_one({"id": item_id}, {"_id": 0}) if item_id else None
     qty = wo.get("quantity", 1)
     
-    # Build lines
+    # Build lines — for with_material, recursively resolve BOM to get leaf-level RM
     sc_lines = []
     if sc_type == "without_material":
         sc_lines = [{"item_id": item_id, "quantity": qty, "sent_quantity": 0, "received_quantity": 0, "rate": item.get("unit_cost", 0) if item else 0}]
     else:
-        bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
-        if bom:
+        # Recursively collect all RM needed for this item (drilling through sub-assemblies)
+        async def collect_rm(parent_item_id, multiplier, visited=None):
+            if visited is None:
+                visited = set()
+            if parent_item_id in visited:
+                return []
+            visited.add(parent_item_id)
+            rm_list = []
+            bom = await db.boms.find_one({"parent_item_id": parent_item_id, "status": "active"}, {"_id": 0})
+            if not bom:
+                return rm_list
             for comp in bom.get("components", []):
                 if comp.get("is_alternate"):
                     continue
                 ci = await db.items.find_one({"id": comp["item_id"]}, {"_id": 0})
-                if ci and ci.get("category") in ["raw_material", "component", "sub_assembly"]:
-                    sc_lines.append({"item_id": comp["item_id"], "quantity": int(comp["quantity"] * qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
+                if not ci:
+                    continue
+                comp_qty = comp.get("quantity", 1) * multiplier
+                if ci.get("category") in ["raw_material", "component"]:
+                    rm_list.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
+                elif ci.get("category") == "sub_assembly":
+                    # Drill into sub-assembly BOM to get its RM
+                    child_rm = await collect_rm(comp["item_id"], comp_qty, visited)
+                    rm_list.extend(child_rm)
+            return rm_list
+        
+        rm_items = await collect_rm(item_id, qty)
+        # Deduplicate by item_id (sum quantities)
+        rm_map = {}
+        for rm in rm_items:
+            if rm["item_id"] in rm_map:
+                rm_map[rm["item_id"]]["quantity"] += rm["quantity"]
+            else:
+                rm_map[rm["item_id"]] = rm
+        sc_lines = list(rm_map.values())
+        
         if not sc_lines:
             sc_lines = [{"item_id": item_id, "quantity": qty, "sent_quantity": 0, "received_quantity": 0, "rate": item.get("unit_cost", 0) if item else 0}]
     
