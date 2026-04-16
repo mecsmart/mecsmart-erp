@@ -481,7 +481,12 @@ export default function JobWorkPage() {
                               <button onClick={async () => {
                                 try {
                                   const { data } = await api.post(`/api/job-work/challans/${dc.id}/send`);
-                                  setDcSendResult({ open: true, data: { message: data.message, consumed: data.consumed_materials || [], dcNumber: dc.dc_number } });
+                                  if (data.success === false && data.insufficient_materials) {
+                                    const items = data.insufficient_materials.map(m => `${m.item} - ${m.name}: need ${m.required}, have ${m.available} (short ${m.shortage})`).join('\n');
+                                    setDcSendResult({ open: true, data: { message: data.message, consumed: [], dcNumber: dc.dc_number, isError: true, insufficient: data.insufficient_materials } });
+                                  } else {
+                                    setDcSendResult({ open: true, data: { message: data.message, consumed: data.consumed_materials || [], dcNumber: dc.dc_number } });
+                                  }
                                 } catch (e) {
                                   const errMsg = e.response?.data?.detail || 'Failed to send DC';
                                   setDcSendResult({ open: true, data: { message: errMsg, consumed: [], dcNumber: dc.dc_number, isError: true } });
@@ -722,7 +727,27 @@ export default function JobWorkPage() {
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle className="font-[Chivo] flex items-center gap-2" style={{color: dcSendResult.data?.isError ? '#9B1C1C' : '#03543F'}}>{dcSendResult.data?.isError ? <AlertCircle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />} {dcSendResult.data?.isError ? 'DC Send Failed' : `Materials Consumed — ${dcSendResult.data?.dcNumber || 'DC'}`}</DialogTitle></DialogHeader>
           <div className="mt-3 space-y-3">
-            <p className="text-sm text-[#03543F] font-medium">{dcSendResult.data?.message}</p>
+            <p className={`text-sm font-medium ${dcSendResult.data?.isError ? 'text-[#9B1C1C]' : 'text-[#03543F]'}`}>{dcSendResult.data?.message}</p>
+            {dcSendResult.data?.insufficient && dcSendResult.data.insufficient.length > 0 && (
+              <div className="bg-[#FDE8E8]/50 rounded p-3 max-h-60 overflow-y-auto">
+                <p className="text-xs font-semibold mb-2 text-[#9B1C1C]">Insufficient Materials:</p>
+                <table className="w-full text-xs">
+                  <thead><tr className="text-[#4B5563] border-b"><th className="text-left py-1">Part No.</th><th className="text-left">Name</th><th className="text-right">Required</th><th className="text-right">Available</th><th className="text-right">Shortage</th></tr></thead>
+                  <tbody>
+                    {dcSendResult.data.insufficient.map((m, i) => (
+                      <tr key={i} className="border-t border-[#FECACA]">
+                        <td className="py-1 mono font-medium">{m.item}</td>
+                        <td className="text-[#4B5563]">{m.name}</td>
+                        <td className="text-right mono">{m.required}</td>
+                        <td className="text-right mono">{m.available}</td>
+                        <td className="text-right mono font-bold text-[#9B1C1C]">{m.shortage}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {!dcSendResult.data?.isError && (
             <div className="bg-[#F3F4F6] rounded p-3 max-h-60 overflow-y-auto">
               <table className="w-full text-xs">
                 <thead><tr className="text-[#4B5563] border-b"><th className="text-left py-1">Item</th><th className="text-right">Qty</th><th className="text-right">Prev Stock</th><th className="text-right">New Stock</th></tr></thead>
@@ -741,6 +766,7 @@ export default function JobWorkPage() {
                 </tbody>
               </table>
             </div>
+            )}
             <div className="flex justify-end pt-2 border-t">
               <button onClick={() => { setDcSendResult({ open: false, data: null }); fetchData(); }} className="btn-primary" data-testid="dc-send-ok">OK</button>
             </div>

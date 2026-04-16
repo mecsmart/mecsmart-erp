@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Body
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -5839,8 +5839,8 @@ async def send_draft_dc(dc_id: str, request: Request):
     
     order = await db.subcontract_orders.find_one({"id": dc.get("subcontract_order_id")})
     
-    # Deduct stock for each line and track consumed materials
-    consumed_materials = []
+    # First pass: check ALL items for stock availability
+    insufficient = []
     for line in dc.get("lines", []):
         item = await db.items.find_one({"id": line["item_id"]})
         if not item:
@@ -5848,7 +5848,29 @@ async def send_draft_dc(dc_id: str, request: Request):
         current_stock = item.get("current_stock", 0)
         qty = line.get("quantity", 0)
         if current_stock < qty:
-            raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.get('part_number')}: need {qty}, have {current_stock}")
+            insufficient.append({
+                "item": item.get("part_number", ""),
+                "name": item.get("name", ""),
+                "required": qty,
+                "available": current_stock,
+                "shortage": qty - current_stock
+            })
+    
+    if insufficient:
+        return JSONResponse(status_code=200, content={
+            "success": False,
+            "message": "Insufficient stock for DC send",
+            "insufficient_materials": insufficient
+        })
+    
+    # Second pass: deduct stock
+    consumed_materials = []
+    for line in dc.get("lines", []):
+        item = await db.items.find_one({"id": line["item_id"]})
+        if not item:
+            continue
+        current_stock = item.get("current_stock", 0)
+        qty = line.get("quantity", 0)
         new_stock = current_stock - qty
         await db.items.update_one({"id": line["item_id"]}, {"$set": {"current_stock": new_stock}})
         consumed_materials.append({
