@@ -6,18 +6,21 @@
 - Auth: Custom JWT with roles
 
 ## MO Process Rules (Feb 2026)
-- Rule 1: SC button hidden if any child MO started inhouse or outsourced. Children with outsourced_by_parent=true skipped.
-- Rule 2 (Smart RM Resolution): Completed child parts -> sent as-is; uncompleted parts -> resolved to leaf-level RM via BOM. Lines preserved during SC edit.
-- SC Type Lock: If any child/descendant completed/in_progress, only "with_material" allowed.
-- Inhouse Processing: MO started inhouse hides SC button and manual Complete button. Complete only shows for MOs with no routing ops.
-- Auto-Complete: When last job card operation completes, MO auto-completes and adds finished item to stock.
-- SC Auto-Create: SC dialog auto-creates SC order on confirm (bypasses Start SC button step).
-- DC Shortage: Shows ALL insufficient items with part number, name, required qty, available, shortage.
+- SC button hidden when MO started inhouse. Complete only for MOs with no routing ops.
+- SC dialog: Choose type → Choose supplier → Confirm → Auto-creates SC order → Shows JW order details in dialog
+- Smart RM Resolution: Completed child parts → sent as-is; uncompleted → resolved to RM. Lines preserved during SC edit.
+- SC Type Lock: "without_material" disabled when child items already processed.
+- Auto-Complete: Last job card op completion auto-completes MO and adds stock.
+- DC Shortage: Shows ALL insufficient items with part number, name, required, available, shortage.
+
+## SC Receipt Stock Rules
+- Receipt adds FG/SA stock ONCE at receipt line processing level
+- MO completion during receipt does NOT add FG stock again (prevents double-counting)
+- RM stock is deducted on DC send, never added back (consumed by vendor)
 
 ## Key Features
 - Multi-Level BOM, MRP (smart RM with MO reservation), Quality
-- MO Reserve/Unreserve material functionality
-- SC Consolidation per supplier, DC draft flow, PO from SC
+- MO Reserve/Unreserve, SC Consolidation, DC draft flow, PO from SC
 - Sales Orders, Purchase Orders/Invoices, GRN, Inventory, Stores
 - Search on all major pages, Collapsible sidebar groups
 
