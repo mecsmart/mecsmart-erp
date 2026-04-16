@@ -994,6 +994,25 @@ export default function ManufacturingPage() {
                       }
                       return false;
                     })();
+                    // Check if ANY child MO is in active SC (not completed) — hide SC on parent until children done
+                    const hasActiveChildSC = (() => {
+                      const checkChildren = (parentId) => {
+                        const kids = workOrders.filter(w => w.parent_wo_id === parentId);
+                        for (const kid of kids) {
+                          if ((kid.is_subcontract || kid.status === 'outsourced') && kid.status !== 'completed') return true;
+                          if (checkChildren(kid.id)) return true;
+                        }
+                        return false;
+                      };
+                      return checkChildren(wo.id);
+                    })();
+                    // Check if ALL children are completed (for allowing SC after children are done)
+                    const allChildrenCompleted = (() => {
+                      const kids = workOrders.filter(w => w.parent_wo_id === wo.id);
+                      if (kids.length === 0) return true;
+                      return kids.every(k => k.status === 'completed' || k.status === 'cancelled');
+                    })();
+                    const canShowSC = canEdit && !wo.is_subcontract && ['pending', 'in_progress'].includes(wo.status) && !hasActiveChildSC;
                     const showReserve = canEdit && wo.status === 'pending' && !wo.materials_reserved && !ancestorIsReserved;
                     const showUnreserve = canEdit && wo.status === 'pending' && wo.materials_reserved && !ancestorIsReserved;
                     return (
@@ -1040,7 +1059,7 @@ export default function ManufacturingPage() {
                               {canEdit && wo.status === 'in_progress' && wo.is_subcontract && <button onClick={() => handleStartSC(wo.id)} className="btn-primary text-xs px-2 py-1" data-testid={`retry-sc-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Create SC</button>}
                               {canEdit && wo.status === 'in_progress' && !wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'completed')} className="btn-secondary text-xs px-2 py-1" data-testid={`complete-wo-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />Complete</button>}
                               {['in_progress','pending'].includes(wo.status) && ops.length > 0 && !wo.is_subcontract && <button onClick={() => openJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`jobcard-wo-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Job Card</button>}
-                              {canEdit && !wo.is_subcontract && ['pending', 'in_progress'].includes(wo.status) && <button onClick={() => handleMarkSubcontract(wo)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`subcontract-wo-${wo.id}`}><Truck className="w-3 h-3 inline mr-0.5" />SC</button>}
+                              {canShowSC && <button onClick={() => handleMarkSubcontract(wo)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`subcontract-wo-${wo.id}`}><Truck className="w-3 h-3 inline mr-0.5" />SC</button>}
                               {wo.status === 'completed' && <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-wo-${wo.id}`}><Printer className="w-3 h-3 inline mr-0.5" />Print</button>}
                             </div>
                             )}
