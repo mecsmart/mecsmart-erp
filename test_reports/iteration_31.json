@@ -1,0 +1,94 @@
+{
+  "summary": "Tested SC RM Resolution Bug Fix for Manufacturing ERP. The fix correctly resolves SC lines: completed parts (PT-1) appear as themselves, uncompleted parts (PT-2) are resolved to their constituent raw materials. E2E test verified the full workflow: FG→SG→PT-1+PT-2, complete PT-1's MO, create SC for SG - SC lines correctly show PT-1 (qty 4) + RM-TEST-1 (qty 4) + RM-TEST-2 (qty 6). SC recalculation on second create-sc call also works correctly.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Backend: E2E test - Create items (FG, SG, PT-1, PT-2, RM-1, RM-2) with correct categories",
+    "Backend: E2E test - Create BOMs (FG→SG, SG→PT-1+PT-2, PT-2→RM-1+RM-2)",
+    "Backend: E2E test - Create routings for all items (FG, SG, PT-1, PT-2)",
+    "Backend: E2E test - Create production order and work orders (auto-creates child MOs)",
+    "Backend: E2E test - Complete PT-1's MO (status=completed)",
+    "Backend: E2E test - Mark SG-1's MO as subcontract with_material",
+    "Backend: E2E test - Create SC for SG-1's MO - SC lines correctly show PT-1 (completed part) + RM items (resolved from PT-2)",
+    "Backend: E2E test - Verify PT-1 quantity = 4 (from SG-1 BOM)",
+    "Backend: E2E test - Verify RM-TEST-1 quantity = 4 (2 per PT-2 * 2 PT-2 per SG-1)",
+    "Backend: E2E test - Verify RM-TEST-2 quantity = 6 (3 per PT-2 * 2 PT-2 per SG-1)",
+    "Backend: SC recalculation test - Second create-sc call recalculates lines when no DC sent",
+    "Frontend: Job Work page loads correctly with 14 SC orders",
+    "Frontend: RM column shows correct resolved items (PT-1 + RM items, NOT PT-2)",
+    "Frontend: Send DC button available for SC orders"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_sc_rm_resolution_bug.py",
+    "/app/test_reports/pytest/pytest_sc_rm_resolution_bug.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "Lines 3606-3614: Tree walking to find root MO via parent_wo_id chain - CORRECT",
+    "Lines 3616-3623: collect_tree_mos() recursively collects ALL MOs in the work order tree - CORRECT",
+    "Lines 3626: completed_item_ids built from all tree MOs with status='completed' - CORRECT",
+    "Lines 3650-3661: smart_resolve() checks both 'component' AND 'sub_assembly' categories against completed_item_ids - CORRECT",
+    "Lines 3677-3690: SC recalculation when existing SC has no sent DC - CORRECT"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_sc_rm_resolution_bug.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (2/2 tests passed)",
+    "frontend": "100% (Job Work page shows correct RM resolution)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Test items, BOMs, routings, production orders, and work orders created during E2E testing. Test data prefixed with unique UUIDs for isolation.",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "SC RM Resolution Bug Fix verified working. The smart_resolve function correctly: (1) walks up to root MO to collect ALL tree MOs, (2) checks completed_item_ids from completed MOs, (3) adds completed parts directly to SC lines, (4) resolves uncompleted parts to their RM via BOM. Test file: /app/backend/tests/test_sc_rm_resolution_bug.py. Job Work page correctly displays resolved RM items.",
+
+  "features_verified": {
+    "sc_rm_resolution_completed_part": {
+      "status": "WORKING",
+      "details": "Completed parts (PT-1) appear as themselves in SC lines with correct quantity"
+    },
+    "sc_rm_resolution_uncompleted_part": {
+      "status": "WORKING",
+      "details": "Uncompleted parts (PT-2) are resolved to their constituent RM items (RM-TEST-1, RM-TEST-2)"
+    },
+    "sc_rm_quantity_calculation": {
+      "status": "WORKING",
+      "details": "Quantities correctly calculated: PT-1=4, RM-1=4 (2*2), RM-2=6 (3*2)"
+    },
+    "sc_recalculation": {
+      "status": "WORKING",
+      "details": "Second create-sc call recalculates SC lines when no DC has been sent"
+    },
+    "job_work_rm_column": {
+      "status": "WORKING",
+      "details": "Job Work page RM column correctly shows resolved items (PT-1 + RM items)"
+    }
+  }
+}

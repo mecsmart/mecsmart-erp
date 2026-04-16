@@ -3297,9 +3297,26 @@ async def bulk_subcontract(request: Request, data: dict = Body(...)):
                 for m in consumed:
                     all_sc_lines.append({"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": m["quantity"], "received_quantity": 0, "rate": m.get("unit_cost", 0), "wo_id": wo_id})
             else:
-                # Smart resolve: completed child parts as-is, unprocessed parts to RM
-                child_mos = await db.work_orders.find({"parent_wo_id": wo_id}, {"_id": 0}).to_list(500)
-                completed_items = {cm["item_id"] for cm in child_mos if cm.get("status") == "completed"}
+                # Smart resolve: walk up to root MO, collect completed items from entire tree
+                root_id = wo_id
+                cur = wo
+                while cur.get("parent_wo_id"):
+                    p = await db.work_orders.find_one({"id": cur["parent_wo_id"]})
+                    if not p:
+                        break
+                    root_id = p["id"]
+                    cur = p
+                
+                async def collect_bulk_tree(pid):
+                    mos = []
+                    ch = await db.work_orders.find({"parent_wo_id": pid}, {"_id": 0}).to_list(500)
+                    for c in ch:
+                        mos.append(c)
+                        mos.extend(await collect_bulk_tree(c["id"]))
+                    return mos
+                
+                tree_mos = await collect_bulk_tree(root_id)
+                completed_items = {cm["item_id"] for cm in tree_mos if cm.get("status") == "completed"}
                 
                 async def bulk_smart_resolve(pid, mult, visited=None):
                     if visited is None:
@@ -3319,9 +3336,9 @@ async def bulk_subcontract(request: Request, data: dict = Body(...)):
                             continue
                         cq = c.get("quantity", 1) * mult
                         cat = ci.get("category", "")
-                        if cat in ["raw_material", "component"]:
+                        if cat == "raw_material":
                             res.append({"item_id": c["item_id"], "quantity": int(cq), "sent_quantity": int(cq), "received_quantity": 0, "rate": ci.get("unit_cost", 0), "wo_id": wo_id})
-                        elif cat == "sub_assembly":
+                        elif cat in ["component", "sub_assembly"]:
                             if c["item_id"] in completed_items:
                                 res.append({"item_id": c["item_id"], "quantity": int(cq), "sent_quantity": int(cq), "received_quantity": 0, "rate": ci.get("unit_cost", 0), "wo_id": wo_id})
                             else:
@@ -3567,24 +3584,48 @@ async def create_sc_for_wo(wo_id: str, request: Request):
         ]
     })
     if existing:
-        existing.pop("_id", None)
-        return {"success": True, "message": f"SC order already exists: {existing.get('order_number')}", "sc_order": existing}
+        # If SC exists but no DC sent yet, recalculate lines with smart resolution
+        sent_dc = await db.delivery_challans.find_one({"subcontract_order_id": existing["id"], "status": "sent"})
+        if not sent_dc and existing.get("status") in ["draft", "in_progress"]:
+            # Recalculate lines below and update existing SC
+            pass  # Fall through to line building logic
+        else:
+            existing.pop("_id", None)
+            return {"success": True, "message": f"SC order already exists: {existing.get('order_number')}", "sc_order": existing}
     
     sc_type = wo.get("subcontract_type", "with_material")
     item_id = wo.get("item_id")
     item = await db.items.find_one({"id": item_id}, {"_id": 0}) if item_id else None
     qty = wo.get("quantity", 1)
     
-    # Build lines — smart resolution based on child MO completion status
+    # Build lines — smart resolution based on MO completion status across the work order tree
     sc_lines = []
     if sc_type == "without_material":
         sc_lines = [{"item_id": item_id, "quantity": qty, "sent_quantity": 0, "received_quantity": 0, "rate": item.get("unit_cost", 0) if item else 0}]
     else:
-        # Collect child MOs under this WO to check completion status
-        all_child_mos = await db.work_orders.find({"parent_wo_id": wo_id}, {"_id": 0}).to_list(500)
-        completed_item_ids = {cm["item_id"] for cm in all_child_mos if cm.get("status") == "completed"}
+        # Walk up to find root parent MO, then collect ALL MOs in the tree
+        root_wo_id = wo_id
+        current_wo = wo
+        while current_wo.get("parent_wo_id"):
+            parent_wo = await db.work_orders.find_one({"id": current_wo["parent_wo_id"]})
+            if not parent_wo:
+                break
+            root_wo_id = parent_wo["id"]
+            current_wo = parent_wo
         
-        # Smart resolve: completed child parts sent as-is, unprocessed parts resolved to RM
+        # Collect all MOs in the tree (recursive)
+        async def collect_tree_mos(pid):
+            mos = []
+            children = await db.work_orders.find({"parent_wo_id": pid}, {"_id": 0}).to_list(500)
+            for c in children:
+                mos.append(c)
+                mos.extend(await collect_tree_mos(c["id"]))
+            return mos
+        
+        all_tree_mos = await collect_tree_mos(root_wo_id)
+        completed_item_ids = {m["item_id"] for m in all_tree_mos if m.get("status") == "completed"}
+        
+        # Smart resolve: completed parts sent as-is, unprocessed parts resolved to RM
         async def smart_resolve(parent_item_id, multiplier, visited=None):
             if visited is None:
                 visited = set()
@@ -3603,20 +3644,20 @@ async def create_sc_for_wo(wo_id: str, request: Request):
                     continue
                 comp_qty = comp.get("quantity", 1) * multiplier
                 cat = ci.get("category", "")
-                if cat in ["raw_material", "component"]:
-                    # Always add RM/components directly
+                if cat == "raw_material":
+                    # Always add RM directly
                     result.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
-                elif cat == "sub_assembly":
+                elif cat in ["component", "sub_assembly"]:
                     if comp["item_id"] in completed_item_ids:
-                        # Child part already completed — send the part itself
+                        # Part already completed — send the finished part itself
                         result.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
                     else:
-                        # Child part NOT completed — resolve to its RM
+                        # Part NOT completed — resolve to its RM via BOM
                         child_rm = await smart_resolve(comp["item_id"], comp_qty, visited)
                         if child_rm:
                             result.extend(child_rm)
                         else:
-                            # No BOM found for this SA, add it directly
+                            # No BOM found, add the part directly
                             result.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
             return result
         
@@ -3632,6 +3673,21 @@ async def create_sc_for_wo(wo_id: str, request: Request):
         
         if not sc_lines:
             sc_lines = [{"item_id": item_id, "quantity": qty, "sent_quantity": 0, "received_quantity": 0, "rate": item.get("unit_cost", 0) if item else 0}]
+    
+    # If existing SC was found (no DC sent), update its lines with recalculated values
+    if existing and not await db.delivery_challans.find_one({"subcontract_order_id": existing["id"], "status": "sent"}):
+        await db.subcontract_orders.update_one({"id": existing["id"]}, {"$set": {
+            "lines": sc_lines,
+            "updated_at": datetime.now(timezone.utc)
+        }})
+        # Also update draft DCs linked to this SC
+        draft_dcs = await db.delivery_challans.find({"subcontract_order_id": existing["id"], "status": "draft"}).to_list(100)
+        for ddc in draft_dcs:
+            dc_lines = [{"item_id": l["item_id"], "quantity": l["quantity"], "rate": l["rate"]} for l in sc_lines]
+            await db.delivery_challans.update_one({"id": ddc["id"]}, {"$set": {"lines": dc_lines}})
+        existing.pop("_id", None)
+        existing["lines"] = sc_lines
+        return {"success": True, "message": f"SC order {existing.get('order_number')} lines recalculated", "sc_order": existing}
     
     # Try to consolidate into existing SC for same supplier (no sent DC, no PO created)
     consolidate_sc = await db.subcontract_orders.find_one({
