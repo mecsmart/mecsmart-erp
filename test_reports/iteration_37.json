@@ -1,0 +1,67 @@
+{
+  "summary": "Tested CRITICAL stock corruption bug fix in DC creation endpoint POST /api/job-work/challans. All 5 tests passed. The fix correctly reads item_current_stock from each item document in the deduction loop instead of using stale variable from check loop.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Login works with admin@erp.com / Admin@123",
+    "CRITICAL: DC creation with multiple items - each item's stock deducted from ITS OWN current_stock (Item A stock=10, Item B stock=200, both deducted correctly)",
+    "Inventory transactions show correct previous_stock and new_stock for each item (no cross-contamination)",
+    "Insufficient stock check still works - blocks DC creation when ANY item has insufficient stock",
+    "Multiple items (3+) with very different stock levels (5, 100, 1000) - all deducted correctly without cross-contamination"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_dc_stock_corruption_fix.py",
+    "/app/test_reports/pytest/pytest_dc_stock_corruption_fix.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "Backend (server.py lines 5928-5930): FIX VERIFIED - Now reads item_current_stock = item.get('current_stock', 0) from fresh item document in deduction loop",
+    "Backend (server.py lines 5941-5942): Inventory transaction correctly uses item_current_stock for previous_stock and new_stock",
+    "The bug was a classic Python variable scope issue: loop variable 'current_stock' from first loop (stock check) persisted and was incorrectly used in second loop (deduction)",
+    "Fix properly renames to 'item_current_stock' and reads from fresh item document for each iteration"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_dc_stock_corruption_fix.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (5/5 tests passed)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Test items (components, raw materials), suppliers, SC orders, and DCs created during backend testing with unique UUID suffixes for isolation.",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "CRITICAL stock corruption bug fix verified. The bug was: 'current_stock' variable from stock-check loop leaked into deduction loop, causing Item A's stock to be set to (Item B's stock - Item A's quantity). Fix: Now reads item.get('current_stock', 0) from fresh item document in deduction loop. Test with items having VERY different stock levels (e.g., 10 vs 200 vs 1000) to catch cross-contamination.",
+
+  "bug_fix_verification": {
+    "bug_description": "Variable 'current_stock' was NOT re-read for each item in deduction loop - retained value from last item in stock-check loop",
+    "example_before_fix": "PT-1 (stock: 0) and RM-2 (stock: 2500). First-pass ends with current_stock=2500. Second-pass deducts: PT-1 new_stock = 2500 - 4 = 2496 (WRONG!)",
+    "fix_applied": "Now reads item_current_stock = item.get('current_stock', 0) from fresh item document in deduction loop",
+    "verification_status": "VERIFIED - All tests pass with correct per-item stock deduction"
+  }
+}

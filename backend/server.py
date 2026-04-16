@@ -5925,8 +5925,9 @@ async def create_delivery_challan(data: DCCreate, request: Request):
         if not item:
             continue
         
-        # Deduct stock
-        new_stock = current_stock - line.quantity
+        # Deduct stock — read fresh current_stock from this item
+        item_current_stock = item.get("current_stock", 0)
+        new_stock = item_current_stock - line.quantity
         await db.items.update_one({"id": line.item_id}, {"$set": {"current_stock": new_stock}})
         
         # Create inventory transaction
@@ -5937,7 +5938,7 @@ async def create_delivery_challan(data: DCCreate, request: Request):
             "quantity": line.quantity,
             "reference_type": "job_work_dc",
             "reference_id": dc_number,
-            "previous_stock": current_stock,
+            "previous_stock": item_current_stock,
             "new_stock": new_stock,
             "notes": f"Sent to subcontractor - {order.get('order_number')}",
             "created_at": datetime.now(timezone.utc),
