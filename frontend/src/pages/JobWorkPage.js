@@ -365,7 +365,7 @@ export default function JobWorkPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full data-table" data-testid="jw-orders-table">
-                  <thead><tr><th>Order #</th><th>MO #</th><th>FG/SA/Part</th><th>Supplier</th><th>Items</th><th>Sent/Total</th><th>Received</th><th className="text-right">Charges</th><th>Status</th><th>Return Date</th><th>Actions</th></tr></thead>
+                  <thead><tr><th>Order #</th><th>MO #</th><th>FG/SA/Part</th><th>Supplier</th><th>RM</th><th>Sent/Total</th><th>Received</th><th className="text-right">Charges</th><th>Status</th><th>Return Date</th><th>Actions</th></tr></thead>
                   <tbody>
                     {orders.map(o => {
                       const totalQty = o.lines.reduce((s, l) => s + l.quantity, 0);
@@ -377,13 +377,13 @@ export default function JobWorkPage() {
                           <td className="mono text-sm text-[#1D3557]">{o.mo_numbers ? o.mo_numbers.join(', ') : o.mo_number || '-'}</td>
                           <td className="text-sm">{o.job_work_parts && o.job_work_parts.length > 0 ? o.job_work_parts.map((p, pi) => {
                             const pit = p.item || items.find(i => i.id === p.item_id);
-                            return <div key={pi}><span className="mono font-medium text-[#1D3557]">{pit?.part_number || '?'}</span> {pit?.name || ''} <span className="mono text-[10px] text-[#6B7280]">x{p.quantity}</span>{p.charges ? <span className="text-[10px] text-[#723B13]"> @{formatCurrency(p.charges)}</span> : ''}</div>;
+                            return <div key={pi} className="font-medium"><span className="text-[#1D3557]">{pit?.part_number || '?'} - {pit?.name || ''}</span> <span className="text-[#6B7280]">({p.quantity})</span>{p.charges ? <div className="text-[10px] text-[#723B13]">@{formatCurrency(p.charges)}</div> : ''}</div>;
                           }) : <span className="text-[#6B7280]">{o.fg_item_name || '-'}</span>}</td>
                           <td>{o.supplier?.name || '-'}</td>
-                          <td className="text-sm">{o.subcontract_type !== 'without_material' && o.lines.map((l, li) => {
+                          <td className="text-sm">{o.subcontract_type === 'without_material' ? <span className="text-[#9CA3AF] text-xs">No RM</span> : o.lines.map((l, li) => {
                             const it = l.item || items.find(i => i.id === l.item_id);
-                            return <div key={li}><span className="mono">{it?.part_number || l.item_id}</span> <span className="text-[#4B5563]">{it?.name || ''}</span></div>;
-                          })}{o.subcontract_type === 'without_material' && <span className="text-[#9CA3AF] text-xs">No RM</span>}</td>
+                            return <div key={li} className="text-[#4B5563]"><span className="mono text-[10px]">{it?.part_number || '-'}</span> {it?.name || ''} <span className="mono text-[#6B7280]">({l.quantity})</span></div>;
+                          })}</td>
                           <td className="mono">{sentQty}/{totalQty}</td>
                           <td className="mono">{recvQty}</td>
                           <td className="text-right mono">{formatCurrency((o.job_work_parts || []).reduce((s, p) => s + (p.quantity || 0) * (p.charges || 0), 0) || o.processing_charges || 0)}</td>
