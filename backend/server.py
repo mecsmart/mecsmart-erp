@@ -3297,15 +3297,44 @@ async def bulk_subcontract(request: Request, data: dict = Body(...)):
                 for m in consumed:
                     all_sc_lines.append({"item_id": m["item_id"], "quantity": m["quantity"], "sent_quantity": m["quantity"], "received_quantity": 0, "rate": m.get("unit_cost", 0), "wo_id": wo_id})
             else:
-                bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"})
-                if bom:
-                    for comp in bom.get("components", []):
-                        if comp.get("is_alternate"):
+                # Smart resolve: completed child parts as-is, unprocessed parts to RM
+                child_mos = await db.work_orders.find({"parent_wo_id": wo_id}, {"_id": 0}).to_list(500)
+                completed_items = {cm["item_id"] for cm in child_mos if cm.get("status") == "completed"}
+                
+                async def bulk_smart_resolve(pid, mult, visited=None):
+                    if visited is None:
+                        visited = set()
+                    if pid in visited:
+                        return []
+                    visited.add(pid)
+                    res = []
+                    b = await db.boms.find_one({"parent_item_id": pid, "status": "active"})
+                    if not b:
+                        return res
+                    for c in b.get("components", []):
+                        if c.get("is_alternate"):
                             continue
-                        comp_item = await db.items.find_one({"id": comp["item_id"]}, {"_id": 0})
-                        if comp_item:
-                            qty = int(comp["quantity"] * wo.get("quantity", 1))
-                            all_sc_lines.append({"item_id": comp["item_id"], "quantity": qty, "sent_quantity": qty, "received_quantity": 0, "rate": comp_item.get("unit_cost", 0), "wo_id": wo_id})
+                        ci = await db.items.find_one({"id": c["item_id"]}, {"_id": 0})
+                        if not ci:
+                            continue
+                        cq = c.get("quantity", 1) * mult
+                        cat = ci.get("category", "")
+                        if cat in ["raw_material", "component"]:
+                            res.append({"item_id": c["item_id"], "quantity": int(cq), "sent_quantity": int(cq), "received_quantity": 0, "rate": ci.get("unit_cost", 0), "wo_id": wo_id})
+                        elif cat == "sub_assembly":
+                            if c["item_id"] in completed_items:
+                                res.append({"item_id": c["item_id"], "quantity": int(cq), "sent_quantity": int(cq), "received_quantity": 0, "rate": ci.get("unit_cost", 0), "wo_id": wo_id})
+                            else:
+                                child_rm = await bulk_smart_resolve(c["item_id"], cq, visited)
+                                if child_rm:
+                                    res.extend(child_rm)
+                                else:
+                                    res.append({"item_id": c["item_id"], "quantity": int(cq), "sent_quantity": int(cq), "received_quantity": 0, "rate": ci.get("unit_cost", 0), "wo_id": wo_id})
+                    return res
+                
+                resolved = await bulk_smart_resolve(item_id, wo.get("quantity", 1))
+                if resolved:
+                    all_sc_lines.extend(resolved)
                 else:
                     wo_item = await db.items.find_one({"id": item_id}, {"_id": 0})
                     if wo_item:
@@ -3546,22 +3575,26 @@ async def create_sc_for_wo(wo_id: str, request: Request):
     item = await db.items.find_one({"id": item_id}, {"_id": 0}) if item_id else None
     qty = wo.get("quantity", 1)
     
-    # Build lines — for with_material, recursively resolve BOM to get leaf-level RM
+    # Build lines — smart resolution based on child MO completion status
     sc_lines = []
     if sc_type == "without_material":
         sc_lines = [{"item_id": item_id, "quantity": qty, "sent_quantity": 0, "received_quantity": 0, "rate": item.get("unit_cost", 0) if item else 0}]
     else:
-        # Recursively collect all RM needed for this item (drilling through sub-assemblies)
-        async def collect_rm(parent_item_id, multiplier, visited=None):
+        # Collect child MOs under this WO to check completion status
+        all_child_mos = await db.work_orders.find({"parent_wo_id": wo_id}, {"_id": 0}).to_list(500)
+        completed_item_ids = {cm["item_id"] for cm in all_child_mos if cm.get("status") == "completed"}
+        
+        # Smart resolve: completed child parts sent as-is, unprocessed parts resolved to RM
+        async def smart_resolve(parent_item_id, multiplier, visited=None):
             if visited is None:
                 visited = set()
             if parent_item_id in visited:
                 return []
             visited.add(parent_item_id)
-            rm_list = []
+            result = []
             bom = await db.boms.find_one({"parent_item_id": parent_item_id, "status": "active"}, {"_id": 0})
             if not bom:
-                return rm_list
+                return result
             for comp in bom.get("components", []):
                 if comp.get("is_alternate"):
                     continue
@@ -3569,15 +3602,25 @@ async def create_sc_for_wo(wo_id: str, request: Request):
                 if not ci:
                     continue
                 comp_qty = comp.get("quantity", 1) * multiplier
-                if ci.get("category") in ["raw_material", "component"]:
-                    rm_list.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
-                elif ci.get("category") == "sub_assembly":
-                    # Drill into sub-assembly BOM to get its RM
-                    child_rm = await collect_rm(comp["item_id"], comp_qty, visited)
-                    rm_list.extend(child_rm)
-            return rm_list
+                cat = ci.get("category", "")
+                if cat in ["raw_material", "component"]:
+                    # Always add RM/components directly
+                    result.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
+                elif cat == "sub_assembly":
+                    if comp["item_id"] in completed_item_ids:
+                        # Child part already completed — send the part itself
+                        result.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
+                    else:
+                        # Child part NOT completed — resolve to its RM
+                        child_rm = await smart_resolve(comp["item_id"], comp_qty, visited)
+                        if child_rm:
+                            result.extend(child_rm)
+                        else:
+                            # No BOM found for this SA, add it directly
+                            result.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
+            return result
         
-        rm_items = await collect_rm(item_id, qty)
+        rm_items = await smart_resolve(item_id, qty)
         # Deduplicate by item_id (sum quantities)
         rm_map = {}
         for rm in rm_items:
