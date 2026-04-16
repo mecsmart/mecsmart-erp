@@ -5896,14 +5896,34 @@ async def create_delivery_challan(data: DCCreate, request: Request):
     count = await db.delivery_challans.count_documents({})
     dc_number = f"DC-{str(count + 1).zfill(6)}"
     
-    dc_lines = []
+    # First pass: check ALL items for stock availability
+    insufficient = []
     for line in data.lines:
         item = await db.items.find_one({"id": line.item_id})
         if not item:
             continue
         current_stock = item.get("current_stock", 0)
         if current_stock < line.quantity:
-            raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.get('part_number')}: need {line.quantity}, have {current_stock}")
+            insufficient.append({
+                "item": item.get("part_number", ""),
+                "name": item.get("name", ""),
+                "required": line.quantity,
+                "available": current_stock,
+                "shortage": line.quantity - current_stock
+            })
+    
+    if insufficient:
+        return JSONResponse(status_code=200, content={
+            "success": False,
+            "message": "Insufficient stock for DC creation",
+            "insufficient_materials": insufficient
+        })
+    
+    dc_lines = []
+    for line in data.lines:
+        item = await db.items.find_one({"id": line.item_id})
+        if not item:
+            continue
         
         # Deduct stock
         new_stock = current_stock - line.quantity

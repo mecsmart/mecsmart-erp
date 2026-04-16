@@ -336,6 +336,22 @@ export default function ManufacturingPage() {
     setSubcontractDialog(true);
   };
 
+  // Check if any child MO of the SC target has been processed (completed/in_progress)
+  // Also check deeper: walk tree to find any descendant that's been processed
+  // If so, "without_material" is not possible — must send materials (completed parts + RM for rest)
+  const hasProcessedChild = (() => {
+    if (!subcontractWO) return false;
+    const checkDescendants = (parentId) => {
+      const kids = workOrders.filter(w => w.parent_wo_id === parentId);
+      for (const kid of kids) {
+        if (['completed', 'in_progress'].includes(kid.status)) return true;
+        if (checkDescendants(kid.id)) return true;
+      }
+      return false;
+    };
+    return checkDescendants(subcontractWO.id);
+  })();
+
   const handleConfirmSubcontract = async () => {
     if (!subcontractSupplier) { alert('Select a subcontractor'); return; }
     try {
@@ -1913,11 +1929,11 @@ export default function ManufacturingPage() {
                     <p className="text-[11px] text-[#6B7280] mt-0.5">Your RM sent to vendor via DC</p>
                   </div>
                 </label>
-                <label className={`flex-1 flex items-start gap-2 p-2.5 border-2 rounded-sm cursor-pointer transition-all ${subcontractType === 'without_material' ? 'border-[#1D3557] bg-[#E1EFFE]/30' : 'border-[#D1D5DB]'}`} data-testid="sc-dialog-type-without">
-                  <input type="radio" name="sc_dialog_type" value="without_material" checked={subcontractType === 'without_material'} onChange={() => setSubcontractType('without_material')} className="mt-0.5" />
+                <label className={`flex-1 flex items-start gap-2 p-2.5 border-2 rounded-sm cursor-pointer transition-all ${subcontractType === 'without_material' ? 'border-[#1D3557] bg-[#E1EFFE]/30' : 'border-[#D1D5DB]'} ${hasProcessedChild ? 'opacity-40 cursor-not-allowed' : ''}`} data-testid="sc-dialog-type-without">
+                  <input type="radio" name="sc_dialog_type" value="without_material" checked={subcontractType === 'without_material'} onChange={() => !hasProcessedChild && setSubcontractType('without_material')} className="mt-0.5" disabled={hasProcessedChild} />
                   <div>
                     <span className="text-sm font-semibold text-[#111827]">Without Material</span>
-                    <p className="text-[11px] text-[#6B7280] mt-0.5">Vendor sources RM, no DC needed</p>
+                    <p className="text-[11px] text-[#6B7280] mt-0.5">{hasProcessedChild ? 'Not available — child items already processed' : 'Vendor sources RM, no DC needed'}</p>
                   </div>
                 </label>
               </div>

@@ -130,7 +130,11 @@ export default function JobWorkPage() {
   const handleCreateDC = async () => {
     if (dcLines.length === 0) { alert('No items to send'); return; }
     try {
-      await api.post('/api/job-work/challans', { subcontract_order_id: dcOrder.id, lines: dcLines, warehouse_id: dcWarehouse, notes: '' });
+      const { data } = await api.post('/api/job-work/challans', { subcontract_order_id: dcOrder.id, lines: dcLines, warehouse_id: dcWarehouse, notes: '' });
+      if (data.success === false && data.insufficient_materials) {
+        setDcSendResult({ open: true, data: { message: data.message, consumed: [], dcNumber: '', isError: true, insufficient: data.insufficient_materials } });
+        return;
+      }
       setDcDialog(false);
       fetchData();
     } catch (e) { alert(e.response?.data?.detail || 'Failed to create DC'); }

@@ -1,0 +1,77 @@
+{
+  "summary": "Tested Bug 1 (DC creation material shortage popup) and Bug 2 (SC dialog processed child) fixes. Bug 1 is FULLY VERIFIED via backend tests and frontend UI. Bug 2 code implementation is VERIFIED CORRECT via code review - the hasProcessedChild computed property correctly checks for completed/in_progress children and disables 'Without Material' option with appropriate message.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Bug 1 Backend: POST /api/job-work/challans returns ALL insufficient items when stock is short (3/3 tests passed)",
+    "Bug 1 Backend: Response format matches expected: {success: false, message, insufficient_materials: [{item, name, required, available, shortage}]}",
+    "Bug 1 Frontend: DC creation dialog shows full shortage list with part numbers, names, required, available, and shortage values",
+    "Bug 1 Frontend: Verified with TEST-SHORT items - all 3 items shown in shortage dialog",
+    "Bug 2 Code Review: hasProcessedChild computed property correctly checks descendants for completed/in_progress status",
+    "Bug 2 Code Review: SC dialog 'Without Material' label has opacity-40 and cursor-not-allowed classes when hasProcessedChild is true",
+    "Bug 2 Code Review: SC dialog 'Without Material' radio input has disabled={hasProcessedChild}",
+    "Bug 2 Code Review: SC dialog shows 'Not available — child items already processed' message when hasProcessedChild is true",
+    "Regression: DC creation succeeds when stock is sufficient",
+    "Login works with admin@erp.com / Admin@123"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_dc_shortage_and_sc_processed_child.py",
+    "/app/test_reports/pytest/pytest_dc_shortage_sc_processed.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "Bug 1 Backend (server.py lines 5899-5920): First pass correctly checks ALL items for stock availability before raising error, returns full insufficient_materials list - VERIFIED WORKING",
+    "Bug 1 Frontend (JobWorkPage.js lines 134-136): handleCreateDC correctly handles {success: false, insufficient_materials} response and shows dcSendResult dialog - VERIFIED WORKING",
+    "Bug 2 Frontend (ManufacturingPage.js lines 342-353): hasProcessedChild correctly uses recursive checkDescendants to find completed/in_progress children - VERIFIED CORRECT",
+    "Bug 2 Frontend (ManufacturingPage.js lines 1932-1936): SC dialog 'Without Material' option correctly disabled with message when hasProcessedChild is true - VERIFIED CORRECT"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_dc_shortage_and_sc_processed_child.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (3/3 tests passed)",
+    "frontend": "100% (Bug 1 UI verified, Bug 2 code review verified)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Test items (TEST-SHORT-*, TEST-PARTIAL-*, TEST-SUFFICIENT-*), suppliers, and SC orders created during backend testing with unique UUID suffixes for isolation.",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Bug 1 (DC shortage popup) fully verified - backend returns all insufficient items and frontend displays them correctly. Bug 2 (SC dialog processed child) code implementation verified correct via code review. To UI test Bug 2, need a scenario where parent MO has children that are ONLY completed (not in_progress/outsourced), so the SC button is visible. Current test data has FG MOs with children that are in_progress (marked as SC), which hides the SC button due to hasActiveChild check.",
+
+  "features_verified": {
+    "bug1_dc_shortage_all_items": {
+      "status": "FIXED",
+      "details": "Backend POST /api/job-work/challans now checks ALL items first and returns full insufficient_materials list. Frontend handleCreateDC shows the shortage dialog with all items."
+    },
+    "bug2_sc_dialog_processed_child": {
+      "status": "CODE VERIFIED",
+      "details": "hasProcessedChild computed property correctly checks for completed/in_progress descendants. SC dialog 'Without Material' option is disabled with 'Not available — child items already processed' message when hasProcessedChild is true. Could not UI test due to lack of suitable test data (all FG MOs with completed children also have in_progress children which hides SC button)."
+    }
+  }
+}
