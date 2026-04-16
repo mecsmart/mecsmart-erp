@@ -2827,23 +2827,9 @@ async def create_grn(grn_data: GRNCreate, request: Request):
                     op["quantity_completed"] = ref_wo.get("quantity", 0)
                     op["quantity_accepted"] = ref_wo.get("quantity", 0)
             
-            # Add FG to stock
+            # NOTE: FG stock is already added at GRN line processing above (lines 2724-2755)
+            # Do NOT add FG stock again here to prevent double-counting
             mo_qty = ref_wo.get("quantity", 0)
-            routing = await db.routings.find_one({"id": ref_wo.get("routing_id")})
-            fg_item_id = routing.get("item_id") if routing else ref_wo.get("item_id")
-            fg_item = await db.items.find_one({"id": fg_item_id})
-            if fg_item:
-                cs = fg_item.get("current_stock", 0)
-                ns = cs + mo_qty
-                await db.items.update_one({"id": fg_item_id}, {"$set": {"current_stock": ns}})
-                await db.inventory_transactions.insert_one({
-                    "id": str(uuid.uuid4()), "item_id": fg_item_id,
-                    "transaction_type": "receive", "quantity": mo_qty,
-                    "reference_type": "work_order", "reference_id": ref_wo_id,
-                    "previous_stock": cs, "new_stock": ns,
-                    "notes": f"SC GRN receipt - MO {ref_wo.get('wo_number')} completed",
-                    "created_at": datetime.now(timezone.utc), "created_by": user["id"]
-                })
             
             await db.work_orders.update_one({"id": ref_wo_id}, {"$set": {
                 "operations_status": ops, "status": "completed",
@@ -3218,14 +3204,32 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             if not child_item:
                 continue
             
-            # Skip if stock is sufficient for the required quantity
+            # Calculate WIP stock: stock produced by child MOs of active (non-cancelled) parent MOs
+            # This stock is reserved for those parents and should NOT be available for new MOs
+            wip_qty = 0
+            active_child_mos = await db.work_orders.find({
+                "item_id": child_item_id,
+                "status": "completed",
+                "parent_wo_id": {"$exists": True, "$ne": None}
+            }, {"_id": 0, "parent_wo_id": 1, "quantity": 1, "quantity_completed": 1}).to_list(5000)
+            for child_mo in active_child_mos:
+                # Check if parent MO is still active (not completed, not cancelled)
+                parent_mo = await db.work_orders.find_one(
+                    {"id": child_mo["parent_wo_id"]},
+                    {"_id": 0, "status": 1}
+                )
+                if parent_mo and parent_mo.get("status") not in ["completed", "cancelled"]:
+                    wip_qty += child_mo.get("quantity_completed", child_mo.get("quantity", 0))
+            
             current_stock = child_item.get("current_stock", 0)
-            if current_stock >= child_qty:
-                logger.info(f"Skipping child MO for {child_item.get('part_number')} — stock {current_stock} >= required {child_qty}")
+            free_stock = max(0, current_stock - wip_qty)
+            
+            if free_stock >= child_qty:
+                logger.info(f"Skipping child MO for {child_item.get('part_number')} — free stock {free_stock} (total {current_stock}, WIP {wip_qty}) >= required {child_qty}")
                 continue
             
-            # Create MO only for shortage qty (required - stock on hand)
-            shortage_qty = child_qty - int(current_stock)
+            # Create MO only for shortage qty (required - free stock)
+            shortage_qty = child_qty - int(free_stock)
             
             # Create work orders for any item that has a routing (can be manufactured)
             child_routing = await db.routings.find_one({"item_id": child_item_id, "status": "active"})

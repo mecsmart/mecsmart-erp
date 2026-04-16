@@ -1,0 +1,87 @@
+{
+  "summary": "Tested two critical bug fixes: Bug 1 (GRN double stock for without_material SC) and Bug 2 (WIP stock calculation for child MOs). All 13 tests passed, 1 skipped (requires full job card workflow).",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Bug 1: Create MO for SC - PASSED",
+    "Bug 1: Mark MO as subcontract without_material - PASSED",
+    "Bug 1: Create SC order from MO - PASSED",
+    "Bug 1: Create PO from SC order - PASSED",
+    "Bug 1: Verify initial stock is zero - PASSED",
+    "Bug 1: GRN receipt does NOT double FG stock (CRITICAL) - PASSED (stock=10, not 20)",
+    "Bug 1: MO auto-completed after GRN receipt - PASSED",
+    "Bug 2: Create first FG MO with child SG MO - PASSED",
+    "Bug 2: Create second FG MO - child MO STILL created (WIP stock not available) - PASSED",
+    "Bug 2: Cancel MO-1 releases WIP stock - PASSED",
+    "Bug 2: Create third FG MO - child MO SKIPPED (stock now free) - PASSED",
+    "Regression: Login works with admin@erp.com / Admin@123 - PASSED",
+    "Regression: with_material SC receipt works correctly (no double stock) - PASSED"
+  ],
+
+  "skipped_tests": [
+    "Bug 2: Complete child SG MO - SKIPPED (requires full job card workflow: start MO -> complete operations -> complete MO)"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_grn_double_stock_and_wip_calculation.py",
+    "/app/test_reports/pytest/pytest_grn_wip_bugs.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "Bug 1 FIX VERIFIED (server.py lines 2830-2831): Comment correctly indicates FG stock is added at GRN line processing (2724-2755), NOT again at MO completion. Stock increased by received qty only (10), not doubled (20).",
+    "Bug 2 FIX VERIFIED (server.py lines 3207-3228): WIP calculation correctly queries completed child MOs with parent_wo_id, checks if parent is active (not completed/cancelled), and calculates free_stock = current_stock - wip_qty.",
+    "Bug 2 test_03 confirms: Second FG MO creates child MO for SG even when SG has stock, because that stock is WIP (tied to active MO-1).",
+    "Bug 2 test_05 confirms: After MO-1 cancelled, third FG MO skips child MO because SG stock is now free (not WIP)."
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_grn_double_stock_and_wip_calculation.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (13/13 passed, 1 skipped)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Test items (FG, SG, RM), suppliers, BOMs, routings, production orders, work orders, SC orders, and POs created during testing with unique UUID suffixes for isolation.",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Both bug fixes verified: (1) GRN for without_material SC no longer doubles FG stock - stock added only at GRN line processing, not again at MO completion. (2) WIP stock calculation now correctly identifies stock produced by completed child MOs of active parent MOs as WIP (not available for new MOs). When parent MO is cancelled, WIP stock becomes free.",
+
+  "bug_fix_verification": {
+    "bug_1": {
+      "description": "GRN receipt for without_material SC PO was doubling FG stock (added at line processing AND at MO completion)",
+      "fix_location": "server.py lines 2830-2831",
+      "fix_description": "Removed FG stock addition from MO completion in GRN path - stock now added only at GRN line processing",
+      "verification_status": "VERIFIED - Stock increased by received qty (10) only, not doubled (20)"
+    },
+    "bug_2": {
+      "description": "Creating new MO for FG skipped child MO creation because it saw available stock, but that stock was WIP tied to running parent MO",
+      "fix_location": "server.py lines 3207-3228",
+      "fix_description": "Now calculates WIP stock from completed child MOs whose parent MOs are still active. free_stock = current_stock - wip_qty",
+      "verification_status": "VERIFIED - Second MO creates child MO (stock is WIP), third MO skips child MO after parent cancelled (stock is free)"
+    }
+  }
+}
