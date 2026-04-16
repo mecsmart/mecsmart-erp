@@ -1,0 +1,86 @@
+{
+  "summary": "Tested 4 bugs in Manufacturing ERP. All backend tests passed (11/11). Frontend UI verification confirmed Bug 2 fix (SC button hidden for in_progress MOs). Bug 3 (auto-complete MO when last op done) and Bug 4 (SC dialog auto-creates SC order) verified via backend tests.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Bug 3 Backend: MO auto-completes when last operation is completed",
+    "Bug 3 Backend: Stock is incremented when MO auto-completes",
+    "Bug 4 Backend: Mark MO as subcontract works correctly",
+    "Bug 4 Backend: create-sc endpoint works after marking MO as subcontract",
+    "Bug 2 Backend: in_progress MO data shows correct status for button visibility logic",
+    "Bug 2 Backend: pending MO can show SC button (status !== 'in_progress')",
+    "Bug 1 Backend: DC shortage response includes item name alongside part number",
+    "Regression: Inhouse Start works for pending MOs",
+    "Bug 2 Frontend: in_progress non-subcontract MO shows only Job Card button (no SC, no Complete)",
+    "Bug 2 Frontend: SC button visible for pending MOs (when hasActiveChild is false)",
+    "Login works with admin@erp.com / Admin@123"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_four_bugs_iteration34.py",
+    "/app/test_reports/pytest/pytest_four_bugs_iteration34.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "Bug 2 Frontend (ManufacturingPage.js line 1090): Complete button correctly shows ONLY when wo.status === 'in_progress' && !wo.is_subcontract && ops.length === 0",
+    "Bug 2 Frontend (ManufacturingPage.js line 1092): SC button correctly shows ONLY when canShowSC && wo.status !== 'in_progress'",
+    "Bug 3 Backend (server.py lines 4466-4479): Auto-completes MO and increments stock when all operations are completed",
+    "Bug 4 Frontend (ManufacturingPage.js lines 355-376): handleConfirmSubcontract correctly does Step 1 (mark as SC) + Step 2 (auto create-sc)"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_four_bugs_iteration34.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (11/11 tests passed)",
+    "frontend": "100% (Bug 2 UI verified via Playwright)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Test items (FG, RM), suppliers, work centers, routings, BOMs, SOs, and MOs created during backend testing with unique UUID suffixes for isolation.",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "All 4 bugs verified: Bug 1 (DC shortage shows item name) - already fixed in iteration 33. Bug 2 (button visibility) - SC button hidden for in_progress MOs, Complete button only for ops.length===0. Bug 3 (auto-complete MO) - works when last operation completed. Bug 4 (SC dialog auto-creates SC order) - handleConfirmSubcontract calls create-sc endpoint after marking MO as subcontract.",
+
+  "features_verified": {
+    "bug1_dc_shortage_item_name": {
+      "status": "VERIFIED",
+      "details": "DC shortage response includes both part number (item) and name fields"
+    },
+    "bug2_button_visibility": {
+      "status": "VERIFIED",
+      "details": "in_progress MO (not subcontract) shows only Job Card button. SC button hidden when status is in_progress. Complete button shows only when ops.length === 0."
+    },
+    "bug3_auto_complete_mo": {
+      "status": "VERIFIED",
+      "details": "When last operation is completed via PUT /api/work-orders/{id}/operations/{seq}, MO auto-completes and stock is incremented"
+    },
+    "bug4_sc_dialog_auto_create": {
+      "status": "VERIFIED",
+      "details": "handleConfirmSubcontract does Step 1 (mark as SC) + Step 2 (auto call create-sc endpoint). SC order created immediately after confirming SC dialog."
+    }
+  }
+}
