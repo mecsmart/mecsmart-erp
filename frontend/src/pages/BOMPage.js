@@ -75,9 +75,9 @@ export default function BOMPage() {
       const params = statusFilter ? `?status=${statusFilter}` : '';
       const { data } = await api.get(`/api/bom${params}`);
       setBoms(data);
-      // Fetch explosions for all active FG BOMs only
+      // Fetch explosions for all active BOMs (FG, SA, and component BOMs)
       const explosions = {};
-      for (const bom of data.filter(b => b.status === 'active' && b.parent_item?.category === 'finished_good')) {
+      for (const bom of data.filter(b => b.status === 'active')) {
         try {
           const { data: expData } = await api.get(`/api/bom/${bom.id}/explode`);
           explosions[bom.id] = expData;
@@ -117,6 +117,13 @@ export default function BOMPage() {
         ...formData,
         effectivity_date: formData.effectivity_date ? new Date(formData.effectivity_date).toISOString() : null,
       };
+      // Ensure components have routings field
+      if (payload.components) {
+        payload.components = payload.components.map(c => ({
+          ...c,
+          routings: c.routings || [],
+        }));
+      }
       
       if (editingBom) {
         await api.put(`/api/bom/${editingBom.id}`, payload);
@@ -128,8 +135,8 @@ export default function BOMPage() {
       resetForm();
       fetchBoms();
     } catch (error) {
-      console.error('Failed to save BOM:', error);
-      alert(error.response?.data?.detail || 'Failed to save BOM');
+      console.error('Failed to save BOM:', error?.response?.data || error);
+      alert(error.response?.data?.detail || JSON.stringify(error.response?.data) || 'Failed to save BOM');
     }
   };
 
@@ -656,7 +663,8 @@ export default function BOMPage() {
                     extended_cost: node.extended_cost || 0,
                     hasChildren,
                     isExpanded,
-                    is_alternate: node.is_alternate
+                    is_alternate: node.is_alternate,
+                    routings: node.routings || []
                   });
                   
                   if (hasChildren && isExpanded) {
