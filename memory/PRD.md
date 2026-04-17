@@ -4,19 +4,17 @@
 - Backend: FastAPI + MongoDB (Motor), JWT httpOnly cookies, /api prefix
 - Frontend: React 19 + Shadcn/UI + Tailwind CSS
 
-## SC with RM Flow
-- SC → Send DC (HSN in print) → Receive via GRN from **Stores/GRN page** (not JW page)
-- JW page shows "Receive via GRN (JW-xxx)" info label
-- GRN page has "Pending Job Work Orders for GRN" section
-- Mandatory: Invoice No + Date, Editable price per line
-- Part/SA rate = BOM rollup cost (material + process), not unit_cost
+## GRN Flow
+- SC with RM: Receive from GRN page → "Pending Job Work Orders for GRN" section
+- SC without RM: Receive via PO-based GRN from GRN page
+- GRN dialog works for both PO and JW orders (shared form, conditional labels)
+- Mandatory: Invoice No + Date (both PO and JW GRN)
+- Editable price per line
 
-## SC without RM / Job Card Outsource
-- SC → Create PO → "Receive via GRN (PO-xxx)" from GRN page
-
-## BOM Rollup Cost
-- calc_bom_rollup: sum(comp_qty × comp_unit_cost) + process_cost from completed WOs
-- Used in: SC lines rate, job_work_parts bom_rollup_cost, BOM explosion
+## BOM
+- Routings at BOM level, Material Cost + Process Cost/Unit + Total/Unit in explosion
+- Export/Import with routings, Child BOM edit
+- Part/SA rate = BOM rollup cost (material + process)
 
 ## Backlog
 - [ ] Job Card outsource DC print format

@@ -736,7 +736,7 @@ export default function BOMPage() {
                           <th className="text-left py-2 px-2">UOM</th>
                           <th className="text-left py-2 px-2">Routings</th>
                           <th className="text-right py-2 px-2">Material Cost</th>
-                          <th className="text-right py-2 px-2">Process Cost</th>
+                          <th className="text-right py-2 px-2">Process Cost/Unit</th>
                           <th className="text-right py-2 px-2">Total/Unit</th>
                           <th className="text-right py-2 px-3">Extended Cost</th>
                         </tr>

@@ -943,18 +943,18 @@ export default function WarehousesPage() {
                   Create GRN {selectedPO ? `- ${selectedPO.po_number}` : selectedJW ? `- ${selectedJW.order_number} (Job Work)` : ''}
                 </DialogTitle>
               </DialogHeader>
-              {selectedPO && (
+              {(selectedPO || selectedJW) && (
                 <form onSubmit={(e) => { e.preventDefault(); selectedJW ? handleJWGRNSubmit() : handleGRNSubmit(e); }} className="space-y-4 mt-3" data-testid="grn-form">
                   {/* Supplier info */}
                   <div className="bg-[#F3F4F6] rounded-sm p-3 text-sm">
                     <div className="flex justify-between">
                       <div>
                         <span className="text-[#6B7280]">Supplier: </span>
-                        <span className="font-medium">{selectedPO.supplier?.name} ({selectedPO.supplier?.code})</span>
+                        <span className="font-medium">{selectedPO ? `${selectedPO.supplier?.name} (${selectedPO.supplier?.code})` : `${selectedJW?.supplier?.name || '-'} (${selectedJW?.supplier?.code || '-'})`}</span>
                       </div>
                       <div>
-                        <span className="text-[#6B7280]">PO Total: </span>
-                        <span className="mono font-semibold">{formatCurrency(selectedPO.total_amount || 0)}</span>
+                        <span className="text-[#6B7280]">{selectedPO ? 'PO Total: ' : 'Process Charges: '}</span>
+                        <span className="mono font-semibold">{formatCurrency(selectedPO ? (selectedPO.total_amount || 0) : (selectedJW?.processing_charges || 0))}</span>
                       </div>
                     </div>
                   </div>
@@ -989,10 +989,10 @@ export default function WarehousesPage() {
                           <tr className="bg-[#1D3557] text-white text-xs">
                             <th className="text-left p-2">Item</th>
                             <th className="text-left p-2">HSN</th>
-                            <th className="text-right p-2">PO Qty</th>
+                            <th className="text-right p-2">{selectedJW ? 'Ordered' : 'PO Qty'}</th>
                             <th className="text-right p-2">Recd Qty</th>
                             <th className="text-left p-2">UOM</th>
-                            <th className="text-right p-2">PO Price</th>
+                            <th className="text-right p-2">{selectedJW ? 'SC Price' : 'PO Price'}</th>
                             <th className="text-right p-2">Verified Price</th>
                             <th className="text-center p-2">Status</th>
                           </tr>
