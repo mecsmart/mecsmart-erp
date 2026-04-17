@@ -827,22 +827,6 @@ export default function ManufacturingPage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-semibold text-[#111827] mb-1">Routing *</label>
-                      <Select value={workOrderForm.routing_id} onValueChange={(v) => setWorkOrderForm({ ...workOrderForm, routing_id: v })}>
-                        <SelectTrigger data-testid="wo-routing-select">
-                          <SelectValue placeholder="Select routing" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {routings.filter(r => r.status === 'active').map((routing) => (
-                            <SelectItem key={routing.id} value={routing.id}>
-                              {routing.item?.part_number} - {routing.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity *</label>
                       {(() => {
                         const selectedSO = productionOrders.find(po => po.id === workOrderForm.production_order_id);

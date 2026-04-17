@@ -457,7 +457,7 @@ class RoutingUpdate(BaseModel):
 
 class WorkOrderCreate(BaseModel):
     production_order_id: str
-    routing_id: str
+    routing_id: Optional[str] = ""  # Optional - routing now comes from BOM
     quantity: int
     scheduled_start: Optional[datetime] = None
     scheduled_end: Optional[datetime] = None
@@ -857,6 +857,7 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
                 "item": item,
                 "quantity": comp.get("quantity"),
                 "is_alternate": comp.get("is_alternate", False),
+                "routings": comp.get("routings", []),
                 "children": [],
                 "unit_cost": 0,
                 "extended_cost": 0
@@ -3087,9 +3088,9 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
     if not prod_order:
         raise HTTPException(status_code=404, detail="Production order not found")
     
-    routing = await db.routings.find_one({"id": wo_data.routing_id})
-    if not routing:
-        raise HTTPException(status_code=404, detail="Routing not found")
+    routing = None
+    if wo_data.routing_id:
+        routing = await db.routings.find_one({"id": wo_data.routing_id})
     
     # Get the BOM for this production order to find the item to manufacture
     bom = await db.boms.find_one({"id": prod_order.get("bom_id")})
