@@ -140,6 +140,27 @@ export default function JobWorkPage() {
     } catch (e) { alert(e.response?.data?.detail || 'Failed to create DC'); }
   };
 
+  // Create DC for Job Card outsource (Part/SA items, no RM)
+  const handleCreateDCForParts = async (order) => {
+    if (!order.job_work_parts?.length) { alert('No parts to send'); return; }
+    try {
+      const partLines = order.job_work_parts.map(p => ({
+        item_id: p.item_id,
+        quantity: p.quantity,
+        rate: p.charges || 0
+      }));
+      const { data } = await api.post('/api/job-work/challans', { subcontract_order_id: order.id, lines: partLines, warehouse_id: '', notes: 'Job Card outsource DC', skip_stock_deduct: true });
+      if (data.success === false) {
+        alert(data.message || 'Failed to create DC');
+        return;
+      }
+      // Mark SC as dc_created
+      await api.put(`/api/job-work/orders/${order.id}`, { dc_created: true });
+      fetchData();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to create DC'); }
+  };
+
+
   // Receipt
   const openReceiptDialog = (order) => {
     setRecOrder(order);
@@ -418,19 +439,21 @@ export default function JobWorkPage() {
                               {canEdit && o.status === 'draft' && (
                                 <button onClick={() => handleConfirmOrder(o.id)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`confirm-jw-${o.id}`}><CheckCircle2 className="w-3 h-3 inline mr-1" />Confirm</button>
                               )}
-                              {canEdit && ['confirmed', 'in_progress'].includes(o.status) && sentQty < totalQty && o.subcontract_type !== 'without_material' && (
+                              {canEdit && ['confirmed', 'in_progress'].includes(o.status) && o.lines?.length > 0 && sentQty < totalQty && (
                                 <button onClick={() => openDCDialog(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
                               )}
-                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && o.subcontract_type === 'without_material' && !o.po_created && (
+                              {canEdit && ['confirmed', 'in_progress'].includes(o.status) && (!o.lines || o.lines.length === 0) && o.job_work_parts?.length > 0 && !o.dc_created && (
+                                <button onClick={() => handleCreateDCForParts(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-parts-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
+                              )}
+                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && (
+                                (o.lines?.length > 0 ? sentQty >= totalQty : o.dc_created) || (o.subcontract_type === 'without_material' && (!o.lines || o.lines.length === 0) && !o.job_work_parts?.length)
+                              ) && (
                                 <button onClick={() => handleCreatePOFromSC(o)} className="btn-primary text-xs px-2 py-1 bg-[#723B13] hover:bg-[#5A2E0F]" data-testid={`create-po-${o.id}`}><FileText className="w-3 h-3 inline mr-1" />Create PO</button>
                               )}
                               {o.po_created && o.po_number && (
                                 <span className="text-[10px] text-[#03543F] bg-[#DEF7EC] px-2 py-1 rounded">{o.po_number}</span>
                               )}
-                              {canEdit && o.status === 'in_progress' && o.subcontract_type !== 'without_material' && sentQty > recvQty && (
-                                <button onClick={() => openReceiptDialog(o)} className="btn-secondary text-xs px-2 py-1" data-testid={`receive-${o.id}`}><ArrowLeft className="w-3 h-3 inline mr-1" />Receive</button>
-                              )}
-                              {o.subcontract_type === 'without_material' && o.status === 'in_progress' && o.po_created && (
+                              {o.status === 'in_progress' && o.po_created && (
                                 <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded">Receive via GRN</span>
                               )}
                               {o.status === 'completed' && (

@@ -1,0 +1,79 @@
+{
+  "summary": "Backend testing completed for Phase 1 Manufacturing ERP features. All 31 tests passed covering: (1) SC with RM → DC → PO → GRN flow, (2) Job Card outsource DC with skip_stock_deduct=true, (3) BOM explosion cost columns, (4) Regression test for SC with RM DC stock deduction.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase1_sc_po_grn_flow.py",
+    "/app/test_reports/pytest/pytest_phase1_sc_po_grn.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_phase1_sc_po_grn_flow.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A - backend only testing"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Test data created dynamically with TEST_ prefix for items (RM, SA, FG, Part), BOMs, routings, suppliers, production orders, work orders, SC orders, DCs, POs, and GRNs",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All Phase 1 features verified: (1) SC with RM flow: Create SC → Confirm → Send DC (deducts RM stock) → Create PO from SC (uses job_work_parts with charges as unit_price) → Approve PO → GRN (adds SA stock, marks SC completed). (2) Job Card outsource: Create SC without_material → Confirm → Send DC with skip_stock_deduct=true (NO stock deduction) → Create PO → GRN. (3) BOM explosion returns process_cost_per_unit and total_cost_per_unit fields. (4) Regression: SC with RM DC without skip_stock_deduct correctly deducts stock.",
+  "tests_passed": [
+    "test_01_login - Login with admin@erp.com / Admin@123",
+    "test_02_create_test_items - Create RM, SA, FG items",
+    "test_03_create_supplier - Create test supplier",
+    "test_04_create_routing - Create test routing",
+    "test_05_create_bom_with_routings - Create BOM with components and routings",
+    "test_06_bom_explosion_shows_cost_columns - BOM explosion returns unit_cost, extended_cost, process_cost_per_unit, total_cost_per_unit",
+    "test_07_create_production_order - Create production order (Sales Order)",
+    "test_08_confirm_production_order - Confirm production order",
+    "test_09_create_work_order_with_subcontract - Create work order with subcontracting",
+    "test_10_create_sc_order_with_rm - Create SC order with RM lines and job_work_parts",
+    "test_11_confirm_sc_order - Confirm SC order",
+    "test_12_send_dc_for_sc_with_rm_deducts_stock - DC for SC with RM deducts stock (skip_stock_deduct=false)",
+    "test_13_create_po_from_sc - POST /api/job-work/create-po creates PO from SC",
+    "test_14_verify_sc_marked_po_created - SC order marked with po_created=true and po_number",
+    "test_15_verify_po_has_job_work_parts_as_lines - PO lines come from job_work_parts with charges as unit_price",
+    "test_16_approve_po - Approve PO for GRN",
+    "test_17_create_grn_against_sc_linked_po - GRN adds stock and marks SC completed",
+    "test_18_verify_sc_completed_after_grn - SC order status is 'completed' after GRN",
+    "TestJobCardOutsourceDC::test_01-08 - Job Card outsource DC with skip_stock_deduct=true does NOT deduct stock",
+    "TestSCConsolidation::test_01 - SC orders endpoint works",
+    "TestRegressionSCWithRMDCDeductsStock::test_01-04 - Regression: SC with RM DC deducts stock correctly"
+  ],
+  "feature_verification": {
+    "sc_with_rm_po_grn_flow": {
+      "status": "VERIFIED",
+      "details": "Full flow tested: SC with RM → Send DC (deducts RM stock) → Create PO from SC (job_work_parts with charges as unit_price) → GRN (adds SA stock, completes SC and linked MOs)"
+    },
+    "job_card_outsource_dc_skip_stock_deduct": {
+      "status": "VERIFIED",
+      "details": "DC creation with skip_stock_deduct=true does NOT deduct stock. No inventory transaction created. Parts go for processing, not consumed."
+    },
+    "bom_explosion_cost_columns": {
+      "status": "VERIFIED",
+      "details": "BOM explosion endpoint returns process_cost_per_unit and total_cost_per_unit fields for each component."
+    },
+    "po_creation_from_sc": {
+      "status": "VERIFIED",
+      "details": "POST /api/job-work/create-po works for both SC types. PO lines come from job_work_parts (FG/SA items with charges as unit_price)."
+    },
+    "grn_completes_sc_and_mo": {
+      "status": "VERIFIED",
+      "details": "GRN against SC-linked PO marks SC as completed and completes linked MOs."
+    },
+    "regression_sc_rm_dc_deducts_stock": {
+      "status": "VERIFIED",
+      "details": "SC with RM DC without skip_stock_deduct (default false) correctly deducts stock."
+    }
+  }
+}

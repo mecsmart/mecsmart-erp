@@ -376,12 +376,14 @@ class SubcontractOrderUpdate(BaseModel):
     notes: Optional[str] = None
     lines: Optional[List[JobWorkLineItem]] = None
     job_work_parts: Optional[List[JobWorkPartItem]] = None
+    dc_created: Optional[bool] = None
 
 class DCCreate(BaseModel):
     subcontract_order_id: str
     lines: List[JobWorkLineItem]
     warehouse_id: Optional[str] = ""
     notes: Optional[str] = ""
+    skip_stock_deduct: Optional[bool] = False  # For Job Card outsource — parts go for processing, not consumed
 
 class SubcontractReceiptLineItem(BaseModel):
     item_id: str
@@ -5987,28 +5989,31 @@ async def create_delivery_challan(data: DCCreate, request: Request):
     count = await db.delivery_challans.count_documents({})
     dc_number = f"DC-{str(count + 1).zfill(6)}"
     
-    # First pass: check ALL items for stock availability
-    insufficient = []
-    for line in data.lines:
-        item = await db.items.find_one({"id": line.item_id})
-        if not item:
-            continue
-        current_stock = item.get("current_stock", 0)
-        if current_stock < line.quantity:
-            insufficient.append({
-                "item": item.get("part_number", ""),
-                "name": item.get("name", ""),
-                "required": line.quantity,
-                "available": current_stock,
-                "shortage": line.quantity - current_stock
-            })
+    skip_deduct = data.skip_stock_deduct or False
     
-    if insufficient:
-        return JSONResponse(status_code=200, content={
-            "success": False,
-            "message": "Insufficient stock for DC creation",
-            "insufficient_materials": insufficient
-        })
+    # First pass: check ALL items for stock availability (skip for Job Card outsource)
+    if not skip_deduct:
+        insufficient = []
+        for line in data.lines:
+            item = await db.items.find_one({"id": line.item_id})
+            if not item:
+                continue
+            current_stock = item.get("current_stock", 0)
+            if current_stock < line.quantity:
+                insufficient.append({
+                    "item": item.get("part_number", ""),
+                    "name": item.get("name", ""),
+                    "required": line.quantity,
+                    "available": current_stock,
+                    "shortage": line.quantity - current_stock
+                })
+        
+        if insufficient:
+            return JSONResponse(status_code=200, content={
+                "success": False,
+                "message": "Insufficient stock for DC creation",
+                "insufficient_materials": insufficient
+            })
     
     dc_lines = []
     for line in data.lines:
@@ -6016,26 +6021,27 @@ async def create_delivery_challan(data: DCCreate, request: Request):
         if not item:
             continue
         
-        # Deduct stock — read fresh current_stock from this item
-        item_current_stock = item.get("current_stock", 0)
-        new_stock = item_current_stock - line.quantity
-        await db.items.update_one({"id": line.item_id}, {"$set": {"current_stock": new_stock}})
-        
-        # Create inventory transaction
-        tx = {
-            "id": str(uuid.uuid4()),
-            "item_id": line.item_id,
-            "transaction_type": "issue",
-            "quantity": line.quantity,
-            "reference_type": "job_work_dc",
-            "reference_id": dc_number,
-            "previous_stock": item_current_stock,
-            "new_stock": new_stock,
-            "notes": f"Sent to subcontractor - {order.get('order_number')}",
-            "created_at": datetime.now(timezone.utc),
-            "created_by": user["id"]
-        }
-        await db.inventory_transactions.insert_one(tx)
+        if not skip_deduct:
+            # Deduct stock — read fresh current_stock from this item
+            item_current_stock = item.get("current_stock", 0)
+            new_stock = item_current_stock - line.quantity
+            await db.items.update_one({"id": line.item_id}, {"$set": {"current_stock": new_stock}})
+            
+            # Create inventory transaction
+            tx = {
+                "id": str(uuid.uuid4()),
+                "item_id": line.item_id,
+                "transaction_type": "issue",
+                "quantity": line.quantity,
+                "reference_type": "job_work_dc",
+                "reference_id": dc_number,
+                "previous_stock": item_current_stock,
+                "new_stock": new_stock,
+                "notes": f"Sent to subcontractor - {order.get('order_number')}",
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"]
+            }
+            await db.inventory_transactions.insert_one(tx)
         
         dc_lines.append({
             "item_id": line.item_id,
@@ -6043,7 +6049,7 @@ async def create_delivery_challan(data: DCCreate, request: Request):
             "rate": line.rate or 0
         })
         
-        # Update sent quantity in order
+        # Update sent quantity in order lines
         for ol in order.get("lines", []):
             if ol["item_id"] == line.item_id:
                 ol["sent_quantity"] = ol.get("sent_quantity", 0) + line.quantity
