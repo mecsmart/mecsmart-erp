@@ -6154,6 +6154,134 @@ async def send_draft_dc(dc_id: str, request: Request):
     await db.delivery_challans.update_one({"id": dc_id}, {"$set": {"status": "sent", "sent_at": datetime.now(timezone.utc)}})
     return {"message": f"DC {dc.get('dc_number')} sent successfully", "consumed_materials": consumed_materials}
 
+
+@jobwork_router.post("/receive-grn")
+async def receive_grn_from_jw(request: Request, data: dict = Body(...)):
+    """Create GRN directly from JW number (SC with RM). Adds FG/SA stock, process cost tracked."""
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    
+    sc_order_id = data.get("subcontract_order_id")
+    order = await db.subcontract_orders.find_one({"id": sc_order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="SC order not found")
+    
+    lines = data.get("lines", [])
+    if not lines:
+        raise HTTPException(status_code=400, detail="No items to receive")
+    
+    # Generate GRN number
+    count = await db.grn.count_documents({})
+    grn_number = f"GRN-{str(count + 1).zfill(6)}"
+    
+    grn_lines = []
+    total_process_cost = 0
+    for line in lines:
+        item = await db.items.find_one({"id": line["item_id"]}, {"_id": 0})
+        if not item:
+            continue
+        
+        recv_qty = line.get("received_quantity", 0)
+        process_charges = line.get("process_charges", 0)
+        total_process_cost += recv_qty * process_charges
+        
+        # Add stock
+        current_stock = item.get("current_stock", 0)
+        new_stock = current_stock + recv_qty
+        await db.items.update_one({"id": line["item_id"]}, {"$set": {"current_stock": new_stock}})
+        
+        # Inventory transaction
+        await db.inventory_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "item_id": line["item_id"],
+            "transaction_type": "receive",
+            "quantity": recv_qty,
+            "reference_type": "jw_grn",
+            "reference_id": grn_number,
+            "previous_stock": current_stock,
+            "new_stock": new_stock,
+            "notes": f"JW GRN {grn_number} from {order.get('order_number')} - Process cost: {process_charges}/unit",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"]
+        })
+        
+        grn_lines.append({
+            "item_id": line["item_id"],
+            "received_quantity": recv_qty,
+            "process_charges": process_charges,
+            "total_charges": recv_qty * process_charges,
+            "uom": item.get("unit_of_measure", "pcs"),
+            "hsn_code": item.get("hsn_code", ""),
+        })
+        
+        # Update received_quantity on job_work_parts
+        for p in order.get("job_work_parts", []):
+            if p.get("item_id") == line["item_id"]:
+                p["received_quantity"] = p.get("received_quantity", 0) + recv_qty
+    
+    # Save GRN
+    grn_doc = {
+        "id": str(uuid.uuid4()),
+        "grn_number": grn_number,
+        "jw_order_id": sc_order_id,
+        "jw_order_number": order.get("order_number", ""),
+        "supplier_id": order.get("supplier_id", ""),
+        "supplier_invoice_no": data.get("supplier_invoice_no", ""),
+        "supplier_invoice_date": data.get("supplier_invoice_date"),
+        "lines": grn_lines,
+        "total_process_cost": total_process_cost,
+        "notes": f"JW GRN from {order.get('order_number')}",
+        "status": "completed",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.grn.insert_one(grn_doc)
+    
+    # Check if all parts are fully received
+    all_received = True
+    for p in order.get("job_work_parts", []):
+        if p.get("received_quantity", 0) < p.get("quantity", 0):
+            all_received = False
+            break
+    
+    # Update SC order
+    sc_update = {
+        "job_work_parts": order.get("job_work_parts", []),
+        "last_receipt_date": datetime.now(timezone.utc).isoformat(),
+        "grn_number": grn_number
+    }
+    if all_received:
+        sc_update["status"] = "completed"
+        sc_update["completed_at"] = datetime.now(timezone.utc).isoformat()
+    await db.subcontract_orders.update_one({"id": sc_order_id}, {"$set": sc_update})
+    
+    # Complete linked MOs if all received
+    if all_received:
+        all_wo_ids = list(set(filter(None, [
+            order.get("reference_wo_id"),
+            *(order.get("reference_wo_ids", []))
+        ])))
+        for ref_wo_id in all_wo_ids:
+            ref_wo = await db.work_orders.find_one({"id": ref_wo_id})
+            if not ref_wo or ref_wo.get("status") == "completed":
+                continue
+            ops = ref_wo.get("operations_status", [])
+            for op in ops:
+                if op.get("status") != "completed":
+                    op["status"] = "completed"
+                    op["actual_end"] = datetime.now(timezone.utc)
+                    op["quantity_completed"] = ref_wo.get("quantity", 0)
+                    op["quantity_accepted"] = ref_wo.get("quantity", 0)
+            mo_qty = ref_wo.get("quantity", 0)
+            await db.work_orders.update_one({"id": ref_wo_id}, {"$set": {
+                "operations_status": ops, "status": "completed",
+                "quantity_completed": mo_qty, "actual_end": datetime.now(timezone.utc)
+            }})
+    
+    grn_doc.pop("_id", None)
+    return {"grn_number": grn_number, "total_process_cost": total_process_cost, "all_received": all_received}
+
 @jobwork_router.get("/receipts")
 async def get_subcontract_receipts(request: Request):
     user = await get_current_user(request)

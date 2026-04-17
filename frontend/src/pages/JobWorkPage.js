@@ -48,6 +48,14 @@ export default function JobWorkPage() {
   const [recDialog, setRecDialog] = useState(false);
   const [recOrder, setRecOrder] = useState(null);
   const [recLines, setRecLines] = useState([]);
+
+  // JW GRN dialog (for SC with RM - receive via JW number)
+  const [jwGrnDialog, setJwGrnDialog] = useState(false);
+  const [jwGrnOrder, setJwGrnOrder] = useState(null);
+  const [jwGrnLines, setJwGrnLines] = useState([]);
+  const [jwGrnInvoiceNo, setJwGrnInvoiceNo] = useState('');
+  const [jwGrnInvoiceDate, setJwGrnInvoiceDate] = useState('');
+
   const [recWarehouse, setRecWarehouse] = useState('');
 
   const canEdit = ['admin', 'production_manager'].includes(user?.role);
@@ -158,6 +166,40 @@ export default function JobWorkPage() {
       await api.put(`/api/job-work/orders/${order.id}`, { dc_created: true });
       fetchData();
     } catch (e) { alert(e.response?.data?.detail || 'Failed to create DC'); }
+  };
+
+
+  // Open JW GRN dialog — receive parts via JW number (SC with RM)
+  const openJWGRNDialog = (order) => {
+    const parts = (order.job_work_parts || []).map(p => {
+      const pit = p.item || items.find(i => i.id === p.item_id) || {};
+      return { item_id: p.item_id, part_number: pit.part_number || '', name: pit.name || '', quantity: p.quantity, received_quantity: 0, charges: p.charges || 0 };
+    });
+    setJwGrnOrder(order);
+    setJwGrnLines(parts);
+    setJwGrnInvoiceNo('');
+    setJwGrnInvoiceDate('');
+    setJwGrnDialog(true);
+  };
+
+  // Submit JW GRN — creates GRN directly from JW number
+  const handleJWGRNSubmit = async () => {
+    if (jwGrnLines.every(l => !l.received_quantity)) { alert('Enter received quantities'); return; }
+    try {
+      const { data } = await api.post('/api/job-work/receive-grn', {
+        subcontract_order_id: jwGrnOrder.id,
+        supplier_invoice_no: jwGrnInvoiceNo,
+        supplier_invoice_date: jwGrnInvoiceDate || null,
+        lines: jwGrnLines.filter(l => l.received_quantity > 0).map(l => ({
+          item_id: l.item_id,
+          received_quantity: l.received_quantity,
+          process_charges: l.charges
+        }))
+      });
+      setJwGrnDialog(false);
+      fetchData();
+      alert(`GRN ${data.grn_number} created successfully!`);
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to create GRN'); }
   };
 
 
@@ -295,29 +337,29 @@ export default function JobWorkPage() {
     
     <div class="section-title">Job Work Part Details</div>
     <table>
-      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th class="text-right">QTY</th><th class="text-right">Charges</th><th class="text-right">Total Amount</th></tr></thead>
+      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th class="text-right">Charges</th><th class="text-right">Total Amount</th></tr></thead>
       <tbody>
       ${jwParts.length > 0 ? jwParts.map((p, i) => {
         const pit = p.item || items.find(it => it.id === p.item_id) || {};
         const charges = p.charges || 0;
         const total = (p.quantity || 0) * charges;
-        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${total.toFixed(2)}</td></tr>`;
-      }).join('') : `<tr><td>1</td><td>${parentItemName || '-'}</td><td class="text-right mono">${parentItemQty || '-'}</td><td class="text-right mono">-</td><td class="text-right mono">-</td></tr>`}
-      <tr class="total-row"><td colspan="4" class="text-right">Total Job Work Cost</td><td class="text-right mono">${currencySymbol}${totalJobWorkCost.toFixed(2)}</td></tr>
+        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td>${pit.hsn_code || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${total.toFixed(2)}</td></tr>`;
+      }).join('') : `<tr><td>1</td><td>${parentItemName || '-'}</td><td>-</td><td class="text-right mono">${parentItemQty || '-'}</td><td class="text-right mono">-</td><td class="text-right mono">-</td></tr>`}
+      <tr class="total-row"><td colspan="5" class="text-right">Total Job Work Cost</td><td class="text-right mono">${currencySymbol}${totalJobWorkCost.toFixed(2)}</td></tr>
       </tbody>
     </table>
     
     <div class="section-title">Raw Material Issued</div>
     <table>
-      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th class="text-right">QTY</th><th class="text-right">Rate</th><th class="text-right">Total RM Cost</th></tr></thead>
+      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th class="text-right">Rate</th><th class="text-right">Total RM Cost</th></tr></thead>
       <tbody>
       ${dc.lines.map((l, i) => {
         const it = l.item || {};
         const rate = it.unit_cost || l.rate || 0;
         const cost = l.quantity * rate;
-        return `<tr><td>${i+1}</td><td>${it.part_number || '-'}, ${it.name || '-'}</td><td class="text-right mono">${l.quantity}</td><td class="text-right mono">${currencySymbol}${rate.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${cost.toFixed(2)}</td></tr>`;
+        return `<tr><td>${i+1}</td><td>${it.part_number || '-'}, ${it.name || '-'}</td><td>${it.hsn_code || '-'}</td><td class="text-right mono">${l.quantity}</td><td class="text-right mono">${currencySymbol}${rate.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${cost.toFixed(2)}</td></tr>`;
       }).join('')}
-      <tr class="total-row"><td colspan="4" class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${totalRMCost.toFixed(2)}</td></tr>
+      <tr class="total-row"><td colspan="5" class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${totalRMCost.toFixed(2)}</td></tr>
       </tbody>
     </table>
     
@@ -445,15 +487,20 @@ export default function JobWorkPage() {
                               {canEdit && ['confirmed', 'in_progress'].includes(o.status) && (!o.lines || o.lines.length === 0) && o.job_work_parts?.length > 0 && !o.dc_created && (
                                 <button onClick={() => handleCreateDCForParts(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-parts-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
                               )}
-                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && (
-                                (o.lines?.length > 0 ? sentQty >= totalQty : o.dc_created) || (o.subcontract_type === 'without_material' && (!o.lines || o.lines.length === 0) && !o.job_work_parts?.length)
+                              {/* SC with RM: After DC sent, show Receive GRN button (direct GRN from JW) */}
+                              {canEdit && o.status === 'in_progress' && o.subcontract_type !== 'without_material' && sentQty >= totalQty && (
+                                <button onClick={() => openJWGRNDialog(o)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`receive-grn-${o.id}`}><ArrowLeft className="w-3 h-3 inline mr-1" />Receive GRN</button>
+                              )}
+                              {/* SC without RM / Job Card outsource: Create PO → GRN */}
+                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && o.subcontract_type === 'without_material' && (
+                                o.dc_created || (!o.lines?.length && !o.job_work_parts?.length)
                               ) && (
                                 <button onClick={() => handleCreatePOFromSC(o)} className="btn-primary text-xs px-2 py-1 bg-[#723B13] hover:bg-[#5A2E0F]" data-testid={`create-po-${o.id}`}><FileText className="w-3 h-3 inline mr-1" />Create PO</button>
                               )}
                               {o.po_created && o.po_number && (
                                 <span className="text-[10px] text-[#03543F] bg-[#DEF7EC] px-2 py-1 rounded">{o.po_number}</span>
                               )}
-                              {o.status === 'in_progress' && o.po_created && (
+                              {o.subcontract_type === 'without_material' && o.status === 'in_progress' && o.po_created && (
                                 <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded">Receive via GRN</span>
                               )}
                               {o.status === 'completed' && (
@@ -800,6 +847,47 @@ export default function JobWorkPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* JW GRN Dialog — Receive via JW Number (SC with RM) */}
+      <Dialog open={jwGrnDialog} onOpenChange={setJwGrnDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle className="font-[Chivo]">Receive GRN — {jwGrnOrder?.order_number}</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier Invoice No.</label>
+                <input type="text" value={jwGrnInvoiceNo} onChange={e => setJwGrnInvoiceNo(e.target.value)} className="input-field" placeholder="Invoice number" data-testid="jw-grn-invoice-no" />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-[#111827] mb-1">Invoice Date</label>
+                <input type="date" value={jwGrnInvoiceDate} onChange={e => setJwGrnInvoiceDate(e.target.value)} className="input-field" data-testid="jw-grn-invoice-date" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-[#111827] mb-2">Parts to Receive</label>
+              <table className="w-full data-table text-sm">
+                <thead><tr><th>Part No.</th><th>Name</th><th className="text-right">Ordered</th><th className="text-right">Process Cost</th><th className="text-right">Receive Qty</th></tr></thead>
+                <tbody>
+                  {jwGrnLines.map((l, i) => (
+                    <tr key={i}>
+                      <td className="mono font-medium">{l.part_number}</td>
+                      <td>{l.name}</td>
+                      <td className="text-right mono">{l.quantity}</td>
+                      <td className="text-right mono">{l.charges ? `₹${l.charges.toFixed(2)}` : '-'}</td>
+                      <td className="text-right"><input type="number" min="0" max={l.quantity} value={l.received_quantity} onChange={e => { const lines = [...jwGrnLines]; lines[i] = { ...lines[i], received_quantity: Math.min(parseInt(e.target.value) || 0, l.quantity) }; setJwGrnLines(lines); }} className="input-field mono w-20 text-right text-xs" data-testid={`jw-grn-qty-${i}`} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex justify-end space-x-3 pt-3 border-t">
+              <button onClick={() => setJwGrnDialog(false)} className="btn-secondary">Cancel</button>
+              <button onClick={handleJWGRNSubmit} className="btn-primary" data-testid="jw-grn-submit">Create GRN</button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

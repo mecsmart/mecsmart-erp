@@ -1,0 +1,85 @@
+{
+  "summary": "Backend testing completed for JW Receive GRN feature (SC with RM flow). All 24 tests passed covering: (1) POST /api/job-work/receive-grn creates GRN from JW number with process cost, (2) JW GRN adds FG/SA stock correctly, (3) JW GRN creates inventory transaction with jw_grn reference type, (4) JW GRN marks SC as completed when all parts received, (5) JW GRN tracks total_process_cost, (6) Partial JW GRN doesn't complete SC, (7) Regression: DC creation with RM deducts stock, (8) DC print includes HSN column for both Part Details and RM tables.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_jw_receive_grn.py",
+    "/app/test_reports/pytest/pytest_jw_receive_grn.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_jw_receive_grn.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A - backend only testing"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Test data created dynamically with TEST_ prefix for items (RM, SA), suppliers, SC orders, DCs, and GRNs",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All JW Receive GRN features verified: (1) POST /api/job-work/receive-grn creates GRN directly from SC order ID with process_charges per line. (2) GRN adds stock for received items (SA/FG). (3) Inventory transaction created with reference_type='jw_grn'. (4) Partial receive: received_quantity tracked on job_work_parts, SC not completed until all parts received. (5) Full receive: SC marked completed with completed_at timestamp. (6) GRN stored in 'grn' collection with jw_order_id and jw_order_number fields. (7) DC creation with RM correctly deducts stock (regression verified). (8) DC includes HSN codes for both RM lines and job_work_parts.",
+  "tests_passed": [
+    "test_01_login - Login with admin@erp.com / Admin@123",
+    "test_02_create_test_items - Create RM, SA items with HSN codes",
+    "test_03_create_supplier - Create test supplier",
+    "test_04_create_sc_order_with_rm - Create SC order with RM lines and job_work_parts",
+    "test_05_confirm_sc_order - Confirm SC order",
+    "test_06_get_rm_stock_before_dc - Record RM stock before DC",
+    "test_07_send_dc_for_sc_with_rm - Create DC for SC with RM",
+    "test_08_verify_dc_deducted_rm_stock - Regression: DC deducts RM stock correctly",
+    "test_09_get_sa_stock_before_grn - Record SA stock before JW GRN",
+    "test_10_receive_grn_partial - Partial JW GRN (5 of 10 units)",
+    "test_11_verify_partial_grn_added_stock - Partial GRN adds SA stock",
+    "test_12_verify_sc_not_completed_after_partial - SC not completed after partial receive",
+    "test_13_receive_grn_remaining - Final JW GRN (remaining 5 units)",
+    "test_14_verify_final_grn_added_stock - Final GRN adds remaining SA stock",
+    "test_15_verify_sc_completed - SC marked completed after all parts received",
+    "test_16_verify_grn_in_collection - GRN exists in collection with jw_order_id",
+    "TestJWReceiveGRNValidation::test_01 - Invalid SC order returns 404",
+    "TestJWReceiveGRNValidation::test_02 - Empty lines returns 400",
+    "TestDCPrintHSNColumn::test_01-06 - DC includes HSN codes for RM and job_work_parts"
+  ],
+  "feature_verification": {
+    "jw_receive_grn_endpoint": {
+      "status": "VERIFIED",
+      "details": "POST /api/job-work/receive-grn creates GRN from SC order ID with process_charges per line. Returns grn_number, total_process_cost, and all_received flag."
+    },
+    "jw_grn_adds_stock": {
+      "status": "VERIFIED",
+      "details": "JW GRN correctly adds stock for received items (SA/FG). Stock updated in items collection."
+    },
+    "jw_grn_inventory_transaction": {
+      "status": "VERIFIED",
+      "details": "Inventory transaction created with reference_type='jw_grn' and reference_id=grn_number."
+    },
+    "jw_grn_completes_sc": {
+      "status": "VERIFIED",
+      "details": "SC order marked completed with completed_at timestamp when all job_work_parts are fully received."
+    },
+    "jw_grn_tracks_process_cost": {
+      "status": "VERIFIED",
+      "details": "total_process_cost calculated as sum of (received_quantity * process_charges) for all lines."
+    },
+    "partial_jw_grn": {
+      "status": "VERIFIED",
+      "details": "Partial receive updates received_quantity on job_work_parts but does not complete SC."
+    },
+    "dc_hsn_column": {
+      "status": "VERIFIED",
+      "details": "DC includes HSN codes for both RM lines and job_work_parts (from item.hsn_code)."
+    },
+    "regression_dc_deducts_stock": {
+      "status": "VERIFIED",
+      "details": "DC creation with RM correctly deducts stock (skip_stock_deduct=false by default)."
+    }
+  }
+}
