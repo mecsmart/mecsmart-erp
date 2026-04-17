@@ -4,27 +4,25 @@
 - Backend: FastAPI + MongoDB (Motor), JWT httpOnly cookies, /api prefix
 - Frontend: React 19 + Shadcn/UI + Tailwind CSS
 
-## SC with RM Flow (Revised Feb 2026)
-- SC → Send DC (Job Work Order Cum DC) → **Receive GRN via JW number** (no PO)
-- DC print: HSN column added to both Part Details and RM tables
-- GRN: POST /api/job-work/receive-grn with process_charges per line
-- GRN adds FG/SA stock, tracks total_process_cost
-- Partial receive supported, SC completed when all parts received
-- MOs auto-completed on full receive
+## SC with RM Flow
+- SC → Send DC (HSN in print) → **Receive GRN via JW** (mandatory invoice no/date, editable price)
+- GRN adds FG/SA stock, tracks process cost, completes SC+MO
+- job_work_parts includes bom_rollup_cost (material + process costs)
 
 ## SC without RM / Job Card Outsource Flow
-- SC → Create PO → GRN via PO flow
+- SC → Create PO → "Receive via GRN (PO-xxx)" from GRN page (stores person)
+- BOM rollup cost on job_work_parts for accurate Part/SA pricing
+
+## GRN Rules
+- Supplier Invoice No: MANDATORY (both JW GRN and PO GRN)
+- Invoice Date: MANDATORY
+- Price/Rate: EDITABLE per line (can override SC charges at receive time)
 
 ## Job Card
 - Inhouse: Process cost/unit, Work Centre dropdown
-- Outsource: Consolidated SC, Send DC (skip_stock_deduct), confirmation dialog
-
-## BOM
-- Routings at BOM level, Process Cost + Material Cost in explosion
-- Export/Import with routings, Child BOM edit
+- Outsource: Consolidated SC, confirmation dialog, BOM rollup cost
 
 ## Backlog
-- [ ] Job Card outsource DC print format (HSN, Charges/Unit, RM Cost/Unit)
+- [ ] Job Card outsource DC print format
 - [ ] Purchase Invoice from GRN with process cost
-- [ ] P1: GST Phase 2
-- [ ] P2: Backend refactoring
+- [ ] P1: GST Phase 2, P2: Backend refactoring

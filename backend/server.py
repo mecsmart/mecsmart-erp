@@ -6185,6 +6185,14 @@ async def receive_grn_from_jw(request: Request, data: dict = Body(...)):
     if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
+    # Mandatory fields validation first
+    supplier_invoice_no = data.get("supplier_invoice_no", "").strip() if data.get("supplier_invoice_no") else ""
+    supplier_invoice_date = data.get("supplier_invoice_date")
+    if not supplier_invoice_no:
+        raise HTTPException(status_code=400, detail="Supplier Invoice No. is mandatory")
+    if not supplier_invoice_date:
+        raise HTTPException(status_code=400, detail="Supplier Invoice Date is mandatory")
+    
     sc_order_id = data.get("subcontract_order_id")
     order = await db.subcontract_orders.find_one({"id": sc_order_id})
     if not order:
@@ -6250,8 +6258,8 @@ async def receive_grn_from_jw(request: Request, data: dict = Body(...)):
         "jw_order_id": sc_order_id,
         "jw_order_number": order.get("order_number", ""),
         "supplier_id": order.get("supplier_id", ""),
-        "supplier_invoice_no": data.get("supplier_invoice_no", ""),
-        "supplier_invoice_date": data.get("supplier_invoice_date"),
+        "supplier_invoice_no": supplier_invoice_no,
+        "supplier_invoice_date": supplier_invoice_date,
         "lines": grn_lines,
         "total_process_cost": total_process_cost,
         "notes": f"JW GRN from {order.get('order_number')}",
