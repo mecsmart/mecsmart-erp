@@ -280,7 +280,10 @@ export default function JobWorkPage() {
       return s + (l.quantity * (it?.unit_cost || l.rate || 0));
     }, 0);
     
-    const html = `<!DOCTYPE html><html><head><title>Delivery Challan - ${dc.dc_number}</title>
+    const isJobOS = !dc.lines || dc.lines.length === 0;
+    const dcTitle = isJobOS ? 'Job Outsource DC' : 'Delivery Challan';
+    
+    const html = `<!DOCTYPE html><html><head><title>${dcTitle} - ${dc.dc_number}</title>
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
       body { font-family:'Segoe UI',Arial,sans-serif; font-size:11px; color:#111; padding:20px; }
@@ -322,7 +325,7 @@ export default function JobWorkPage() {
         </div>
       </div>
       <div class="header-right">
-        <div class="dc-title">Delivery Challan</div>
+        <div class="dc-title">${dcTitle}</div>
         <div class="dc-number">${dc.dc_number}</div>
         <div class="dc-date">${dc.created_at ? new Date(dc.created_at).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-'}</div>
       </div>
@@ -356,6 +359,7 @@ export default function JobWorkPage() {
       </tbody>
     </table>
     
+    ${isJobOS ? '' : `
     <div class="section-title">Raw Material Issued</div>
     <table>
       <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th class="text-right">Rate</th><th class="text-right">Total RM Cost</th></tr></thead>
@@ -368,7 +372,7 @@ export default function JobWorkPage() {
       }).join('')}
       <tr class="total-row"><td colspan="5" class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${totalRMCost.toFixed(2)}</td></tr>
       </tbody>
-    </table>
+    </table>`}
     
     ${dc.notes ? `<p style="margin-bottom:10px;"><strong>Notes:</strong> ${dc.notes}</p>` : ''}
     <div class="terms-box">

@@ -4381,11 +4381,11 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             sc_part = {"item_id": wo.get("item_id"), "quantity": mo_qty, "charges": outsource_charges, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost, 2)}
             sc_lines = []  # No RM lines for operation outsourcing — only the part goes and comes back
             
-            # Check for existing SC order for same supplier on same WO (consolidate)
+            # Check for existing SC order for same supplier (consolidate across all MOs)
             existing_sc = await db.subcontract_orders.find_one({
                 "supplier_id": op_data.outsource_supplier_id,
                 "status": {"$in": ["draft", "in_progress"]},
-                "reference_wo_id": wo_id
+                "subcontract_type": "without_material"
             })
             
             if existing_sc:
@@ -4396,7 +4396,7 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                 for jp in jwp:
                     if jp.get("item_id") == wo.get("item_id"):
                         jp["quantity"] += mo_qty
-                        jp["charges"] = jp.get("charges", 0) + (op_data.outsource_charges or 0)
+                        jp["charges"] = jp.get("charges", 0) + outsource_charges
                         found_jwp = True
                         break
                 if not found_jwp:
@@ -4406,13 +4406,19 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                 if sequence not in ref_ops:
                     ref_ops.append(sequence)
                 
-                total_charges = sum(p.get("charges", 0) for p in jwp)
+                # Track all reference WO IDs
+                ref_wo_ids = existing_sc.get("reference_wo_ids", [existing_sc.get("reference_wo_id")])
+                if wo_id not in ref_wo_ids:
+                    ref_wo_ids.append(wo_id)
+                
+                total_charges = sum(p.get("charges", 0) * p.get("quantity", 1) for p in jwp)
                 
                 await db.subcontract_orders.update_one({"id": existing_sc["id"]}, {"$set": {
                     "job_work_parts": jwp,
+                    "reference_wo_ids": ref_wo_ids,
                     "processing_charges": total_charges,
                     "reference_operation_seqs": ref_ops,
-                    "notes": f"Consolidated SC for MO {wo.get('wo_number')} - Operations: {', '.join(str(s) for s in ref_ops)}",
+                    "notes": f"Consolidated Job OS - {len(jwp)} parts, {len(ref_wo_ids)} MOs",
                     "updated_at": datetime.now(timezone.utc)
                 }})
                 
@@ -6140,8 +6146,16 @@ async def create_delivery_challan(data: DCCreate, request: Request):
         for ol in order.get("lines", []):
             if ol["item_id"] == line.item_id:
                 ol["sent_quantity"] = ol.get("sent_quantity", 0) + line.quantity
+        # Also update sent in job_work_parts (for Job OS)
+        for jp in order.get("job_work_parts", []):
+            if jp.get("item_id") == line.item_id:
+                jp["sent_quantity"] = jp.get("sent_quantity", 0) + line.quantity
     
-    await db.subcontract_orders.update_one({"id": data.subcontract_order_id}, {"$set": {"lines": order["lines"], "status": "in_progress"}})
+    update_fields = {"lines": order.get("lines", []), "status": "in_progress"}
+    if order.get("job_work_parts"):
+        update_fields["job_work_parts"] = order["job_work_parts"]
+        update_fields["dc_created"] = True
+    await db.subcontract_orders.update_one({"id": data.subcontract_order_id}, {"$set": update_fields})
     
     dc_doc = {
         "id": str(uuid.uuid4()),
