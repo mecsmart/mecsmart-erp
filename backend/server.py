@@ -866,6 +866,7 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
             # Check for child BOM
             child_bom = await db.boms.find_one({"parent_item_id": comp.get("item_id"), "status": "active"}, {"_id": 0})
             if child_bom:
+                comp_data["child_bom_id"] = child_bom.get("id")
                 comp_data["children"] = await explode_level(child_bom.get("id"), level + 1, max_levels)
                 # Rollup cost from children
                 comp_data["unit_cost"] = sum(c.get("extended_cost", 0) for c in comp_data["children"])

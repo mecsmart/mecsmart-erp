@@ -664,7 +664,8 @@ export default function BOMPage() {
                     hasChildren,
                     isExpanded,
                     is_alternate: node.is_alternate,
-                    routings: node.routings || []
+                    routings: node.routings || [],
+                    child_bom_id: node.child_bom_id || null
                   });
                   
                   if (hasChildren && isExpanded) {
@@ -755,7 +756,14 @@ export default function BOMPage() {
                               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${catBadge(row.cat)}`}>{catLabel(row.cat)}</span>
                             </td>
                             <td className="py-2 px-2 mono font-semibold text-[#111827]">{row.item?.part_number || '?'}</td>
-                            <td className="py-2 px-2 text-[#374151]">{row.item?.name || '-'}{row.is_alternate ? ' (alt)' : ''}</td>
+                            <td className="py-2 px-2 text-[#374151]">
+                              {row.item?.name || '-'}{row.is_alternate ? ' (alt)' : ''}
+                              {row.child_bom_id && canEdit && (
+                                <button onClick={(e) => { e.stopPropagation(); const childBom = boms.find(b => b.id === row.child_bom_id); if (childBom) handleEdit(childBom); }} className="ml-2 inline-flex items-center gap-0.5 text-[10px] text-[#1E429F] hover:text-[#1D3557] bg-[#E1EFFE] hover:bg-[#C3DDFD] px-1.5 py-0.5 rounded" title={`Edit ${row.item?.part_number} BOM`} data-testid={`edit-child-bom-${row.key}`}>
+                                  <Edit2 className="w-3 h-3" />Edit BOM
+                                </button>
+                              )}
+                            </td>
                             <td className="py-2 px-2 text-right mono font-medium">{row.quantity}</td>
                             <td className="py-2 px-2 text-[#6B7280]">{row.item?.unit_of_measure || '-'}</td>
                             <td className="py-2 px-2">{(row.routings || []).length > 0 ? <span className="text-xs text-[#1E429F] font-medium">{row.routings.join(', ')}</span> : <span className="text-xs text-[#9CA3AF]">-</span>}</td>
