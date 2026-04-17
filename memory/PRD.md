@@ -5,20 +5,19 @@
 - Frontend: React 19 + Shadcn/UI + Tailwind CSS
 
 ## Job Card Process (Feb 2026)
-- **Inhouse**: Process cost per unit field on start/complete. Rolls up to BOM explosion costing (material + process = total)
-- **Work Centre**: Dropdown to select WC per operation at runtime
-- **Outsource Consolidation**: Multiple outsourced operations to same supplier → single SC order + DC. Lines merged, charges summed.
+- **Inhouse**: Process cost/unit field → saved on operation → rolls up to BOM explosion
+- **BOM Explosion**: Shows Material Cost, Process Cost, Total/Unit, Extended Cost columns
+- **Work Centre**: Dropdown selector per operation at runtime
+- **Outsource**: Confirmation dialog before outsourcing. SC shows only Part/SA (no RM). Same-supplier consolidation into single SC.
+- **SC Type**: Operation outsource creates without_material SC with job_work_parts only, lines=[]
 
-## BOM Export/Import
-- Export with Parent Routings + Component Routings columns
-- Per-BOM export via download icon
-- Import parses routing columns, backward compatible
+## BOM
+- Routings at BOM level (parent_routings + components[].routings)
+- Export/Import with routing columns
+- Child BOM edit via "Edit BOM" button on SA rows
 
-## Routing at BOM Level
-- Routing Screen: Simple operation type names
-- BOM: parent_routings + components[].routings
-- SA/Part rows show "Edit BOM" button for child BOM editing
-- MO: Operations from BOM, no routing_id needed
+## Stock Rules
+- DC: Per-item deduction, SC Receipt: job_work_parts only, WIP tracking
 
 ## Backlog
 - [ ] P1: GST Phase 2
