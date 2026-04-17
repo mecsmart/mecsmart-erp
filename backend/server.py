@@ -490,6 +490,7 @@ class WorkOrderOperationUpdate(BaseModel):
     outsource_supplier_id: Optional[str] = None
     outsource_charges: Optional[float] = None
     work_center_id: Optional[str] = None
+    process_cost_per_unit: Optional[float] = None
 
 # ================== GST / INDIA COMPLIANCE MODELS ==================
 
@@ -876,6 +877,23 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
                 comp_data["unit_cost"] = item.get("unit_cost", 0) if item else 0
             
             comp_data["extended_cost"] = comp_data["unit_cost"] * comp.get("quantity", 0)
+            
+            # Calculate process cost from operation routings
+            comp_routings = comp.get("routings", [])
+            # Look for actual process costs from completed work orders for this item
+            latest_wo = await db.work_orders.find_one(
+                {"item_id": comp.get("item_id"), "status": "completed", "operations_status": {"$exists": True}},
+                {"_id": 0, "operations_status": 1},
+                sort=[("actual_end", -1)]
+            )
+            process_cost_per_unit = 0
+            if latest_wo:
+                for op in latest_wo.get("operations_status", []):
+                    if op.get("process_cost_per_unit"):
+                        process_cost_per_unit += op["process_cost_per_unit"]
+            comp_data["process_cost_per_unit"] = process_cost_per_unit
+            comp_data["total_cost_per_unit"] = comp_data["unit_cost"] + process_cost_per_unit
+            
             result.append(comp_data)
         return result
     
@@ -4267,10 +4285,6 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             supplier = await db.suppliers.find_one({"id": op_data.outsource_supplier_id}, {"_id": 0})
             supplier_name = supplier.get("name", "Outsourced") if supplier else "Outsourced"
             
-            # Create SC Order for this operation
-            sc_count = await db.subcontract_orders.count_documents({})
-            sc_order_number = f"JW-{str(sc_count + 1).zfill(6)}"
-            
             # Get materials for this MO — prefer consumed_materials, fallback to BOM, then WO item itself
             consumed = wo.get("consumed_materials", [])
             sc_lines = []
@@ -4289,44 +4303,101 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                             qty_needed = comp["quantity"] * mo_qty
                             sc_lines.append({"item_id": comp["item_id"], "quantity": qty_needed, "sent_quantity": qty_needed, "received_quantity": 0, "rate": comp_item.get("unit_cost", 0)})
                             dc_lines.append({"item_id": comp["item_id"], "quantity": qty_needed, "rate": comp_item.get("unit_cost", 0)})
-                # Fallback: add the WO item itself
                 if not sc_lines:
                     wo_item = await db.items.find_one({"id": wo.get("item_id")}, {"_id": 0})
                     if wo_item:
                         sc_lines.append({"item_id": wo.get("item_id"), "quantity": mo_qty, "sent_quantity": mo_qty, "received_quantity": 0, "rate": wo_item.get("unit_cost", 0)})
                         dc_lines.append({"item_id": wo.get("item_id"), "quantity": mo_qty, "rate": wo_item.get("unit_cost", 0)})
             
-            sc_order_doc = {
-                "id": str(uuid.uuid4()),
-                "order_number": sc_order_number,
+            # Check for existing SC order for same supplier (consolidate before DC send)
+            existing_sc = await db.subcontract_orders.find_one({
                 "supplier_id": op_data.outsource_supplier_id,
-                "reference_wo_id": wo_id,
-                "reference_operation_seq": sequence,
-                "lines": sc_lines,
-                "processing_charges": op_data.outsource_charges or 0,
-                "status": "in_progress",
-                "notes": f"Auto-created for outsourced operation: {target_op.get('operation_name')} on MO {wo.get('wo_number')}",
-                "created_at": datetime.now(timezone.utc),
-                "created_by": user["id"]
-            }
-            await db.subcontract_orders.insert_one(sc_order_doc)
+                "status": {"$in": ["draft", "in_progress"]},
+                "reference_wo_id": wo_id
+            })
             
-            # Create DC
-            if dc_lines:
-                dc_count = await db.delivery_challans.count_documents({})
-                dc_number = f"DC-{str(dc_count + 1).zfill(6)}"
-                dc_doc = {
+            if existing_sc:
+                # Consolidate: add items to existing SC and update
+                merged_lines = existing_sc.get("lines", [])
+                for new_line in sc_lines:
+                    found = False
+                    for ml in merged_lines:
+                        if ml["item_id"] == new_line["item_id"]:
+                            ml["quantity"] += new_line["quantity"]
+                            ml["sent_quantity"] = ml.get("sent_quantity", 0) + new_line.get("sent_quantity", 0)
+                            found = True
+                            break
+                    if not found:
+                        merged_lines.append(new_line)
+                
+                existing_charges = existing_sc.get("processing_charges", 0)
+                new_charges = existing_charges + (op_data.outsource_charges or 0)
+                ref_ops = existing_sc.get("reference_operation_seqs", [existing_sc.get("reference_operation_seq")])
+                if sequence not in ref_ops:
+                    ref_ops.append(sequence)
+                
+                await db.subcontract_orders.update_one({"id": existing_sc["id"]}, {"$set": {
+                    "lines": merged_lines,
+                    "processing_charges": new_charges,
+                    "reference_operation_seqs": ref_ops,
+                    "notes": f"Consolidated SC for MO {wo.get('wo_number')} - Operations: {', '.join(str(s) for s in ref_ops)}",
+                    "updated_at": datetime.now(timezone.utc)
+                }})
+                
+                sc_order_doc = existing_sc
+                sc_order_doc["lines"] = merged_lines
+                
+                # Update existing draft DC for this SC
+                existing_dc = await db.delivery_challans.find_one({"subcontract_order_id": existing_sc["id"], "status": "draft"})
+                if existing_dc and dc_lines:
+                    merged_dc_lines = existing_dc.get("lines", [])
+                    for new_dl in dc_lines:
+                        found = False
+                        for mdl in merged_dc_lines:
+                            if mdl["item_id"] == new_dl["item_id"]:
+                                mdl["quantity"] += new_dl["quantity"]
+                                found = True
+                                break
+                        if not found:
+                            merged_dc_lines.append(new_dl)
+                    await db.delivery_challans.update_one({"id": existing_dc["id"]}, {"$set": {"lines": merged_dc_lines, "updated_at": datetime.now(timezone.utc)}})
+            else:
+                # Create new SC Order
+                sc_count = await db.subcontract_orders.count_documents({})
+                sc_order_number = f"JW-{str(sc_count + 1).zfill(6)}"
+                
+                sc_order_doc = {
                     "id": str(uuid.uuid4()),
-                    "dc_number": dc_number,
-                    "subcontract_order_id": sc_order_doc["id"],
+                    "order_number": sc_order_number,
+                    "supplier_id": op_data.outsource_supplier_id,
                     "reference_wo_id": wo_id,
-                    "lines": dc_lines,
-                    "status": "draft",
-                    "notes": f"Auto-DC for outsourced operation: {target_op.get('operation_name')}",
+                    "reference_operation_seq": sequence,
+                    "reference_operation_seqs": [sequence],
+                    "lines": sc_lines,
+                    "processing_charges": op_data.outsource_charges or 0,
+                    "status": "in_progress",
+                    "notes": f"Auto-created for outsourced operation: {target_op.get('operation_name')} on MO {wo.get('wo_number')}",
                     "created_at": datetime.now(timezone.utc),
                     "created_by": user["id"]
                 }
-                await db.delivery_challans.insert_one(dc_doc)
+                await db.subcontract_orders.insert_one(sc_order_doc)
+                
+                # Create DC
+                if dc_lines:
+                    dc_count = await db.delivery_challans.count_documents({})
+                    dc_number = f"DC-{str(dc_count + 1).zfill(6)}"
+                    dc_doc = {
+                        "id": str(uuid.uuid4()),
+                        "dc_number": dc_number,
+                        "subcontract_order_id": sc_order_doc["id"],
+                        "reference_wo_id": wo_id,
+                        "lines": dc_lines,
+                        "status": "draft",
+                        "notes": f"Auto-DC for outsourced operation: {target_op.get('operation_name')}",
+                        "created_at": datetime.now(timezone.utc),
+                        "created_by": user["id"]
+                    }
+                    await db.delivery_challans.insert_one(dc_doc)
             
             target_op["is_job_work"] = True
             target_op["job_work_supplier_id"] = op_data.outsource_supplier_id
@@ -4381,6 +4452,8 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                 wc = await db.work_centers.find_one({"id": op_data.work_center_id}, {"_id": 0})
                 target_op["work_center_id"] = op_data.work_center_id
                 target_op["work_center_name"] = wc.get("name", "") if wc else ""
+            if op_data.process_cost_per_unit is not None:
+                target_op["process_cost_per_unit"] = op_data.process_cost_per_unit
     
     # STOP operation (pause current run)
     elif op_data.status == "stopped":
@@ -4452,6 +4525,10 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
     
     if op_data.notes:
         target_op["notes"] = op_data.notes
+    
+    # Save process cost per unit if provided (for both start and complete)
+    if op_data.process_cost_per_unit is not None and op_data.process_cost_per_unit > 0:
+        target_op["process_cost_per_unit"] = op_data.process_cost_per_unit
     
     # Auto-determine WO status
     all_completed = all(op.get("status") == "completed" for op in operations)

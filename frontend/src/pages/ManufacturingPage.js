@@ -51,7 +51,7 @@ export default function ManufacturingPage() {
   
   // MO Start result dialog (replaces browser alert)
   const [startResultDialog, setStartResultDialog] = useState({ open: false, success: null, data: null });
-  const [opForm, setOpForm] = useState({ operator: '', quantity: 0, quality_result: 'accept', reject_qty: 0, rework_qty: 0, notes: '', is_outsource: false, outsource_supplier_id: '', outsource_charges: 0 });
+  const [opForm, setOpForm] = useState({ operator: '', quantity: 0, quality_result: 'accept', reject_qty: 0, rework_qty: 0, notes: '', is_outsource: false, outsource_supplier_id: '', outsource_charges: 0, process_cost_per_unit: 0 });
 
   // Subcontract dialog
   const [subcontractDialog, setSubcontractDialog] = useState(false);
@@ -283,6 +283,7 @@ export default function ManufacturingPage() {
       outsource_supplier_id: op?.job_work_supplier_id || '',
       outsource_charges: 0,
       work_center_id: op?._selected_wc || op?.work_center_id || '',
+      process_cost_per_unit: op?.process_cost_per_unit || 0,
     });
     setOpDialog({ open: true, mode, sequence });
   };
@@ -299,12 +300,12 @@ export default function ManufacturingPage() {
           payload = { status: 'in_progress', operator: suppliers.find(s => s.id === opForm.outsource_supplier_id)?.name || 'Outsourced', quantity_completed: opForm.quantity, notes: opForm.notes, is_outsource: true, outsource_supplier_id: opForm.outsource_supplier_id, outsource_charges: opForm.outsource_charges, work_center_id: opForm.work_center_id || '' };
         } else {
           if (!opForm.operator.trim()) { alert('Operator name is required'); return; }
-          payload = { status: 'in_progress', operator: opForm.operator, quantity_completed: opForm.quantity, work_center_id: opForm.work_center_id || '' };
+          payload = { status: 'in_progress', operator: opForm.operator, quantity_completed: opForm.quantity, work_center_id: opForm.work_center_id || '', process_cost_per_unit: opForm.process_cost_per_unit || 0 };
         }
       } else if (mode === 'stop') {
         payload = { status: 'stopped', quantity_completed: opForm.quantity, quality_result: opForm.quality_result, reject_qty: opForm.reject_qty, rework_qty: opForm.rework_qty, notes: opForm.notes };
       } else if (mode === 'complete') {
-        payload = { status: 'completed', quantity_completed: opForm.quantity, quality_result: opForm.quality_result, reject_qty: opForm.reject_qty, rework_qty: opForm.rework_qty, notes: opForm.notes };
+        payload = { status: 'completed', quantity_completed: opForm.quantity, quality_result: opForm.quality_result, reject_qty: opForm.reject_qty, rework_qty: opForm.rework_qty, notes: opForm.notes, process_cost_per_unit: opForm.process_cost_per_unit || 0 };
       }
       const { data } = await api.put(`/api/work-orders/${woId}/operations/${sequence}`, payload);
       setJobCardWO(data);
@@ -1334,6 +1335,7 @@ export default function ManufacturingPage() {
                       <th className="text-left py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Operator</th>
                       <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Qty Done</th>
                       <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Accept/Reject</th>
+                      <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Cost/Unit</th>
                       <th className="text-center py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Action</th>
                     </tr>
                   </thead>
@@ -1398,6 +1400,9 @@ export default function ManufacturingPage() {
                                 {(op.quantity_rework || 0) > 0 && <div className="text-[#723B13]">RW: {op.quantity_rework}</div>}
                               </div>
                             )}
+                          </td>
+                          <td className="py-3 px-3 text-right mono text-xs font-medium">
+                            {op.process_cost_per_unit ? `₹${op.process_cost_per_unit.toFixed(2)}` : '-'}
                           </td>
                           <td className="py-3 px-3 text-center">
                             <div className="flex items-center justify-center gap-1">
@@ -1547,6 +1552,11 @@ export default function ManufacturingPage() {
                       {!opForm.operator.trim() && <p className="text-xs text-[#9B1C1C] mt-1">Operator name is required</p>}
                     </div>
                     <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Process Cost / Unit</label>
+                      <input type="number" min="0" step="0.01" value={opForm.process_cost_per_unit} onChange={e => setOpForm({...opForm, process_cost_per_unit: parseFloat(e.target.value) || 0})} className="input-field mono" placeholder="0.00" data-testid="process-cost-input" />
+                      <p className="text-[10px] text-[#6B7280] mt-0.5">Cost per unit for this operation (rolls up to BOM costing)</p>
+                    </div>
+                    <div>
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity to Produce (max: {jobCardWO?.quantity || 0})</label>
                       <input type="number" min="1" max={jobCardWO?.quantity || 1} value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: Math.min(parseInt(e.target.value) || 0, jobCardWO?.quantity || 1)})} className="input-field mono" data-testid="op-qty-input" />
                     </div>
@@ -1559,6 +1569,10 @@ export default function ManufacturingPage() {
                 <div>
                   <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity Produced (max: {jobCardWO?.quantity || 0})</label>
                   <input type="number" min="0" max={jobCardWO?.quantity || 1} value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: Math.min(parseInt(e.target.value) || 0, jobCardWO?.quantity || 1)})} className="input-field mono" data-testid="op-produced-qty-input" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Process Cost / Unit</label>
+                  <input type="number" min="0" step="0.01" value={opForm.process_cost_per_unit} onChange={e => setOpForm({...opForm, process_cost_per_unit: parseFloat(e.target.value) || 0})} className="input-field mono" placeholder="0.00" data-testid="process-cost-complete-input" />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-[#111827] mb-1">Quality Result</label>

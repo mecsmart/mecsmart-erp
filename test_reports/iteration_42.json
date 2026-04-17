@@ -1,0 +1,51 @@
+{
+  "summary": "Backend testing completed for two new requirements: (1) Process cost per unit on inhouse operations with BOM explosion costing, (2) SC order consolidation for same supplier. All 9 tests passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_process_cost_and_sc_consolidation.py",
+    "/app/test_reports/pytest/pytest_process_cost_sc_consolidation.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_process_cost_and_sc_consolidation.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "N/A - backend only testing"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Test data created dynamically with TEST_ prefix for items, BOMs, routings, suppliers, production orders, and work orders",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All tests for process_cost_per_unit and SC consolidation pass. Key findings: (1) BOM must have status='active' for operations to be created on MO, (2) Operations must be stopped/completed before starting next operation, (3) SC consolidation works when outsourcing multiple operations to same supplier - charges and operation sequences are merged, (4) Different suppliers create separate SC orders as expected.",
+  "tests_passed": [
+    "test_01_login_works - Login with admin@erp.com / Admin@123",
+    "test_02_inhouse_start_without_process_cost_regression - Inhouse start works without process_cost_per_unit",
+    "test_03_inhouse_operation_with_process_cost - PUT /api/work-orders/{id}/operations/{seq} with process_cost_per_unit saves it",
+    "test_04_process_cost_persists_on_complete - process_cost_per_unit persists on completed operations",
+    "test_05_bom_explosion_shows_process_cost_fields - GET /api/bom/{id}/explode returns process_cost_per_unit and total_cost_per_unit",
+    "test_06_outsource_first_operation_creates_sc - First outsourced operation creates new SC order",
+    "test_07_second_outsource_same_supplier_consolidates - Second outsourced operation to same supplier consolidates into existing SC (charges merged, operation sequences merged)",
+    "test_08_dc_updated_with_merged_lines - Draft DC is updated with merged lines",
+    "test_09_different_supplier_creates_separate_sc - Outsourcing to different supplier creates separate SC order"
+  ],
+  "feature_verification": {
+    "req1_process_cost_per_unit": {
+      "status": "VERIFIED",
+      "details": "process_cost_per_unit field saves on operation start and persists on completion. BOM explosion returns process_cost_per_unit and total_cost_per_unit fields."
+    },
+    "req2_sc_consolidation": {
+      "status": "VERIFIED",
+      "details": "When outsourcing multiple operations to same supplier, they consolidate into single SC order. Processing charges are summed (100+150=250), operation sequences are merged ([10,20]), and DC lines are updated. Different suppliers create separate SC orders."
+    }
+  }
+}
