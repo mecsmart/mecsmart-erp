@@ -3658,6 +3658,28 @@ async def create_sc_for_wo(wo_id: str, request: Request):
         all_tree_mos = await collect_tree_mos(root_wo_id)
         completed_item_ids = {m["item_id"] for m in all_tree_mos if m.get("status") == "completed"}
         
+        # Helper to calculate BOM rollup cost for a Part/SA
+        async def calc_bom_rollup(item_id_calc):
+            item_bom = await db.boms.find_one({"parent_item_id": item_id_calc, "status": "active"}, {"_id": 0})
+            if not item_bom:
+                ci_for_cost = await db.items.find_one({"id": item_id_calc}, {"_id": 0})
+                return ci_for_cost.get("unit_cost", 0) if ci_for_cost else 0
+            material_cost = 0
+            for bcomp in item_bom.get("components", []):
+                bci = await db.items.find_one({"id": bcomp.get("item_id")}, {"_id": 0})
+                if bci:
+                    material_cost += bcomp.get("quantity", 0) * bci.get("unit_cost", 0)
+            # Add process costs from latest completed WO
+            process_cost = 0
+            lwo = await db.work_orders.find_one(
+                {"item_id": item_id_calc, "status": "completed", "operations_status": {"$exists": True}},
+                {"_id": 0, "operations_status": 1}, sort=[("actual_end", -1)]
+            )
+            if lwo:
+                for lop in lwo.get("operations_status", []):
+                    process_cost += lop.get("process_cost_per_unit", 0)
+            return material_cost + process_cost
+        
         # Smart resolve: completed parts sent as-is, unprocessed parts resolved to RM
         async def smart_resolve(parent_item_id, multiplier, visited=None):
             if visited is None:
@@ -3682,16 +3704,18 @@ async def create_sc_for_wo(wo_id: str, request: Request):
                     result.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
                 elif cat in ["component", "sub_assembly"]:
                     if comp["item_id"] in completed_item_ids:
-                        # Part already completed — send the finished part itself
-                        result.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
+                        # Part already completed — send the finished part with BOM rollup cost
+                        rollup_cost = await calc_bom_rollup(comp["item_id"])
+                        result.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": round(rollup_cost, 2)})
                     else:
                         # Part NOT completed — resolve to its RM via BOM
                         child_rm = await smart_resolve(comp["item_id"], comp_qty, visited)
                         if child_rm:
                             result.extend(child_rm)
                         else:
-                            # No BOM found, add the part directly
-                            result.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": ci.get("unit_cost", 0)})
+                            # No BOM found, use rollup cost
+                            rollup_cost = await calc_bom_rollup(comp["item_id"])
+                            result.append({"item_id": comp["item_id"], "quantity": int(comp_qty), "sent_quantity": 0, "received_quantity": 0, "rate": round(rollup_cost, 2)})
             return result
         
         rm_items = await smart_resolve(item_id, qty)

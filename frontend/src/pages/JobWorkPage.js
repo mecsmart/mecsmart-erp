@@ -489,9 +489,9 @@ export default function JobWorkPage() {
                               {canEdit && ['confirmed', 'in_progress'].includes(o.status) && (!o.lines || o.lines.length === 0) && o.job_work_parts?.length > 0 && !o.dc_created && (
                                 <button onClick={() => handleCreateDCForParts(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-parts-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
                               )}
-                              {/* SC with RM: After DC sent, show Receive GRN button (direct GRN from JW) */}
-                              {canEdit && o.status === 'in_progress' && o.subcontract_type !== 'without_material' && sentQty >= totalQty && (
-                                <button onClick={() => openJWGRNDialog(o)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`receive-grn-${o.id}`}><ArrowLeft className="w-3 h-3 inline mr-1" />Receive GRN</button>
+                              {/* SC with RM: After DC sent, show info to receive from GRN page */}
+                              {o.status === 'in_progress' && o.subcontract_type !== 'without_material' && sentQty >= totalQty && (
+                                <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium">Receive via GRN ({o.order_number})</span>
                               )}
                               {/* SC without RM / Job Card outsource: Create PO → GRN */}
                               {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && o.subcontract_type === 'without_material' && (

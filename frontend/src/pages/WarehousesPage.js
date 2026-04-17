@@ -63,8 +63,10 @@ export default function WarehousesPage() {
   // GRN State
   const [grnList, setGrnList] = useState([]);
   const [pendingPOs, setPendingPOs] = useState([]);
+  const [pendingJWOrders, setPendingJWOrders] = useState([]);
   const [grnDialogOpen, setGrnDialogOpen] = useState(false);
   const [selectedPO, setSelectedPO] = useState(null);
+  const [selectedJW, setSelectedJW] = useState(null);
   const [grnForm, setGrnForm] = useState({
     supplier_invoice_no: '',
     supplier_invoice_date: '',
@@ -80,13 +82,14 @@ export default function WarehousesPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [warehousesRes, transfersRes, itemsRes, grnRes, pendingRes, inventoryRes] = await Promise.all([
+      const [warehousesRes, transfersRes, itemsRes, grnRes, pendingRes, inventoryRes, jwRes] = await Promise.all([
         api.get('/api/warehouses'),
         api.get('/api/warehouses/transfers/history'),
         api.get('/api/items'),
         api.get('/api/grn'),
         api.get('/api/grn/pending-pos'),
         api.get('/api/inventory'),
+        api.get('/api/job-work/orders').catch(() => ({ data: [] })),
       ]);
       setWarehouses(warehousesRes.data);
       setTransfers(transfersRes.data);
@@ -94,6 +97,12 @@ export default function WarehousesPage() {
       setGrnList(grnRes.data);
       setPendingPOs(pendingRes.data);
       setInventory(inventoryRes.data);
+      // Filter JW orders that are in_progress with DC sent (pending GRN receive)
+      const pendingJW = (jwRes.data || []).filter(jw => 
+        jw.status === 'in_progress' && jw.subcontract_type !== 'without_material' && 
+        (jw.lines || []).some(l => l.sent_quantity > 0)
+      );
+      setPendingJWOrders(pendingJW);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -233,6 +242,56 @@ export default function WarehousesPage() {
       alert(error.response?.data?.detail || 'Failed to create GRN');
     }
   };
+
+  // JW GRN Functions
+  const openJWGRNDialog = (jw) => {
+    setSelectedJW(jw);
+    const parts = (jw.job_work_parts || []).map(p => {
+      const pit = items.find(i => i.id === p.item_id) || {};
+      return {
+        item_id: p.item_id,
+        item_name: pit.name || '',
+        item_part_number: pit.part_number || '',
+        po_quantity: p.quantity,
+        received_quantity: p.quantity - (p.received_quantity || 0),
+        po_price: p.charges || 0,
+        verified_price: p.charges || 0,
+        bom_rollup_cost: p.bom_rollup_cost || 0,
+        uom: pit.unit_of_measure || 'pcs',
+        hsn_code: pit.hsn_code || '',
+      };
+    });
+    setGrnForm({
+      supplier_invoice_no: '',
+      supplier_invoice_date: '',
+      warehouse_id: '',
+      notes: '',
+      lines: parts,
+    });
+    setGrnDialogOpen(true);
+  };
+
+  const handleJWGRNSubmit = async () => {
+    if (!grnForm.supplier_invoice_no.trim()) { alert('Supplier Invoice No. is mandatory'); return; }
+    if (!grnForm.supplier_invoice_date) { alert('Invoice Date is mandatory'); return; }
+    if (grnForm.lines.every(l => !l.received_quantity)) { alert('Enter received quantities'); return; }
+    try {
+      await api.post('/api/job-work/receive-grn', {
+        subcontract_order_id: selectedJW.id,
+        supplier_invoice_no: grnForm.supplier_invoice_no,
+        supplier_invoice_date: grnForm.supplier_invoice_date,
+        lines: grnForm.lines.filter(l => l.received_quantity > 0).map(l => ({
+          item_id: l.item_id,
+          received_quantity: l.received_quantity,
+          process_charges: l.verified_price
+        }))
+      });
+      setGrnDialogOpen(false);
+      setSelectedJW(null);
+      fetchData();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to create JW GRN'); }
+  };
+
 
   const [printGRN, setPrintGRN] = useState(null);
 
@@ -749,6 +808,59 @@ export default function WarehousesPage() {
             </div>
           )}
 
+          {/* Pending JW Orders for GRN (SC with RM) */}
+          {pendingJWOrders.length > 0 && (
+            <div className="card-flat overflow-hidden">
+              <div className="p-4 border-b border-[#E5E7EB]">
+                <h3 className="text-sm font-semibold text-[#723B13] flex items-center gap-2">
+                  <ClipboardCheck className="w-4 h-4" /> Pending Job Work Orders for GRN
+                </h3>
+                <p className="text-xs text-[#6B7280] mt-1">Receive processed materials from subcontractors</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full data-table" data-testid="pending-jw-grn-table">
+                  <thead>
+                    <tr>
+                      <th>JW Order #</th>
+                      <th>Supplier</th>
+                      <th>FG/SA/Part</th>
+                      <th>RM Sent</th>
+                      <th className="text-right">Charges</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingJWOrders.map(jw => {
+                      const supplier = jw.supplier || {};
+                      const jwpItems = (jw.job_work_parts || []).map(p => {
+                        const it = items.find(i => i.id === p.item_id) || {};
+                        return `${it.part_number || '-'} (${p.quantity})`;
+                      }).join(', ');
+                      const totalCharges = (jw.job_work_parts || []).reduce((s, p) => s + (p.quantity || 0) * (p.charges || 0), 0);
+                      return (
+                        <tr key={jw.id} data-testid={`pending-jw-row-${jw.id}`}>
+                          <td className="mono font-medium">{jw.order_number}</td>
+                          <td>
+                            <span className="mono text-xs">{supplier.code || '-'}</span>
+                            <p className="text-sm">{supplier.name || '-'}</p>
+                          </td>
+                          <td className="text-sm">{jwpItems || '-'}</td>
+                          <td className="mono text-sm">{(jw.lines || []).length} items</td>
+                          <td className="text-right mono font-semibold">{formatCurrency(totalCharges)}</td>
+                          <td>
+                            <button onClick={() => openJWGRNDialog(jw)} className="btn-primary text-xs flex items-center gap-1" data-testid={`create-jw-grn-${jw.id}`}>
+                              <Package className="w-3 h-3" /> Create GRN
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Completed GRN List */}
           <div className="card-flat overflow-hidden">
             <div className="p-4 border-b border-[#E5E7EB]">
@@ -824,15 +936,15 @@ export default function WarehousesPage() {
           </div>
 
           {/* GRN Create Dialog */}
-          <Dialog open={grnDialogOpen} onOpenChange={(open) => { if (!open) { setSelectedPO(null); } setGrnDialogOpen(open); }}>
+          <Dialog open={grnDialogOpen} onOpenChange={(open) => { if (!open) { setSelectedPO(null); setSelectedJW(null); } setGrnDialogOpen(open); }}>
             <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="font-[Chivo]">
-                  Create GRN {selectedPO ? `- ${selectedPO.po_number}` : ''}
+                  Create GRN {selectedPO ? `- ${selectedPO.po_number}` : selectedJW ? `- ${selectedJW.order_number} (Job Work)` : ''}
                 </DialogTitle>
               </DialogHeader>
               {selectedPO && (
-                <form onSubmit={handleGRNSubmit} className="space-y-4 mt-3" data-testid="grn-form">
+                <form onSubmit={(e) => { e.preventDefault(); selectedJW ? handleJWGRNSubmit() : handleGRNSubmit(e); }} className="space-y-4 mt-3" data-testid="grn-form">
                   {/* Supplier info */}
                   <div className="bg-[#F3F4F6] rounded-sm p-3 text-sm">
                     <div className="flex justify-between">
