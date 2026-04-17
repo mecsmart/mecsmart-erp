@@ -5,22 +5,18 @@
 - Frontend: React 19 + Shadcn/UI + Tailwind CSS
 
 ## SC with RM Flow
-- SC → Send DC (HSN in print) → **Receive GRN via JW** (mandatory invoice no/date, editable price)
-- GRN adds FG/SA stock, tracks process cost, completes SC+MO
-- job_work_parts includes bom_rollup_cost (material + process costs)
+- SC → Send DC (HSN in print) → Receive via GRN from **Stores/GRN page** (not JW page)
+- JW page shows "Receive via GRN (JW-xxx)" info label
+- GRN page has "Pending Job Work Orders for GRN" section
+- Mandatory: Invoice No + Date, Editable price per line
+- Part/SA rate = BOM rollup cost (material + process), not unit_cost
 
-## SC without RM / Job Card Outsource Flow
-- SC → Create PO → "Receive via GRN (PO-xxx)" from GRN page (stores person)
-- BOM rollup cost on job_work_parts for accurate Part/SA pricing
+## SC without RM / Job Card Outsource
+- SC → Create PO → "Receive via GRN (PO-xxx)" from GRN page
 
-## GRN Rules
-- Supplier Invoice No: MANDATORY (both JW GRN and PO GRN)
-- Invoice Date: MANDATORY
-- Price/Rate: EDITABLE per line (can override SC charges at receive time)
-
-## Job Card
-- Inhouse: Process cost/unit, Work Centre dropdown
-- Outsource: Consolidated SC, confirmation dialog, BOM rollup cost
+## BOM Rollup Cost
+- calc_bom_rollup: sum(comp_qty × comp_unit_cost) + process_cost from completed WOs
+- Used in: SC lines rate, job_work_parts bom_rollup_cost, BOM explosion
 
 ## Backlog
 - [ ] Job Card outsource DC print format
