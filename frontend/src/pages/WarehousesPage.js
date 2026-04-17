@@ -221,6 +221,12 @@ export default function WarehousesPage() {
     e.preventDefault();
     if (!grnForm.supplier_invoice_no.trim()) { alert('Supplier Invoice No. is mandatory'); return; }
     if (!grnForm.supplier_invoice_date) { alert('Supplier Invoice Date is mandatory'); return; }
+    
+    // Calculate total for confirmation
+    const totalQty = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0), 0);
+    const totalCost = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0) * (l.verified_price || 0), 0);
+    if (!window.confirm(`Confirm GRN Receipt?\n\nTotal Items: ${grnForm.lines.filter(l => l.received_quantity > 0).length}\nTotal Qty: ${totalQty}\nTotal Cost: ₹${totalCost.toFixed(2)}\n\nReceived stock will be added to inventory.`)) return;
+    
     try {
       const payload = {
         po_id: selectedPO.id,
@@ -275,6 +281,12 @@ export default function WarehousesPage() {
     if (!grnForm.supplier_invoice_no.trim()) { alert('Supplier Invoice No. is mandatory'); return; }
     if (!grnForm.supplier_invoice_date) { alert('Invoice Date is mandatory'); return; }
     if (grnForm.lines.every(l => !l.received_quantity)) { alert('Enter received quantities'); return; }
+    
+    // Calculate total for confirmation
+    const totalQty = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0), 0);
+    const totalCost = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0) * (l.verified_price || 0), 0);
+    if (!window.confirm(`Confirm JW GRN Receipt?\n\nJW Order: ${selectedJW?.order_number}\nTotal Qty: ${totalQty}\nTotal Cost: ₹${totalCost.toFixed(2)}\n\nReceived stock will be added to inventory.`)) return;
+    
     try {
       await api.post('/api/job-work/receive-grn', {
         subcontract_order_id: selectedJW.id,

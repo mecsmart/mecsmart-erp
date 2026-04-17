@@ -878,7 +878,7 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
                 # Leaf node - use item unit_cost
                 comp_data["unit_cost"] = item.get("unit_cost", 0) if item else 0
             
-            comp_data["extended_cost"] = comp_data["unit_cost"] * comp.get("quantity", 0)
+            comp_data["extended_cost"] = 0  # Will be recalculated after process cost
             
             # Calculate process cost: check SC orders (outsource charges) and completed WO operations
             process_cost_per_unit = 0
@@ -907,6 +907,7 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
             
             comp_data["process_cost_per_unit"] = process_cost_per_unit
             comp_data["total_cost_per_unit"] = comp_data["unit_cost"] + process_cost_per_unit
+            comp_data["extended_cost"] = comp_data["total_cost_per_unit"] * comp.get("quantity", 0)
             
             result.append(comp_data)
         return result
@@ -3829,6 +3830,19 @@ async def create_sc_for_wo(wo_id: str, request: Request):
     # Calculate BOM rollup cost for the FG/SA item
     bom_rollup_cost_val = (sum(l.get("quantity", 0) * l.get("rate", 0) for l in sc_lines) / qty) if qty and sc_lines else (item.get("unit_cost", 0) if item else 0)
     
+    # Pull previous process charges for this item from latest SC order
+    prev_charges = 0
+    prev_sc = await db.subcontract_orders.find_one(
+        {"job_work_parts.item_id": item_id, "status": {"$in": ["in_progress", "completed"]}},
+        {"_id": 0, "job_work_parts": 1},
+        sort=[("created_at", -1)]
+    )
+    if prev_sc:
+        for pjwp in prev_sc.get("job_work_parts", []):
+            if pjwp.get("item_id") == item_id and pjwp.get("charges"):
+                prev_charges = pjwp["charges"]
+                break
+    
     sc_doc = {
         "id": str(uuid.uuid4()),
         "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
@@ -3839,7 +3853,7 @@ async def create_sc_for_wo(wo_id: str, request: Request):
         "fg_item_id": item_id,
         "fg_item_name": f"{item.get('part_number', '')} - {item.get('name', '')}" if item else "",
         "fg_quantity": qty,
-        "job_work_parts": [{"item_id": item_id, "quantity": qty, "charges": 0, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost_val, 2)}],
+        "job_work_parts": [{"item_id": item_id, "quantity": qty, "charges": prev_charges, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost_val, 2)}],
         "lines": sc_lines,
         "status": "in_progress",
         "notes": f"SC for MO {wo.get('wo_number')} ({sc_type.replace('_', ' ')})",
@@ -4350,7 +4364,21 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                         process_cost += op.get("process_cost_per_unit", 0)
                 bom_rollup_cost = material_cost + process_cost
             
-            sc_part = {"item_id": wo.get("item_id"), "quantity": mo_qty, "charges": op_data.outsource_charges or 0, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost, 2)}
+            # Pull previous charges if not explicitly set
+            outsource_charges = op_data.outsource_charges or 0
+            if not outsource_charges:
+                prev_sc_op = await db.subcontract_orders.find_one(
+                    {"job_work_parts.item_id": wo.get("item_id"), "status": {"$in": ["in_progress", "completed"]}},
+                    {"_id": 0, "job_work_parts": 1},
+                    sort=[("created_at", -1)]
+                )
+                if prev_sc_op:
+                    for pjwp in prev_sc_op.get("job_work_parts", []):
+                        if pjwp.get("item_id") == wo.get("item_id") and pjwp.get("charges"):
+                            outsource_charges = pjwp["charges"]
+                            break
+            
+            sc_part = {"item_id": wo.get("item_id"), "quantity": mo_qty, "charges": outsource_charges, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost, 2)}
             sc_lines = []  # No RM lines for operation outsourcing — only the part goes and comes back
             
             # Check for existing SC order for same supplier on same WO (consolidate)

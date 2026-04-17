@@ -187,6 +187,11 @@ export default function JobWorkPage() {
     if (!jwGrnInvoiceNo.trim()) { alert('Supplier Invoice No. is mandatory'); return; }
     if (!jwGrnInvoiceDate) { alert('Invoice Date is mandatory'); return; }
     if (jwGrnLines.every(l => !l.received_quantity)) { alert('Enter received quantities'); return; }
+    
+    const totalQty = jwGrnLines.reduce((s, l) => s + (l.received_quantity || 0), 0);
+    const totalCost = jwGrnLines.reduce((s, l) => s + (l.received_quantity || 0) * (l.charges || 0), 0);
+    if (!window.confirm(`Confirm JW GRN Receipt?\n\nJW Order: ${jwGrnOrder?.order_number}\nTotal Qty: ${totalQty}\nTotal Cost: ₹${totalCost.toFixed(2)}\n\nReceived stock will be added to inventory.`)) return;
+    
     try {
       const { data } = await api.post('/api/job-work/receive-grn', {
         subcontract_order_id: jwGrnOrder.id,

@@ -4,20 +4,17 @@
 - Backend: FastAPI + MongoDB (Motor), JWT httpOnly cookies, /api prefix
 - Frontend: React 19 + Shadcn/UI + Tailwind CSS
 
-## BOM Process Cost (Updated)
-- Process cost sources (priority order):
-  1. SC order job_work_parts.charges (outsource process cost from latest SC)
-  2. Completed WO operations.process_cost_per_unit (inhouse process cost)
-- Always shows last updated cost
-- Explosion: Material Cost + Process Cost/Unit + Total/Unit + Extended Cost
+## BOM Costing
+- Extended Cost = Total/Unit × Qty (material + process, not material only)
+- Process cost from: 1) SC job_work_parts.charges 2) WO operations.process_cost_per_unit
+- SC creation pre-populates charges from previous SC for same item
 
 ## GRN
-- Header: Cost/Unit (editable), Total Cost column (auto-calculated)
-- Grand Total row at bottom
-- Mandatory: Invoice No + Date
-- Works for both PO-based and JW-based GRN
+- Confirmation popup before receipt (shows total qty, total cost, inventory impact)
+- Mandatory Invoice No + Date, Editable Cost/Unit, Total Cost column
+- Works for PO-based and JW-based GRN
 
 ## Backlog
 - [ ] Job Card outsource DC print format
-- [ ] Purchase Invoice from GRN with process cost
+- [ ] Purchase Invoice from GRN
 - [ ] P1: GST Phase 2, P2: Backend refactoring
