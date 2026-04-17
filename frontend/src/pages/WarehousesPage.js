@@ -993,7 +993,8 @@ export default function WarehousesPage() {
                             <th className="text-right p-2">Recd Qty</th>
                             <th className="text-left p-2">UOM</th>
                             <th className="text-right p-2">{selectedJW ? 'SC Price' : 'PO Price'}</th>
-                            <th className="text-right p-2">Verified Price</th>
+                            <th className="text-right p-2">Cost/Unit</th>
+                            <th className="text-right p-2">Total Cost</th>
                             <th className="text-center p-2">Status</th>
                           </tr>
                         </thead>
@@ -1017,6 +1018,7 @@ export default function WarehousesPage() {
                                 <td className="p-2">
                                   <input type="number" min="0" step="0.01" value={line.verified_price} onChange={(e) => updateGRNLine(i, 'verified_price', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono w-24 text-right" data-testid={`grn-verified-price-${i}`} />
                                 </td>
+                                <td className="p-2 text-right mono text-xs font-semibold">{formatCurrency((line.received_quantity || 0) * (line.verified_price || 0))}</td>
                                 <td className="p-2 text-center">
                                   {qtyMatch && priceMatch ? (
                                     <CheckCircle2 className="w-4 h-4 text-[#03543F] mx-auto" />
@@ -1029,6 +1031,11 @@ export default function WarehousesPage() {
                               </tr>
                             );
                           })}
+                          <tr className="bg-[#F3F4F6] font-semibold">
+                            <td className="p-2 text-right text-sm" colSpan={6}>Grand Total</td>
+                            <td className="p-2 text-right mono text-sm">{formatCurrency(grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0) * (l.verified_price || 0), 0))}</td>
+                            <td></td>
+                          </tr>
                         </tbody>
                       </table>
                     </div>

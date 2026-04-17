@@ -880,19 +880,31 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
             
             comp_data["extended_cost"] = comp_data["unit_cost"] * comp.get("quantity", 0)
             
-            # Calculate process cost from operation routings
-            comp_routings = comp.get("routings", [])
-            # Look for actual process costs from completed work orders for this item
-            latest_wo = await db.work_orders.find_one(
-                {"item_id": comp.get("item_id"), "status": "completed", "operations_status": {"$exists": True}},
-                {"_id": 0, "operations_status": 1},
-                sort=[("actual_end", -1)]
-            )
+            # Calculate process cost: check SC orders (outsource charges) and completed WO operations
             process_cost_per_unit = 0
-            if latest_wo:
-                for op in latest_wo.get("operations_status", []):
-                    if op.get("process_cost_per_unit"):
-                        process_cost_per_unit += op["process_cost_per_unit"]
+            
+            # 1) Check SC orders where this item was outsourced (job_work_parts charges)
+            sc_orders = await db.subcontract_orders.find(
+                {"job_work_parts.item_id": comp.get("item_id"), "status": {"$in": ["in_progress", "completed"]}},
+                {"_id": 0, "job_work_parts": 1}
+            ).sort("created_at", -1).to_list(1)
+            if sc_orders:
+                for jwp in sc_orders[0].get("job_work_parts", []):
+                    if jwp.get("item_id") == comp.get("item_id") and jwp.get("charges"):
+                        process_cost_per_unit += jwp["charges"]
+            
+            # 2) Check completed WO operations (inhouse process costs)
+            if not process_cost_per_unit:
+                latest_wo = await db.work_orders.find_one(
+                    {"item_id": comp.get("item_id"), "status": "completed", "operations_status": {"$exists": True}},
+                    {"_id": 0, "operations_status": 1},
+                    sort=[("actual_end", -1)]
+                )
+                if latest_wo:
+                    for op in latest_wo.get("operations_status", []):
+                        if op.get("process_cost_per_unit"):
+                            process_cost_per_unit += op["process_cost_per_unit"]
+            
             comp_data["process_cost_per_unit"] = process_cost_per_unit
             comp_data["total_cost_per_unit"] = comp_data["unit_cost"] + process_cost_per_unit
             
