@@ -208,13 +208,14 @@ export default function BOMPage() {
   const bomFileRef = useRef(null);
   const [bomImporting, setBomImporting] = useState(false);
 
-  const handleBomExport = async () => {
+  const handleBomExport = async (bomId = null) => {
     try {
-      const response = await api.get('/api/bom/export/excel', { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const url = bomId ? `/api/bom/export/excel?bom_id=${bomId}` : '/api/bom/export/excel';
+      const response = await api.get(url, { responseType: 'blob' });
+      const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'bom_data.xlsx');
+      link.href = blobUrl;
+      link.setAttribute('download', bomId ? `bom_${bomId.slice(0,8)}.xlsx` : 'bom_data.xlsx');
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -713,6 +714,7 @@ export default function BOMPage() {
                       <div className="flex items-center gap-2">
                         <span className="mono text-sm font-bold">Total: {formatCurrency(totalCost)}</span>
                         {explosion && <button onClick={() => printBomExplosion(parentItem, explosion.explosion, totalCost, activeBom)} className="p-1 hover:bg-white/20 rounded" title="Print BOM" data-testid={`print-bom-${pid}`}><Printer className="w-4 h-4" /></button>}
+                        {activeBom && <button onClick={() => handleBomExport(activeBom.id)} className="p-1 hover:bg-white/20 rounded" title="Export this BOM" data-testid={`export-bom-${pid}`}><Download className="w-4 h-4" /></button>}
                         <button onClick={() => handleView(activeBom)} className="p-1 hover:bg-white/20 rounded" title="View"><Eye className="w-4 h-4" /></button>
                         {canEdit && <button onClick={() => handleEdit(activeBom)} className="p-1 hover:bg-white/20 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>}
                         {canEdit && <button onClick={() => handleRevise(activeBom)} className="p-1 hover:bg-white/20 rounded" title="Revise"><GitBranch className="w-4 h-4" /></button>}

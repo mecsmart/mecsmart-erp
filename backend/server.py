@@ -489,6 +489,7 @@ class WorkOrderOperationUpdate(BaseModel):
     is_outsource: Optional[bool] = None
     outsource_supplier_id: Optional[str] = None
     outsource_charges: Optional[float] = None
+    work_center_id: Optional[str] = None
 
 # ================== GST / INDIA COMPLIANCE MODELS ==================
 
@@ -4375,6 +4376,11 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             target_op["actual_start"] = target_op.get("actual_start") or datetime.now(timezone.utc)
             target_op["operator"] = op_data.operator.strip()
             target_op["status"] = "in_progress"
+            # Save work center if provided
+            if op_data.work_center_id:
+                wc = await db.work_centers.find_one({"id": op_data.work_center_id}, {"_id": 0})
+                target_op["work_center_id"] = op_data.work_center_id
+                target_op["work_center_name"] = wc.get("name", "") if wc else ""
     
     # STOP operation (pause current run)
     elif op_data.status == "stopped":
@@ -4677,13 +4683,16 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
     return results
 
 @bom_router.get("/export/excel")
-async def export_boms_excel(request: Request):
-    """Export all BOMs to Excel"""
+async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
+    """Export BOMs to Excel with routings. Optionally filter by bom_id."""
     await get_current_user(request)
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     
-    boms = await db.boms.find({}, {"_id": 0}).to_list(10000)
+    if bom_id:
+        boms = await db.boms.find({"id": bom_id}, {"_id": 0}).to_list(1)
+    else:
+        boms = await db.boms.find({}, {"_id": 0}).to_list(10000)
     items_map = {}
     async for item in db.items.find({}, {"_id": 0}):
         items_map[item["id"]] = item
@@ -4692,7 +4701,7 @@ async def export_boms_excel(request: Request):
     ws = wb.active
     ws.title = "BOM Data"
     
-    headers = ["Parent Part Number", "Parent Name", "Revision", "Status", "Component Part Number", "Component Name", "Quantity", "Is Alternate", "Effectivity Start", "Effectivity End"]
+    headers = ["Parent Part Number", "Parent Name", "Revision", "Status", "Parent Routings", "Component Part Number", "Component Name", "Quantity", "Component Routings", "Is Alternate", "Effectivity Date"]
     header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=11)
     thin_border = Border(
@@ -4710,15 +4719,20 @@ async def export_boms_excel(request: Request):
     row_num = 2
     for bom in boms:
         parent = items_map.get(bom.get("parent_item_id"), {})
+        parent_routings_str = ", ".join(bom.get("parent_routings", []))
+        eff_date = str(bom.get("effectivity_date", ""))[:10] if bom.get("effectivity_date") else ""
         for comp in bom.get("components", []):
             comp_item = items_map.get(comp.get("item_id"), {})
+            comp_routings_str = ", ".join(comp.get("routings", []))
             data = [
                 parent.get("part_number", ""), parent.get("name", ""),
                 bom.get("revision", ""), bom.get("status", ""),
+                parent_routings_str,
                 comp_item.get("part_number", ""), comp_item.get("name", ""),
-                comp.get("quantity", 0), "Yes" if comp.get("is_alternate") else "No",
-                str(bom.get("effectivity_start", "")) if bom.get("effectivity_start") else "",
-                str(bom.get("effectivity_end", "")) if bom.get("effectivity_end") else ""
+                comp.get("quantity", 0),
+                comp_routings_str,
+                "Yes" if comp.get("is_alternate") else "No",
+                eff_date
             ]
             for col, value in enumerate(data, 1):
                 cell = ws.cell(row=row_num, column=col, value=value)
@@ -4726,16 +4740,17 @@ async def export_boms_excel(request: Request):
             row_num += 1
     
     for col in range(1, len(headers) + 1):
-        ws.column_dimensions[chr(64 + col) if col <= 26 else 'A'].width = 20
+        ws.column_dimensions[chr(64 + col) if col <= 26 else 'A'].width = 22
     
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
     
+    filename = f"bom_{boms[0].get('revision','')}.xlsx" if bom_id and boms else "bom_data.xlsx"
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=bom_data.xlsx"}
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
 @bom_router.post("/import/excel")
@@ -4759,18 +4774,47 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
         items_by_pn[item.get("part_number", "")] = item
     
     # Group rows by parent part number
+    # New format: Parent PN, Parent Name, Rev, Status, Parent Routings, Comp PN, Comp Name, Qty, Comp Routings, Is Alt, Effectivity
     bom_groups = {}
     for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
         if not row or not row[0]:
             continue
         parent_pn = str(row[0]).strip()
         if parent_pn not in bom_groups:
-            bom_groups[parent_pn] = {"revision": str(row[2]).strip() if row[2] else "A", "status": str(row[3]).strip() if row[3] else "active", "components": []}
+            parent_routings_str = str(row[4]).strip() if len(row) > 4 and row[4] else ""
+            parent_routings = [r.strip() for r in parent_routings_str.split(",") if r.strip()] if parent_routings_str else []
+            bom_groups[parent_pn] = {
+                "revision": str(row[2]).strip() if row[2] else "A",
+                "status": str(row[3]).strip() if row[3] else "active",
+                "parent_routings": parent_routings,
+                "components": []
+            }
         
-        comp_pn = str(row[4]).strip() if row[4] else None
+        comp_pn = str(row[5]).strip() if len(row) > 5 and row[5] else (str(row[4]).strip() if len(row) > 4 and row[4] else None)
         if not comp_pn:
             results["errors"].append(f"Row {row_num}: Missing component part number")
             continue
+        
+        # Detect old format (no Parent Routings column) vs new format
+        # New format: col 5 = Comp PN, col 8 = Comp Routings, col 9 = Is Alt
+        # Old format: col 4 = Comp PN, col 6 = Qty, col 7 = Is Alt
+        if len(row) > 8 and isinstance(row[8], str) and row[8] in ["Yes", "No", "yes", "no", "true", "false", "TRUE", "FALSE"]:
+            # New format
+            comp_routings_str = str(row[8]).strip() if row[8] else ""
+            qty = float(row[7]) if row[7] else 1
+            is_alt = str(row[9]).strip().lower() in ["yes", "true", "1"] if len(row) > 9 and row[9] else False
+        elif len(row) > 8:
+            # New format with routings
+            comp_routings_str = str(row[8]).strip() if row[8] else ""
+            qty = float(row[7]) if row[7] else 1
+            is_alt = str(row[9]).strip().lower() in ["yes", "true", "1"] if len(row) > 9 and row[9] else False
+        else:
+            # Old format fallback
+            comp_routings_str = ""
+            qty = float(row[6]) if len(row) > 6 and row[6] else 1
+            is_alt = str(row[7]).strip().lower() in ["yes", "true", "1"] if len(row) > 7 and row[7] else False
+        
+        comp_routings = [r.strip() for r in comp_routings_str.split(",") if r.strip()] if comp_routings_str else []
         
         parent_item = items_by_pn.get(parent_pn)
         comp_item = items_by_pn.get(comp_pn)
@@ -4785,8 +4829,9 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
         bom_groups[parent_pn]["parent_item_id"] = parent_item["id"]
         bom_groups[parent_pn]["components"].append({
             "item_id": comp_item["id"],
-            "quantity": float(row[6]) if row[6] else 1,
-            "is_alternate": str(row[7]).strip().lower() in ["yes", "true", "1"] if row[7] else False
+            "quantity": qty,
+            "is_alternate": is_alt,
+            "routings": comp_routings
         })
     
     # Create or update BOMs
@@ -4798,7 +4843,12 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
         if existing:
             await db.boms.update_one(
                 {"id": existing["id"]},
-                {"$set": {"components": bom_data["components"], "status": bom_data["status"], "updated_at": datetime.now(timezone.utc)}}
+                {"$set": {
+                    "components": bom_data["components"],
+                    "parent_routings": bom_data.get("parent_routings", []),
+                    "status": bom_data["status"],
+                    "updated_at": datetime.now(timezone.utc)
+                }}
             )
             results["updated"] += 1
         else:
@@ -4808,9 +4858,9 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
                 "name": f"BOM - {parent_pn}",
                 "revision": bom_data["revision"],
                 "status": bom_data["status"],
+                "parent_routings": bom_data.get("parent_routings", []),
                 "components": bom_data["components"],
-                "effectivity_start": None,
-                "effectivity_end": None,
+                "effectivity_date": datetime.now(timezone.utc),
                 "created_at": datetime.now(timezone.utc),
                 "created_by": user["id"]
             }

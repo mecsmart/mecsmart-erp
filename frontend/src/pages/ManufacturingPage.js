@@ -282,6 +282,7 @@ export default function ManufacturingPage() {
       is_outsource: isJW,
       outsource_supplier_id: op?.job_work_supplier_id || '',
       outsource_charges: 0,
+      work_center_id: op?._selected_wc || op?.work_center_id || '',
     });
     setOpDialog({ open: true, mode, sequence });
   };
@@ -295,10 +296,10 @@ export default function ManufacturingPage() {
       if (mode === 'start') {
         if (opForm.is_outsource) {
           if (!opForm.outsource_supplier_id) { alert('Select a supplier for outsourcing'); return; }
-          payload = { status: 'in_progress', operator: suppliers.find(s => s.id === opForm.outsource_supplier_id)?.name || 'Outsourced', quantity_completed: opForm.quantity, notes: opForm.notes, is_outsource: true, outsource_supplier_id: opForm.outsource_supplier_id, outsource_charges: opForm.outsource_charges };
+          payload = { status: 'in_progress', operator: suppliers.find(s => s.id === opForm.outsource_supplier_id)?.name || 'Outsourced', quantity_completed: opForm.quantity, notes: opForm.notes, is_outsource: true, outsource_supplier_id: opForm.outsource_supplier_id, outsource_charges: opForm.outsource_charges, work_center_id: opForm.work_center_id || '' };
         } else {
           if (!opForm.operator.trim()) { alert('Operator name is required'); return; }
-          payload = { status: 'in_progress', operator: opForm.operator, quantity_completed: opForm.quantity };
+          payload = { status: 'in_progress', operator: opForm.operator, quantity_completed: opForm.quantity, work_center_id: opForm.work_center_id || '' };
         }
       } else if (mode === 'stop') {
         payload = { status: 'stopped', quantity_completed: opForm.quantity, quality_result: opForm.quality_result, reject_qty: opForm.reject_qty, rework_qty: opForm.rework_qty, notes: opForm.notes };
@@ -1347,7 +1348,20 @@ export default function ManufacturingPage() {
                         <tr key={op.sequence} className={`border-t ${op.status === 'in_progress' ? 'bg-[#FDF6B2]/30' : op.status === 'completed' ? 'bg-[#DEF7EC]/30' : op.status === 'stopped' ? 'bg-[#FDE8E8]/10' : ''}`} data-testid={`op-row-${op.sequence}`}>
                           <td className="py-3 px-3 mono font-medium">{op.sequence}</td>
                           <td className="py-3 px-3 font-medium">{op.operation_name}</td>
-                          <td className="py-3 px-3 text-sm text-[#4B5563]">{wc?.name || '-'}</td>
+                          <td className="py-3 px-3 text-sm text-[#4B5563]">
+                            {op.work_center_id ? (wc?.name || op.work_center_name || '-') : (
+                              op.status === 'pending' || op.status === 'stopped' ? (
+                                <select value={op._selected_wc || ''} onChange={(e) => {
+                                  const updated = { ...jobCardWO };
+                                  updated.operations_status = updated.operations_status.map(o => o.sequence === op.sequence ? { ...o, _selected_wc: e.target.value } : o);
+                                  setJobCardWO(updated);
+                                }} className="input-field text-xs py-1 px-2" data-testid={`wc-select-${op.sequence}`}>
+                                  <option value="">Select WC</option>
+                                  {workCenters.map(w => <option key={w.id} value={w.id}>{w.code} - {w.name}</option>)}
+                                </select>
+                              ) : '-'
+                            )}
+                          </td>
                           <td className="py-3 px-3 text-center">
                             <span className={`status-badge ${
                               op.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' :
