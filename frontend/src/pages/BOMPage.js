@@ -51,7 +51,7 @@ export default function BOMPage() {
     status: 'draft',
     effectivity_date: '',
     components: [],
-    operations: [],
+    parent_routings: [],
   });
 
   const canEdit = ['admin', 'production_manager'].includes(user?.role);
@@ -143,7 +143,7 @@ export default function BOMPage() {
       status: bom.status,
       effectivity_date: bom.effectivity_date ? bom.effectivity_date.split('T')[0] : '',
       components: bom.components || [],
-      operations: bom.operations || [],
+      parent_routings: bom.parent_routings || [],
     });
     setIsDialogOpen(true);
   };
@@ -181,7 +181,7 @@ export default function BOMPage() {
   const addComponent = () => {
     setFormData({
       ...formData,
-      components: [...formData.components, { item_id: '', quantity: 1, unit_of_measure: 'pcs', is_alternate: false }],
+      components: [...formData.components, { item_id: '', quantity: 1, unit_of_measure: 'pcs', is_alternate: false, routings: [] }],
     });
   };
 
@@ -243,7 +243,7 @@ export default function BOMPage() {
       status: 'draft',
       effectivity_date: '',
       components: [],
-      operations: [],
+      parent_routings: [],
     });
   };
 
@@ -459,18 +459,32 @@ export default function BOMPage() {
                   />
                 </div>
 
+                {/* Parent Item Routing */}
+                <div className="border-t border-[#E5E7EB] pt-4">
+                  <label className="block text-sm font-semibold text-[#111827] mb-2">Parent Item Routings</label>
+                  <p className="text-xs text-[#6B7280] mb-2">Operations for the FG/SA item itself (e.g., Assembly, Powder Coating)</p>
+                  <div className="flex flex-wrap gap-2">
+                    {routingOptions.map(r => {
+                      const selected = (formData.parent_routings || []).includes(r.name);
+                      return (
+                        <button key={r.id} type="button" onClick={() => {
+                          const cur = formData.parent_routings || [];
+                          setFormData({ ...formData, parent_routings: selected ? cur.filter(n => n !== r.name) : [...cur, r.name] });
+                        }} className={`px-2.5 py-1 text-xs rounded-sm border transition-all ${selected ? 'bg-[#1D3557] text-white border-[#1D3557]' : 'bg-white text-[#4B5563] border-[#D1D5DB] hover:border-[#1D3557]'}`} data-testid={`parent-routing-${r.name}`}>
+                          {r.name}
+                        </button>
+                      );
+                    })}
+                    {routingOptions.length === 0 && <p className="text-xs text-[#9CA3AF] italic">No operation types defined. Create them in Manufacturing → Routings tab first.</p>}
+                  </div>
+                </div>
+
                 {/* Components */}
                 <div className="border-t border-[#E5E7EB] pt-4">
                   <div className="flex items-center justify-between mb-3">
                     <label className="text-sm font-semibold text-[#111827]">Components</label>
-                    <button
-                      type="button"
-                      onClick={addComponent}
-                      className="btn-secondary text-xs flex items-center space-x-1"
-                      data-testid="add-component-btn"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>Add Component</span>
+                    <button type="button" onClick={addComponent} className="btn-secondary text-xs flex items-center space-x-1" data-testid="add-component-btn">
+                      <Plus className="w-3 h-3" /><span>Add Component</span>
                     </button>
                   </div>
                   
@@ -481,95 +495,54 @@ export default function BOMPage() {
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {formData.components.map((comp, index) => (
-                        <div key={index} className="flex items-center gap-2 p-2 bg-[#F3F4F6] rounded-sm">
-                          <div className="flex-1">
-                            <Select 
-                              value={comp.item_id} 
-                              onValueChange={(v) => updateComponent(index, 'item_id', v)}
-                            >
-                              <SelectTrigger className="bg-white" data-testid={`component-item-select-${index}`}>
-                                <SelectValue placeholder="Select component" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {items.map((item) => (
-                                  <SelectItem key={item.id} value={item.id}>
-                                    {item.part_number} - {item.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="w-24">
-                            <input
-                              type="number"
-                              min="0.01"
-                              step="0.01"
-                              value={comp.quantity}
-                              onChange={(e) => updateComponent(index, 'quantity', parseFloat(e.target.value) || 0)}
-                              className="input-field mono bg-white"
-                              placeholder="Qty"
-                              data-testid={`component-qty-input-${index}`}
-                            />
-                          </div>
-                          <label className="flex items-center space-x-1 text-xs text-[#4B5563]">
-                            <input
-                              type="checkbox"
-                              checked={comp.is_alternate}
-                              onChange={(e) => updateComponent(index, 'is_alternate', e.target.checked)}
-                              className="rounded"
-                            />
-                            <span>Alt</span>
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => removeComponent(index)}
-                            className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Operations Section */}
-                <div className="border-t border-[#E5E7EB] pt-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="text-sm font-semibold text-[#111827]">Manufacturing Operations</label>
-                    <button type="button" onClick={() => setFormData({ ...formData, operations: [...formData.operations, { sequence: (formData.operations.length + 1) * 10, operation_name: '', description: '', setup_time_minutes: 0, run_time_minutes: 0 }] })} className="btn-secondary text-xs flex items-center space-x-1" data-testid="add-bom-operation-btn">
-                      <Plus className="w-3 h-3" /><span>Add Operation</span>
-                    </button>
-                  </div>
-                  {formData.operations.length === 0 ? (
-                    <div className="text-center py-4 text-[#4B5563] bg-[#F3F4F6] rounded-sm">
-                      <p className="text-sm">No operations defined. Add operations from the routing list.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {formData.operations.map((op, idx) => (
-                        <div key={idx} className="p-3 bg-[#F3F4F6] rounded-sm">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-semibold text-[#6B7280]">Step {op.sequence}</span>
-                            <button type="button" onClick={() => setFormData({ ...formData, operations: formData.operations.filter((_, i) => i !== idx) })} className="text-[#9B1C1C] text-xs">Remove</button>
-                          </div>
-                          <div className="grid grid-cols-3 gap-2">
-                            <div className="col-span-1">
-                              <select value={op.operation_name} onChange={(e) => { const ops = [...formData.operations]; ops[idx] = { ...ops[idx], operation_name: e.target.value }; setFormData({ ...formData, operations: ops }); }} className="input-field text-xs" data-testid={`bom-op-name-${idx}`}>
-                                <option value="">Select operation</option>
-                                {routingOptions.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
-                              </select>
+                      {formData.components.map((comp, index) => {
+                        const compItem = items.find(i => i.id === comp.item_id);
+                        const isRM = compItem?.category === 'raw_material';
+                        return (
+                          <div key={index} className="p-2.5 bg-[#F3F4F6] rounded-sm space-y-2">
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1">
+                                <Select value={comp.item_id} onValueChange={(v) => updateComponent(index, 'item_id', v)}>
+                                  <SelectTrigger className="bg-white" data-testid={`component-item-select-${index}`}><SelectValue placeholder="Select component" /></SelectTrigger>
+                                  <SelectContent>
+                                    {items.map((item) => (
+                                      <SelectItem key={item.id} value={item.id}>{item.part_number} - {item.name} <span className="text-[#9CA3AF]">({item.category})</span></SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="w-24">
+                                <input type="number" min="0.01" step="0.01" value={comp.quantity} onChange={(e) => updateComponent(index, 'quantity', parseFloat(e.target.value) || 0)} className="input-field mono bg-white" placeholder="Qty" data-testid={`component-qty-input-${index}`} />
+                              </div>
+                              <label className="flex items-center space-x-1 text-xs text-[#4B5563]">
+                                <input type="checkbox" checked={comp.is_alternate} onChange={(e) => updateComponent(index, 'is_alternate', e.target.checked)} className="rounded" />
+                                <span>Alt</span>
+                              </label>
+                              <button type="button" onClick={() => removeComponent(index)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"><X className="w-4 h-4" /></button>
                             </div>
-                            <div>
-                              <input type="number" min="0" value={op.setup_time_minutes} onChange={(e) => { const ops = [...formData.operations]; ops[idx] = { ...ops[idx], setup_time_minutes: parseInt(e.target.value) || 0 }; setFormData({ ...formData, operations: ops }); }} className="input-field text-xs mono" placeholder="Setup min" />
-                            </div>
-                            <div>
-                              <input type="number" min="0" value={op.run_time_minutes} onChange={(e) => { const ops = [...formData.operations]; ops[idx] = { ...ops[idx], run_time_minutes: parseInt(e.target.value) || 0 }; setFormData({ ...formData, operations: ops }); }} className="input-field text-xs mono" placeholder="Run min" />
-                            </div>
+                            {/* Routing tags for non-RM components */}
+                            {comp.item_id && !isRM && (
+                              <div className="flex items-center gap-1.5 pl-1">
+                                <span className="text-[10px] font-semibold text-[#6B7280] uppercase">Routings:</span>
+                                {routingOptions.map(r => {
+                                  const sel = (comp.routings || []).includes(r.name);
+                                  return (
+                                    <button key={r.id} type="button" onClick={() => {
+                                      const comps = [...formData.components];
+                                      const cur = comps[index].routings || [];
+                                      comps[index] = { ...comps[index], routings: sel ? cur.filter(n => n !== r.name) : [...cur, r.name] };
+                                      setFormData({ ...formData, components: comps });
+                                    }} className={`px-1.5 py-0.5 text-[10px] rounded-sm border transition-all ${sel ? 'bg-[#1E429F] text-white border-[#1E429F]' : 'bg-white text-[#6B7280] border-[#D1D5DB] hover:border-[#1E429F]'}`} data-testid={`comp-${index}-routing-${r.name}`}>
+                                      {r.name}
+                                    </button>
+                                  );
+                                })}
+                                {(comp.routings || []).length === 0 && <span className="text-[10px] text-[#9CA3AF] italic">none</span>}
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -748,6 +721,7 @@ export default function BOMPage() {
                           <th className="text-left py-2 px-2">Description</th>
                           <th className="text-right py-2 px-2">QTY</th>
                           <th className="text-left py-2 px-2">UOM</th>
+                          <th className="text-left py-2 px-2">Routings</th>
                           <th className="text-right py-2 px-2">Unit Cost</th>
                           <th className="text-right py-2 px-3">Extended Cost</th>
                         </tr>
@@ -776,6 +750,7 @@ export default function BOMPage() {
                             <td className="py-2 px-2 text-[#374151]">{row.item?.name || '-'}{row.is_alternate ? ' (alt)' : ''}</td>
                             <td className="py-2 px-2 text-right mono font-medium">{row.quantity}</td>
                             <td className="py-2 px-2 text-[#6B7280]">{row.item?.unit_of_measure || '-'}</td>
+                            <td className="py-2 px-2">{(row.routings || []).length > 0 ? <span className="text-xs text-[#1E429F] font-medium">{row.routings.join(', ')}</span> : <span className="text-xs text-[#9CA3AF]">-</span>}</td>
                             <td className="py-2 px-2 text-right mono">{formatCurrency(row.unit_cost)}</td>
                             <td className="py-2 px-3 text-right mono font-medium">{formatCurrency(row.extended_cost)}</td>
                           </tr>

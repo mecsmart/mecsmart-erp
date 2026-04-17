@@ -157,13 +157,7 @@ class BOMComponentCreate(BaseModel):
     is_alternate: bool = False
     alternate_for: Optional[str] = None
     position: Optional[int] = None
-
-class BOMOperationCreate(BaseModel):
-    sequence: int
-    operation_name: str  # Name of routing/operation (e.g., "LC Cutting")
-    description: Optional[str] = ""
-    setup_time_minutes: int = 0
-    run_time_minutes: int = 0
+    routings: Optional[List[str]] = []  # Operation names: ["LC Cutting", "Bending"]
 
 class BOMCreate(BaseModel):
     parent_item_id: str
@@ -174,7 +168,7 @@ class BOMCreate(BaseModel):
     expiry_date: Optional[datetime] = None
     status: str = "draft"  # draft, active, obsolete
     components: List[BOMComponentCreate] = []
-    operations: Optional[List[BOMOperationCreate]] = []  # Operations defined at BOM level
+    parent_routings: Optional[List[str]] = []  # Routings for the parent/FG item itself: ["Assembly"]
 
 class BOMUpdate(BaseModel):
     name: Optional[str] = None
@@ -184,7 +178,7 @@ class BOMUpdate(BaseModel):
     expiry_date: Optional[datetime] = None
     status: Optional[str] = None
     components: Optional[List[BOMComponentCreate]] = None
-    operations: Optional[List[BOMOperationCreate]] = None
+    parent_routings: Optional[List[str]] = None
 
 class ProductionOrderCreate(BaseModel):
     bom_id: str
@@ -920,7 +914,7 @@ async def create_bom(bom_data: BOMCreate, request: Request):
         "expiry_date": bom_data.expiry_date,
         "status": bom_data.status,
         "components": [c.model_dump() for c in bom_data.components],
-        "operations": [op.model_dump() for op in (bom_data.operations or [])],
+        "parent_routings": bom_data.parent_routings or [],
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -937,8 +931,10 @@ async def update_bom(bom_id: str, bom_data: BOMUpdate, request: Request):
     update_data = {}
     for k, v in bom_data.model_dump().items():
         if v is not None:
-            if k in ["components", "operations"]:
+            if k == "components":
                 update_data[k] = [c.model_dump() if hasattr(c, 'model_dump') else c for c in v]
+            elif k == "parent_routings":
+                update_data[k] = v
             else:
                 update_data[k] = v
     
@@ -3135,14 +3131,31 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
         count = await db.work_orders.count_documents({})
         wo_number = f"MO-{str(count + 1).zfill(6)}"
         
-        # Create operation statuses from BOM operations (not routing)
+        # Create operation statuses from BOM routings
         operations_status = []
-        item_bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
-        bom_ops = item_bom.get("operations", []) if item_bom else []
-        for op in bom_ops:
+        # Find routings for this item:
+        # 1) If this is the main/parent item, use bom.parent_routings
+        # 2) If this is a child, look for routings in parent's BOM component entry
+        item_routings_list = []
+        if is_main:
+            item_bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
+            item_routings_list = item_bom.get("parent_routings", []) if item_bom else []
+        else:
+            # Find the parent BOM that contains this child item as a component
+            parent_bom = await db.boms.find_one({
+                "components.item_id": item_id,
+                "status": "active"
+            }, {"_id": 0})
+            if parent_bom:
+                for comp in parent_bom.get("components", []):
+                    if comp.get("item_id") == item_id:
+                        item_routings_list = comp.get("routings", [])
+                        break
+        
+        for seq, op_name in enumerate(item_routings_list, 1):
             operations_status.append({
-                "sequence": op.get("sequence"),
-                "operation_name": op.get("operation_name"),
+                "sequence": seq * 10,
+                "operation_name": op_name,
                 "work_center_id": "",  # Work centre decided at Job Card runtime
                 "work_center_name": "",
                 "is_job_work": False,
