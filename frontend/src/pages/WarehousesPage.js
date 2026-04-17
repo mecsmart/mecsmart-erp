@@ -210,6 +210,8 @@ export default function WarehousesPage() {
 
   const handleGRNSubmit = async (e) => {
     e.preventDefault();
+    if (!grnForm.supplier_invoice_no.trim()) { alert('Supplier Invoice No. is mandatory'); return; }
+    if (!grnForm.supplier_invoice_date) { alert('Supplier Invoice Date is mandatory'); return; }
     try {
       const payload = {
         po_id: selectedPO.id,

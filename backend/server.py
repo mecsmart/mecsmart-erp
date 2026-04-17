@@ -3790,6 +3790,9 @@ async def create_sc_for_wo(wo_id: str, request: Request):
     
     # Create SC order
     sc_count = await db.subcontract_orders.count_documents({})
+    # Calculate BOM rollup cost for the FG/SA item
+    bom_rollup_cost_val = (sum(l.get("quantity", 0) * l.get("rate", 0) for l in sc_lines) / qty) if qty and sc_lines else (item.get("unit_cost", 0) if item else 0)
+    
     sc_doc = {
         "id": str(uuid.uuid4()),
         "order_number": f"JW-{str(sc_count + 1).zfill(6)}",
@@ -3800,7 +3803,7 @@ async def create_sc_for_wo(wo_id: str, request: Request):
         "fg_item_id": item_id,
         "fg_item_name": f"{item.get('part_number', '')} - {item.get('name', '')}" if item else "",
         "fg_quantity": qty,
-        "job_work_parts": [{"item_id": item_id, "quantity": qty, "charges": 0, "received_quantity": 0}],
+        "job_work_parts": [{"item_id": item_id, "quantity": qty, "charges": 0, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost_val, 2)}],
         "lines": sc_lines,
         "status": "in_progress",
         "notes": f"SC for MO {wo.get('wo_number')} ({sc_type.replace('_', ' ')})",
@@ -4289,9 +4292,29 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             
             # For operation outsourcing: SC lines = Part/SA item only (NOT RM)
             wo_item = await db.items.find_one({"id": wo.get("item_id")}, {"_id": 0})
-            wo_item_rate = wo_item.get("unit_cost", 0) if wo_item else 0
             
-            sc_part = {"item_id": wo.get("item_id"), "quantity": mo_qty, "charges": op_data.outsource_charges or 0, "received_quantity": 0}
+            # Calculate BOM rollup cost for this Part/SA
+            bom_rollup_cost = wo_item.get("unit_cost", 0) if wo_item else 0
+            item_bom = await db.boms.find_one({"parent_item_id": wo.get("item_id"), "status": "active"}, {"_id": 0})
+            if item_bom:
+                material_cost = 0
+                for comp in item_bom.get("components", []):
+                    comp_item = await db.items.find_one({"id": comp.get("item_id")}, {"_id": 0})
+                    if comp_item:
+                        material_cost += comp.get("quantity", 0) * comp_item.get("unit_cost", 0)
+                # Add process costs from latest completed WO
+                process_cost = 0
+                latest_wo = await db.work_orders.find_one(
+                    {"item_id": wo.get("item_id"), "status": "completed", "operations_status": {"$exists": True}},
+                    {"_id": 0, "operations_status": 1},
+                    sort=[("actual_end", -1)]
+                )
+                if latest_wo:
+                    for op in latest_wo.get("operations_status", []):
+                        process_cost += op.get("process_cost_per_unit", 0)
+                bom_rollup_cost = material_cost + process_cost
+            
+            sc_part = {"item_id": wo.get("item_id"), "quantity": mo_qty, "charges": op_data.outsource_charges or 0, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost, 2)}
             sc_lines = []  # No RM lines for operation outsourcing — only the part goes and comes back
             
             # Check for existing SC order for same supplier on same WO (consolidate)

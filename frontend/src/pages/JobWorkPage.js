@@ -184,6 +184,8 @@ export default function JobWorkPage() {
 
   // Submit JW GRN — creates GRN directly from JW number
   const handleJWGRNSubmit = async () => {
+    if (!jwGrnInvoiceNo.trim()) { alert('Supplier Invoice No. is mandatory'); return; }
+    if (!jwGrnInvoiceDate) { alert('Invoice Date is mandatory'); return; }
     if (jwGrnLines.every(l => !l.received_quantity)) { alert('Enter received quantities'); return; }
     try {
       const { data } = await api.post('/api/job-work/receive-grn', {
@@ -498,10 +500,10 @@ export default function JobWorkPage() {
                                 <button onClick={() => handleCreatePOFromSC(o)} className="btn-primary text-xs px-2 py-1 bg-[#723B13] hover:bg-[#5A2E0F]" data-testid={`create-po-${o.id}`}><FileText className="w-3 h-3 inline mr-1" />Create PO</button>
                               )}
                               {o.po_created && o.po_number && (
-                                <span className="text-[10px] text-[#03543F] bg-[#DEF7EC] px-2 py-1 rounded">{o.po_number}</span>
+                                <span className="text-[10px] text-[#03543F] bg-[#DEF7EC] px-2 py-1 rounded">PO: {o.po_number}</span>
                               )}
                               {o.subcontract_type === 'without_material' && o.status === 'in_progress' && o.po_created && (
-                                <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded">Receive via GRN</span>
+                                <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium">Receive via GRN ({o.po_number})</span>
                               )}
                               {o.status === 'completed' && (
                                 <span className="text-[10px] text-[#03543F] bg-[#DEF7EC] px-2 py-1 rounded font-medium">Completed</span>
@@ -855,25 +857,25 @@ export default function JobWorkPage() {
           <div className="space-y-4 mt-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier Invoice No.</label>
-                <input type="text" value={jwGrnInvoiceNo} onChange={e => setJwGrnInvoiceNo(e.target.value)} className="input-field" placeholder="Invoice number" data-testid="jw-grn-invoice-no" />
+                <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier Invoice No. *</label>
+                <input type="text" value={jwGrnInvoiceNo} onChange={e => setJwGrnInvoiceNo(e.target.value)} className="input-field" placeholder="Invoice number (required)" required data-testid="jw-grn-invoice-no" />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-[#111827] mb-1">Invoice Date</label>
-                <input type="date" value={jwGrnInvoiceDate} onChange={e => setJwGrnInvoiceDate(e.target.value)} className="input-field" data-testid="jw-grn-invoice-date" />
+                <label className="block text-sm font-semibold text-[#111827] mb-1">Invoice Date *</label>
+                <input type="date" value={jwGrnInvoiceDate} onChange={e => setJwGrnInvoiceDate(e.target.value)} className="input-field" required data-testid="jw-grn-invoice-date" />
               </div>
             </div>
             <div>
               <label className="block text-sm font-semibold text-[#111827] mb-2">Parts to Receive</label>
               <table className="w-full data-table text-sm">
-                <thead><tr><th>Part No.</th><th>Name</th><th className="text-right">Ordered</th><th className="text-right">Process Cost</th><th className="text-right">Receive Qty</th></tr></thead>
+                <thead><tr><th>Part No.</th><th>Name</th><th className="text-right">Ordered</th><th className="text-right">Process Cost/Unit</th><th className="text-right">Receive Qty</th></tr></thead>
                 <tbody>
                   {jwGrnLines.map((l, i) => (
                     <tr key={i}>
                       <td className="mono font-medium">{l.part_number}</td>
                       <td>{l.name}</td>
                       <td className="text-right mono">{l.quantity}</td>
-                      <td className="text-right mono">{l.charges ? `₹${l.charges.toFixed(2)}` : '-'}</td>
+                      <td className="text-right"><input type="number" min="0" step="0.01" value={l.charges} onChange={e => { const lines = [...jwGrnLines]; lines[i] = { ...lines[i], charges: parseFloat(e.target.value) || 0 }; setJwGrnLines(lines); }} className="input-field mono w-24 text-right text-xs" data-testid={`jw-grn-price-${i}`} /></td>
                       <td className="text-right"><input type="number" min="0" max={l.quantity} value={l.received_quantity} onChange={e => { const lines = [...jwGrnLines]; lines[i] = { ...lines[i], received_quantity: Math.min(parseInt(e.target.value) || 0, l.quantity) }; setJwGrnLines(lines); }} className="input-field mono w-20 text-right text-xs" data-testid={`jw-grn-qty-${i}`} /></td>
                     </tr>
                   ))}
@@ -882,7 +884,7 @@ export default function JobWorkPage() {
             </div>
             <div className="flex justify-end space-x-3 pt-3 border-t">
               <button onClick={() => setJwGrnDialog(false)} className="btn-secondary">Cancel</button>
-              <button onClick={handleJWGRNSubmit} className="btn-primary" data-testid="jw-grn-submit">Create GRN</button>
+              <button onClick={handleJWGRNSubmit} className="btn-primary" disabled={!jwGrnInvoiceNo.trim() || !jwGrnInvoiceDate} data-testid="jw-grn-submit">Create GRN</button>
             </div>
           </div>
         </DialogContent>
