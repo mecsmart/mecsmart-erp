@@ -6,7 +6,7 @@
 - Auth: Custom JWT with roles
 
 ## Routing at BOM Level (Feb 2026)
-- **Routing Screen**: Operation type names (LC Cutting, Welding, Assembly, Bending, etc.)
+- **Routing Screen**: Simple operation type names (LC Cutting, Welding, Assembly, etc.)
 - **BOM Level**: 
   - `parent_routings`: Operations for the FG/SA item itself
   - `components[].routings`: Operations per component (SA, Parts)
@@ -14,19 +14,19 @@
   - Explosion endpoint includes routings per component
 - **MO Creation**: 
   - No routing_id required (removed from dialog)
-  - Operations auto-pulled from BOM parent_routings and component routings
+  - Operations auto-pulled from BOM
 - **Job Card**: Work centre selected at runtime per operation
 
 ## Stock Rules
 - DC: Per-item stock deduction
-- SC Receipt: Only job_work_parts get stock (not RM)
+- SC Receipt: Only job_work_parts get stock
 - GRN: No double-count on MO completion
 - WIP Stock: Child MO stock of active parents = reserved
 
 ## MO Process
-- "SC Done" label for in_progress SC MOs
+- "SC Done" for in_progress SC MOs
 - No Sub-Contract in Create MO dialog
-- SC auto-creates on confirm, smart RM resolution
+- SC auto-creates on confirm
 
 ## Backlog
 - [ ] P1: GST Phase 2
