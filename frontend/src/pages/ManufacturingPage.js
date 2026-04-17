@@ -297,6 +297,10 @@ export default function ManufacturingPage() {
       if (mode === 'start') {
         if (opForm.is_outsource) {
           if (!opForm.outsource_supplier_id) { alert('Select a supplier for outsourcing'); return; }
+          // Confirmation dialog for outsourcing
+          const supplierName = suppliers.find(s => s.id === opForm.outsource_supplier_id)?.name || 'selected supplier';
+          const opName = jobCardWO?.operations_status?.find(o => o.sequence === opDialog.sequence)?.operation_name || '';
+          if (!window.confirm(`Confirm outsource operation "${opName}" to ${supplierName}?\n\nThis will create/update a Job Work order for this supplier.`)) return;
           payload = { status: 'in_progress', operator: suppliers.find(s => s.id === opForm.outsource_supplier_id)?.name || 'Outsourced', quantity_completed: opForm.quantity, notes: opForm.notes, is_outsource: true, outsource_supplier_id: opForm.outsource_supplier_id, outsource_charges: opForm.outsource_charges, work_center_id: opForm.work_center_id || '' };
         } else {
           if (!opForm.operator.trim()) { alert('Operator name is required'); return; }

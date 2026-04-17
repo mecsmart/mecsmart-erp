@@ -666,7 +666,9 @@ export default function BOMPage() {
                     isExpanded,
                     is_alternate: node.is_alternate,
                     routings: node.routings || [],
-                    child_bom_id: node.child_bom_id || null
+                    child_bom_id: node.child_bom_id || null,
+                    process_cost_per_unit: node.process_cost_per_unit || 0,
+                    total_cost_per_unit: node.total_cost_per_unit || (node.unit_cost || 0)
                   });
                   
                   if (hasChildren && isExpanded) {
@@ -733,7 +735,9 @@ export default function BOMPage() {
                           <th className="text-right py-2 px-2">QTY</th>
                           <th className="text-left py-2 px-2">UOM</th>
                           <th className="text-left py-2 px-2">Routings</th>
-                          <th className="text-right py-2 px-2">Unit Cost</th>
+                          <th className="text-right py-2 px-2">Material Cost</th>
+                          <th className="text-right py-2 px-2">Process Cost</th>
+                          <th className="text-right py-2 px-2">Total/Unit</th>
                           <th className="text-right py-2 px-3">Extended Cost</th>
                         </tr>
                       </thead>
@@ -770,6 +774,8 @@ export default function BOMPage() {
                             <td className="py-2 px-2 text-[#6B7280]">{row.item?.unit_of_measure || '-'}</td>
                             <td className="py-2 px-2">{(row.routings || []).length > 0 ? <span className="text-xs text-[#1E429F] font-medium">{row.routings.join(', ')}</span> : <span className="text-xs text-[#9CA3AF]">-</span>}</td>
                             <td className="py-2 px-2 text-right mono">{formatCurrency(row.unit_cost)}</td>
+                            <td className="py-2 px-2 text-right mono">{row.process_cost_per_unit > 0 ? <span className="text-[#723B13]">{formatCurrency(row.process_cost_per_unit)}</span> : <span className="text-[#9CA3AF]">-</span>}</td>
+                            <td className="py-2 px-2 text-right mono font-semibold">{formatCurrency(row.total_cost_per_unit)}</td>
                             <td className="py-2 px-3 text-right mono font-medium">{formatCurrency(row.extended_cost)}</td>
                           </tr>
                         ))}
