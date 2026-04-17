@@ -4,22 +4,26 @@
 - Backend: FastAPI + MongoDB (Motor), JWT httpOnly cookies, /api prefix
 - Frontend: React 19 + Shadcn/UI + Tailwind CSS
 
-## Job Card Process (Feb 2026)
-- **Inhouse**: Process cost/unit field → saved on operation → rolls up to BOM explosion
-- **BOM Explosion**: Shows Material Cost, Process Cost, Total/Unit, Extended Cost columns
-- **Work Centre**: Dropdown selector per operation at runtime
-- **Outsource**: Confirmation dialog before outsourcing. SC shows only Part/SA (no RM). Same-supplier consolidation into single SC.
-- **SC Type**: Operation outsource creates without_material SC with job_work_parts only, lines=[]
+## Phase 1 Complete (Feb 2026)
+### SC with RM Flow
+- SC → Send DC (deducts RM stock) → Create PO → Receive via GRN (adds FG stock, completes SC+MO)
+### SC without RM Flow
+- SC → Create PO → Receive via GRN
+### Job Card Outsource Flow
+- Outsource operation → Consolidated SC (Part/SA only, no RM) → Send DC (skip_stock_deduct) → Create PO → GRN
+### Inhouse Process
+- Select WC → Operator → Process Cost/Unit → Complete → Auto-complete MO if last op
 
 ## BOM
-- Routings at BOM level (parent_routings + components[].routings)
-- Export/Import with routing columns
-- Child BOM edit via "Edit BOM" button on SA rows
+- Routings at BOM level, Process Cost + Material Cost + Total/Unit in explosion
+- Export/Import with routings, Child BOM edit
 
 ## Stock Rules
-- DC: Per-item deduction, SC Receipt: job_work_parts only, WIP tracking
+- DC: Per-item deduction (skipped for Job Card outsource)
+- SC Receipt via GRN (not direct receipt)
+- WIP Stock tracking
 
 ## Backlog
 - [ ] P1: GST Phase 2
 - [ ] P2: Backend refactoring
-- [ ] P3: GST Phase 3, Barcode/QR, Gantt, Windows wrapper
+- [ ] P3: DC print format for Job Card outsource (HSN, Charges/Unit, RM Cost/Unit, Total)
