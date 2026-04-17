@@ -6,27 +6,27 @@
 - Auth: Custom JWT with roles
 
 ## Routing Redesign (Feb 2026)
-- **Routing Screen**: Simple operation type definitions (name, description, status). E.g., "LC Cutting", "Welding", "Assembly"
-- **BOM Level**: Operations defined per BOM with sequence, operation_name, setup/run times
-- **MO Creation**: Operations pulled from BOM's operations array (not from routing)
-- **Job Card**: Work centre selected at runtime when starting each operation
+- **Routing Screen**: Simple operation type names (LC Cutting, Welding, Assembly, Bending, etc.)
+- **BOM Level**: Each BOM has:
+  - `parent_routings`: Operations for the FG/SA item itself (e.g., ["Assembly"])
+  - `components[].routings`: Operations per component (e.g., PT-1: ["LC Cutting", "Bending"])
+  - RM items: no routing (empty array, shown as dash)
+- **MO Creation**: Operations pulled from BOM:
+  - Main MO: from bom.parent_routings
+  - Child MOs: from parent_bom.components[].routings
+- **Job Card**: Work centre selected at runtime per operation
 
 ## Stock Accounting Rules
-- DC Creation: Each item deducted from ITS OWN current_stock
-- with_material SC Receipt: ONLY adds stock for job_work_parts items
-- without_material SC via GRN: Stock added at GRN line level only
-- WIP Stock: Completed child MOs of active parents = WIP (not available for new MOs)
+- DC Creation: Per-item current_stock deduction
+- with_material SC Receipt: Only job_work_parts items get stock
+- without_material via GRN: No double-count on MO completion
+- WIP Stock: Completed child MOs of active parents = reserved
 
 ## MO Process Rules
-- SC button hidden when MO started inhouse
-- "SC Done" label (muted gray) shown for in_progress SC MOs
-- SC dialog auto-creates SC order, shows JW order details
-- No Sub-Contract option in Create MO dialog (all SC at MO level)
-
-## Key Features
-- Multi-Level BOM, MRP, Quality, MO Reserve/Unreserve
-- SC Consolidation, DC draft flow, PO from SC
-- Sales Orders, Purchase Orders/Invoices, GRN, Inventory, Stores
+- "SC Done" label for in_progress SC MOs
+- No Sub-Contract in Create MO dialog
+- SC dialog auto-creates SC order
+- Smart RM Resolution for SA outsourcing
 
 ## Backlog
 - [ ] P1: GST Phase 2 - invoice generation + tax breakup
