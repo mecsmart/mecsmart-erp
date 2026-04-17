@@ -76,12 +76,9 @@ export default function ManufacturingPage() {
   });
   
   const [routingForm, setRoutingForm] = useState({
-    item_id: '',
     name: '',
     description: '',
-    revision: 'A',
     status: 'active',
-    operations: [],
   });
   
   const [workOrderForm, setWorkOrderForm] = useState({
@@ -461,30 +458,16 @@ export default function ManufacturingPage() {
       item_id: '',
       name: '',
       description: '',
-      revision: 'A',
       status: 'active',
-      operations: [],
     });
   };
 
   const handleEditRouting = (routing) => {
     setEditingRouting(routing);
     setRoutingForm({
-      item_id: routing.item_id,
       name: routing.name,
       description: routing.description || '',
-      revision: routing.revision || 'A',
       status: routing.status || 'active',
-      operations: routing.operations?.map(op => ({
-        sequence: op.sequence,
-        work_center_id: op.work_center_id,
-        operation_name: op.operation_name,
-        description: op.description || '',
-        setup_time_minutes: op.setup_time_minutes || 0,
-        run_time_minutes: op.run_time_minutes || 0,
-        is_job_work: op.is_job_work || false,
-        job_work_supplier_id: op.job_work_supplier_id || '',
-      })) || [],
     });
     setIsRoutingDialogOpen(true);
   };
@@ -912,52 +895,6 @@ export default function ManufacturingPage() {
                       </div>
                     </div>
 
-                    {/* Sub-Contract Option */}
-                    <div className="border rounded-sm p-3 bg-[#F9FAFB]">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={workOrderForm.is_subcontract} onChange={e => setWorkOrderForm({...workOrderForm, is_subcontract: e.target.checked, subcontract_supplier_id: '', subcontract_type: 'with_material'})} className="rounded" data-testid="wo-subcontract-check" />
-                        <span className="text-sm font-semibold text-[#111827]">Sub-Contract (Send to external supplier)</span>
-                      </label>
-                      {workOrderForm.is_subcontract && (
-                        <div className="mt-3 space-y-3">
-                          {/* SC Type Radio */}
-                          <div>
-                            <label className="block text-sm font-semibold text-[#111827] mb-2">Sub-Contract Type *</label>
-                            <div className="flex gap-3">
-                              <label className={`flex-1 flex items-start gap-2 p-2.5 border-2 rounded-sm cursor-pointer transition-all ${workOrderForm.subcontract_type === 'with_material' ? 'border-[#1D3557] bg-[#E1EFFE]/30' : 'border-[#D1D5DB]'}`} data-testid="sc-type-with-material">
-                                <input type="radio" name="sc_type" value="with_material" checked={workOrderForm.subcontract_type === 'with_material'} onChange={() => setWorkOrderForm({...workOrderForm, subcontract_type: 'with_material'})} className="mt-0.5" />
-                                <div>
-                                  <span className="text-sm font-semibold text-[#111827]">With Material</span>
-                                  <p className="text-[11px] text-[#6B7280] mt-0.5">Your RM consumed from stock and sent to vendor via DC</p>
-                                </div>
-                              </label>
-                              <label className={`flex-1 flex items-start gap-2 p-2.5 border-2 rounded-sm cursor-pointer transition-all ${workOrderForm.subcontract_type === 'without_material' ? 'border-[#1D3557] bg-[#E1EFFE]/30' : 'border-[#D1D5DB]'}`} data-testid="sc-type-without-material">
-                                <input type="radio" name="sc_type" value="without_material" checked={workOrderForm.subcontract_type === 'without_material'} onChange={() => setWorkOrderForm({...workOrderForm, subcontract_type: 'without_material'})} className="mt-0.5" />
-                                <div>
-                                  <span className="text-sm font-semibold text-[#111827]">Without Material</span>
-                                  <p className="text-[11px] text-[#6B7280] mt-0.5">Vendor sources RM themselves. No stock consumed, no DC</p>
-                                </div>
-                              </label>
-                            </div>
-                          </div>
-                          <div>
-                            <label className="block text-sm font-semibold text-[#111827] mb-1">Subcontractor *</label>
-                            <Select value={workOrderForm.subcontract_supplier_id} onValueChange={v => setWorkOrderForm({...workOrderForm, subcontract_supplier_id: v})}>
-                              <SelectTrigger data-testid="wo-subcontract-supplier"><SelectValue placeholder="Select supplier" /></SelectTrigger>
-                              <SelectContent>
-                                {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <p className="text-xs text-[#723B13] bg-[#FDF6B2]/50 p-2 rounded-sm">
-                            {workOrderForm.subcontract_type === 'with_material'
-                              ? 'BOM materials will be consumed from stock and auto-sent via Delivery Challan when MO starts.'
-                              : 'No materials consumed from your stock. Vendor will source and manufacture. Only finished item received back.'}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
                     <div>
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Notes</label>
                       <textarea
@@ -1086,7 +1023,7 @@ export default function ManufacturingPage() {
                               )}
                               {canEdit && wo.status === 'pending' && !wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')} className="btn-secondary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Inhouse Start</button>}
                               {canEdit && wo.status === 'pending' && wo.is_subcontract && <button onClick={() => handleStartSC(wo.id)} className="btn-primary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Start SC</button>}
-                              {canEdit && wo.status === 'in_progress' && wo.is_subcontract && <button onClick={() => handleStartSC(wo.id)} className="btn-primary text-xs px-2 py-1" data-testid={`retry-sc-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Create SC</button>}
+                              {canEdit && wo.status === 'in_progress' && wo.is_subcontract && <span className="text-xs px-2 py-1 rounded bg-[#E5E7EB] text-[#6B7280] font-medium" data-testid={`sc-done-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />SC Done</span>}
                               {canEdit && wo.status === 'in_progress' && !wo.is_subcontract && ops.length === 0 && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'completed')} className="btn-secondary text-xs px-2 py-1" data-testid={`complete-wo-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />Complete</button>}
                               {['in_progress','pending'].includes(wo.status) && ops.length > 0 && !wo.is_subcontract && <button onClick={() => openJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`jobcard-wo-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Job Card</button>}
                               {canShowSC && wo.status !== 'in_progress' && <button onClick={() => handleMarkSubcontract(wo)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`subcontract-wo-${wo.id}`}><Truck className="w-3 h-3 inline mr-0.5" />SC</button>}
@@ -1132,179 +1069,44 @@ export default function ManufacturingPage() {
           </div>
         </TabsContent>
 
-        {/* Routings Tab */}
+        {/* Routings Tab — Simplified: just operation type names */}
         <TabsContent value="routings" className="mt-4">
           <div className="flex items-center justify-between mb-4">
-            <div className="relative w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-              <input type="text" value={moSearch} onChange={(e) => setMoSearch(e.target.value)} placeholder="Search routings..." className="input-field pl-9 text-sm" data-testid="routing-search-input" />
-            </div>
+            <p className="text-sm text-[#6B7280]">Define standard operation types. Operations are assigned to items in BOM.</p>
             {canEdit && (
               <Dialog open={isRoutingDialogOpen} onOpenChange={setIsRoutingDialogOpen}>
                 <DialogTrigger asChild>
-                  <button className="btn-primary flex items-center space-x-2" data-testid="create-routing-btn">
+                  <button className="btn-primary flex items-center space-x-2" data-testid="create-routing-btn" onClick={() => { resetRoutingForm(); setEditingRouting(null); }}>
                     <Plus className="w-4 h-4" />
-                    <span>Create Routing</span>
+                    <span>Add Operation Type</span>
                   </button>
                 </DialogTrigger>
-                <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                <DialogContent className="max-w-md">
                   <DialogHeader>
-                    <DialogTitle className="font-[Chivo]">{editingRouting ? 'Edit Routing' : 'Create Routing'}</DialogTitle>
+                    <DialogTitle className="font-[Chivo]">{editingRouting ? 'Edit Operation Type' : 'Add Operation Type'}</DialogTitle>
                   </DialogHeader>
                   <form onSubmit={handleRoutingSubmit} className="space-y-4 mt-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-semibold text-[#111827] mb-1">Item *</label>
-                        <Select value={routingForm.item_id} onValueChange={(v) => setRoutingForm({ ...routingForm, item_id: v })}>
-                          <SelectTrigger data-testid="routing-item-select">
-                            <SelectValue placeholder="Select item" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {items.filter(i => ['sub_assembly', 'finished_good', 'component'].includes(i.category)).map((item) => (
-                              <SelectItem key={item.id} value={item.id}>
-                                {item.part_number} - {item.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-[#111827] mb-1">Name *</label>
-                        <input
-                          type="text"
-                          value={routingForm.name}
-                          onChange={(e) => setRoutingForm({ ...routingForm, name: e.target.value })}
-                          className="input-field"
-                          placeholder="Product Assembly Routing"
-                          required
-                          data-testid="routing-name-input"
-                        />
-                      </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Operation Name *</label>
+                      <input type="text" value={routingForm.name} onChange={(e) => setRoutingForm({ ...routingForm, name: e.target.value })} className="input-field" placeholder="e.g., LC Cutting, Welding, Assembly" required data-testid="routing-name-input" />
                     </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-semibold text-[#111827] mb-1">Revision</label>
-                        <input
-                          type="text"
-                          value={routingForm.revision}
-                          onChange={(e) => setRoutingForm({ ...routingForm, revision: e.target.value })}
-                          className="input-field mono"
-                          placeholder="A"
-                          data-testid="routing-revision-input"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-[#111827] mb-1">Status</label>
-                        <Select value={routingForm.status} onValueChange={(v) => setRoutingForm({ ...routingForm, status: v })}>
-                          <SelectTrigger data-testid="routing-status-select">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="active">Active</SelectItem>
-                            <SelectItem value="draft">Draft</SelectItem>
-                            <SelectItem value="obsolete">Obsolete</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Description</label>
+                      <input type="text" value={routingForm.description} onChange={(e) => setRoutingForm({ ...routingForm, description: e.target.value })} className="input-field" placeholder="Optional description" />
                     </div>
-
-                    {/* Operations */}
-                    <div className="border-t border-[#E5E7EB] pt-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <label className="text-sm font-semibold text-[#111827]">Operations</label>
-                        <button
-                          type="button"
-                          onClick={addOperation}
-                          className="btn-secondary text-xs flex items-center space-x-1"
-                          data-testid="add-operation-btn"
-                        >
-                          <Plus className="w-3 h-3" />
-                          <span>Add Operation</span>
-                        </button>
-                      </div>
-
-                      {routingForm.operations.length === 0 ? (
-                        <div className="text-center py-6 text-[#4B5563] bg-[#F3F4F6] rounded-sm">
-                          <Settings2 className="w-8 h-8 mx-auto mb-2 text-[#9CA3AF]" />
-                          <p className="text-sm">No operations added yet</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {routingForm.operations.map((op, index) => (
-                            <div key={index} className="p-3 bg-[#F3F4F6] rounded-sm space-y-2">
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm font-medium">Operation {op.sequence}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => removeOperation(index)}
-                                  className="text-[#9B1C1C] text-xs"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <Select value={op.work_center_id} onValueChange={(v) => updateOperation(index, 'work_center_id', v)}>
-                                  <SelectTrigger className="bg-white">
-                                    <SelectValue placeholder="Work Center" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {workCenters.map((wc) => (
-                                      <SelectItem key={wc.id} value={wc.id}>{wc.code} - {wc.name}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                <input
-                                  type="text"
-                                  value={op.operation_name}
-                                  onChange={(e) => updateOperation(index, 'operation_name', e.target.value)}
-                                  className="input-field bg-white"
-                                  placeholder="Operation name"
-                                />
-                              </div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={op.setup_time_minutes}
-                                  onChange={(e) => updateOperation(index, 'setup_time_minutes', parseInt(e.target.value) || 0)}
-                                  className="input-field bg-white mono"
-                                  placeholder="Setup (min)"
-                                />
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={op.run_time_minutes}
-                                  onChange={(e) => updateOperation(index, 'run_time_minutes', parseInt(e.target.value) || 0)}
-                                  className="input-field bg-white mono"
-                                  placeholder="Run time (min)"
-                                />
-                              </div>
-                              <div>
-                                <label className="flex items-center gap-2 mt-2 cursor-pointer">
-                                  <input type="checkbox" checked={op.is_job_work || false} onChange={e => updateOperation(index, 'is_job_work', e.target.checked)} className="rounded" />
-                                  <span className="text-xs font-medium text-[#723B13]">Job Work (Outsourced)</span>
-                                </label>
-                                {op.is_job_work && (
-                                  <Select value={op.job_work_supplier_id || ''} onValueChange={v => updateOperation(index, 'job_work_supplier_id', v)}>
-                                    <SelectTrigger className="mt-1 h-8 text-xs"><SelectValue placeholder="Select supplier" /></SelectTrigger>
-                                    <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}</SelectContent>
-                                  </Select>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Status</label>
+                      <Select value={routingForm.status} onValueChange={(v) => setRoutingForm({ ...routingForm, status: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="active">Active</SelectItem>
+                          <SelectItem value="inactive">Inactive</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
-
                     <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
-                      <button type="button" onClick={() => { setIsRoutingDialogOpen(false); setEditingRouting(null); }} className="btn-secondary">
-                        Cancel
-                      </button>
-                      <button type="submit" className="btn-primary" data-testid="routing-save-btn">
-                        {editingRouting ? 'Update Routing' : 'Create Routing'}
-                      </button>
+                      <button type="button" onClick={() => { setIsRoutingDialogOpen(false); setEditingRouting(null); }} className="btn-secondary">Cancel</button>
+                      <button type="submit" className="btn-primary" data-testid="routing-save-btn">{editingRouting ? 'Update' : 'Create'}</button>
                     </div>
                   </form>
                 </DialogContent>
@@ -1313,153 +1115,34 @@ export default function ManufacturingPage() {
           </div>
 
           <div className="card-flat overflow-hidden">
-            {loading ? (
-              <div className="flex items-center justify-center h-48">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div>
-              </div>
-            ) : routings.length === 0 && workOrders.length === 0 ? (
+            {routings.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]">
                 <Settings2 className="w-12 h-12 mb-2 text-[#9CA3AF]" />
-                <p>No routings found</p>
+                <p>No operation types defined yet</p>
+                <p className="text-xs text-[#9CA3AF] mt-1">Add operations like LC Cutting, Welding, Assembly, etc.</p>
               </div>
             ) : (
-              <div className="p-4 space-y-3">
-                {/* Group by parent FG MOs */}
-                {(() => {
-                  const parentMOs = workOrders.filter(wo => !wo.parent_wo_id);
-                  const getRoutingForItem = (itemId) => routings.find(r => r.item_id === itemId);
-                  const getChildMOs = (parentId) => workOrders.filter(wo => wo.parent_wo_id === parentId);
-                  const getCategoryLabel = (item) => item?.category === 'finished_good' ? 'FG' : item?.category === 'sub_assembly' ? 'SA' : 'PART';
-                  const getCategoryColor = (item) => item?.category === 'finished_good' ? '#1D3557' : item?.category === 'sub_assembly' ? '#1E429F' : '#723B13';
-
-                  const renderMORoutingRow = (wo, depth = 0) => {
-                    const item = wo.item || items.find(i => i.id === wo.item_id);
-                    const routing = getRoutingForItem(wo.item_id);
-                    const catLabel = getCategoryLabel(item);
-                    const catColor = getCategoryColor(item);
-                    const children = getChildMOs(wo.id);
-
-                    return (
-                      <React.Fragment key={wo.id}>
-                        <tr className={depth > 0 ? 'bg-[#F9FAFB]' : ''} data-testid={`routing-mo-row-${wo.id}`}>
-                          <td style={{ paddingLeft: `${12 + depth * 24}px` }}>
-                            {depth > 0 && <span className="text-[#1D3557] mr-1">└→</span>}
-                            <span className="mono font-medium text-sm">{wo.wo_number}</span>
-                            <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-semibold text-white" style={{ backgroundColor: catColor }}>{catLabel}</span>
-                          </td>
-                          <td>
-                            <span className="mono text-sm">{item?.part_number || '-'}</span>
-                            <p className="text-xs text-[#4B5563]">{item?.name || '-'}</p>
-                          </td>
-                          <td>
-                            {routing ? (
-                              <span className="font-medium text-sm">{routing.name} <span className="mono text-[#6B7280] text-xs">Rev {routing.revision}</span></span>
-                            ) : (
-                              <span className="text-sm text-[#9B1C1C] italic">No routing defined</span>
-                            )}
-                          </td>
-                          <td>
-                            {routing?.operations?.length > 0 ? (
-                              <div className="space-y-0.5">
-                                {routing.operations.map((op, oi) => (
-                                  <div key={oi} className="text-xs flex items-center gap-1">
-                                    <span className="mono text-[#6B7280]">{op.sequence}.</span>
-                                    <span>{op.operation_name}</span>
-                                    {op.is_job_work && <span className="text-[9px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">JW</span>}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="text-xs text-[#9CA3AF]">{routing ? 'No operations' : '-'}</span>
-                            )}
-                          </td>
-                          <td>
-                            <div className="flex items-center gap-1">
-                              {routing ? (
-                                <>
-                                  <button onClick={() => handleEditRouting(routing)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit Routing">
-                                    <Edit2 className="w-4 h-4" />
-                                  </button>
-                                </>
-                              ) : canEdit ? (
-                                <button onClick={() => { resetRoutingForm(); setRoutingForm(f => ({...f, item_id: wo.item_id})); setIsRoutingDialogOpen(true); }} className="btn-primary text-xs px-2 py-1" data-testid={`create-routing-for-${wo.id}`}>
-                                  <Plus className="w-3 h-3 inline mr-1" />Define
-                                </button>
-                              ) : null}
-                            </div>
-                          </td>
-                        </tr>
-                        {children.map(child => renderMORoutingRow(child, depth + 1))}
-                      </React.Fragment>
-                    );
-                  };
-
-                  if (parentMOs.length === 0) {
-                    // Fallback: show routings by category if no MOs exist
-                    return [
-                      { key: 'finished_good', label: 'Finished Goods (FG)', color: '#1D3557' },
-                      { key: 'sub_assembly', label: 'Sub-Assemblies (SA)', color: '#1E429F' },
-                      { key: 'component', label: 'Parts / Components', color: '#723B13' },
-                    ].map(group => {
-                      const groupRoutings = routings.filter(r => r.item?.category === group.key).filter(r => {
-                        if (!moSearch.trim()) return true;
-                        const q = moSearch.toLowerCase();
-                        return r.name?.toLowerCase().includes(q) || r.item?.part_number?.toLowerCase().includes(q) || r.item?.name?.toLowerCase().includes(q);
-                      });
-                      if (groupRoutings.length === 0) return null;
-                      return (
-                        <details key={group.key} open className="border rounded-sm overflow-hidden">
-                          <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none" style={{ borderLeft: `4px solid ${group.color}` }}>
-                            <ChevronRight className="w-4 h-4 text-[#4B5563]" />
-                            <span className="font-semibold text-sm" style={{ color: group.color }}>{group.label}</span>
-                            <span className="text-xs text-[#6B7280] ml-auto">{groupRoutings.length} routing(s)</span>
-                          </summary>
-                          <table className="w-full data-table">
-                            <thead><tr><th>Item</th><th>Routing Name</th><th>Rev</th><th>Operations</th><th>Actions</th></tr></thead>
-                            <tbody>
-                              {groupRoutings.map(routing => (
-                                <tr key={routing.id}>
-                                  <td><span className="mono text-sm">{routing.item?.part_number}</span> <span className="text-xs text-[#4B5563]">{routing.item?.name}</span></td>
-                                  <td className="font-medium">{routing.name}</td>
-                                  <td className="mono">{routing.revision}</td>
-                                  <td>{routing.operations?.map((op,i) => <div key={i} className="text-xs"><span className="mono text-[#6B7280]">{op.sequence}.</span> {op.operation_name} {op.is_job_work && <span className="text-[9px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">JW</span>}</div>)}</td>
-                                  <td>{canEdit && <button onClick={() => handleEditRouting(routing)} className="p-1 text-[#4B5563] hover:text-[#1D3557]"><Edit2 className="w-4 h-4" /></button>}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </details>
-                      );
-                    });
-                  }
-
-                  return parentMOs.map(parentMO => {
-                    const parentItem = parentMO.item || items.find(i => i.id === parentMO.item_id);
-                    const children = getChildMOs(parentMO.id);
-                    const totalNodes = 1 + children.length + children.reduce((s, c) => s + getChildMOs(c.id).length, 0);
-                    return (
-                      <details key={parentMO.id} open className="border rounded-sm overflow-hidden">
-                        <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none" style={{ borderLeft: '4px solid #1D3557' }}>
-                          <ChevronRight className="w-4 h-4 text-[#4B5563]" />
-                          <span className="mono font-bold text-sm text-[#1D3557]">{parentMO.wo_number}</span>
-                          <span className="text-sm font-semibold text-[#374151]">{parentItem?.part_number} - {parentItem?.name}</span>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold text-white bg-[#1D3557]">FG</span>
-                          <span className={`text-[10px] px-1 rounded ${parentMO.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : 'bg-[#FDF6B2] text-[#723B13]'}`}>{parentMO.status?.replace('_',' ')}</span>
-                          <span className="text-xs text-[#6B7280] ml-auto">{totalNodes} MO(s)</span>
-                        </summary>
-                        <div className="overflow-x-auto">
-                          <table className="w-full data-table">
-                            <thead><tr><th>MO / Level</th><th>Item</th><th>Routing</th><th>Operations</th><th>Actions</th></tr></thead>
-                            <tbody>
-                              {renderMORoutingRow(parentMO, 0)}
-                            </tbody>
-                          </table>
-                        </div>
-                      </details>
-                    );
-                  });
-                })()}
-              </div>
+              <table className="w-full data-table">
+                <thead><tr><th>Operation Name</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {routings.filter(r => r.status === 'active').map(r => (
+                    <tr key={r.id} data-testid={`routing-row-${r.id}`}>
+                      <td className="font-semibold text-sm">{r.name}</td>
+                      <td className="text-sm text-[#4B5563]">{r.description || '-'}</td>
+                      <td><span className="status-badge bg-[#DEF7EC] text-[#03543F]">{r.status}</span></td>
+                      <td>{canEdit && <button onClick={() => handleEditRouting(r)} className="p-1 text-[#4B5563] hover:text-[#1D3557]"><Edit2 className="w-4 h-4" /></button>}</td>
+                    </tr>
+                  ))}
+                  {routings.filter(r => r.status !== 'active').map(r => (
+                    <tr key={r.id} className="opacity-50" data-testid={`routing-row-${r.id}`}>
+                      <td className="font-semibold text-sm">{r.name}</td>
+                      <td className="text-sm text-[#4B5563]">{r.description || '-'}</td>
+                      <td><span className="status-badge bg-[#E5E7EB] text-[#6B7280]">{r.status}</span></td>
+                      <td>{canEdit && <button onClick={() => handleEditRouting(r)} className="p-1 text-[#4B5563] hover:text-[#1D3557]"><Edit2 className="w-4 h-4" /></button>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         </TabsContent>

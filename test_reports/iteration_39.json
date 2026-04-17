@@ -1,0 +1,74 @@
+{
+  "summary": "Tested 2 UI fixes + Routing Redesign. All features verified working. Fixed backend bug where MO creation failed with simplified routings (routings without item_id).",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Fix 1: in_progress SC MO shows 'SC Done' label (muted gray span, not button) - VERIFIED via UI",
+    "Fix 2: Create Manufacturing Order dialog does NOT have Sub-Contract checkbox - VERIFIED via UI",
+    "Routing: POST /api/routings creates simple routing with just name/description/status - PASSED",
+    "Routing: GET /api/routings returns list of operation types - PASSED",
+    "Routing: PUT /api/routings/{id} updates routing - PASSED",
+    "BOM: POST /api/bom accepts operations array - PASSED",
+    "BOM: PUT /api/bom/{id} can update operations - PASSED",
+    "MO Creation: POST /api/work-orders creates MO with operations from BOM - PASSED (after fix)",
+    "Frontend: Routings tab shows simplified operation type list (Operation Name, Description, Status, Actions) - VERIFIED",
+    "Frontend: BOM page has 'Manufacturing Operations' section with 'Add Operation' button - VERIFIED",
+    "Login works with admin@erp.com / Admin@123 - PASSED"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_routing_redesign.py",
+    "/app/test_reports/pytest/pytest_routing_redesign.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "FIXED: Backend MO creation (server.py lines 3094-3106, 3228-3232) was failing for simplified routings because it expected routing.item_id. Fixed to get item from BOM's parent_item_id instead.",
+    "The create_wo_for_item helper function now accepts use_routing_id parameter for main MO, falls back to item_id lookup for child MOs (backward compatible)."
+  ],
+
+  "updated_files": [
+    "/app/backend/server.py",
+    "/app/backend/tests/test_routing_redesign.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (9/9 passed)",
+    "frontend": "100% (all UI verifications passed)"
+  },
+
+  "test_credentials": {
+    "admin": {
+      "email": "admin@erp.com",
+      "password": "Admin@123",
+      "role": "admin"
+    }
+  },
+
+  "seed_data_creation": "Test items (FG, RM), supplier, BOM with operations, routing, production order, and work order created during testing with unique UUID suffixes for isolation.",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Routing redesign complete: (1) Routings are now simple operation types (name/description/status only, no item_id or operations array). (2) Operations are defined at BOM level with sequence, operation_name, setup_time_minutes, run_time_minutes. (3) MO creation pulls operations from BOM's operations array. (4) UI: SC Done label shown for in_progress SC MOs, no Sub-Contract checkbox in Create MO dialog.",
+
+  "bug_fix_applied": {
+    "description": "MO creation was failing with 'Item not found for routing' error when using simplified routings (without item_id)",
+    "root_cause": "Backend code at lines 3094-3106 was looking for item via routing.get('item_id'), but simplified routings don't have item_id",
+    "fix_location": "server.py lines 3094-3106, 3111-3120, 3228-3232",
+    "fix_description": "Changed to get item from BOM's parent_item_id. Added use_routing_id parameter to create_wo_for_item for main MO routing lookup.",
+    "verification_status": "VERIFIED - MO creation now works with simplified routings"
+  }
+}

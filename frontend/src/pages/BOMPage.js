@@ -51,14 +51,24 @@ export default function BOMPage() {
     status: 'draft',
     effectivity_date: '',
     components: [],
+    operations: [],
   });
 
   const canEdit = ['admin', 'production_manager'].includes(user?.role);
+  const [routingOptions, setRoutingOptions] = useState([]);
 
   useEffect(() => {
     fetchBoms();
     fetchItems();
+    fetchRoutings();
   }, [statusFilter]);
+
+  const fetchRoutings = async () => {
+    try {
+      const { data } = await api.get('/api/routings?status=active');
+      setRoutingOptions(data);
+    } catch (e) { console.error('Failed to fetch routings:', e); }
+  };
 
   const fetchBoms = async () => {
     try {
@@ -133,6 +143,7 @@ export default function BOMPage() {
       status: bom.status,
       effectivity_date: bom.effectivity_date ? bom.effectivity_date.split('T')[0] : '',
       components: bom.components || [],
+      operations: bom.operations || [],
     });
     setIsDialogOpen(true);
   };
@@ -232,6 +243,7 @@ export default function BOMPage() {
       status: 'draft',
       effectivity_date: '',
       components: [],
+      operations: [],
     });
   };
 
@@ -516,6 +528,46 @@ export default function BOMPage() {
                           >
                             <X className="w-4 h-4" />
                           </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Operations Section */}
+                <div className="border-t border-[#E5E7EB] pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="text-sm font-semibold text-[#111827]">Manufacturing Operations</label>
+                    <button type="button" onClick={() => setFormData({ ...formData, operations: [...formData.operations, { sequence: (formData.operations.length + 1) * 10, operation_name: '', description: '', setup_time_minutes: 0, run_time_minutes: 0 }] })} className="btn-secondary text-xs flex items-center space-x-1" data-testid="add-bom-operation-btn">
+                      <Plus className="w-3 h-3" /><span>Add Operation</span>
+                    </button>
+                  </div>
+                  {formData.operations.length === 0 ? (
+                    <div className="text-center py-4 text-[#4B5563] bg-[#F3F4F6] rounded-sm">
+                      <p className="text-sm">No operations defined. Add operations from the routing list.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {formData.operations.map((op, idx) => (
+                        <div key={idx} className="p-3 bg-[#F3F4F6] rounded-sm">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-semibold text-[#6B7280]">Step {op.sequence}</span>
+                            <button type="button" onClick={() => setFormData({ ...formData, operations: formData.operations.filter((_, i) => i !== idx) })} className="text-[#9B1C1C] text-xs">Remove</button>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="col-span-1">
+                              <select value={op.operation_name} onChange={(e) => { const ops = [...formData.operations]; ops[idx] = { ...ops[idx], operation_name: e.target.value }; setFormData({ ...formData, operations: ops }); }} className="input-field text-xs" data-testid={`bom-op-name-${idx}`}>
+                                <option value="">Select operation</option>
+                                {routingOptions.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <input type="number" min="0" value={op.setup_time_minutes} onChange={(e) => { const ops = [...formData.operations]; ops[idx] = { ...ops[idx], setup_time_minutes: parseInt(e.target.value) || 0 }; setFormData({ ...formData, operations: ops }); }} className="input-field text-xs mono" placeholder="Setup min" />
+                            </div>
+                            <div>
+                              <input type="number" min="0" value={op.run_time_minutes} onChange={(e) => { const ops = [...formData.operations]; ops[idx] = { ...ops[idx], run_time_minutes: parseInt(e.target.value) || 0 }; setFormData({ ...formData, operations: ops }); }} className="input-field text-xs mono" placeholder="Run min" />
+                            </div>
+                          </div>
                         </div>
                       ))}
                     </div>

@@ -158,6 +158,13 @@ class BOMComponentCreate(BaseModel):
     alternate_for: Optional[str] = None
     position: Optional[int] = None
 
+class BOMOperationCreate(BaseModel):
+    sequence: int
+    operation_name: str  # Name of routing/operation (e.g., "LC Cutting")
+    description: Optional[str] = ""
+    setup_time_minutes: int = 0
+    run_time_minutes: int = 0
+
 class BOMCreate(BaseModel):
     parent_item_id: str
     name: str
@@ -167,6 +174,7 @@ class BOMCreate(BaseModel):
     expiry_date: Optional[datetime] = None
     status: str = "draft"  # draft, active, obsolete
     components: List[BOMComponentCreate] = []
+    operations: Optional[List[BOMOperationCreate]] = []  # Operations defined at BOM level
 
 class BOMUpdate(BaseModel):
     name: Optional[str] = None
@@ -176,6 +184,7 @@ class BOMUpdate(BaseModel):
     expiry_date: Optional[datetime] = None
     status: Optional[str] = None
     components: Optional[List[BOMComponentCreate]] = None
+    operations: Optional[List[BOMOperationCreate]] = None
 
 class ProductionOrderCreate(BaseModel):
     bom_id: str
@@ -437,28 +446,20 @@ class WorkCenterUpdate(BaseModel):
 
 class RoutingOperationCreate(BaseModel):
     sequence: int
-    work_center_id: str
-    operation_name: str
+    operation_name: str  # References a routing name (e.g., "LC Cutting", "Welding")
     description: Optional[str] = ""
     setup_time_minutes: int = 0
     run_time_minutes: int = 0
-    is_job_work: Optional[bool] = False
-    job_work_supplier_id: Optional[str] = ""
 
 class RoutingCreate(BaseModel):
-    item_id: str
-    name: str
+    name: str  # e.g., "LC Cutting", "Welding", "Assembly"
     description: Optional[str] = ""
-    revision: str = "A"
     status: str = "active"
-    operations: List[RoutingOperationCreate] = []
 
 class RoutingUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    revision: Optional[str] = None
     status: Optional[str] = None
-    operations: Optional[List[RoutingOperationCreate]] = None
 
 class WorkOrderCreate(BaseModel):
     production_order_id: str
@@ -919,6 +920,7 @@ async def create_bom(bom_data: BOMCreate, request: Request):
         "expiry_date": bom_data.expiry_date,
         "status": bom_data.status,
         "components": [c.model_dump() for c in bom_data.components],
+        "operations": [op.model_dump() for op in (bom_data.operations or [])],
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -935,7 +937,7 @@ async def update_bom(bom_id: str, bom_data: BOMUpdate, request: Request):
     update_data = {}
     for k, v in bom_data.model_dump().items():
         if v is not None:
-            if k == "components":
+            if k in ["components", "operations"]:
                 update_data[k] = [c.model_dump() if hasattr(c, 'model_dump') else c for c in v]
             else:
                 update_data[k] = v
@@ -2928,15 +2930,6 @@ async def get_routings(request: Request, status: Optional[str] = None, item_id: 
         query["item_id"] = item_id
     
     routings = await db.routings.find(query, {"_id": 0}).to_list(1000)
-    
-    for routing in routings:
-        item = await db.items.find_one({"id": routing.get("item_id")}, {"_id": 0})
-        routing["item"] = item
-        # Enrich operations with work center details
-        for op in routing.get("operations", []):
-            wc = await db.work_centers.find_one({"id": op.get("work_center_id")}, {"_id": 0})
-            op["work_center"] = wc
-    
     return routings
 
 @routings_router.get("/{routing_id}")
@@ -2945,13 +2938,6 @@ async def get_routing(routing_id: str, request: Request):
     routing = await db.routings.find_one({"id": routing_id}, {"_id": 0})
     if not routing:
         raise HTTPException(status_code=404, detail="Routing not found")
-    
-    item = await db.items.find_one({"id": routing.get("item_id")}, {"_id": 0})
-    routing["item"] = item
-    for op in routing.get("operations", []):
-        wc = await db.work_centers.find_one({"id": op.get("work_center_id")}, {"_id": 0})
-        op["work_center"] = wc
-    
     return routing
 
 @routings_router.post("", status_code=201)
@@ -2960,18 +2946,11 @@ async def create_routing(routing_data: RoutingCreate, request: Request):
     if user["role"] not in ["admin", "production_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
-    item = await db.items.find_one({"id": routing_data.item_id})
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
-    
     routing_doc = {
         "id": str(uuid.uuid4()),
-        "item_id": routing_data.item_id,
         "name": routing_data.name,
         "description": routing_data.description,
-        "revision": routing_data.revision,
         "status": routing_data.status,
-        "operations": [op.model_dump() for op in routing_data.operations],
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -2988,10 +2967,7 @@ async def update_routing(routing_id: str, routing_data: RoutingUpdate, request: 
     update_data = {}
     for k, v in routing_data.model_dump().items():
         if v is not None:
-            if k == "operations":
-                update_data[k] = [op.model_dump() if hasattr(op, 'model_dump') else op for op in v]
-            else:
-                update_data[k] = v
+            update_data[k] = v
     
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
@@ -3119,19 +3095,33 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
     if not routing:
         raise HTTPException(status_code=404, detail="Routing not found")
     
-    # Get the item for this routing
-    item = await db.items.find_one({"id": routing.get("item_id")})
+    # Get the BOM for this production order to find the item to manufacture
+    bom = await db.boms.find_one({"id": prod_order.get("bom_id")})
+    if not bom:
+        raise HTTPException(status_code=404, detail="BOM not found for production order")
+    
+    # Get the item from BOM's parent_item_id (the item to manufacture)
+    item = await db.items.find_one({"id": bom.get("parent_item_id")})
     if not item:
-        raise HTTPException(status_code=404, detail="Item not found for routing")
+        raise HTTPException(status_code=404, detail="Item not found for BOM")
     
     created_work_orders = []
     
     # Helper function to create work order for an item
-    async def create_wo_for_item(item_id: str, qty: int, parent_wo_id: str = None, is_main: bool = False):
-        # Find routing for this item
-        item_routing = await db.routings.find_one({"item_id": item_id, "status": "active"})
+    async def create_wo_for_item(item_id: str, qty: int, parent_wo_id: str = None, is_main: bool = False, use_routing_id: str = None):
+        # For main MO, use the routing passed in the request
+        # For child MOs, try to find a routing by item_id (backward compatible with old routings)
+        if use_routing_id:
+            item_routing = await db.routings.find_one({"id": use_routing_id, "status": "active"})
+        else:
+            item_routing = await db.routings.find_one({"item_id": item_id, "status": "active"})
+        
         if not item_routing:
-            return None  # No routing, skip
+            # For main MO, we must have a routing
+            if is_main:
+                return None
+            # For child MOs, create without routing (operations come from BOM)
+            item_routing = {"id": None, "name": "No Routing"}
         
         item_doc = await db.items.find_one({"id": item_id})
         if not item_doc:
@@ -3145,16 +3135,18 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
         count = await db.work_orders.count_documents({})
         wo_number = f"MO-{str(count + 1).zfill(6)}"
         
-        # Create operation statuses
+        # Create operation statuses from BOM operations (not routing)
         operations_status = []
-        for op in item_routing.get("operations", []):
+        item_bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
+        bom_ops = item_bom.get("operations", []) if item_bom else []
+        for op in bom_ops:
             operations_status.append({
                 "sequence": op.get("sequence"),
                 "operation_name": op.get("operation_name"),
-                "work_center_id": op.get("work_center_id"),
+                "work_center_id": "",  # Work centre decided at Job Card runtime
                 "work_center_name": "",
-                "is_job_work": op.get("is_job_work", False),
-                "job_work_supplier_id": op.get("job_work_supplier_id", ""),
+                "is_job_work": False,
+                "job_work_supplier_id": "",
                 "status": "pending",
                 "quantity_completed": 0
             })
@@ -3241,12 +3233,13 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
                     await create_child_work_orders(child_item_id, child_qty, child_wo["id"])
     
     # For all cases (including subcontract): create MO first, SC order created at "Start SC"
-    # Create main work order
-    main_wo = await create_wo_for_item(routing.get("item_id"), wo_data.quantity, None, is_main=True)
+    # Create main work order - use item from BOM (not routing)
+    main_item_id = bom.get("parent_item_id")
+    main_wo = await create_wo_for_item(main_item_id, wo_data.quantity, None, is_main=True, use_routing_id=wo_data.routing_id)
     if main_wo:
         created_work_orders.insert(0, main_wo)
         # Create work orders for child items
-        await create_child_work_orders(routing.get("item_id"), wo_data.quantity, main_wo["id"])
+        await create_child_work_orders(main_item_id, wo_data.quantity, main_wo["id"])
     
     # SC order is NOT auto-created here — user clicks "Start SC" / "Create SC" button which calls /create-sc endpoint
     return {"message": f"Created {len(created_work_orders)} work order(s)", "work_orders": created_work_orders}
