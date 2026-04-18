@@ -28,6 +28,8 @@ export default function InventoryPage() {
   const { formatCurrency } = useCompanySettings();
   const [inventory, setInventory] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
+  const [stockByItem, setStockByItem] = useState({});
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('stock');
   const [showLowStock, setShowLowStock] = useState(false);
@@ -39,6 +41,7 @@ export default function InventoryPage() {
     item_id: '',
     transaction_type: 'receive',
     quantity: 1,
+    warehouse_id: '',
     notes: '',
   });
 
@@ -55,12 +58,16 @@ export default function InventoryPage() {
       if (showLowStock) params.append('low_stock', 'true');
       if (categoryFilter) params.append('category', categoryFilter);
       
-      const [inventoryRes, transactionsRes] = await Promise.all([
+      const [inventoryRes, transactionsRes, warehousesRes, stockByItemRes] = await Promise.all([
         api.get(`/api/inventory?${params.toString()}`),
         api.get('/api/inventory/transactions?limit=50'),
+        api.get('/api/warehouses'),
+        api.get('/api/warehouses/stock/by-item'),
       ]);
       setInventory(inventoryRes.data);
       setTransactions(transactionsRes.data);
+      setWarehouses(warehousesRes.data || []);
+      setStockByItem(stockByItemRes.data || {});
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -70,6 +77,10 @@ export default function InventoryPage() {
 
   const handleTransactionSubmit = async (e) => {
     e.preventDefault();
+    if (!transactionForm.warehouse_id) {
+      alert('Warehouse is required for stock changes. Please select a warehouse.');
+      return;
+    }
     try {
       await api.post('/api/inventory/transactions', transactionForm);
       setIsTransactionDialogOpen(false);
@@ -86,6 +97,7 @@ export default function InventoryPage() {
       item_id: '',
       transaction_type: 'receive',
       quantity: 1,
+      warehouse_id: '',
       notes: '',
     });
   };
@@ -153,6 +165,23 @@ export default function InventoryPage() {
                     <SelectContent>
                       {transactionTypes.map((type) => (
                         <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Warehouse *</label>
+                  <Select 
+                    value={transactionForm.warehouse_id} 
+                    onValueChange={(v) => setTransactionForm({ ...transactionForm, warehouse_id: v })}
+                  >
+                    <SelectTrigger data-testid="transaction-warehouse-select">
+                      <SelectValue placeholder="Select warehouse" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {warehouses.map((w) => (
+                        <SelectItem key={w.id} value={w.id}>{w.code ? `${w.code} — ` : ''}{w.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -312,6 +341,7 @@ export default function InventoryPage() {
                       <th>Name</th>
                       <th>Category</th>
                       <th className="text-right">Current Stock</th>
+                      <th>Warehouse</th>
                       <th className="text-right">Safety Stock</th>
                       <th className="text-right">Reorder Point</th>
                       <th className="text-right">Unit Cost</th>
@@ -344,6 +374,20 @@ export default function InventoryPage() {
                         </td>
                         <td className={`text-right mono font-medium ${isLowStock(item) ? 'text-[#9B1C1C]' : ''}`}>
                           {item.current_stock} {item.unit_of_measure}
+                        </td>
+                        <td className="text-xs">
+                          {(stockByItem[item.id] || []).length === 0 ? (
+                            <span className="text-[#9CA3AF] italic">—</span>
+                          ) : (
+                            <div className="space-y-0.5">
+                              {(stockByItem[item.id] || []).map((ws, wi) => (
+                                <div key={wi} className="flex gap-1">
+                                  <span className="text-[#1E429F] font-medium">{ws.warehouse_code || ws.warehouse_name}:</span>
+                                  <span className="mono">{ws.quantity}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="text-right mono">{item.safety_stock}</td>
                         <td className="text-right mono">{item.reorder_point}</td>

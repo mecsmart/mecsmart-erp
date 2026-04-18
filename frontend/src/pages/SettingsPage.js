@@ -29,6 +29,8 @@ export default function SettingsPage() {
   const [chargeDialog, setChargeDialog] = useState(false);
   const [editingCharge, setEditingCharge] = useState(null);
   const [chargeForm, setChargeForm] = useState({ name: '', hsn_code: '', gst_rate: 18 });
+  const [numberSeries, setNumberSeries] = useState([]);
+  const [savingSeries, setSavingSeries] = useState({});
   const fileInputRef = useRef(null);
   const isAdmin = user?.role === 'admin';
 
@@ -36,14 +38,16 @@ export default function SettingsPage() {
 
   const fetchData = async () => {
     try {
-      const [settingsRes, statesRes, chargesRes] = await Promise.all([
+      const [settingsRes, statesRes, chargesRes, seriesRes] = await Promise.all([
         api.get('/api/settings/company'),
         api.get('/api/settings/states'),
         api.get('/api/settings/po-charges'),
+        api.get('/api/settings/number-series'),
       ]);
       setSettings(settingsRes.data);
       setStates(statesRes.data);
       setChargeTypes(chargesRes.data);
+      setNumberSeries(seriesRes.data || []);
     } catch (error) {
       console.error('Failed to fetch settings:', error);
     } finally { setLoading(false); }
@@ -99,6 +103,30 @@ export default function SettingsPage() {
     catch (error) { alert('Failed to delete charge type'); }
   };
 
+  const updateSeriesField = (key, field, value) => {
+    setNumberSeries(prev => prev.map(s => s.key === key ? { ...s, [field]: value } : s));
+  };
+
+  const saveSeries = async (key) => {
+    const s = numberSeries.find(x => x.key === key);
+    if (!s) return;
+    setSavingSeries(p => ({ ...p, [key]: true }));
+    try {
+      const payload = {
+        prefix: s.prefix || '',
+        padding: parseInt(s.padding) || 4,
+        next_number: parseInt(s.next_number) || 1,
+      };
+      const { data } = await api.put(`/api/settings/number-series/${key}`, payload);
+      setNumberSeries(prev => prev.map(x => x.key === key ? data : x));
+      alert(`${s.label} series saved`);
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to save series');
+    } finally {
+      setSavingSeries(p => ({ ...p, [key]: false }));
+    }
+  };
+
   if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div></div>;
 
   return (
@@ -115,6 +143,7 @@ export default function SettingsPage() {
           <TabsTrigger value="company">Company & GST</TabsTrigger>
           <TabsTrigger value="branding" data-testid="branding-tab">Branding & Currency</TabsTrigger>
           <TabsTrigger value="po-charges" data-testid="po-charges-tab">PO Additional Charges</TabsTrigger>
+          <TabsTrigger value="number-series" data-testid="number-series-tab">Number Series</TabsTrigger>
         </TabsList>
 
         {/* ====== Company & GST Tab ====== */}
@@ -397,6 +426,75 @@ export default function SettingsPage() {
               </div>
             </DialogContent>
           </Dialog>
+        </TabsContent>
+
+        {/* ====== Number Series Tab ====== */}
+        <TabsContent value="number-series" className="space-y-4 mt-4" data-testid="number-series-tab-content">
+          <div className="bg-white border border-[#E5E7EB] rounded-sm p-5">
+            <h2 className="text-lg font-semibold text-[#111827] mb-1">Number Series</h2>
+            <p className="text-xs text-[#6B7280] mb-4">Configure auto-incrementing prefix and starting number for vendors, customers, POs and sales invoices. Existing records keep their old numbers; only new records use the updated series.</p>
+            <div className="space-y-3">
+              {numberSeries.map(s => {
+                const preview = `${s.prefix || ''}${String(s.next_number || 1).padStart(s.padding || 4, '0')}`;
+                return (
+                  <div key={s.key} className="grid grid-cols-12 gap-3 items-end border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB]" data-testid={`series-row-${s.key}`}>
+                    <div className="col-span-3">
+                      <label className="block text-xs font-semibold text-[#6B7280] uppercase mb-1">{s.label}</label>
+                      <div className="mono text-xs bg-[#E1EFFE] text-[#1E429F] inline-block px-2 py-1 rounded">Next: {preview}</div>
+                    </div>
+                    <div className="col-span-3">
+                      <label className="block text-xs text-[#374151] mb-1">Prefix</label>
+                      <input
+                        type="text"
+                        value={s.prefix || ''}
+                        onChange={e => updateSeriesField(s.key, 'prefix', e.target.value)}
+                        className="input-field mono"
+                        disabled={!isAdmin}
+                        placeholder="e.g. SUP-"
+                        data-testid={`series-prefix-${s.key}`}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs text-[#374151] mb-1">Start #</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={s.next_number || 1}
+                        onChange={e => updateSeriesField(s.key, 'next_number', parseInt(e.target.value) || 1)}
+                        className="input-field mono"
+                        disabled={!isAdmin}
+                        data-testid={`series-start-${s.key}`}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs text-[#374151] mb-1">Padding</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="12"
+                        value={s.padding || 4}
+                        onChange={e => updateSeriesField(s.key, 'padding', parseInt(e.target.value) || 4)}
+                        className="input-field mono"
+                        disabled={!isAdmin}
+                        data-testid={`series-padding-${s.key}`}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <button
+                        onClick={() => saveSeries(s.key)}
+                        disabled={!isAdmin || savingSeries[s.key]}
+                        className="btn-primary w-full disabled:opacity-50"
+                        data-testid={`series-save-${s.key}`}
+                      >
+                        {savingSeries[s.key] ? 'Saving…' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {numberSeries.length === 0 && <p className="text-sm text-[#9CA3AF] italic">No series configured.</p>}
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

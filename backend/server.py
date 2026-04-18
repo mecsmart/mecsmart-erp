@@ -130,6 +130,7 @@ class ItemCreate(BaseModel):
     category: str  # raw_material, component, sub_assembly, finished_good
     unit_of_measure: str = "pcs"
     unit_cost: float = 0.0
+    purchase_price: float = 0.0  # Last PO price; auto-updates from new POs
     lead_time_days: int = 0
     safety_stock: int = 0
     current_stock: int = 0
@@ -143,6 +144,7 @@ class ItemUpdate(BaseModel):
     category: Optional[str] = None
     unit_of_measure: Optional[str] = None
     unit_cost: Optional[float] = None
+    purchase_price: Optional[float] = None
     lead_time_days: Optional[int] = None
     safety_stock: Optional[int] = None
     current_stock: Optional[int] = None
@@ -216,13 +218,14 @@ class InventoryTransactionCreate(BaseModel):
     reference_type: Optional[str] = None  # production_order, purchase_order, adjustment
     reference_id: Optional[str] = None
     notes: Optional[str] = ""
+    warehouse_id: Optional[str] = None
     from_warehouse_id: Optional[str] = None
     to_warehouse_id: Optional[str] = None
 
 # ================== PROCUREMENT MODELS ==================
 
 class SupplierCreate(BaseModel):
-    code: str
+    code: Optional[str] = ""  # Auto-generated from number series if blank
     name: str
     contact_person: Optional[str] = ""
     email: Optional[str] = ""
@@ -530,7 +533,7 @@ class CompanySettingsUpdate(BaseModel):
     secondary_currency: Optional[str] = None
 
 class CustomerCreate(BaseModel):
-    code: str
+    code: Optional[str] = ""  # Auto-generated from number series if blank
     name: str
     gstin: Optional[str] = ""
     state_code: Optional[str] = ""
@@ -767,6 +770,9 @@ async def create_item(item_data: ItemCreate, request: Request):
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
+    # Sync unit_cost with purchase_price on creation if unit_cost not explicitly set
+    if item_doc.get("purchase_price") and not item_doc.get("unit_cost"):
+        item_doc["unit_cost"] = item_doc["purchase_price"]
     await db.items.insert_one(item_doc)
     item_doc.pop("_id", None)
     return item_doc
@@ -1676,9 +1682,19 @@ async def create_inventory_transaction(tx_data: InventoryTransactionCreate, requ
     if user["role"] not in ["admin", "inventory_manager", "production_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
+    # Warehouse is mandatory for stock-changing transactions
+    if tx_data.transaction_type in ["receive", "issue", "adjust"] and not tx_data.warehouse_id:
+        raise HTTPException(status_code=400, detail="Warehouse is required for stock-changing transactions")
+    
     item = await db.items.find_one({"id": tx_data.item_id})
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    
+    warehouse = None
+    if tx_data.warehouse_id:
+        warehouse = await db.warehouses.find_one({"id": tx_data.warehouse_id}, {"_id": 0})
+        if not warehouse:
+            raise HTTPException(status_code=404, detail="Warehouse not found")
     
     # Calculate new stock
     current_stock = item.get("current_stock", 0)
@@ -1706,6 +1722,26 @@ async def create_inventory_transaction(tx_data: InventoryTransactionCreate, requ
     
     # Update item stock
     await db.items.update_one({"id": tx_data.item_id}, {"$set": {"current_stock": new_stock}})
+    
+    # Update warehouse-specific stock
+    if tx_data.warehouse_id:
+        wh_stock = await db.warehouse_stock.find_one({"warehouse_id": tx_data.warehouse_id, "item_id": tx_data.item_id})
+        wh_current = wh_stock.get("quantity", 0) if wh_stock else 0
+        if tx_data.transaction_type == "receive":
+            wh_new = wh_current + tx_data.quantity
+        elif tx_data.transaction_type == "issue":
+            wh_new = wh_current - tx_data.quantity
+            if wh_new < 0:
+                raise HTTPException(status_code=400, detail=f"Insufficient stock in warehouse {warehouse.get('name') if warehouse else ''}")
+        elif tx_data.transaction_type == "adjust":
+            wh_new = tx_data.quantity
+        else:
+            wh_new = wh_current
+        await db.warehouse_stock.update_one(
+            {"warehouse_id": tx_data.warehouse_id, "item_id": tx_data.item_id},
+            {"$set": {"quantity": wh_new, "updated_at": datetime.now(timezone.utc)}},
+            upsert=True
+        )
     
     tx_doc.pop("_id", None)
     return tx_doc
@@ -1895,13 +1931,20 @@ async def create_supplier(supplier_data: SupplierCreate, request: Request):
     if user["role"] not in ["admin", "production_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
-    existing = await db.suppliers.find_one({"code": supplier_data.code})
+    # Auto-generate supplier code from configurable series if not provided
+    provided_code = (supplier_data.code or "").strip()
+    if not provided_code:
+        supplier_code = await get_next_series_number("supplier_code")
+    else:
+        supplier_code = provided_code
+    existing = await db.suppliers.find_one({"code": supplier_code})
     if existing:
         raise HTTPException(status_code=400, detail="Supplier code already exists")
     
     supplier_doc = {
         "id": str(uuid.uuid4()),
         **supplier_data.model_dump(),
+        "code": supplier_code,
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -2008,9 +2051,8 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
     
-    # Generate PO number
-    count = await db.purchase_orders.count_documents({})
-    po_number = f"PO-{str(count + 1).zfill(6)}"
+    # Generate PO number from configurable series
+    po_number = await get_next_series_number("po_number")
     
     # Get company settings for GST calculation
     company_settings = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
@@ -2135,6 +2177,13 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
     }
     await db.purchase_orders.insert_one(po_doc)
     po_doc.pop("_id", None)
+    # Auto-update item purchase_price & unit_cost to the latest PO line rate
+    for line in lines_with_tax:
+        if line.get("item_id") and line.get("unit_price"):
+            await db.items.update_one(
+                {"id": line["item_id"]},
+                {"$set": {"purchase_price": line["unit_price"], "unit_cost": line["unit_price"]}}
+            )
     return po_doc
 
 @purchase_orders_router.post("/from-mrp", status_code=201)
@@ -2237,7 +2286,7 @@ async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
     total_amount = subtotal + total_tax
     
     count = await db.purchase_orders.count_documents({})
-    po_number = f"PO-{str(count + 1).zfill(6)}"
+    po_number = await get_next_series_number("po_number")
     
     po_doc = {
         "id": str(uuid.uuid4()),
@@ -2267,6 +2316,13 @@ async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
     }
     await db.purchase_orders.insert_one(po_doc)
     po_doc.pop("_id", None)
+    # Auto-update item purchase_price & unit_cost to the latest PO line rate
+    for line in lines:
+        if line.get("item_id") and line.get("unit_price"):
+            await db.items.update_one(
+                {"id": line["item_id"]},
+                {"$set": {"purchase_price": line["unit_price"], "unit_cost": line["unit_price"]}}
+            )
     return po_doc
 
 @purchase_orders_router.put("/{po_id}")
@@ -2561,6 +2617,26 @@ async def get_warehouse(warehouse_id: str, request: Request):
     if not warehouse:
         raise HTTPException(status_code=404, detail="Warehouse not found")
     return warehouse
+
+@warehouses_router.get("/stock/by-item")
+async def get_stock_by_item(request: Request):
+    """Aggregate warehouse stock grouped by item. Returns {item_id: [{warehouse_id, warehouse_name, warehouse_code, quantity}]}"""
+    await get_current_user(request)
+    all_stock = await db.warehouse_stock.find({}, {"_id": 0}).to_list(10000)
+    warehouses = {w["id"]: w for w in await db.warehouses.find({}, {"_id": 0}).to_list(1000)}
+    grouped = {}
+    for s in all_stock:
+        iid = s.get("item_id")
+        if not iid:
+            continue
+        wh = warehouses.get(s.get("warehouse_id"), {})
+        grouped.setdefault(iid, []).append({
+            "warehouse_id": s.get("warehouse_id"),
+            "warehouse_name": wh.get("name", ""),
+            "warehouse_code": wh.get("code", ""),
+            "quantity": s.get("quantity", 0),
+        })
+    return grouped
 
 @warehouses_router.get("/{warehouse_id}/stock")
 async def get_warehouse_stock(warehouse_id: str, request: Request):
@@ -4343,7 +4419,7 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             # For operation outsourcing: SC lines = Part/SA item only (NOT RM)
             wo_item = await db.items.find_one({"id": wo.get("item_id")}, {"_id": 0})
             
-            # Calculate BOM rollup cost for this Part/SA
+            # Calculate BOM RM cost for this Part/SA (RAW MATERIAL ONLY — exclude process costs)
             bom_rollup_cost = wo_item.get("unit_cost", 0) if wo_item else 0
             item_bom = await db.boms.find_one({"parent_item_id": wo.get("item_id"), "status": "active"}, {"_id": 0})
             if item_bom:
@@ -4352,17 +4428,7 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                     comp_item = await db.items.find_one({"id": comp.get("item_id")}, {"_id": 0})
                     if comp_item:
                         material_cost += comp.get("quantity", 0) * comp_item.get("unit_cost", 0)
-                # Add process costs from latest completed WO
-                process_cost = 0
-                latest_wo = await db.work_orders.find_one(
-                    {"item_id": wo.get("item_id"), "status": "completed", "operations_status": {"$exists": True}},
-                    {"_id": 0, "operations_status": 1},
-                    sort=[("actual_end", -1)]
-                )
-                if latest_wo:
-                    for op in latest_wo.get("operations_status", []):
-                        process_cost += op.get("process_cost_per_unit", 0)
-                bom_rollup_cost = material_cost + process_cost
+                bom_rollup_cost = material_cost
             
             # Pull previous charges if not explicitly set
             outsource_charges = op_data.outsource_charges or 0
@@ -5113,6 +5179,72 @@ async def update_company_settings(data: CompanySettingsUpdate, request: Request)
     )
     return await db.company_settings.find_one({"type": "company"}, {"_id": 0})
 
+# ================== NUMBER SERIES (Vendor/Customer/PO/Sales Invoice) ==================
+# Each key stores: {prefix, padding, next_number}
+DEFAULT_NUMBER_SERIES = {
+    "supplier_code":  {"prefix": "SUP-",  "padding": 4, "next_number": 1, "label": "Vendor / Supplier Code"},
+    "customer_code":  {"prefix": "CUST-", "padding": 4, "next_number": 1, "label": "Customer Code"},
+    "po_number":      {"prefix": "PO-",   "padding": 6, "next_number": 1, "label": "Purchase Order"},
+    "sales_invoice":  {"prefix": "INV-",  "padding": 6, "next_number": 1, "label": "Sales Invoice"},
+}
+
+async def get_next_series_number(key: str) -> str:
+    """Atomically fetch and increment the next number for a series. Returns formatted string."""
+    default = DEFAULT_NUMBER_SERIES.get(key, {"prefix": "", "padding": 4, "next_number": 1})
+    # Ensure the doc exists with defaults
+    existing = await db.number_series.find_one({"key": key})
+    if not existing:
+        await db.number_series.insert_one({"key": key, "prefix": default["prefix"], "padding": default["padding"], "next_number": default["next_number"]})
+        existing = await db.number_series.find_one({"key": key})
+    current = existing.get("next_number", default["next_number"])
+    prefix = existing.get("prefix", default["prefix"])
+    padding = existing.get("padding", default["padding"])
+    # Increment next_number for the next call
+    await db.number_series.update_one({"key": key}, {"$inc": {"next_number": 1}})
+    return f"{prefix}{str(current).zfill(padding)}"
+
+class NumberSeriesUpdate(BaseModel):
+    prefix: Optional[str] = None
+    padding: Optional[int] = None
+    next_number: Optional[int] = None
+
+@settings_router.get("/number-series")
+async def get_number_series(request: Request):
+    await get_current_user(request)
+    series_list = []
+    for key, default in DEFAULT_NUMBER_SERIES.items():
+        doc = await db.number_series.find_one({"key": key}, {"_id": 0})
+        if not doc:
+            doc = {"key": key, **default}
+        else:
+            doc["label"] = default["label"]
+        series_list.append(doc)
+    return series_list
+
+@settings_router.put("/number-series/{key}")
+async def update_number_series(key: str, data: NumberSeriesUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can update number series")
+    if key not in DEFAULT_NUMBER_SERIES:
+        raise HTTPException(status_code=404, detail=f"Unknown series key: {key}")
+    update_fields = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No data to update")
+    default = DEFAULT_NUMBER_SERIES[key]
+    existing = await db.number_series.find_one({"key": key})
+    if not existing:
+        # First-time: seed with defaults then apply updates
+        seed = {"key": key, **default}
+        seed.pop("label", None)
+        seed.update(update_fields)
+        await db.number_series.insert_one(seed)
+    else:
+        await db.number_series.update_one({"key": key}, {"$set": update_fields})
+    doc = await db.number_series.find_one({"key": key}, {"_id": 0})
+    doc["label"] = default["label"]
+    return doc
+
 @settings_router.get("/states")
 async def get_indian_states(request: Request):
     await get_current_user(request)
@@ -5281,13 +5413,20 @@ async def create_customer(data: CustomerCreate, request: Request):
     if user["role"] not in ["admin", "production_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
-    existing = await db.customers.find_one({"code": data.code})
+    # Auto-generate customer code from configurable series if not provided
+    provided_code = (data.code or "").strip()
+    if not provided_code:
+        customer_code = await get_next_series_number("customer_code")
+    else:
+        customer_code = provided_code
+    existing = await db.customers.find_one({"code": customer_code})
     if existing:
         raise HTTPException(status_code=400, detail="Customer code already exists")
     
     customer_doc = {
         "id": str(uuid.uuid4()),
         **data.model_dump(),
+        "code": customer_code,
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -6030,7 +6169,7 @@ async def create_po_from_sc(request: Request, data: dict = Body(...)):
                     })
     
     po_count = await db.purchase_orders.count_documents({})
-    po_number = f"PO-{str(po_count + 1).zfill(6)}"
+    po_number = await get_next_series_number("po_number")
     po_doc = {
         "id": str(uuid.uuid4()),
         "po_number": po_number,
