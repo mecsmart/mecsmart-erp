@@ -1038,6 +1038,7 @@ export default function ManufacturingPage() {
                         <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none" style={{borderLeft: `4px solid ${catColor}`}}>
                           <ChevronRight className="w-4 h-4 text-[#4B5563]" />
                           <span className="mono font-bold text-sm" style={{color: catColor}}>{parentMO.wo_number}</span>
+                          {parentMO.production_order?.order_number && <span className="text-[10px] bg-[#E1EFFE] text-[#1E429F] px-1.5 py-0.5 rounded font-medium mono" data-testid={`so-ref-${parentMO.id}`}>SO: {parentMO.production_order.order_number}</span>}
                           <span className="text-sm font-medium text-[#374151]">{parentItem?.part_number} - {parentItem?.name}</span>
                           <span className="text-[10px] px-1.5 py-0.5 rounded text-white font-semibold" style={{backgroundColor: catColor}}>{getCatLabel(parentMO)}</span>
                           <span className={`text-[10px] px-1 rounded ${parentMO.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : parentMO.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : 'bg-[#FDF6B2] text-[#723B13]'}`}>{parentMO.status?.replace('_',' ')}</span>
@@ -1318,6 +1319,7 @@ export default function ManufacturingPage() {
             <DialogTitle className="font-[Chivo] flex items-center space-x-2">
               <ClipboardList className="w-5 h-5" />
               <span>Job Card - {jobCardWO?.wo_number}</span>
+              {jobCardWO?.production_order?.order_number && <span className="text-[11px] bg-[#E1EFFE] text-[#1E429F] px-2 py-0.5 rounded font-medium mono" data-testid="jobcard-so-ref">SO: {jobCardWO.production_order.order_number}</span>}
             </DialogTitle>
           </DialogHeader>
           {jobCardWO && (
@@ -1511,7 +1513,7 @@ export default function ManufacturingPage() {
                       </Select>
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-[#111827] mb-1">Processing Charges</label>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Processing Charges / Unit</label>
                       <input type="number" min="0" step="0.01" value={opForm.outsource_charges} onChange={e => setOpForm({...opForm, outsource_charges: parseFloat(e.target.value) || 0})} className="input-field mono" placeholder="0.00" data-testid="outsource-charges-input" />
                     </div>
                     <div>

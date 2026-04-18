@@ -280,7 +280,7 @@ export default function JobWorkPage() {
       return s + (l.quantity * (it?.unit_cost || l.rate || 0));
     }, 0);
     
-    const isJobOS = !dc.lines || dc.lines.length === 0;
+    const isJobOS = dc.order?.subcontract_type === 'without_material' && (dc.order?.job_work_parts?.length > 0);
     const dcTitle = isJobOS ? 'Job Work Order Cum Delivery Challan' : 'Delivery Challan';
     
     const html = `<!DOCTYPE html><html><head><title>${dcTitle} - ${dc.dc_number}</title>
