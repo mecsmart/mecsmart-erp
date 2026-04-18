@@ -19,6 +19,7 @@
 ## Changelog
 - 2026-02-18 (iter 50): Fixed Job OS regressions — consolidation no longer doubles per-unit charges; DC print format conditional (9-col for Job OS, 6-col for standard SC); Job Card hides Stop/Complete for outsourced ops.
 - 2026-02-18 (iter 51): Job Card UX polish — outsourced op badge now shows `JW: JW-000XXX — Receive via GRN` (reads from `op.outsource_sc_order_number`, persisted by backend on outsource). Removed "Manufacturing Order Tree" section from Job Card dialog. Tested & verified.
+- 2026-02-18 (iter 52): (a) Renamed "Processing Charges" → "Processing Charges / Unit" in Start Operation dialog. (b) Fixed DC print isJobOS check — was broken because Job OS DCs are created WITH lines; now uses `dc.order.subcontract_type === 'without_material' && job_work_parts.length > 0`. (c) Sales Order reference chip (`SO: SO-000XXX`) now displayed on parent MO summary row and in Job Card dialog header.
 
 ## BOM
 - Extended Cost = Total/Unit × Qty (material + process)
