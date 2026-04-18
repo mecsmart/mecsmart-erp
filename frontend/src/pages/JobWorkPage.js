@@ -90,6 +90,25 @@ export default function JobWorkPage() {
   const removeJWPart = (idx) => setOrderForm({ ...orderForm, job_work_parts: orderForm.job_work_parts.filter((_, i) => i !== idx) });
   const updateJWPart = (idx, field, val) => { const parts = [...orderForm.job_work_parts]; parts[idx] = { ...parts[idx], [field]: val }; setOrderForm({ ...orderForm, job_work_parts: parts }); };
 
+  // Auto-populate charges from BOM when user selects an item for a JW part
+  const updateJWPartItem = async (idx, item_id) => {
+    const parts = [...orderForm.job_work_parts];
+    parts[idx] = { ...parts[idx], item_id };
+    setOrderForm({ ...orderForm, job_work_parts: parts });
+    if (!item_id) return;
+    try {
+      const { data } = await api.get(`/api/bom/costs/${item_id}`);
+      const cur = [...orderForm.job_work_parts];
+      cur[idx] = {
+        ...cur[idx],
+        item_id,
+        charges: cur[idx].charges || data.process_cost || 0,
+        process_names: data.process_names || []
+      };
+      setOrderForm({ ...orderForm, job_work_parts: cur });
+    } catch (e) { /* silent */ }
+  };
+
   const handleCreateOrder = async () => {
     if (!orderForm.supplier_id || orderForm.lines.length === 0) { alert('Select supplier and add items'); return; }
     try {
@@ -681,10 +700,13 @@ export default function JobWorkPage() {
                       return (
                         <tr key={idx} className="border-t">
                           <td className="py-1 px-2">
-                            <Select value={p.item_id} onValueChange={v => updateJWPart(idx, 'item_id', v)}>
+                            <Select value={p.item_id} onValueChange={v => updateJWPartItem(idx, v)}>
                               <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select part" /></SelectTrigger>
                               <SelectContent>{items.filter(i => ['finished_good','sub_assembly','component'].includes(i.category)).map(i => <SelectItem key={i.id} value={i.id}>{i.part_number} - {i.name}</SelectItem>)}</SelectContent>
                             </Select>
+                            {p.process_names && p.process_names.length > 0 && (
+                              <div className="text-[10px] text-[#1E429F] mt-1" data-testid={`jw-part-${idx}-processes`}>Processes: {p.process_names.join(', ')}</div>
+                            )}
                           </td>
                           <td className="py-1 px-2"><input type="number" min="1" value={p.quantity} onChange={e => updateJWPart(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
                           <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={p.charges} onChange={e => updateJWPart(idx, 'charges', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>

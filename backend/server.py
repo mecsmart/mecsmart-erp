@@ -950,6 +950,12 @@ async def get_bom(bom_id: str, request: Request):
     
     return bom
 
+@bom_router.get("/costs/{item_id}")
+async def get_bom_costs_for_item(item_id: str, request: Request):
+    """Return BOM-based RM cost, process cost, and process names for an item."""
+    await get_current_user(request)
+    return await compute_bom_costs(item_id)
+
 @bom_router.get("/{bom_id}/explode")
 async def explode_bom(bom_id: str, request: Request, levels: int = 10):
     """Get full multi-level BOM explosion with rollup costing"""
