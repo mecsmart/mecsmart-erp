@@ -1,0 +1,48 @@
+{
+  "summary": "Tested iteration 51 features: (1) outsource_sc_order_number field on operations, (2) JW badge format in Job Card dialog, (3) MO Tree section removal. All backend and frontend tests passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_outsource_sc_order_number.py",
+    "/app/test_reports/pytest/pytest_results_iteration_51.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_outsource_sc_order_number.py"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25 tests passed)",
+    "frontend": "100% (all 3 features verified)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created test items, suppliers, routings, BOMs, POs, WOs for outsource testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 51 features verified: (1) Backend correctly sets outsource_sc_order_number on operations when outsourcing - both for new SC creation and consolidation into existing SC. (2) Frontend Job Card dialog shows 'JW: JW-000XXX — Receive via GRN' badge for outsourced operations. (3) MO Tree section has been removed from Job Card dialog - dialog now shows: Header → Operations table → Progress bar → Print buttons.",
+  "tests_executed": {
+    "backend": [
+      "TestOutsourceSCOrderNumber - 11 tests: Verifies outsource_sc_order_number is set when outsourcing an operation, persisted in DB, and SC order created",
+      "TestConsolidationSetsExistingSCOrderNumber - 7 tests: Verifies consolidation sets existing SC's order_number on new op",
+      "TestNonOutsourcedOperationFlow - 7 tests: Regression test for normal operation start/stop/complete flow"
+    ],
+    "frontend": [
+      "Job Card dialog - Outsourced badge shows JW number format 'JW: JW-000XXX — Receive via GRN' (tested 5 Job Cards, found JW-000167, JW-000166, JW-000004)",
+      "Job Card dialog - MO Tree section removed (all 5 tested Job Cards confirmed removal)",
+      "Job Card dialog - Print Manufacturing Order and Print Job Card buttons present",
+      "Job Card dialog - Progress bar present"
+    ]
+  },
+  "issues_verified_fixed": {
+    "issue_1_jw_badge_format": "FIXED - Outsourced operation badge now shows 'JW: JW-000XXX — Receive via GRN' instead of generic 'Outsourced — Receive via GRN'. Falls back to 'Outsourced' for legacy data without outsource_sc_order_number.",
+    "issue_2_mo_tree_removal": "FIXED - Manufacturing Order Tree section has been completely removed from Job Card dialog. Dialog structure is now: Header (Item, Qty, Status) → Operations table → Progress bar → Print buttons.",
+    "issue_3_sc_not_created": "ADDRESSED - The outsource_sc_order_number field now exposes the JW number on the operation, allowing users to locate the consolidated SC. Backend correctly creates new SC when no prior open Job OS SC exists, and consolidates into existing SC when one exists for same supplier."
+  }
+}
