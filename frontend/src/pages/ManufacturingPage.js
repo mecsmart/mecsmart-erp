@@ -1342,6 +1342,7 @@ export default function ManufacturingPage() {
                       <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Qty Done</th>
                       <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Accept/Reject</th>
                       <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Cost/Unit</th>
+                      <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Duration</th>
                       <th className="text-center py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Action</th>
                     </tr>
                   </thead>
@@ -1409,6 +1410,30 @@ export default function ManufacturingPage() {
                           </td>
                           <td className="py-3 px-3 text-right mono text-xs font-medium">
                             {op.process_cost_per_unit ? `₹${op.process_cost_per_unit.toFixed(2)}` : '-'}
+                          </td>
+                          <td className="py-3 px-3 text-right mono text-xs" data-testid={`op-duration-${op.sequence}`}>
+                            {(() => {
+                              // Aggregate duration from runs[] or actual_start/actual_end
+                              const runs = op.runs || [];
+                              let totalMinutes = 0;
+                              runs.forEach(r => {
+                                const s = r.actual_start || r.start_time;
+                                const e = r.actual_end || r.end_time;
+                                if (s && e) totalMinutes += Math.max(0, (new Date(e) - new Date(s)) / 60000);
+                              });
+                              if (!totalMinutes && op.actual_start && op.actual_end) {
+                                totalMinutes = Math.max(0, (new Date(op.actual_end) - new Date(op.actual_start)) / 60000);
+                              }
+                              if (!totalMinutes && op.status === 'in_progress' && (op.actual_start || (runs[runs.length-1]?.actual_start))) {
+                                const s = op.actual_start || runs[runs.length-1]?.actual_start;
+                                totalMinutes = Math.max(0, (Date.now() - new Date(s)) / 60000);
+                                return <span className="text-[#1E429F]">{totalMinutes.toFixed(0)} min (running)</span>;
+                              }
+                              if (!totalMinutes) return <span className="text-[#9CA3AF]">-</span>;
+                              const h = Math.floor(totalMinutes / 60);
+                              const m = Math.round(totalMinutes % 60);
+                              return <span className="text-[#111827]">{h > 0 ? `${h}h ${m}m` : `${m} min`}</span>;
+                            })()}
                           </td>
                           <td className="py-3 px-3 text-center">
                             <div className="flex items-center justify-center gap-1">

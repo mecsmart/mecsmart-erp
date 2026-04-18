@@ -901,8 +901,10 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
             if child_bom:
                 comp_data["child_bom_id"] = child_bom.get("id")
                 comp_data["children"] = await explode_level(child_bom.get("id"), level + 1, max_levels)
-                # Rollup cost from children
-                comp_data["unit_cost"] = sum(c.get("extended_cost", 0) for c in comp_data["children"])
+                # Rollup cost from children (material + children process) + this child's FG process
+                children_rollup = sum(c.get("extended_cost", 0) for c in comp_data["children"])
+                child_fg_process = routings_total_cost(child_bom.get("parent_routings", []))
+                comp_data["unit_cost"] = children_rollup + child_fg_process
             else:
                 # Leaf node - use item unit_cost
                 comp_data["unit_cost"] = item.get("unit_cost", 0) if item else 0
@@ -952,13 +954,18 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
     parent_item = await db.items.find_one({"id": bom.get("parent_item_id")}, {"_id": 0})
     explosion = await explode_level(bom_id, 1, levels)
     
-    # Calculate total rollup cost
-    total_cost = sum(c.get("extended_cost", 0) for c in explosion)
+    # Components rollup (material + component process costs)
+    components_cost = sum(c.get("extended_cost", 0) for c in explosion)
+    # FG parent process cost (e.g., Assembly, Powder Coating done on the parent item)
+    fg_process_cost = routings_total_cost(bom.get("parent_routings", []))
+    total_cost = components_cost + fg_process_cost
     
     return {
         "bom": bom,
         "parent_item": parent_item,
         "explosion": explosion,
+        "fg_process_cost_per_unit": round(fg_process_cost, 2),
+        "components_cost": round(components_cost, 2),
         "total_rollup_cost": round(total_cost, 2)
     }
 
@@ -4483,7 +4490,7 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                             outsource_charges = pjwp["charges"]
                             break
             
-            sc_part = {"item_id": wo.get("item_id"), "quantity": mo_qty, "charges": outsource_charges, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost, 2)}
+            sc_part = {"item_id": wo.get("item_id"), "quantity": mo_qty, "charges": outsource_charges, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost, 2), "process_name": target_op.get("operation_name", ""), "wo_id": wo_id}
             sc_lines = []  # No RM lines for operation outsourcing — only the part goes and comes back
             
             # Check for existing SC order for same supplier (consolidate across all MOs)
@@ -4501,10 +4508,10 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             if existing_sc:
                 # Consolidate into existing SC — add this part to job_work_parts
                 jwp = existing_sc.get("job_work_parts", [])
-                # Check if this item already exists in job_work_parts
+                # Check if this item + process already exists in job_work_parts (for consolidation)
                 found_jwp = False
                 for jp in jwp:
-                    if jp.get("item_id") == wo.get("item_id"):
+                    if jp.get("item_id") == wo.get("item_id") and jp.get("process_name", "") == target_op.get("operation_name", ""):
                         jp["quantity"] += mo_qty
                         # charges are per-unit — update only if not already set
                         if not jp.get("charges") and outsource_charges:
@@ -4940,7 +4947,7 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
     ws = wb.active
     ws.title = "BOM Data"
     
-    headers = ["Parent Part Number", "Parent Name", "Revision", "Status", "Parent Routings", "Component Part Number", "Component Name", "Quantity", "Component Routings", "Is Alternate", "Effectivity Date"]
+    headers = ["Parent Part Number", "Parent Name", "Revision", "Status", "Parent Routings (Name:Cost)", "Component Part Number", "Component Name", "Quantity", "Component Routings (Name:Cost)", "Is Alternate", "Effectivity Date"]
     header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=11)
     thin_border = Border(
@@ -4956,13 +4963,25 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
         cell.border = thin_border
     
     row_num = 2
+    def fmt_routings(rs):
+        """Format routings as 'Name:Cost, Name:Cost' (or just 'Name' when cost=0)"""
+        parts = []
+        for r in (rs or []):
+            if isinstance(r, str):
+                parts.append(r)
+            elif isinstance(r, dict):
+                n = r.get("name", "")
+                c = r.get("cost", 0) or 0
+                parts.append(f"{n}:{c}" if c else n)
+        return ", ".join(parts)
+    
     for bom in boms:
         parent = items_map.get(bom.get("parent_item_id"), {})
-        parent_routings_str = ", ".join(bom.get("parent_routings", []))
+        parent_routings_str = fmt_routings(bom.get("parent_routings", []))
         eff_date = str(bom.get("effectivity_date", ""))[:10] if bom.get("effectivity_date") else ""
         for comp in bom.get("components", []):
             comp_item = items_map.get(comp.get("item_id"), {})
-            comp_routings_str = ", ".join(comp.get("routings", []))
+            comp_routings_str = fmt_routings(comp.get("routings", []))
             data = [
                 parent.get("part_number", ""), parent.get("name", ""),
                 bom.get("revision", ""), bom.get("status", ""),
@@ -5012,6 +5031,26 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
     async for item in db.items.find({}, {"_id": 0}):
         items_by_pn[item.get("part_number", "")] = item
     
+    def parse_routings(s):
+        """Parse 'Name:Cost, Name:Cost' -> [{name, cost}]. Accepts plain 'Name' (cost=0)"""
+        out = []
+        if not s:
+            return out
+        for entry in str(s).split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            if ":" in entry:
+                name, cost_str = entry.rsplit(":", 1)
+                try:
+                    cost = float(cost_str.strip()) if cost_str.strip() else 0.0
+                except ValueError:
+                    cost = 0.0
+                out.append({"name": name.strip(), "cost": cost})
+            else:
+                out.append({"name": entry, "cost": 0.0})
+        return out
+    
     # Group rows by parent part number
     # New format: Parent PN, Parent Name, Rev, Status, Parent Routings, Comp PN, Comp Name, Qty, Comp Routings, Is Alt, Effectivity
     bom_groups = {}
@@ -5021,11 +5060,10 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
         parent_pn = str(row[0]).strip()
         if parent_pn not in bom_groups:
             parent_routings_str = str(row[4]).strip() if len(row) > 4 and row[4] else ""
-            parent_routings = [r.strip() for r in parent_routings_str.split(",") if r.strip()] if parent_routings_str else []
             bom_groups[parent_pn] = {
                 "revision": str(row[2]).strip() if row[2] else "A",
                 "status": str(row[3]).strip() if row[3] else "active",
-                "parent_routings": parent_routings,
+                "parent_routings": parse_routings(parent_routings_str),
                 "components": []
             }
         
@@ -5053,7 +5091,7 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
             qty = float(row[6]) if len(row) > 6 and row[6] else 1
             is_alt = str(row[7]).strip().lower() in ["yes", "true", "1"] if len(row) > 7 and row[7] else False
         
-        comp_routings = [r.strip() for r in comp_routings_str.split(",") if r.strip()] if comp_routings_str else []
+        comp_routings = parse_routings(comp_routings_str)
         
         parent_item = items_by_pn.get(parent_pn)
         comp_item = items_by_pn.get(comp_pn)

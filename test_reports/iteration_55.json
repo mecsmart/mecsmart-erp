@@ -1,0 +1,92 @@
+{
+  "summary": "Iteration 55 testing complete. All 5 feature fixes verified: (1) BOM rollup cost includes FG process cost - fg_process_cost_per_unit=100, components_cost=108.5, total_rollup_cost=208.5 for test BOM 'RoutingCostTest'. (2) BOM Print has Process Cost column and routings with costs. (3) BOM Excel export/import uses 'Name:Cost' format for routings. (4) Job Card Duration column shows elapsed time (e.g., '420 min (running)' for in-progress ops). (5) Job OS DC includes process_name in job_work_parts for consolidation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_55.py",
+    "/app/test_reports/pytest/pytest_iteration_55.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_55.py"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 tests passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None - used existing test BOM 'RoutingCostTest' (id: 70c22fb4-5c6d-4679-a5f7-674a7ccd63a2)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 55 features verified: (1) BOM explode at server.py lines 890-970 returns fg_process_cost_per_unit (sum of parent_routings costs) and total_rollup_cost = components_cost + fg_process_cost. Test BOM 'RoutingCostTest' has parent_routings=[{Assembly:100}] and component with routings=[{LC Cutting:50},{Bending:30}]. (2) BOM print (BOMPage.js printBomExplosion) renders table with columns: Type, Part Number, Description, Routings (cost), QTY, UOM, Material Cost/Unit, Process Cost/Unit, Extended Cost. Summary shows Components Cost + FG Parent Process Cost + Total Rollup Cost. (3) BOM export (server.py lines 4945-5012) uses headers 'Parent Routings (Name:Cost)' and 'Component Routings (Name:Cost)'. Import (lines 5014-5100) parses 'Name:Cost' and plain 'Name' entries. (4) Job Card (ManufacturingPage.js lines 1333-1437) has Duration column (9th col) showing elapsed time from runs[] or actual_start/actual_end. In-progress shows 'N min (running)' in blue. (5) Job OS sc_part includes process_name (server.py line 4493). Consolidation matches on item_id + process_name (lines 4512-4520).",
+  "features_tested": {
+    "fix1_bom_rollup_fg_process_cost": {
+      "status": "PASSED",
+      "details": "BOM explode returns fg_process_cost_per_unit=100, components_cost=108.5, total_rollup_cost=208.5 for test BOM with parent_routings=[{Assembly:100}]"
+    },
+    "fix1_child_bom_rollup": {
+      "status": "PASSED",
+      "details": "Child BOM unit_cost includes SA's own FG process cost. Component with routings=[{LC Cutting:50},{Bending:30}] has process_cost_per_unit=80"
+    },
+    "fix2_bom_print_process_cost_column": {
+      "status": "PASSED",
+      "details": "BOM table has columns: Type, Part Number, Description, QTY, UOM, Routings, Material Cost, Process Cost/Unit, Total/Unit, Extended Cost"
+    },
+    "fix2_bom_print_summary": {
+      "status": "PASSED",
+      "details": "BOM print summary shows Components Cost + FG Parent Process Cost + Total Rollup Cost"
+    },
+    "fix3_bom_export_routings_format": {
+      "status": "PASSED",
+      "details": "Export headers include 'Parent Routings (Name:Cost)' and 'Component Routings (Name:Cost)'. Data formatted as 'Assembly:100.0' or 'LC Cutting:50.0, Bending:30.0'"
+    },
+    "fix3_bom_import_routings_parsing": {
+      "status": "PASSED",
+      "details": "Import parses 'Name:Cost' format and plain 'Name' (cost=0) entries"
+    },
+    "fix4_job_card_duration_column": {
+      "status": "PASSED",
+      "details": "Job Card operations table has Duration column (9th). Shows '420 min (running)' for in-progress operation. Calculates from runs[] start/end or actual_start/actual_end"
+    },
+    "fix5_job_os_process_name": {
+      "status": "PASSED",
+      "details": "Job OS sc_part includes process_name from outsourced operation. Consolidation matches on item_id + process_name"
+    },
+    "fix5_dc_print_process_column": {
+      "status": "PASSED",
+      "details": "DC print for Job OS includes Process column in job_work_parts table"
+    },
+    "regression_legacy_bom_routings": {
+      "status": "PASSED",
+      "details": "Legacy BOMs with string routings load and explode without errors. String routings normalized to {name, cost:0}"
+    }
+  },
+  "backend_tests_summary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "test_classes": [
+      "TestBOMRollupCost",
+      "TestBOMExcelExport",
+      "TestBOMExcelImport",
+      "TestJobOSProcessName",
+      "TestLegacyBOMRoutings",
+      "TestWorkOrderOperations",
+      "TestDeliveryChallanProcess"
+    ]
+  },
+  "frontend_ui_verification": {
+    "bom_table_columns": "VERIFIED - Type, Part Number, Description, QTY, UOM, Routings, Material Cost, Process Cost/Unit, Total/Unit, Extended Cost",
+    "bom_print_export_buttons": "VERIFIED - 94 print buttons, 103 export buttons found",
+    "job_card_duration_column": "VERIFIED - Duration column shows '420 min (running)' for in-progress operation",
+    "job_work_dc_print": "VERIFIED - Print DC buttons available for delivery challans"
+  }
+}

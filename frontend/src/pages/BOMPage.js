@@ -259,7 +259,7 @@ export default function BOMPage() {
     setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const printBomExplosion = (parentItem, explosion, totalCost, bomInfo) => {
+  const printBomExplosion = (parentItem, explosion, totalCost, bomInfo, fgProcessCost = 0, componentsCost = 0) => {
     const catLabel = (cat) => cat === 'finished_good' ? 'FG' : cat === 'sub_assembly' ? 'SG' : cat === 'raw_material' ? 'RM' : cat === 'component' ? 'CP' : 'PT';
     const renderPrintRows = (nodes, level = 0) => {
       let html = '';
@@ -267,13 +267,20 @@ export default function BOMPage() {
         const item = node.item || {};
         const indent = level * 20;
         const bgColor = item.category === 'sub_assembly' ? '#FEF3C7' : item.category === 'raw_material' ? '#DBEAFE' : item.category === 'component' ? '#FEE2E2' : '#F3F4F6';
+        const routingsText = (node.routings || []).map(r => {
+          const n = typeof r === 'string' ? r : r.name;
+          const c = typeof r === 'string' ? 0 : (r.cost || 0);
+          return c > 0 ? `${n} (${c.toFixed(2)})` : n;
+        }).join(', ') || '-';
         html += `<tr style="background:${bgColor}">
           <td style="padding:4px 8px;padding-left:${indent + 8}px;font-size:10px;font-weight:600;">${catLabel(item.category || '')}</td>
           <td style="padding:4px 8px;font-family:monospace;font-size:11px;">${item.part_number || '-'}</td>
           <td style="padding:4px 8px;font-size:11px;">${item.name || '-'}${node.is_alternate ? ' (alt)' : ''}</td>
+          <td style="padding:4px 8px;font-size:10px;color:#1E429F;">${routingsText}</td>
           <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;">${node.quantity}</td>
           <td style="padding:4px 8px;font-size:11px;">${item.unit_of_measure || '-'}</td>
           <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;">${node.unit_cost != null ? node.unit_cost.toFixed(2) : '-'}</td>
+          <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;color:#723B13;">${node.process_cost_per_unit != null && node.process_cost_per_unit > 0 ? node.process_cost_per_unit.toFixed(2) : '-'}</td>
           <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;font-weight:600;">${node.extended_cost != null ? node.extended_cost.toFixed(2) : '-'}</td>
         </tr>`;
         if (node.children && node.children.length > 0) {
@@ -282,17 +289,29 @@ export default function BOMPage() {
       });
       return html;
     };
+    const parentRoutingsText = (bomInfo?.parent_routings || []).map(r => {
+      const n = typeof r === 'string' ? r : r.name;
+      const c = typeof r === 'string' ? 0 : (r.cost || 0);
+      return c > 0 ? `${n} (${c.toFixed(2)})` : n;
+    }).join(', ');
     const html = `<!DOCTYPE html><html><head><title>BOM - ${parentItem?.part_number || ''}</title>
     <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',sans-serif;font-size:11px;padding:20px}
     h1{font-size:16px;color:#1D3557;margin-bottom:4px}h2{font-size:12px;color:#555;margin-bottom:12px}
     table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#1D3557;color:white;padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase}
-    td{border-bottom:1px solid #ddd;font-size:11px}.total{font-size:13px;font-weight:700;text-align:right;margin-top:12px;color:#1D3557}
+    td{border-bottom:1px solid #ddd;font-size:11px}
+    .summary{margin-top:14px;padding:10px;background:#F9FAFB;border:1px solid #E5E7EB;font-size:11px}
+    .summary .row{display:flex;justify-content:space-between;padding:2px 0}
+    .summary .row.total{font-size:13px;font-weight:700;color:#1D3557;border-top:2px solid #1D3557;padding-top:6px;margin-top:6px}
     @media print{body{padding:10px}}</style></head><body>
     <h1>${parentItem?.part_number || ''} - ${parentItem?.name || ''}</h1>
-    <h2>BOM Explosion | Rev ${bomInfo?.revision || '-'} | ${bomInfo?.status || '-'}</h2>
-    <table><thead><tr><th>Type</th><th>Part Number</th><th>Description</th><th style="text-align:right">QTY</th><th>UOM</th><th style="text-align:right">Unit Cost</th><th style="text-align:right">Extended Cost</th></tr></thead>
+    <h2>BOM Explosion | Rev ${bomInfo?.revision || '-'} | ${bomInfo?.status || '-'}${parentRoutingsText ? ' | FG Routings: ' + parentRoutingsText : ''}</h2>
+    <table><thead><tr><th>Type</th><th>Part Number</th><th>Description</th><th>Routings (cost)</th><th style="text-align:right">QTY</th><th>UOM</th><th style="text-align:right">Material Cost/Unit</th><th style="text-align:right">Process Cost/Unit</th><th style="text-align:right">Extended Cost</th></tr></thead>
     <tbody>${renderPrintRows(explosion)}</tbody></table>
-    <p class="total">Total Rollup Cost: ${formatCurrency(totalCost)}</p>
+    <div class="summary">
+      <div class="row"><span>Components Cost (material + component process):</span><span style="font-family:monospace">${formatCurrency(componentsCost)}</span></div>
+      <div class="row"><span>FG Parent Process Cost (${parentRoutingsText || '—'}):</span><span style="font-family:monospace;color:#723B13">${formatCurrency(fgProcessCost)}</span></div>
+      <div class="row total"><span>Total Rollup Cost:</span><span style="font-family:monospace">${formatCurrency(totalCost)}</span></div>
+    </div>
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:30px">Printed on ${new Date().toLocaleString()}</p>
     </body></html>`;
     const w = window.open('', '_blank');
@@ -806,8 +825,11 @@ export default function BOMPage() {
                         {activeBom && <span className="text-xs bg-white/15 px-2 py-0.5 rounded">Rev {activeBom.revision} - {activeBom.status}</span>}
                       </div>
                       <div className="flex items-center gap-2">
+                        {explosion?.fg_process_cost_per_unit > 0 && (
+                          <span className="text-[11px] bg-[#FDF6B2] text-[#723B13] px-2 py-0.5 rounded mono font-medium" title="FG Parent Process Cost per unit">FG Process: {formatCurrency(explosion.fg_process_cost_per_unit)}</span>
+                        )}
                         <span className="mono text-sm font-bold">Total: {formatCurrency(totalCost)}</span>
-                        {explosion && <button onClick={() => printBomExplosion(parentItem, explosion.explosion, totalCost, activeBom)} className="p-1 hover:bg-white/20 rounded" title="Print BOM" data-testid={`print-bom-${pid}`}><Printer className="w-4 h-4" /></button>}
+                        {explosion && <button onClick={() => printBomExplosion(parentItem, explosion.explosion, totalCost, activeBom, explosion.fg_process_cost_per_unit || 0, explosion.components_cost || 0)} className="p-1 hover:bg-white/20 rounded" title="Print BOM" data-testid={`print-bom-${pid}`}><Printer className="w-4 h-4" /></button>}
                         {activeBom && <button onClick={() => handleBomExport(activeBom.id)} className="p-1 hover:bg-white/20 rounded" title="Export this BOM" data-testid={`export-bom-${pid}`}><Download className="w-4 h-4" /></button>}
                         <button onClick={() => handleView(activeBom)} className="p-1 hover:bg-white/20 rounded" title="View"><Eye className="w-4 h-4" /></button>
                         {canEdit && <button onClick={() => handleEdit(activeBom)} className="p-1 hover:bg-white/20 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>}
