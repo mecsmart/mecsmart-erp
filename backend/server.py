@@ -207,42 +207,75 @@ def routings_total_cost(routings: Optional[List[Any]]) -> float:
 
 
 async def compute_bom_costs(item_id: str) -> Dict[str, float]:
-    """Return {rm_cost, process_cost} from the active BOM for this item.
-    rm_cost = sum(components.quantity * components.item.unit_cost)
-    process_cost = sum(parent_routings.cost) + sum(components.routings.cost)
-    Returns zeros if no BOM exists."""
+    """Return {rm_cost, process_cost} for this item.
+    Strategy 1: Item is a BOM parent — rm_cost = sum(components.qty*unit_cost); process_cost = parent_routings + component_routings.
+    Strategy 2: Item appears as a component in another BOM — rm_cost = item.unit_cost (no child BOM); process_cost = that component's routings total cost.
+    Returns zeros if item not found anywhere."""
+    # Strategy 1: this item IS a BOM parent
     bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
     if not bom:
-        # Fallback: try any BOM (draft/obsolete)
         bom = await db.boms.find_one({"parent_item_id": item_id}, {"_id": 0})
-    if not bom:
-        return {"rm_cost": 0.0, "process_cost": 0.0}
-    rm = 0.0
-    comp_proc = 0.0
-    for comp in bom.get("components", []):
-        c_item = await db.items.find_one({"id": comp.get("item_id")}, {"_id": 0})
-        if c_item:
-            rm += comp.get("quantity", 0) * c_item.get("unit_cost", 0)
-        comp_proc += routings_total_cost(comp.get("routings", []))
-    parent_proc = routings_total_cost(bom.get("parent_routings", []))
-    return {"rm_cost": round(rm, 2), "process_cost": round(parent_proc + comp_proc, 2)}
+    if bom:
+        rm = 0.0
+        comp_proc = 0.0
+        for comp in bom.get("components", []):
+            c_item = await db.items.find_one({"id": comp.get("item_id")}, {"_id": 0})
+            if c_item:
+                rm += comp.get("quantity", 0) * c_item.get("unit_cost", 0)
+            comp_proc += routings_total_cost(comp.get("routings", []))
+        parent_proc = routings_total_cost(bom.get("parent_routings", []))
+        return {"rm_cost": round(rm, 2), "process_cost": round(parent_proc + comp_proc, 2)}
+    
+    # Strategy 2: this item is a COMPONENT in some parent BOM — use that component's routings
+    parent_bom = await db.boms.find_one({"components.item_id": item_id, "status": "active"}, {"_id": 0})
+    if not parent_bom:
+        parent_bom = await db.boms.find_one({"components.item_id": item_id}, {"_id": 0})
+    if parent_bom:
+        for comp in parent_bom.get("components", []):
+            if comp.get("item_id") == item_id:
+                proc = routings_total_cost(comp.get("routings", []))
+                item_rec = await db.items.find_one({"id": item_id}, {"_id": 0})
+                rm = item_rec.get("unit_cost", 0) if item_rec else 0
+                return {"rm_cost": round(rm, 2), "process_cost": round(proc, 2)}
+    
+    return {"rm_cost": 0.0, "process_cost": 0.0}
 
 
 def routing_cost_for_process(bom: Dict[str, Any], item_id: str, process_name: str) -> float:
     """Find the cost for a specific process_name in a BOM component (or parent if item_id matches parent)."""
     if not bom or not process_name:
         return 0.0
-    # If the item is the parent, look at parent_routings
+    target_name = process_name.strip().lower()
     if bom.get("parent_item_id") == item_id:
         for r in normalize_routings(bom.get("parent_routings", [])):
-            if r.get("name", "").strip().lower() == process_name.strip().lower():
+            if r.get("name", "").strip().lower() == target_name:
                 return r.get("cost", 0.0)
-    # Otherwise look at matching component's routings
     for comp in bom.get("components", []):
         if comp.get("item_id") == item_id:
             for r in normalize_routings(comp.get("routings", [])):
-                if r.get("name", "").strip().lower() == process_name.strip().lower():
+                if r.get("name", "").strip().lower() == target_name:
                     return r.get("cost", 0.0)
+    return 0.0
+
+
+async def find_routing_cost(item_id: str, process_name: str) -> float:
+    """Search any BOM (as parent or as component) for the given item + process and return its cost."""
+    if not item_id or not process_name:
+        return 0.0
+    # First: item as parent
+    bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
+    if not bom:
+        bom = await db.boms.find_one({"parent_item_id": item_id}, {"_id": 0})
+    if bom:
+        c = routing_cost_for_process(bom, item_id, process_name)
+        if c:
+            return c
+    # Second: item as a component in any BOM
+    parent_bom = await db.boms.find_one({"components.item_id": item_id, "status": "active"}, {"_id": 0})
+    if not parent_bom:
+        parent_bom = await db.boms.find_one({"components.item_id": item_id}, {"_id": 0})
+    if parent_bom:
+        return routing_cost_for_process(parent_bom, item_id, process_name)
     return 0.0
 
 class ProductionOrderCreate(BaseModel):
@@ -4515,14 +4548,10 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             bom_costs = await compute_bom_costs(wo.get("item_id"))
             bom_rollup_cost = bom_costs["rm_cost"] or (wo_item.get("unit_cost", 0) if wo_item else 0)
             
-            # Default charges: look up matching operation in the item's BOM
+            # Default charges: look up matching operation in ANY BOM (item as parent or component)
             outsource_charges = op_data.outsource_charges or 0
-            if not outsource_charges:
-                item_bom = await db.boms.find_one({"parent_item_id": wo.get("item_id"), "status": "active"}, {"_id": 0})
-                if not item_bom:
-                    item_bom = await db.boms.find_one({"parent_item_id": wo.get("item_id")}, {"_id": 0})
-                if item_bom and op_name:
-                    outsource_charges = routing_cost_for_process(item_bom, wo.get("item_id"), op_name)
+            if not outsource_charges and op_name:
+                outsource_charges = await find_routing_cost(wo.get("item_id"), op_name)
             
             # Fallback: pull from previous SC
             if not outsource_charges:
@@ -6304,7 +6333,7 @@ async def create_po_from_sc(request: Request, data: dict = Body(...)):
         "subtotal": total_amount,
         "additional_charges": [],
         "total_amount": total_amount,
-        "status": "draft",
+        "status": "approved",
         "notes": f"Auto-created from SC Orders: {', '.join(sc_refs)}",
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
