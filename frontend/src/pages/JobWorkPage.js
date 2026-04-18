@@ -281,7 +281,7 @@ export default function JobWorkPage() {
     }, 0);
     
     const isJobOS = !dc.lines || dc.lines.length === 0;
-    const dcTitle = isJobOS ? 'Job Outsource DC' : 'Delivery Challan';
+    const dcTitle = isJobOS ? 'Job Work Order Cum Delivery Challan' : 'Delivery Challan';
     
     const html = `<!DOCTYPE html><html><head><title>${dcTitle} - ${dc.dc_number}</title>
     <style>
@@ -347,15 +347,21 @@ export default function JobWorkPage() {
     
     <div class="section-title">Job Work Part Details</div>
     <table>
-      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th class="text-right">Charges</th><th class="text-right">Total Amount</th></tr></thead>
+      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th>UOM</th><th class="text-right">Charges/Unit</th><th class="text-right">Total Charges</th><th class="text-right">RM Cost/Unit</th><th class="text-right">Total Amount</th></tr></thead>
       <tbody>
       ${jwParts.length > 0 ? jwParts.map((p, i) => {
         const pit = p.item || items.find(it => it.id === p.item_id) || {};
         const charges = p.charges || 0;
-        const total = (p.quantity || 0) * charges;
-        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td>${pit.hsn_code || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${total.toFixed(2)}</td></tr>`;
-      }).join('') : `<tr><td>1</td><td>${parentItemName || '-'}</td><td>-</td><td class="text-right mono">${parentItemQty || '-'}</td><td class="text-right mono">-</td><td class="text-right mono">-</td></tr>`}
-      <tr class="total-row"><td colspan="5" class="text-right">Total Job Work Cost</td><td class="text-right mono">${currencySymbol}${totalJobWorkCost.toFixed(2)}</td></tr>
+        const rmCost = p.bom_rollup_cost || pit.unit_cost || 0;
+        const totalCharges = (p.quantity || 0) * charges;
+        const totalAmount = (p.quantity || 0) * rmCost;
+        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td>${pit.hsn_code || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td>${pit.unit_of_measure || 'Nos'}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${totalCharges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${rmCost.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${totalAmount.toFixed(2)}</td></tr>`;
+      }).join('') : `<tr><td>1</td><td>${parentItemName || '-'}</td><td>-</td><td class="text-right mono">${parentItemQty || '-'}</td><td>Nos</td><td class="text-right mono">-</td><td class="text-right mono">-</td><td class="text-right mono">-</td><td class="text-right mono">-</td></tr>`}
+      ${(() => {
+        const grandCharges = jwParts.reduce((s, p) => s + ((p.quantity || 0) * (p.charges || 0)), 0);
+        const grandAmount = jwParts.reduce((s, p) => s + ((p.quantity || 0) * (p.bom_rollup_cost || (p.item || items.find(it => it.id === p.item_id) || {}).unit_cost || 0)), 0);
+        return `<tr class="total-row"><td colspan="6" class="text-right">Total</td><td class="text-right mono">${currencySymbol}${grandCharges.toFixed(2)}</td><td></td><td class="text-right mono">${currencySymbol}${grandAmount.toFixed(2)}</td></tr>`;
+      })()}
       </tbody>
     </table>
     
@@ -502,10 +508,12 @@ export default function JobWorkPage() {
                               {o.status === 'in_progress' && o.subcontract_type !== 'without_material' && sentQty >= totalQty && (
                                 <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium">Receive via GRN ({o.order_number})</span>
                               )}
-                              {/* SC without RM / Job Card outsource: Create PO → GRN */}
-                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && o.subcontract_type === 'without_material' && (
-                                o.dc_created || (!o.lines?.length && !o.job_work_parts?.length)
-                              ) && (
+                              {/* Job OS (without_material with job_work_parts): After DC sent, show Receive via GRN - NO PO needed */}
+                              {o.subcontract_type === 'without_material' && o.job_work_parts?.length > 0 && o.dc_created && o.status === 'in_progress' && (
+                                <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium">Receive via GRN ({o.order_number})</span>
+                              )}
+                              {/* SC without RM without job_work_parts (old flow): Create PO → GRN */}
+                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && o.subcontract_type === 'without_material' && !o.job_work_parts?.length && (
                                 <button onClick={() => handleCreatePOFromSC(o)} className="btn-primary text-xs px-2 py-1 bg-[#723B13] hover:bg-[#5A2E0F]" data-testid={`create-po-${o.id}`}><FileText className="w-3 h-3 inline mr-1" />Create PO</button>
                               )}
                               {o.po_created && o.po_number && (

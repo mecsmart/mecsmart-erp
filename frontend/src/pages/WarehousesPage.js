@@ -99,8 +99,12 @@ export default function WarehousesPage() {
       setInventory(inventoryRes.data);
       // Filter JW orders that are in_progress with DC sent (pending GRN receive)
       const pendingJW = (jwRes.data || []).filter(jw => 
-        jw.status === 'in_progress' && jw.subcontract_type !== 'without_material' && 
-        (jw.lines || []).some(l => l.sent_quantity > 0)
+        jw.status === 'in_progress' && jw.job_work_parts?.length > 0 && (
+          // SC with RM: lines sent
+          (jw.subcontract_type !== 'without_material' && (jw.lines || []).some(l => l.sent_quantity > 0)) ||
+          // Job OS: dc_created
+          (jw.subcontract_type === 'without_material' && jw.dc_created)
+        )
       );
       setPendingJWOrders(pendingJW);
     } catch (error) {

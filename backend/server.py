@@ -4382,10 +4382,15 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             sc_lines = []  # No RM lines for operation outsourcing — only the part goes and comes back
             
             # Check for existing SC order for same supplier (consolidate across all MOs)
+            # Only consolidate if DC hasn't been sent yet
             existing_sc = await db.subcontract_orders.find_one({
                 "supplier_id": op_data.outsource_supplier_id,
                 "status": {"$in": ["draft", "in_progress"]},
-                "subcontract_type": "without_material"
+                "subcontract_type": "without_material",
+                "$or": [
+                    {"dc_created": {"$exists": False}},
+                    {"dc_created": False}
+                ]
             })
             
             if existing_sc:
@@ -4434,11 +4439,13 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                     "supplier_id": op_data.outsource_supplier_id,
                     "subcontract_type": "without_material",
                     "reference_wo_id": wo_id,
+                    "reference_wo_ids": [wo_id],
                     "reference_operation_seq": sequence,
                     "reference_operation_seqs": [sequence],
                     "job_work_parts": [sc_part],
                     "lines": [],  # No RM lines
-                    "processing_charges": op_data.outsource_charges or 0,
+                    "processing_charges": outsource_charges,
+                    "dc_created": False,
                     "status": "in_progress",
                     "notes": f"Operation outsource: {target_op.get('operation_name')} on MO {wo.get('wo_number')}",
                     "created_at": datetime.now(timezone.utc),
