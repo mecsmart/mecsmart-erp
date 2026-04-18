@@ -4,20 +4,20 @@
 - Backend: FastAPI + MongoDB (Motor), JWT httpOnly cookies, /api prefix
 - Frontend: React 19 + Shadcn/UI + Tailwind CSS
 
-## Job OS Flow (Updated)
-- Consolidation: Same supplier across ALL MOs → single SC order
-- Send DC: skip_stock_deduct=true, updates job_work_parts.sent_quantity + dc_created
-- DC print: "Job Outsource DC" title, Part Details only (no RM section)
-- Receive: via GRN page (stores person)
+## Job OS Flow (Final)
+- Outsource ops → Consolidated SC (same supplier, dc_created=false)
+- Send DC → "Job Work Order Cum Delivery Challan" print format
+  - Columns: SL, Part No & Name, HSN, Qty, UOM, Charges/Unit, Total Charges, RM Cost/Unit, Total Amount
+- NO PO for Job OS — Receive via GRN directly using JW number
+- GRN page shows both SC with RM and Job OS pending orders
 
 ## SC with RM Flow
-- DC print: "Delivery Challan" with both Part Details + RM sections, HSN columns
-- Receive: via GRN page, mandatory Invoice No + Date, editable Cost/Unit
+- SC → Send DC (HSN in print) → Receive via GRN from Stores page
+- DC print: "Delivery Challan" with Part Details + RM sections
 
 ## BOM
 - Extended Cost = Total/Unit × Qty (material + process)
-- Process cost from SC charges + WO operations
-- SC pre-populates previous charges
+- Process cost from SC charges (priority) + WO operations (fallback)
 
 ## Backlog
 - [ ] Purchase Invoice from GRN with process cost
