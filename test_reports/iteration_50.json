@@ -1,0 +1,48 @@
+{
+  "summary": "Tested 3 reported Job OS regressions. All fixes verified working correctly: (1) Vendor consolidation - charges per unit NOT doubled when same item outsourced twice to same supplier, (2) DC print format - 9-col format for Job OS only (isJobOS = dc.lines empty), 6-col for standard SC, (3) Manufacturing Job Card - Stop/Complete buttons hidden for outsourced ops, yellow badge 'Outsourced — Receive via GRN' shown instead.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_job_os_regressions.py",
+    "/app/test_reports/pytest/pytest_results_iteration_50.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_job_os_regressions.py"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 tests passed)",
+    "frontend": "100% (all 3 issues verified fixed)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created test items, suppliers, routings, BOMs, POs, WOs for consolidation testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Job OS regression fixes verified: (1) Backend consolidation logic at lines 4380-4460 correctly sums quantities without doubling charges per unit, (2) Frontend printDC at lines 254-395 uses isJobOS = !dc.lines || dc.lines.length === 0 to conditionally render 9-col vs 6-col format, (3) ManufacturingPage.js lines 1419-1442 correctly hides Stop/Complete for op.is_job_work === true and shows badge instead.",
+  "tests_executed": {
+    "backend": [
+      "TestJobOSConsolidationCharges - 11 tests: Verifies vendor consolidation when same item outsourced twice to same supplier - charges per unit should NOT double",
+      "TestDCCreatedBlocksConsolidation - 7 tests: Verifies that after DC is sent (dc_created=True), new outsource creates new SC instead of consolidating",
+      "TestSendDCButtonVisibility - 2 tests: Verifies Job OS SC conditions for Send DC button visibility"
+    ],
+    "frontend": [
+      "Job Work page - Send DC buttons visible for Job OS SC orders (16 found with data-testid=send-dc-parts-*)",
+      "Delivery Challans tab - Print DC buttons visible (86 found)",
+      "DC Print format - Code verified: isJobOS = !dc.lines || dc.lines.length === 0, dcTitle = isJobOS ? 'Job Work Order Cum Delivery Challan' : 'Delivery Challan'",
+      "Manufacturing Job Card - Outsourced operation badge found (data-testid=outsourced-op-*), Stop/Complete buttons correctly hidden for outsourced ops"
+    ]
+  },
+  "issues_verified_fixed": {
+    "issue_1_vendor_consolidation": "FIXED - Backend consolidation logic correctly sums quantities without doubling charges per unit when same item is outsourced twice to same supplier",
+    "issue_2_dc_print_format": "FIXED - Frontend printDC conditionally renders 9-col format for Job OS (dc.lines empty) with 'Job Work Order Cum Delivery Challan' title, 6-col format for standard SC with 'Delivery Challan' title",
+    "issue_3_job_card_outsourced_ops": "FIXED - Manufacturing Job Card hides Stop/Complete buttons for outsourced operations (op.is_job_work === true) and shows yellow badge 'Outsourced — Receive via GRN' instead"
+  }
+}

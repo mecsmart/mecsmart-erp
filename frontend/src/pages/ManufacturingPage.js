@@ -1417,7 +1417,7 @@ export default function ManufacturingPage() {
                                 </button>
                               )}
                               {/* Stop button */}
-                              {op.status === 'in_progress' && canEdit && (
+                              {op.status === 'in_progress' && !op.is_job_work && canEdit && (
                                 <>
                                   <button onClick={() => openOpDialog('stop', op.sequence)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`stop-op-${op.sequence}`}>
                                     <Square className="w-3 h-3 inline mr-1" />Stop
@@ -1426,6 +1426,12 @@ export default function ManufacturingPage() {
                                     <CheckCircle2 className="w-3 h-3 inline mr-1" />Complete
                                   </button>
                                 </>
+                              )}
+                              {/* Outsourced operation — hide Stop/Complete, show receive reminder */}
+                              {op.status === 'in_progress' && op.is_job_work && (
+                                <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium" data-testid={`outsourced-op-${op.sequence}`}>
+                                  Outsourced — Receive via GRN
+                                </span>
                               )}
                               {op.status === 'completed' && (
                                 <CheckCircle2 className="w-4 h-4 text-[#03543F]" />

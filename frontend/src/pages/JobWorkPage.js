@@ -345,6 +345,7 @@ export default function JobWorkPage() {
       </div>
     </div>
     
+    ${isJobOS ? `
     <div class="section-title">Job Work Part Details</div>
     <table>
       <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th>UOM</th><th class="text-right">Charges/Unit</th><th class="text-right">Total Charges</th><th class="text-right">RM Cost/Unit</th><th class="text-right">Total Amount</th></tr></thead>
@@ -364,8 +365,23 @@ export default function JobWorkPage() {
       })()}
       </tbody>
     </table>
+    ` : `
+    ${jwParts.length > 0 ? `
+    <div class="section-title">Job Work Part Details</div>
+    <table>
+      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th class="text-right">Charges</th><th class="text-right">Total Amount</th></tr></thead>
+      <tbody>
+      ${jwParts.map((p, i) => {
+        const pit = p.item || items.find(it => it.id === p.item_id) || {};
+        const charges = p.charges || 0;
+        const total = (p.quantity || 0) * charges;
+        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td>${pit.hsn_code || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${total.toFixed(2)}</td></tr>`;
+      }).join('')}
+      <tr class="total-row"><td colspan="5" class="text-right">Total Job Work Cost</td><td class="text-right mono">${currencySymbol}${totalJobWorkCost.toFixed(2)}</td></tr>
+      </tbody>
+    </table>
+    ` : ''}
     
-    ${isJobOS ? '' : `
     <div class="section-title">Raw Material Issued</div>
     <table>
       <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th class="text-right">Rate</th><th class="text-right">Total RM Cost</th></tr></thead>

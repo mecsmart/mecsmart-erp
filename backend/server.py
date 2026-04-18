@@ -4401,7 +4401,9 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                 for jp in jwp:
                     if jp.get("item_id") == wo.get("item_id"):
                         jp["quantity"] += mo_qty
-                        jp["charges"] = jp.get("charges", 0) + outsource_charges
+                        # charges are per-unit — update only if not already set
+                        if not jp.get("charges") and outsource_charges:
+                            jp["charges"] = outsource_charges
                         found_jwp = True
                         break
                 if not found_jwp:
