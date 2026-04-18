@@ -1427,10 +1427,10 @@ export default function ManufacturingPage() {
                                   </button>
                                 </>
                               )}
-                              {/* Outsourced operation — hide Stop/Complete, show receive reminder */}
+                              {/* Outsourced operation — hide Stop/Complete, show JW number + receive reminder */}
                               {op.status === 'in_progress' && op.is_job_work && (
                                 <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium" data-testid={`outsourced-op-${op.sequence}`}>
-                                  Outsourced — Receive via GRN
+                                  {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'} — Receive via GRN
                                 </span>
                               )}
                               {op.status === 'completed' && (
@@ -1459,40 +1459,6 @@ export default function ManufacturingPage() {
                   ></div>
                 </div>
               </div>
-
-              {/* MO Tree View */}
-              {moTree && (moTree.children?.length > 0 || moTree.id) && (
-                <div>
-                  <p className="text-xs font-semibold text-[#374151] uppercase tracking-wide mb-2">Manufacturing Order Tree</p>
-                  <div className="border rounded-sm p-4 bg-[#F9FAFB]">
-                    {(() => {
-                      const renderTree = (node, depth = 0) => {
-                        if (!node) return null;
-                        const category = node.item?.category === 'finished_good' ? 'FG' : node.item?.category === 'sub_assembly' ? 'SA' : 'PART';
-                        const hasRouting = routings.some(r => r.item_id === node.item_id);
-                        const routingName = routings.find(r => r.item_id === node.item_id)?.name;
-                        return (
-                          <div key={node.id} className={depth > 0 ? 'ml-6 mt-2 pl-4 border-l-2 border-[#1D3557]/20' : ''}>
-                            <div className="flex items-center gap-3 py-1.5">
-                              {depth > 0 && <span className="text-[#1D3557] font-bold -ml-[18px]">└→</span>}
-                              <span className="mono font-bold text-[#1D3557] text-sm">{node.wo_number}</span>
-                              {hasRouting ? (
-                                <span className="text-sm text-[#374151]">Routing: <span className="font-medium">{routingName}</span> <span className="text-[10px] bg-[#DEF7EC] text-[#03543F] px-1 rounded">{category}</span></span>
-                              ) : (
-                                <span className="text-sm text-[#9B1C1C]">Define Routing <span className="text-[10px] bg-[#FDE8E8] text-[#9B1C1C] px-1 rounded">{category}</span></span>
-                              )}
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${node.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : node.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : 'bg-[#FDF6B2] text-[#723B13]'}`}>{node.status?.replace('_', ' ')}</span>
-                              {node.is_subcontract && <span className="text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">Sub-Contract</span>}
-                            </div>
-                            {node.children?.map(child => renderTree(child, depth + 1))}
-                          </div>
-                        );
-                      };
-                      return renderTree(moTree);
-                    })()}
-                  </div>
-                </div>
-              )}
 
               {/* Print Buttons */}
               <div className="flex justify-end space-x-2 pt-3 border-t border-[#E5E7EB]">

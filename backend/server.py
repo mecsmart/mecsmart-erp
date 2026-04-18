@@ -4461,6 +4461,7 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             target_op["outsource_supplier_name"] = supplier_name
             target_op["outsource_charges"] = op_data.outsource_charges or 0
             target_op["outsource_sc_order_id"] = sc_order_doc["id"]
+            target_op["outsource_sc_order_number"] = sc_order_doc.get("order_number", "")
             target_op["operator"] = f"OS: {supplier_name}"
             target_op["actual_start"] = target_op.get("actual_start") or datetime.now(timezone.utc)
             target_op["status"] = "in_progress"
