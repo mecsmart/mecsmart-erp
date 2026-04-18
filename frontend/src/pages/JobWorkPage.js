@@ -514,7 +514,7 @@ export default function JobWorkPage() {
                               {canEdit && o.status === 'draft' && (
                                 <button onClick={() => handleConfirmOrder(o.id)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`confirm-jw-${o.id}`}><CheckCircle2 className="w-3 h-3 inline mr-1" />Confirm</button>
                               )}
-                              {canEdit && ['confirmed', 'in_progress'].includes(o.status) && o.lines?.length > 0 && sentQty < totalQty && (
+                              {canEdit && ['confirmed', 'in_progress'].includes(o.status) && o.subcontract_type !== 'without_material' && o.lines?.length > 0 && sentQty < totalQty && (
                                 <button onClick={() => openDCDialog(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
                               )}
                               {canEdit && ['confirmed', 'in_progress'].includes(o.status) && (!o.lines || o.lines.length === 0) && o.job_work_parts?.length > 0 && !o.dc_created && (

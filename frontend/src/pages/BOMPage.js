@@ -30,7 +30,7 @@ const statusOptions = [
 
 export default function BOMPage() {
   const { user } = useAuth();
-  const { formatCurrency } = useCompanySettings();
+  const { formatCurrency, currencySymbol } = useCompanySettings();
   const [boms, setBoms] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -467,24 +467,66 @@ export default function BOMPage() {
                   />
                 </div>
 
-                {/* Parent Item Routing */}
+                {/* Parent Item Routings */}
                 <div className="border-t border-[#E5E7EB] pt-4">
                   <label className="block text-sm font-semibold text-[#111827] mb-2">Parent Item Routings</label>
-                  <p className="text-xs text-[#6B7280] mb-2">Operations for the FG/SA item itself (e.g., Assembly, Powder Coating)</p>
-                  <div className="flex flex-wrap gap-2">
+                  <p className="text-xs text-[#6B7280] mb-2">Operations for the FG/SA item itself (e.g., Assembly, Powder Coating). Enter cost/unit per operation.</p>
+                  <div className="flex flex-wrap gap-2 mb-2">
                     {routingOptions.map(r => {
-                      const selected = (formData.parent_routings || []).includes(r.name);
+                      const cur = formData.parent_routings || [];
+                      const sel = cur.some(cr => (typeof cr === 'string' ? cr : cr.name) === r.name);
                       return (
                         <button key={r.id} type="button" onClick={() => {
-                          const cur = formData.parent_routings || [];
-                          setFormData({ ...formData, parent_routings: selected ? cur.filter(n => n !== r.name) : [...cur, r.name] });
-                        }} className={`px-2.5 py-1 text-xs rounded-sm border transition-all ${selected ? 'bg-[#1D3557] text-white border-[#1D3557]' : 'bg-white text-[#4B5563] border-[#D1D5DB] hover:border-[#1D3557]'}`} data-testid={`parent-routing-${r.name}`}>
+                          setFormData({
+                            ...formData,
+                            parent_routings: sel
+                              ? cur.filter(cr => (typeof cr === 'string' ? cr : cr.name) !== r.name)
+                              : [...cur, { name: r.name, cost: 0 }]
+                          });
+                        }} className={`px-2.5 py-1 text-xs rounded-sm border transition-all ${sel ? 'bg-[#1D3557] text-white border-[#1D3557]' : 'bg-white text-[#4B5563] border-[#D1D5DB] hover:border-[#1D3557]'}`} data-testid={`parent-routing-${r.name}`}>
                           {r.name}
                         </button>
                       );
                     })}
                     {routingOptions.length === 0 && <p className="text-xs text-[#9CA3AF] italic">No operation types defined. Create them in Manufacturing → Routings tab first.</p>}
                   </div>
+                  {(formData.parent_routings || []).length > 0 && (
+                    <div className="flex flex-col gap-1 pl-2 mt-1">
+                      {(formData.parent_routings || []).map((pr, pi) => {
+                        const pName = typeof pr === 'string' ? pr : pr.name;
+                        const pCost = typeof pr === 'string' ? 0 : (pr.cost || 0);
+                        return (
+                          <div key={pi} className="flex items-center gap-2 text-xs" data-testid={`parent-routing-cost-row-${pi}`}>
+                            <span className="w-40 text-[#1D3557] font-medium">{pName}</span>
+                            <span className="text-[#6B7280]">Cost/Unit:</span>
+                            <input
+                              type="number" min="0" step="0.01"
+                              value={pCost}
+                              onChange={(e) => {
+                                const cur = [...(formData.parent_routings || [])];
+                                const val = parseFloat(e.target.value) || 0;
+                                cur[pi] = typeof cur[pi] === 'string' ? { name: cur[pi], cost: val } : { ...cur[pi], cost: val };
+                                setFormData({ ...formData, parent_routings: cur });
+                              }}
+                              className="input-field mono bg-white text-xs w-24 py-1"
+                              placeholder="0.00"
+                              data-testid={`parent-routing-cost-${pi}`}
+                            />
+                            <span className="text-[10px] text-[#9CA3AF]">{currencySymbol}</span>
+                          </div>
+                        );
+                      })}
+                      {(() => {
+                        const total = (formData.parent_routings || []).reduce((s, pr) => s + (typeof pr === 'string' ? 0 : (pr.cost || 0)), 0);
+                        return total > 0 ? (
+                          <div className="flex items-center gap-2 text-xs pt-1 border-t border-[#D1D5DB]">
+                            <span className="w-40 text-[#111827] font-semibold">Process Cost / Unit:</span>
+                            <span className="mono font-semibold text-[#03543F]">{currencySymbol}{total.toFixed(2)}</span>
+                          </div>
+                        ) : null;
+                      })()}
+                    </div>
+                  )}
                 </div>
 
                 {/* Components */}
@@ -528,24 +570,74 @@ export default function BOMPage() {
                               </label>
                               <button type="button" onClick={() => removeComponent(index)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"><X className="w-4 h-4" /></button>
                             </div>
-                            {/* Routing tags for non-RM components */}
+                            {/* Routings with per-operation cost (non-RM components only) */}
                             {comp.item_id && !isRM && (
-                              <div className="flex items-center gap-1.5 pl-1">
-                                <span className="text-[10px] font-semibold text-[#6B7280] uppercase">Routings:</span>
-                                {routingOptions.map(r => {
-                                  const sel = (comp.routings || []).includes(r.name);
-                                  return (
-                                    <button key={r.id} type="button" onClick={() => {
-                                      const comps = [...formData.components];
-                                      const cur = comps[index].routings || [];
-                                      comps[index] = { ...comps[index], routings: sel ? cur.filter(n => n !== r.name) : [...cur, r.name] };
-                                      setFormData({ ...formData, components: comps });
-                                    }} className={`px-1.5 py-0.5 text-[10px] rounded-sm border transition-all ${sel ? 'bg-[#1E429F] text-white border-[#1E429F]' : 'bg-white text-[#6B7280] border-[#D1D5DB] hover:border-[#1E429F]'}`} data-testid={`comp-${index}-routing-${r.name}`}>
-                                      {r.name}
-                                    </button>
-                                  );
-                                })}
-                                {(comp.routings || []).length === 0 && <span className="text-[10px] text-[#9CA3AF] italic">none</span>}
+                              <div className="pl-1 space-y-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[10px] font-semibold text-[#6B7280] uppercase">Routings:</span>
+                                  {routingOptions.map(r => {
+                                    const cur = comp.routings || [];
+                                    const sel = cur.some(cr => (typeof cr === 'string' ? cr : cr.name) === r.name);
+                                    return (
+                                      <button key={r.id} type="button" onClick={() => {
+                                        const comps = [...formData.components];
+                                        const curR = comps[index].routings || [];
+                                        comps[index] = {
+                                          ...comps[index],
+                                          routings: sel
+                                            ? curR.filter(cr => (typeof cr === 'string' ? cr : cr.name) !== r.name)
+                                            : [...curR, { name: r.name, cost: 0 }]
+                                        };
+                                        setFormData({ ...formData, components: comps });
+                                      }} className={`px-1.5 py-0.5 text-[10px] rounded-sm border transition-all ${sel ? 'bg-[#1E429F] text-white border-[#1E429F]' : 'bg-white text-[#6B7280] border-[#D1D5DB] hover:border-[#1E429F]'}`} data-testid={`comp-${index}-routing-${r.name}`}>
+                                        {r.name}
+                                      </button>
+                                    );
+                                  })}
+                                  {(comp.routings || []).length === 0 && <span className="text-[10px] text-[#9CA3AF] italic">none</span>}
+                                </div>
+                                {/* Per-routing cost inputs */}
+                                {(comp.routings || []).length > 0 && (
+                                  <div className="flex flex-col gap-1 pl-2">
+                                    {(comp.routings || []).map((cr, ri) => {
+                                      const rName = typeof cr === 'string' ? cr : cr.name;
+                                      const rCost = typeof cr === 'string' ? 0 : (cr.cost || 0);
+                                      return (
+                                        <div key={ri} className="flex items-center gap-2 text-xs" data-testid={`comp-${index}-routing-cost-row-${ri}`}>
+                                          <span className="w-32 text-[#1E429F] font-medium">{rName}</span>
+                                          <span className="text-[#6B7280]">Cost/Unit:</span>
+                                          <input
+                                            type="number" min="0" step="0.01"
+                                            value={rCost}
+                                            onChange={(e) => {
+                                              const comps = [...formData.components];
+                                              const curR = [...(comps[index].routings || [])];
+                                              const val = parseFloat(e.target.value) || 0;
+                                              curR[ri] = typeof curR[ri] === 'string'
+                                                ? { name: curR[ri], cost: val }
+                                                : { ...curR[ri], cost: val };
+                                              comps[index] = { ...comps[index], routings: curR };
+                                              setFormData({ ...formData, components: comps });
+                                            }}
+                                            className="input-field mono bg-white text-xs w-24 py-1"
+                                            placeholder="0.00"
+                                            data-testid={`comp-${index}-routing-cost-${ri}`}
+                                          />
+                                          <span className="text-[10px] text-[#9CA3AF]">{currencySymbol}</span>
+                                        </div>
+                                      );
+                                    })}
+                                    {(() => {
+                                      const total = (comp.routings || []).reduce((s, cr) => s + (typeof cr === 'string' ? 0 : (cr.cost || 0)), 0);
+                                      return total > 0 ? (
+                                        <div className="flex items-center gap-2 text-xs pt-1 border-t border-[#D1D5DB]">
+                                          <span className="w-32 text-[#111827] font-semibold">Process Cost / Unit:</span>
+                                          <span className="mono font-semibold text-[#03543F]">{currencySymbol}{total.toFixed(2)}</span>
+                                        </div>
+                                      ) : null;
+                                    })()}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -772,7 +864,17 @@ export default function BOMPage() {
                             </td>
                             <td className="py-2 px-2 text-right mono font-medium">{row.quantity}</td>
                             <td className="py-2 px-2 text-[#6B7280]">{row.item?.unit_of_measure || '-'}</td>
-                            <td className="py-2 px-2">{(row.routings || []).length > 0 ? <span className="text-xs text-[#1E429F] font-medium">{row.routings.join(', ')}</span> : <span className="text-xs text-[#9CA3AF]">-</span>}</td>
+                            <td className="py-2 px-2">
+                              {(row.routings || []).length > 0 ? (
+                                <div className="flex flex-col gap-0.5">
+                                  {row.routings.map((r, ri) => {
+                                    const rn = typeof r === 'string' ? r : r.name;
+                                    const rc = typeof r === 'string' ? 0 : (r.cost || 0);
+                                    return <span key={ri} className="text-xs text-[#1E429F] font-medium">{rn}{rc > 0 && <span className="text-[#723B13] mono ml-1">({formatCurrency(rc)})</span>}</span>;
+                                  })}
+                                </div>
+                              ) : <span className="text-xs text-[#9CA3AF]">-</span>}
+                            </td>
                             <td className="py-2 px-2 text-right mono">{formatCurrency(row.unit_cost)}</td>
                             <td className="py-2 px-2 text-right mono">{row.process_cost_per_unit > 0 ? <span className="text-[#723B13]">{formatCurrency(row.process_cost_per_unit)}</span> : <span className="text-[#9CA3AF]">-</span>}</td>
                             <td className="py-2 px-2 text-right mono font-semibold">{formatCurrency(row.total_cost_per_unit)}</td>

@@ -1,0 +1,84 @@
+{
+  "summary": "Iteration 54 testing complete. Both fixes verified: (1) Fix 1 - Send DC button correctly hidden for without_material SCs (line 517 condition o.subcontract_type !== 'without_material'), Create PO button shows for without_material SCs without job_work_parts, Send DC Parts button shows for Job OS SCs. (2) Fix 2 - BOM routing costs per operation working: routings stored as {name, cost} dicts, legacy string routings normalized to {name, cost: 0}, BOM explode returns process_cost_per_unit = sum of routing costs (verified 50+30=80), frontend form shows cost inputs per routing.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_54.py",
+    "/app/test_reports/pytest/pytest_iteration_54.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_54.py"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 54 features verified: (1) Fix 1 - JobWorkPage.js line 517 correctly excludes Send DC button for without_material SCs. Line 520-521 shows Send DC Parts for Job OS (without_material with job_work_parts). Line 532-533 shows Create PO for without_material without job_work_parts. (2) Fix 2 - BOM routings now store {name, cost} dicts. normalize_routings() at server.py line 190 converts legacy strings to {name, cost: 0}. routings_total_cost() at line 204 sums costs. BOM explode at line 916 uses routings_total_cost as priority 1 for process_cost_per_unit. Frontend BOMPage.js shows cost inputs per routing (data-testid=parent-routing-cost-{i} and comp-{idx}-routing-cost-{ri}). Explosion table shows routings with costs in parentheses when cost > 0.",
+  "features_tested": {
+    "fix1_send_dc_button_hidden_for_without_material": {
+      "status": "PASSED",
+      "details": "JobWorkPage.js line 517: Send DC button condition includes 'o.subcontract_type !== without_material'. Verified via Playwright - without_material SCs show 'No RM' badge but no Send DC button."
+    },
+    "fix1_create_po_button_for_without_material_no_parts": {
+      "status": "PASSED",
+      "details": "JobWorkPage.js line 532-533: Create PO button shows for without_material SCs without job_work_parts. This is the MO-SC flow where vendor sources items."
+    },
+    "fix1_send_dc_parts_for_job_os": {
+      "status": "PASSED",
+      "details": "JobWorkPage.js line 520-521: Send DC Parts button shows for Job OS SCs (without_material with job_work_parts, lines empty). Verified via Playwright."
+    },
+    "fix2_bom_create_with_routing_costs": {
+      "status": "PASSED",
+      "details": "POST /api/bom with routings=[{name:'LC Cutting',cost:50}] stores correctly. Verified parent_routings and component routings both store {name, cost} dicts."
+    },
+    "fix2_bom_legacy_string_normalized": {
+      "status": "PASSED",
+      "details": "POST /api/bom with routings=['Assembly'] normalizes to [{name:'Assembly',cost:0}]. normalize_routings() at server.py line 190 handles this."
+    },
+    "fix2_bom_explode_process_cost": {
+      "status": "PASSED",
+      "details": "GET /api/bom/{id}/explode returns process_cost_per_unit = sum of routing costs. Verified: LC Cutting 50 + Bending 30 = 80. total_cost_per_unit = material (100) + process (80) = 180."
+    },
+    "fix2_bom_explode_routings_priority": {
+      "status": "PASSED",
+      "details": "BOM routing costs take priority over SC/WO-derived process costs. routings_total_cost() called first at line 916, fallback to SC/WO only if 0."
+    },
+    "fix2_frontend_routing_cost_inputs": {
+      "status": "PASSED",
+      "details": "BOM form shows cost inputs per routing. Parent routings: data-testid=parent-routing-cost-{i}. Component routings: data-testid=comp-{idx}-routing-cost-{ri}. Process Cost / Unit total displayed."
+    },
+    "fix2_frontend_explosion_table": {
+      "status": "PASSED",
+      "details": "BOM explosion table has Routings column and Process Cost/Unit column. Routings show name with cost in parentheses when cost > 0 (line 873 BOMPage.js)."
+    }
+  },
+  "backend_tests_summary": {
+    "total": 9,
+    "passed": 9,
+    "failed": 0,
+    "test_classes": [
+      "TestBOMRoutingCosts",
+      "TestSubcontractOrderWithoutMaterial",
+      "TestBOMUpdateRoutings",
+      "TestRegressionExistingBOMs"
+    ]
+  },
+  "frontend_ui_verification": {
+    "jobwork_send_dc_button": "VERIFIED - Send DC button hidden for without_material SCs, Send DC Parts visible for Job OS",
+    "bom_routing_cost_inputs": "VERIFIED - Parent and component routing cost inputs visible with data-testid attributes",
+    "bom_explosion_table": "VERIFIED - Routings and Process Cost/Unit columns present, costs displayed correctly"
+  }
+}

@@ -152,6 +152,10 @@ class ItemUpdate(BaseModel):
     hsn_code: Optional[str] = None
     gst_rate: Optional[float] = None
 
+class RoutingEntry(BaseModel):
+    name: str
+    cost: float = 0.0  # Cost per unit for this operation
+
 class BOMComponentCreate(BaseModel):
     item_id: str
     quantity: float
@@ -159,7 +163,7 @@ class BOMComponentCreate(BaseModel):
     is_alternate: bool = False
     alternate_for: Optional[str] = None
     position: Optional[int] = None
-    routings: Optional[List[str]] = []  # Operation names: ["LC Cutting", "Bending"]
+    routings: Optional[List[Any]] = []  # Each item: str (legacy) OR {name, cost}
 
 class BOMCreate(BaseModel):
     parent_item_id: str
@@ -170,7 +174,7 @@ class BOMCreate(BaseModel):
     expiry_date: Optional[datetime] = None
     status: str = "draft"  # draft, active, obsolete
     components: List[BOMComponentCreate] = []
-    parent_routings: Optional[List[str]] = []  # Routings for the parent/FG item itself: ["Assembly"]
+    parent_routings: Optional[List[Any]] = []  # Each item: str (legacy) OR {name, cost}
 
 class BOMUpdate(BaseModel):
     name: Optional[str] = None
@@ -180,7 +184,26 @@ class BOMUpdate(BaseModel):
     expiry_date: Optional[datetime] = None
     status: Optional[str] = None
     components: Optional[List[BOMComponentCreate]] = None
-    parent_routings: Optional[List[str]] = None
+    parent_routings: Optional[List[Any]] = None
+
+
+def normalize_routings(routings: Optional[List[Any]]) -> List[Dict[str, Any]]:
+    """Normalize legacy routings (list of strings) to list of {name, cost}.
+    Accepts: ["LC Cutting", {"name": "Bending", "cost": 50}] → [{"name": "LC Cutting", "cost": 0}, {"name": "Bending", "cost": 50}]"""
+    if not routings:
+        return []
+    out = []
+    for r in routings:
+        if isinstance(r, str):
+            out.append({"name": r, "cost": 0.0})
+        elif isinstance(r, dict):
+            out.append({"name": r.get("name", ""), "cost": float(r.get("cost", 0) or 0)})
+    return out
+
+
+def routings_total_cost(routings: Optional[List[Any]]) -> float:
+    """Sum of cost across all routing entries."""
+    return sum(r.get("cost", 0) for r in normalize_routings(routings))
 
 class ProductionOrderCreate(BaseModel):
     bom_id: str
@@ -886,21 +909,25 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
             
             comp_data["extended_cost"] = 0  # Will be recalculated after process cost
             
-            # Calculate process cost: check SC orders (outsource charges) and completed WO operations
-            process_cost_per_unit = 0
+            # Calculate process cost:
+            # Priority 1: Sum of costs from BOM component routings (user-defined per operation)
+            # Priority 2: SC orders outsource charges
+            # Priority 3: Completed WO operations (inhouse process costs)
+            process_cost_per_unit = routings_total_cost(comp.get("routings", []))
             
-            # 1) Check SC orders where this item was outsourced (job_work_parts charges)
-            sc_orders = await db.subcontract_orders.find(
-                {"job_work_parts.item_id": comp.get("item_id"), "status": {"$in": ["in_progress", "completed"]}},
-                {"_id": 0, "job_work_parts": 1}
-            ).sort("created_at", -1).to_list(1)
-            if sc_orders:
-                for jwp in sc_orders[0].get("job_work_parts", []):
-                    if jwp.get("item_id") == comp.get("item_id") and jwp.get("charges"):
-                        process_cost_per_unit += jwp["charges"]
-            
-            # 2) Check completed WO operations (inhouse process costs)
             if not process_cost_per_unit:
+                # Check SC orders where this item was outsourced (job_work_parts charges)
+                sc_orders = await db.subcontract_orders.find(
+                    {"job_work_parts.item_id": comp.get("item_id"), "status": {"$in": ["in_progress", "completed"]}},
+                    {"_id": 0, "job_work_parts": 1}
+                ).sort("created_at", -1).to_list(1)
+                if sc_orders:
+                    for jwp in sc_orders[0].get("job_work_parts", []):
+                        if jwp.get("item_id") == comp.get("item_id") and jwp.get("charges"):
+                            process_cost_per_unit += jwp["charges"]
+            
+            if not process_cost_per_unit:
+                # Check completed WO operations (inhouse process costs)
                 latest_wo = await db.work_orders.find_one(
                     {"item_id": comp.get("item_id"), "status": "completed", "operations_status": {"$exists": True}},
                     {"_id": 0, "operations_status": 1},
@@ -946,6 +973,13 @@ async def create_bom(bom_data: BOMCreate, request: Request):
     if not parent_item:
         raise HTTPException(status_code=404, detail="Parent item not found")
     
+    # Normalize component & parent routings to {name, cost}
+    normalized_components = []
+    for c in bom_data.components:
+        cd = c.model_dump()
+        cd["routings"] = normalize_routings(cd.get("routings", []))
+        normalized_components.append(cd)
+    
     bom_doc = {
         "id": str(uuid.uuid4()),
         "parent_item_id": bom_data.parent_item_id,
@@ -955,8 +989,8 @@ async def create_bom(bom_data: BOMCreate, request: Request):
         "effectivity_date": bom_data.effectivity_date or datetime.now(timezone.utc),
         "expiry_date": bom_data.expiry_date,
         "status": bom_data.status,
-        "components": [c.model_dump() for c in bom_data.components],
-        "parent_routings": bom_data.parent_routings or [],
+        "components": normalized_components,
+        "parent_routings": normalize_routings(bom_data.parent_routings or []),
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -974,9 +1008,14 @@ async def update_bom(bom_id: str, bom_data: BOMUpdate, request: Request):
     for k, v in bom_data.model_dump().items():
         if v is not None:
             if k == "components":
-                update_data[k] = [c.model_dump() if hasattr(c, 'model_dump') else c for c in v]
+                normalized = []
+                for c in v:
+                    cd = c.model_dump() if hasattr(c, 'model_dump') else dict(c)
+                    cd["routings"] = normalize_routings(cd.get("routings", []))
+                    normalized.append(cd)
+                update_data[k] = normalized
             elif k == "parent_routings":
-                update_data[k] = v
+                update_data[k] = normalize_routings(v)
             else:
                 update_data[k] = v
     
