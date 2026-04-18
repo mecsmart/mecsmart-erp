@@ -1015,7 +1015,7 @@ export default function ManufacturingPage() {
                               {canEdit && wo.status === 'pending' && wo.is_subcontract && <button onClick={() => handleStartSC(wo.id)} className="btn-primary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Start SC</button>}
                               {canEdit && wo.status === 'in_progress' && wo.is_subcontract && <span className="text-xs px-2 py-1 rounded bg-[#E5E7EB] text-[#6B7280] font-medium" data-testid={`sc-done-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />SC Done</span>}
                               {canEdit && wo.status === 'in_progress' && !wo.is_subcontract && ops.length === 0 && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'completed')} className="btn-secondary text-xs px-2 py-1" data-testid={`complete-wo-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />Complete</button>}
-                              {['in_progress','pending'].includes(wo.status) && ops.length > 0 && !wo.is_subcontract && <button onClick={() => openJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`jobcard-wo-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Job Card</button>}
+                              {wo.status === 'in_progress' && ops.length > 0 && !wo.is_subcontract && <button onClick={() => openJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`jobcard-wo-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Job Card</button>}
                               {canShowSC && wo.status !== 'in_progress' && <button onClick={() => handleMarkSubcontract(wo)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`subcontract-wo-${wo.id}`}><Truck className="w-3 h-3 inline mr-0.5" />SC</button>}
                               {wo.status === 'completed' && <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-wo-${wo.id}`}><Printer className="w-3 h-3 inline mr-0.5" />Print</button>}
                             </div>
@@ -1314,7 +1314,7 @@ export default function ManufacturingPage() {
 
       {/* Job Card Dialog */}
       <Dialog open={isJobCardOpen} onOpenChange={(open) => { setIsJobCardOpen(open); if (!open) setJobCardWO(null); }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-[Chivo] flex items-center space-x-2">
               <ClipboardList className="w-5 h-5" />
@@ -1413,26 +1413,41 @@ export default function ManufacturingPage() {
                           </td>
                           <td className="py-3 px-3 text-right mono text-xs" data-testid={`op-duration-${op.sequence}`}>
                             {(() => {
-                              // Aggregate duration from runs[] or actual_start/actual_end
-                              const runs = op.runs || [];
-                              let totalMinutes = 0;
-                              runs.forEach(r => {
-                                const s = r.actual_start || r.start_time;
-                                const e = r.actual_end || r.end_time;
-                                if (s && e) totalMinutes += Math.max(0, (new Date(e) - new Date(s)) / 60000);
-                              });
-                              if (!totalMinutes && op.actual_start && op.actual_end) {
-                                totalMinutes = Math.max(0, (new Date(op.actual_end) - new Date(op.actual_start)) / 60000);
+                              try {
+                                const runs = op.runs || [];
+                                let totalMinutes = 0;
+                                runs.forEach(r => {
+                                  const s = r?.actual_start || r?.start_time;
+                                  const e = r?.actual_end || r?.end_time;
+                                  if (s && e) {
+                                    const ds = new Date(s).getTime();
+                                    const de = new Date(e).getTime();
+                                    if (!isNaN(ds) && !isNaN(de)) totalMinutes += Math.max(0, (de - ds) / 60000);
+                                  }
+                                });
+                                if (!totalMinutes && op.actual_start && op.actual_end) {
+                                  const ds = new Date(op.actual_start).getTime();
+                                  const de = new Date(op.actual_end).getTime();
+                                  if (!isNaN(ds) && !isNaN(de)) totalMinutes = Math.max(0, (de - ds) / 60000);
+                                }
+                                if (!totalMinutes && op.status === 'in_progress') {
+                                  const s = op.actual_start || runs[runs.length-1]?.actual_start;
+                                  if (s) {
+                                    const ds = new Date(s).getTime();
+                                    if (!isNaN(ds)) {
+                                      totalMinutes = Math.max(0, (Date.now() - ds) / 60000);
+                                      return <span className="text-[#1E429F]">{totalMinutes.toFixed(0)} min (running)</span>;
+                                    }
+                                  }
+                                  return <span className="text-[#9CA3AF]">-</span>;
+                                }
+                                if (!totalMinutes || isNaN(totalMinutes)) return <span className="text-[#9CA3AF]">-</span>;
+                                const h = Math.floor(totalMinutes / 60);
+                                const m = Math.round(totalMinutes % 60);
+                                return <span className="text-[#111827]">{h > 0 ? `${h}h ${m}m` : `${m} min`}</span>;
+                              } catch (e) {
+                                return <span className="text-[#9CA3AF]">-</span>;
                               }
-                              if (!totalMinutes && op.status === 'in_progress' && (op.actual_start || (runs[runs.length-1]?.actual_start))) {
-                                const s = op.actual_start || runs[runs.length-1]?.actual_start;
-                                totalMinutes = Math.max(0, (Date.now() - new Date(s)) / 60000);
-                                return <span className="text-[#1E429F]">{totalMinutes.toFixed(0)} min (running)</span>;
-                              }
-                              if (!totalMinutes) return <span className="text-[#9CA3AF]">-</span>;
-                              const h = Math.floor(totalMinutes / 60);
-                              const m = Math.round(totalMinutes % 60);
-                              return <span className="text-[#111827]">{h > 0 ? `${h}h ${m}m` : `${m} min`}</span>;
                             })()}
                           </td>
                           <td className="py-3 px-3 text-center">

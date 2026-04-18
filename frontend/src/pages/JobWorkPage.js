@@ -506,7 +506,7 @@ export default function JobWorkPage() {
                           <td className="text-sm">{o.last_receipt_date ? new Date(o.last_receipt_date).toLocaleDateString() : o.expected_return_date ? new Date(o.expected_return_date).toLocaleDateString() : '-'}</td>
                           <td>
                             <div className="flex items-center space-x-1">
-                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && (
+                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && !o.dc_created && (
                                 <button onClick={() => handleEditOrder(o)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit" data-testid={`edit-jw-${o.id}`}>
                                   <Edit2 className="w-4 h-4" />
                                 </button>
@@ -528,8 +528,8 @@ export default function JobWorkPage() {
                               {o.subcontract_type === 'without_material' && o.job_work_parts?.length > 0 && o.dc_created && o.status === 'in_progress' && (
                                 <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium">Receive via GRN ({o.order_number})</span>
                               )}
-                              {/* SC without RM without job_work_parts (old flow): Create PO → GRN */}
-                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && o.subcontract_type === 'without_material' && !o.job_work_parts?.length && (
+                              {/* SC without RM: Create PO → GRN (works for both MO→SC and Job OS) */}
+                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && !o.dc_created && o.subcontract_type === 'without_material' && (
                                 <button onClick={() => handleCreatePOFromSC(o)} className="btn-primary text-xs px-2 py-1 bg-[#723B13] hover:bg-[#5A2E0F]" data-testid={`create-po-${o.id}`}><FileText className="w-3 h-3 inline mr-1" />Create PO</button>
                               )}
                               {o.po_created && o.po_number && (
