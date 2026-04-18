@@ -208,9 +208,11 @@ def routings_total_cost(routings: Optional[List[Any]]) -> float:
 
 async def compute_bom_costs(item_id: str) -> Dict[str, Any]:
     """Return {rm_cost, process_cost, process_names} for this item.
-    Strategy 1: Item is a BOM parent — rm_cost = sum(components.qty*unit_cost); process_cost = parent_routings + component_routings; process_names = all routing names.
+    Strategy 1: Item is a BOM parent — rm_cost = sum(components.qty*unit_cost); process_cost = parent_routings + component_routings.
     Strategy 2: Item appears as a component in another BOM — use that component's routings.
+    Strategy 3 (fallback): If Strategy 1 found a BOM but with NO process cost, ALSO check Strategy 2 and prefer its process_cost if non-zero.
     Returns zeros/empty if item not found anywhere."""
+    strategy1 = None
     # Strategy 1: this item IS a BOM parent
     bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
     if not bom:
@@ -231,7 +233,10 @@ async def compute_bom_costs(item_id: str) -> Dict[str, Any]:
                 if r.get("name") and r["name"] not in names:
                     names.append(r["name"])
         parent_proc = routings_total_cost(bom.get("parent_routings", []))
-        return {"rm_cost": round(rm, 2), "process_cost": round(parent_proc + comp_proc, 2), "process_names": names}
+        strategy1 = {"rm_cost": round(rm, 2), "process_cost": round(parent_proc + comp_proc, 2), "process_names": names}
+        # If process_cost is non-zero, return immediately
+        if strategy1["process_cost"] > 0:
+            return strategy1
     
     # Strategy 2: this item is a COMPONENT in some parent BOM — use that component's routings
     parent_bom = await db.boms.find_one({"components.item_id": item_id, "status": "active"}, {"_id": 0})
@@ -241,11 +246,18 @@ async def compute_bom_costs(item_id: str) -> Dict[str, Any]:
         for comp in parent_bom.get("components", []):
             if comp.get("item_id") == item_id:
                 proc = routings_total_cost(comp.get("routings", []))
+                names = [r["name"] for r in normalize_routings(comp.get("routings", [])) if r.get("name")]
+                # Prefer strategy1's rm_cost (since it comes from the item's own BOM)
+                if strategy1:
+                    return {"rm_cost": strategy1["rm_cost"], "process_cost": round(proc, 2), "process_names": names}
+                # Otherwise use item's unit_cost as RM
                 item_rec = await db.items.find_one({"id": item_id}, {"_id": 0})
                 rm = item_rec.get("unit_cost", 0) if item_rec else 0
-                names = [r["name"] for r in normalize_routings(comp.get("routings", [])) if r.get("name")]
                 return {"rm_cost": round(rm, 2), "process_cost": round(proc, 2), "process_names": names}
     
+    # No component-in-parent match — return strategy1 result (even if process_cost=0) or empty
+    if strategy1:
+        return strategy1
     return {"rm_cost": 0.0, "process_cost": 0.0, "process_names": []}
 
 
@@ -3241,10 +3253,9 @@ async def recalculate_all_reservations():
             all_rm_ids.add(rm.get("item_id"))
     
     stock_map = {}
-    for rid in all_rm_ids:
-        item = await db.items.find_one({"id": rid}, {"_id": 0, "id": 1, "current_stock": 1})
-        if item:
-            stock_map[rid] = item.get("current_stock", 0)
+    if all_rm_ids:
+        async for item in db.items.find({"id": {"$in": list(all_rm_ids)}}, {"_id": 0, "id": 1, "current_stock": 1}):
+            stock_map[item["id"]] = item.get("current_stock", 0)
     
     # Remaining pool per item (starts at current stock, decremented as we allocate FIFO)
     remaining = dict(stock_map)
@@ -3290,16 +3301,35 @@ async def get_work_orders(request: Request, status: Optional[str] = None, produc
     
     work_orders = await db.work_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     
+    # Batch-fetch related docs to eliminate N+1 queries
+    routing_ids = {wo.get("routing_id") for wo in work_orders if wo.get("routing_id")}
+    item_ids = {wo.get("item_id") for wo in work_orders if wo.get("item_id")}
+    po_ids = {wo.get("production_order_id") for wo in work_orders if wo.get("production_order_id")}
+    
+    routings_map = {}
+    if routing_ids:
+        async for r in db.routings.find({"id": {"$in": list(routing_ids)}}, {"_id": 0}):
+            routings_map[r["id"]] = r
+            if r.get("item_id"):
+                item_ids.add(r["item_id"])
+    
+    items_map = {}
+    if item_ids:
+        async for it in db.items.find({"id": {"$in": list(item_ids)}}, {"_id": 0}):
+            items_map[it["id"]] = it
+    
+    pos_map = {}
+    if po_ids:
+        async for po in db.production_orders.find({"id": {"$in": list(po_ids)}}, {"_id": 0}):
+            pos_map[po["id"]] = po
+    
     for wo in work_orders:
-        routing = await db.routings.find_one({"id": wo.get("routing_id")}, {"_id": 0})
+        routing = routings_map.get(wo.get("routing_id"))
         wo["routing"] = routing
-        # Get item either from wo.item_id or from routing
-        item_id = wo.get("item_id") or (routing.get("item_id") if routing else None)
-        if item_id:
-            item = await db.items.find_one({"id": item_id}, {"_id": 0})
-            wo["item"] = item
-        prod_order = await db.production_orders.find_one({"id": wo.get("production_order_id")}, {"_id": 0})
-        wo["production_order"] = prod_order
+        resolved_item_id = wo.get("item_id") or (routing.get("item_id") if routing else None)
+        if resolved_item_id:
+            wo["item"] = items_map.get(resolved_item_id)
+        wo["production_order"] = pos_map.get(wo.get("production_order_id"))
     
     return work_orders
 
