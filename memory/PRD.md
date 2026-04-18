@@ -17,7 +17,8 @@
 - DC print: "Delivery Challan" with 6-col Part Details + RM Issued sections (NOT 9-col Job OS format)
 
 ## Changelog
-- 2026-02-18: Fixed Job OS regressions — (a) consolidation no longer doubles per-unit charges, (b) DC print format now conditional (9-col for Job OS, 6-col for standard SC with RM), (c) Job Card hides Stop/Complete for outsourced ops. Tested & verified in iteration 50.
+- 2026-02-18 (iter 50): Fixed Job OS regressions — consolidation no longer doubles per-unit charges; DC print format conditional (9-col for Job OS, 6-col for standard SC); Job Card hides Stop/Complete for outsourced ops.
+- 2026-02-18 (iter 51): Job Card UX polish — outsourced op badge now shows `JW: JW-000XXX — Receive via GRN` (reads from `op.outsource_sc_order_number`, persisted by backend on outsource). Removed "Manufacturing Order Tree" section from Job Card dialog. Tested & verified.
 
 ## BOM
 - Extended Cost = Total/Unit × Qty (material + process)
