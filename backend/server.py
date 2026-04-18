@@ -206,11 +206,11 @@ def routings_total_cost(routings: Optional[List[Any]]) -> float:
     return sum(r.get("cost", 0) for r in normalize_routings(routings))
 
 
-async def compute_bom_costs(item_id: str) -> Dict[str, float]:
-    """Return {rm_cost, process_cost} for this item.
-    Strategy 1: Item is a BOM parent — rm_cost = sum(components.qty*unit_cost); process_cost = parent_routings + component_routings.
-    Strategy 2: Item appears as a component in another BOM — rm_cost = item.unit_cost (no child BOM); process_cost = that component's routings total cost.
-    Returns zeros if item not found anywhere."""
+async def compute_bom_costs(item_id: str) -> Dict[str, Any]:
+    """Return {rm_cost, process_cost, process_names} for this item.
+    Strategy 1: Item is a BOM parent — rm_cost = sum(components.qty*unit_cost); process_cost = parent_routings + component_routings; process_names = all routing names.
+    Strategy 2: Item appears as a component in another BOM — use that component's routings.
+    Returns zeros/empty if item not found anywhere."""
     # Strategy 1: this item IS a BOM parent
     bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
     if not bom:
@@ -218,13 +218,20 @@ async def compute_bom_costs(item_id: str) -> Dict[str, float]:
     if bom:
         rm = 0.0
         comp_proc = 0.0
+        names = []
+        for r in normalize_routings(bom.get("parent_routings", [])):
+            if r.get("name"):
+                names.append(r["name"])
         for comp in bom.get("components", []):
             c_item = await db.items.find_one({"id": comp.get("item_id")}, {"_id": 0})
             if c_item:
                 rm += comp.get("quantity", 0) * c_item.get("unit_cost", 0)
             comp_proc += routings_total_cost(comp.get("routings", []))
+            for r in normalize_routings(comp.get("routings", [])):
+                if r.get("name") and r["name"] not in names:
+                    names.append(r["name"])
         parent_proc = routings_total_cost(bom.get("parent_routings", []))
-        return {"rm_cost": round(rm, 2), "process_cost": round(parent_proc + comp_proc, 2)}
+        return {"rm_cost": round(rm, 2), "process_cost": round(parent_proc + comp_proc, 2), "process_names": names}
     
     # Strategy 2: this item is a COMPONENT in some parent BOM — use that component's routings
     parent_bom = await db.boms.find_one({"components.item_id": item_id, "status": "active"}, {"_id": 0})
@@ -236,9 +243,10 @@ async def compute_bom_costs(item_id: str) -> Dict[str, float]:
                 proc = routings_total_cost(comp.get("routings", []))
                 item_rec = await db.items.find_one({"id": item_id}, {"_id": 0})
                 rm = item_rec.get("unit_cost", 0) if item_rec else 0
-                return {"rm_cost": round(rm, 2), "process_cost": round(proc, 2)}
+                names = [r["name"] for r in normalize_routings(comp.get("routings", [])) if r.get("name")]
+                return {"rm_cost": round(rm, 2), "process_cost": round(proc, 2), "process_names": names}
     
-    return {"rm_cost": 0.0, "process_cost": 0.0}
+    return {"rm_cost": 0.0, "process_cost": 0.0, "process_names": []}
 
 
 def routing_cost_for_process(bom: Dict[str, Any], item_id: str, process_name: str) -> float:
@@ -4053,7 +4061,7 @@ async def create_sc_for_wo(wo_id: str, request: Request):
         "fg_item_id": item_id,
         "fg_item_name": f"{item.get('part_number', '')} - {item.get('name', '')}" if item else "",
         "fg_quantity": qty,
-        "job_work_parts": [{"item_id": item_id, "quantity": qty, "charges": effective_charges, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost_val, 2)}],
+        "job_work_parts": [{"item_id": item_id, "quantity": qty, "charges": effective_charges, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost_val, 2), "process_names": bom_costs.get("process_names", [])}],
         "lines": sc_lines,
         "status": "in_progress",
         "notes": f"SC for MO {wo.get('wo_number')} ({sc_type.replace('_', ' ')})",
@@ -6149,12 +6157,26 @@ async def create_subcontract_order(data: SubcontractOrderCreate, request: Reques
             "rate": line.rate or 0
         })
     
+    # Enrich job_work_parts with BOM-based defaults (process cost, RM rollup, process names)
+    enriched_parts = []
+    for p in (data.job_work_parts or []):
+        bom_costs = await compute_bom_costs(p.item_id)
+        charges = p.charges if p.charges else bom_costs["process_cost"]
+        enriched_parts.append({
+            "item_id": p.item_id,
+            "quantity": p.quantity,
+            "charges": charges,
+            "received_quantity": 0,
+            "bom_rollup_cost": bom_costs["rm_cost"],
+            "process_names": bom_costs.get("process_names", [])
+        })
+    
     order_doc = {
         "id": str(uuid.uuid4()),
         "order_number": order_number,
         "supplier_id": data.supplier_id,
         "lines": lines,
-        "job_work_parts": [{"item_id": p.item_id, "quantity": p.quantity, "charges": p.charges, "received_quantity": 0} for p in (data.job_work_parts or [])],
+        "job_work_parts": enriched_parts,
         "expected_return_date": data.expected_return_date,
         "processing_charges": data.processing_charges or 0,
         "status": "draft",
@@ -6186,7 +6208,19 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
     if data.status is not None:
         update_data["status"] = data.status
     if data.job_work_parts is not None:
-        update_data["job_work_parts"] = [{"item_id": p.item_id, "quantity": p.quantity, "charges": p.charges, "received_quantity": 0} for p in data.job_work_parts]
+        enriched_jwp = []
+        for p in data.job_work_parts:
+            bom_costs = await compute_bom_costs(p.item_id)
+            charges = p.charges if p.charges else bom_costs["process_cost"]
+            enriched_jwp.append({
+                "item_id": p.item_id,
+                "quantity": p.quantity,
+                "charges": charges,
+                "received_quantity": 0,
+                "bom_rollup_cost": bom_costs["rm_cost"],
+                "process_names": bom_costs.get("process_names", [])
+            })
+        update_data["job_work_parts"] = enriched_jwp
         
         # Only auto-recalculate RM lines if this SC was NOT created via create-sc (smart resolution)
         # SC orders with reference_wo_ids have already been smart-resolved — preserve their lines

@@ -1,0 +1,95 @@
+{
+  "summary": "Iteration 58 testing complete. All 5 fixes verified: (1) Manual SC create pulls BOM process_cost when charges=0. (2) User-provided charges preserved. (3) DC Send dialog has Rate, Send Qty, Total RM Cost columns + Grand Total row. (4) process_names stored on job_work_parts from BOM routings; DC Print shows process_name || process_names.join(', '). (5) Sales Orders page has sticky header with overflow-auto scrolling.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_58.py",
+    "/app/test_reports/pytest/pytest_iteration_58.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_58.py"
+  ],
+  "success_rate": {
+    "backend": "100% (8 passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Used existing BOM 'RoutingCostTest' with RM-002 component having LC Cutting:50 + Bending:30 routings",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 58 verified: (1) server.py lines 6160-6172 - manual SC create uses compute_bom_costs to pull charges and process_names. (2) server.py lines 6210-6222 - manual SC update also enriches job_work_parts with BOM data. (3) JobWorkPage.js lines 748-775 - DC Send dialog has Rate, Send Qty, Total RM Cost columns with Grand Total row. (4) JobWorkPage.js lines 359, 378 - DC Print shows p.process_name || p.process_names.join(', '). (5) ProductionPage.js line 357-359 - Sales Orders table has sticky thead with overflow-auto container.",
+  "features_tested": {
+    "fix1_manual_sc_create_bom_costs": {
+      "status": "PASSED",
+      "details": "POST /api/job-work/orders with job_work_parts[{item_id, quantity, charges:0}] pulls charges from BOM process_cost. Tested with RM-002 (component in BOM with LC Cutting:50 + Bending:30) - charges correctly set to 80."
+    },
+    "fix1_regression_user_charges_preserved": {
+      "status": "PASSED",
+      "details": "POST /api/job-work/orders with explicit charges=500 preserves user-provided charges (not overwritten by BOM process_cost=80)."
+    },
+    "fix1_manual_sc_update_bom_costs": {
+      "status": "PASSED",
+      "details": "PUT /api/job-work/orders/{id} with job_work_parts[{charges:0}] re-pulls BOM charges."
+    },
+    "fix2_with_material_sc_bom_costs": {
+      "status": "PASSED",
+      "details": "SC with RM lines (with_material type) also pulls BOM costs for job_work_parts."
+    },
+    "fix3_dc_send_dialog_columns": {
+      "status": "PASSED",
+      "details": "DC Send dialog verified with columns: Item, Rate, Send Qty, Total RM Cost. Grand Total RM Cost row shows sum of (quantity × unit_cost). Screenshot: dc_send_dialog_verified.png"
+    },
+    "fix4_process_names_stored": {
+      "status": "PASSED",
+      "details": "process_names stored on job_work_parts from BOM routings. For RM-002 (component): process_names=['LC Cutting', 'Bending']. For RM-001 (parent): process_names=['Assembly', 'LC Cutting', 'Bending']."
+    },
+    "fix4_dc_print_process_column": {
+      "status": "PASSED",
+      "details": "DC Print shows Process column with p.process_name || p.process_names.join(', ') || '-'. Verified in JobWorkPage.js lines 359, 378."
+    },
+    "fix5_sales_orders_sticky_header": {
+      "status": "PASSED",
+      "details": "Sales Orders table has sticky header (classes: 'sticky top-0 z-10 bg-white shadow-sm') with overflow-auto container (max-height: 820px). Screenshot: sales_orders_page.png"
+    },
+    "regression_backfilled_scs": {
+      "status": "PASSED",
+      "details": "Existing SCs have process_names populated. Verified DC-000087 has process_names=['TEST_DCBLOCK_ROUTING_1776502209']."
+    }
+  },
+  "backend_tests_summary": {
+    "total": 8,
+    "passed": 8,
+    "skipped": 0,
+    "failed": 0,
+    "test_classes": [
+      "TestFix1_ManualSCCreatePullsBOMCosts",
+      "TestFix1_Regression_UserChargesPreserved",
+      "TestFix1_ManualSCUpdatePullsBOMCosts",
+      "TestFix2_WithMaterialSCBehavior",
+      "TestFix4_ProcessNamesStored",
+      "TestBackfilledSCsHaveProcessNames",
+      "TestDCPrintProcessColumn"
+    ]
+  },
+  "frontend_ui_verification": {
+    "dc_send_dialog": "VERIFIED - Has Item, Rate, Send Qty, Total RM Cost columns + Grand Total RM Cost row",
+    "dc_print_dialog": "VERIFIED - Print dialog opens with Terms & Conditions editor",
+    "sales_orders_sticky_header": "VERIFIED - thead has sticky positioning, container has overflow-auto"
+  },
+  "code_review_notes": {
+    "compute_bom_costs": "server.py lines 209-249 - Returns {rm_cost, process_cost, process_names}. Strategy 1: item as BOM parent. Strategy 2: item as component in parent BOM.",
+    "manual_sc_create": "server.py lines 6160-6172 - Uses compute_bom_costs to enrich job_work_parts with charges (if 0), bom_rollup_cost, and process_names.",
+    "manual_sc_update": "server.py lines 6210-6222 - Same enrichment logic for updates.",
+    "dc_send_dialog": "JobWorkPage.js lines 748-775 - Table with Rate, Send Qty, Total RM Cost columns and Grand Total row.",
+    "dc_print_process": "JobWorkPage.js lines 359, 378 - Uses p.process_name || (p.process_names || []).join(', ') || '-'"
+  }
+}

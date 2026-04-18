@@ -354,9 +354,9 @@ export default function ProductionPage() {
             <p>No sales orders found</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-260px)] border-t border-[#E5E7EB]">
             <table className="w-full data-table" data-testid="production-table">
-              <thead>
+              <thead className="sticky top-0 z-10 bg-white shadow-sm">
                 <tr>
                   <th>Order #</th>
                   <th>Product</th>

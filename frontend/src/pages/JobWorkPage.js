@@ -356,7 +356,7 @@ export default function JobWorkPage() {
         const rmCost = p.bom_rollup_cost || pit.unit_cost || 0;
         const totalCharges = (p.quantity || 0) * charges;
         const totalAmount = (p.quantity || 0) * rmCost;
-        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td>${p.process_name || '-'}</td><td>${pit.hsn_code || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td>${pit.unit_of_measure || 'Nos'}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${totalCharges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${rmCost.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${totalAmount.toFixed(2)}</td></tr>`;
+        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td>${p.process_name || (p.process_names || []).join(', ') || '-'}</td><td>${pit.hsn_code || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td>${pit.unit_of_measure || 'Nos'}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${totalCharges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${rmCost.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${totalAmount.toFixed(2)}</td></tr>`;
       }).join('') : `<tr><td>1</td><td>${parentItemName || '-'}</td><td>-</td><td>-</td><td class="text-right mono">${parentItemQty || '-'}</td><td>Nos</td><td class="text-right mono">-</td><td class="text-right mono">-</td><td class="text-right mono">-</td><td class="text-right mono">-</td></tr>`}
       ${(() => {
         const grandCharges = jwParts.reduce((s, p) => s + ((p.quantity || 0) * (p.charges || 0)), 0);
@@ -375,7 +375,7 @@ export default function JobWorkPage() {
         const pit = p.item || items.find(it => it.id === p.item_id) || {};
         const charges = p.charges || 0;
         const total = (p.quantity || 0) * charges;
-        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td>${p.process_name || '-'}</td><td>${pit.hsn_code || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${total.toFixed(2)}</td></tr>`;
+        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td>${p.process_name || (p.process_names || []).join(', ') || '-'}</td><td>${pit.hsn_code || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${total.toFixed(2)}</td></tr>`;
       }).join('')}
       <tr class="total-row"><td colspan="6" class="text-right">Total Job Work Cost</td><td class="text-right mono">${currencySymbol}${totalJobWorkCost.toFixed(2)}</td></tr>
       </tbody>
@@ -747,17 +747,25 @@ export default function JobWorkPage() {
             </div>
             <div className="border rounded-sm overflow-hidden">
               <table className="w-full text-sm">
-                <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs">Send Qty</th></tr></thead>
+                <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs">Rate</th><th className="text-right py-2 px-2 text-xs">Send Qty</th><th className="text-right py-2 px-2 text-xs">Total RM Cost</th></tr></thead>
                 <tbody>
                   {dcLines.map((l, idx) => {
                     const it = items.find(i => i.id === l.item_id);
+                    const rate = it?.unit_cost || 0;
+                    const totalRMCost = (l.quantity || 0) * rate;
                     return (
                       <tr key={idx} className="border-t">
                         <td className="py-2 px-2"><span className="mono text-xs">{it?.part_number}</span> - {it?.name} <span className="text-[10px] text-[#6B7280]">(Stock: {it?.current_stock || 0})</span></td>
+                        <td className="py-2 px-2 text-right mono text-xs">{currencySymbol}{rate.toFixed(2)}</td>
                         <td className="py-2 px-2"><input type="number" min="0" max={it?.current_stock || 0} value={l.quantity} onChange={e => { const ls = [...dcLines]; ls[idx].quantity = Math.min(parseFloat(e.target.value) || 0, it?.current_stock || 0); setDcLines(ls); }} className="w-24 px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                        <td className="py-2 px-2 text-right mono text-xs font-semibold">{currencySymbol}{totalRMCost.toFixed(2)}</td>
                       </tr>
                     );
                   })}
+                  <tr className="bg-[#F9FAFB] border-t font-semibold">
+                    <td colSpan="3" className="py-2 px-2 text-right">Grand Total RM Cost:</td>
+                    <td className="py-2 px-2 text-right mono">{currencySymbol}{dcLines.reduce((s, l) => { const it = items.find(i => i.id === l.item_id); return s + ((l.quantity || 0) * (it?.unit_cost || 0)); }, 0).toFixed(2)}</td>
+                  </tr>
                 </tbody>
               </table>
             </div>
