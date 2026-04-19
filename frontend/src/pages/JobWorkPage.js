@@ -256,13 +256,9 @@ export default function JobWorkPage() {
   const handleCreatePOFromSC = async (order) => {
     try {
       const { data } = await api.post('/api/job-work/create-po', { subcontract_order_id: order.id });
-      // PO status depends on SC type:
-      //   • SC with RM (with_material) → PO in DRAFT awaiting approval
-      //   • SC without RM / Job OS → PO auto-APPROVED
-      const statusMsg = data.status === 'draft'
-        ? `Purchase Order ${data.po_number} created in DRAFT status.\nSC has RM — approval is required on the Purchase Orders page before dispatch.`
-        : `Purchase Order ${data.po_number} created and auto-approved.\nGo to Purchase Orders to manage.`;
-      alert(statusMsg);
+      // ALL SC-derived POs are created in DRAFT status and must be approved on the
+      // Purchase Orders page before dispatch/receipt.
+      alert(`Purchase Order ${data.po_number} created in DRAFT status.\nApproval is required on the Purchase Orders page before dispatch.`);
       // Update SC order status to in_progress
       if (order.status === 'draft' || order.status === 'confirmed') {
         await api.put(`/api/job-work/orders/${order.id}`, { status: 'in_progress' });

@@ -6943,12 +6943,10 @@ async def create_po_from_sc(request: Request, data: dict = Body(...)):
                     })
     
     po_number = await get_next_series_number("po_number")
-    # Determine PO status based on SC types:
-    #   - SC with RM (with_material): PO → DRAFT (awaits approval). The supervisor must approve it.
-    #   - SC without RM / Job OS (without_material): PO → APPROVED directly. No RM risk.
-    # If ANY SC in the bundle has RM, entire PO goes to draft (safer).
-    has_with_material = any((sc.get("subcontract_type") == "with_material") for sc in sc_orders)
-    po_status = "draft" if has_with_material else "approved"
+    # ALL POs created from SC go into DRAFT status — they must be explicitly
+    # approved on the Purchase Orders page before dispatch/receipt. This applies
+    # to both SC with RM (with_material) and SC without RM / Job OS (without_material).
+    po_status = "draft"
     po_doc = {
         "id": str(uuid.uuid4()),
         "po_number": po_number,
