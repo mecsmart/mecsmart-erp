@@ -51,7 +51,7 @@ export default function ManufacturingPage() {
   
   // MO Start result dialog (replaces browser alert)
   const [startResultDialog, setStartResultDialog] = useState({ open: false, success: null, data: null });
-  const [opForm, setOpForm] = useState({ operator: '', quantity: 0, quality_result: 'accept', reject_qty: 0, rework_qty: 0, notes: '', is_outsource: false, outsource_supplier_id: '', outsource_charges: 0, process_cost_per_unit: 0 });
+  const [opForm, setOpForm] = useState({ operator: '', quantity: 0, quality_result: 'accept', reject_qty: 0, rework_qty: 0, notes: '', is_outsource: false, outsource_supplier_id: '', outsource_charges: 0, process_cost_per_unit: 0, run_number: null });
 
   // Subcontract dialog
   const [subcontractDialog, setSubcontractDialog] = useState(false);
@@ -290,7 +290,7 @@ export default function ManufacturingPage() {
     api.get(`/api/work-orders/${wo.id}/tree`).then(res => setMoTree(res.data)).catch(() => setMoTree(null));
   };
 
-  const openOpDialog = (mode, sequence) => {
+  const openOpDialog = (mode, sequence, runContext = null) => {
     const op = jobCardWO?.operations_status?.find(o => o.sequence === sequence);
     const moQty = jobCardWO?.quantity || 0;
     const runs = op?.runs || [];
@@ -301,12 +301,12 @@ export default function ManufacturingPage() {
     const remainingToAllocate = Math.max(0, moQty - allocated);
     const isJW = op?.is_job_work || false;
     // For Start: default to remaining un-allocated qty so parallel operators can't overbook.
-    // For Stop/Complete: default to what the current run still needs to finish.
+    // For Stop/Complete on a specific run: default to that run's planned qty.
     const defaultStartQty = remainingToAllocate > 0 ? remainingToAllocate : (remaining > 0 ? remaining : moQty);
-    const defaultStopQty = remaining > 0 ? remaining : moQty;
+    const runPlannedQty = runContext?.quantity_planned || runContext?.quantity_completed || (remaining > 0 ? remaining : moQty);
     setOpForm({
-      operator: mode === 'start' ? '' : (op?.operator || ''),  // blank operator when starting a NEW run
-      quantity: mode === 'start' ? defaultStartQty : defaultStopQty,
+      operator: mode === 'start' ? '' : (runContext?.operator || op?.operator || ''),
+      quantity: mode === 'start' ? defaultStartQty : runPlannedQty,
       quality_result: 'accept',
       reject_qty: 0,
       rework_qty: 0,
@@ -316,6 +316,7 @@ export default function ManufacturingPage() {
       outsource_charges: 0,
       work_center_id: op?._selected_wc || op?.work_center_id || '',
       process_cost_per_unit: op?.process_cost_per_unit || 0,
+      run_number: runContext?.run_number || null,
     });
     setOpDialog({ open: true, mode, sequence });
   };
@@ -339,9 +340,9 @@ export default function ManufacturingPage() {
           payload = { status: 'in_progress', operator: opForm.operator, quantity_completed: opForm.quantity, work_center_id: opForm.work_center_id || '', process_cost_per_unit: opForm.process_cost_per_unit || 0 };
         }
       } else if (mode === 'stop') {
-        payload = { status: 'stopped', quantity_completed: opForm.quantity, quality_result: opForm.quality_result, reject_qty: opForm.reject_qty, rework_qty: opForm.rework_qty, notes: opForm.notes };
+        payload = { status: 'stopped', quantity_completed: opForm.quantity, quality_result: opForm.quality_result, reject_qty: opForm.reject_qty, rework_qty: opForm.rework_qty, notes: opForm.notes, operator: opForm.operator || undefined, run_number: opForm.run_number || undefined };
       } else if (mode === 'complete') {
-        payload = { status: 'completed', quantity_completed: opForm.quantity, quality_result: opForm.quality_result, reject_qty: opForm.reject_qty, rework_qty: opForm.rework_qty, notes: opForm.notes, process_cost_per_unit: opForm.process_cost_per_unit || 0 };
+        payload = { status: 'completed', quantity_completed: opForm.quantity, quality_result: opForm.quality_result, reject_qty: opForm.reject_qty, rework_qty: opForm.rework_qty, notes: opForm.notes, process_cost_per_unit: opForm.process_cost_per_unit || 0, operator: opForm.operator || undefined, run_number: opForm.run_number || undefined };
       }
       const { data } = await api.put(`/api/work-orders/${woId}/operations/${sequence}`, payload);
       setJobCardWO(data);
@@ -1477,24 +1478,15 @@ export default function ManufacturingPage() {
                         ) : '-'
                       );
 
+                      // Shared action cell (spans all runs) — holds only Start button for remaining qty
+                      // and completion indicator. Per-run Stop/Complete live in each run's own Action cell.
                       const actionCell = (
                         <div className="flex items-center justify-center gap-1 flex-wrap">
-                          {/* Start button — visible whenever there is remaining qty to allocate (incl. in_progress) */}
                           {canStartMore && (
                             <button onClick={() => openOpDialog('start', op.sequence)} className="btn-primary text-xs px-2 py-1" data-testid={`start-op-${op.sequence}`}>
                               <Play className="w-3 h-3 inline mr-1" />
-                              {op.status === 'stopped' ? 'Resume' : op.status === 'in_progress' ? `Start (${remainingToAllocate} rem)` : 'Start'}
+                              {op.status === 'stopped' && runs.length === 0 ? 'Resume' : op.status === 'stopped' ? `Start (${remainingToAllocate} rem)` : op.status === 'in_progress' ? `Start (${remainingToAllocate} rem)` : 'Start'}
                             </button>
-                          )}
-                          {op.status === 'in_progress' && !op.is_job_work && canEdit && (
-                            <>
-                              <button onClick={() => openOpDialog('stop', op.sequence)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`stop-op-${op.sequence}`}>
-                                <Square className="w-3 h-3 inline mr-1" />Stop
-                              </button>
-                              <button onClick={() => openOpDialog('complete', op.sequence)} className="text-xs px-2 py-1 bg-[#03543F] text-white rounded-sm hover:bg-[#024733]" data-testid={`complete-op-${op.sequence}`}>
-                                <CheckCircle2 className="w-3 h-3 inline mr-1" />Complete
-                              </button>
-                            </>
                           )}
                           {op.status === 'in_progress' && op.is_job_work && (
                             <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium" data-testid={`outsourced-op-${op.sequence}`}>
@@ -1506,6 +1498,35 @@ export default function ManufacturingPage() {
                           )}
                         </div>
                       );
+
+                      // Per-run action cell — Stop + Complete buttons for an individual operator run
+                      const renderRunActionCell = (r) => {
+                        const isOpen = !r.ended_at;
+                        if (!isOpen) {
+                          // Run has ended — show qty outcome summary
+                          const acc = (r.quantity_completed || 0) - (r.reject_qty || 0) - (r.rework_qty || 0);
+                          return (
+                            <div className="flex items-center justify-center gap-1 text-[10px] text-[#03543F]" data-testid={`run-done-${op.sequence}-${r.run_number}`}>
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Done{acc > 0 ? ` · A:${acc}` : ''}</span>
+                            </div>
+                          );
+                        }
+                        if (op.is_job_work) {
+                          return <span className="text-[10px] text-[#9CA3AF]">—</span>;
+                        }
+                        if (!canEdit) return <span className="text-[10px] text-[#9CA3AF]">-</span>;
+                        return (
+                          <div className="flex items-center justify-center gap-1 flex-wrap">
+                            <button onClick={() => openOpDialog('stop', op.sequence, r)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`stop-run-${op.sequence}-${r.run_number}`}>
+                              <Square className="w-3 h-3 inline mr-1" />Stop
+                            </button>
+                            <button onClick={() => openOpDialog('complete', op.sequence, r)} className="text-xs px-2 py-1 bg-[#03543F] text-white rounded-sm hover:bg-[#024733]" data-testid={`complete-run-${op.sequence}-${r.run_number}`}>
+                              <CheckCircle2 className="w-3 h-3 inline mr-1" />Complete
+                            </button>
+                          </div>
+                        );
+                      };
 
                       // Helper to render per-run duration + cost cells
                       const renderRunDurCost = (r) => {
@@ -1557,7 +1578,12 @@ export default function ManufacturingPage() {
                             {isFirst && <td rowSpan={runs.length} className="py-3 px-3 mono font-medium align-top">{op.sequence}</td>}
                             {isFirst && <td rowSpan={runs.length} className="py-3 px-3 font-medium align-top">{typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : op.operation_name}</td>}
                             {isFirst && <td rowSpan={runs.length} className="py-3 px-3 text-sm text-[#4B5563] align-top">{wcCell}</td>}
-                            {isFirst && <td rowSpan={runs.length} className="py-3 px-3 text-center align-top">{statusBadge}</td>}
+                            {isFirst && <td rowSpan={runs.length} className="py-3 px-3 align-top">
+                              <div className="flex flex-col items-center gap-1.5">
+                                {statusBadge}
+                                {actionCell}
+                              </div>
+                            </td>}
                             <td className="py-3 px-3 text-sm" data-testid={`op-operator-${op.sequence}-${ri}`}>
                               <div className="flex items-center gap-1 text-xs">
                                 <User className="w-3 h-3 text-[#6B7280]" />
@@ -1582,7 +1608,7 @@ export default function ManufacturingPage() {
                             ) : null}
                             <td className="py-3 px-3 text-right mono text-xs" data-testid={`op-duration-${op.sequence}-${ri}`}>{durNode}</td>
                             <td className="py-3 px-3 text-right mono text-xs font-medium" data-testid={`op-cost-${op.sequence}-${ri}`}>{costNode}</td>
-                            {isFirst && <td rowSpan={runs.length} className="py-3 px-3 text-center align-top">{actionCell}</td>}
+                            <td className="py-3 px-3 text-center">{renderRunActionCell(r)}</td>
                           </tr>
                         );
                       });

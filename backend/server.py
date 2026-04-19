@@ -614,6 +614,7 @@ class WorkOrderOperationUpdate(BaseModel):
     outsource_charges: Optional[float] = None
     work_center_id: Optional[str] = None
     process_cost_per_unit: Optional[float] = None
+    run_number: Optional[int] = None  # Target specific run when stopping/completing a parallel operator
 
 # ================== GST / INDIA COMPLIANCE MODELS ==================
 
@@ -4789,19 +4790,36 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             if op_data.process_cost_per_unit is not None:
                 target_op["process_cost_per_unit"] = op_data.process_cost_per_unit
     
-    # STOP operation (pause current run)
+    # STOP operation (per-run)
     elif op_data.status == "stopped":
         runs = target_op.get("runs", [])
         produced_qty = min(op_data.quantity_completed or 0, mo_qty)
-        if runs and runs[-1].get("ended_at") is None:
-            runs[-1]["ended_at"] = datetime.now(timezone.utc)
-            runs[-1]["quantity_completed"] = produced_qty
-            runs[-1]["quality_result"] = op_data.quality_result or "accept"
-            runs[-1]["reject_qty"] = min(op_data.reject_qty or 0, produced_qty)
-            runs[-1]["rework_qty"] = min(op_data.rework_qty or 0, produced_qty)
-            runs[-1]["notes"] = op_data.notes or runs[-1].get("notes", "")
-        
-        # Calculate totals from all runs
+        # Pick which run to close: explicit run_number > open run for operator > last open run
+        target_run_idx = None
+        if op_data.run_number is not None:
+            for _i, _r in enumerate(runs):
+                if _r.get("run_number") == op_data.run_number and _r.get("ended_at") is None:
+                    target_run_idx = _i
+                    break
+        if target_run_idx is None and op_data.operator:
+            for _i in range(len(runs) - 1, -1, -1):
+                if runs[_i].get("ended_at") is None and runs[_i].get("operator") == op_data.operator:
+                    target_run_idx = _i
+                    break
+        if target_run_idx is None:
+            for _i in range(len(runs) - 1, -1, -1):
+                if runs[_i].get("ended_at") is None:
+                    target_run_idx = _i
+                    break
+        if target_run_idx is None:
+            raise HTTPException(status_code=400, detail="No open run to stop for this operation")
+        runs[target_run_idx]["ended_at"] = datetime.now(timezone.utc)
+        runs[target_run_idx]["quantity_completed"] = produced_qty
+        runs[target_run_idx]["quality_result"] = op_data.quality_result or "accept"
+        runs[target_run_idx]["reject_qty"] = min(op_data.reject_qty or 0, produced_qty)
+        runs[target_run_idx]["rework_qty"] = min(op_data.rework_qty or 0, produced_qty)
+        runs[target_run_idx]["notes"] = op_data.notes or runs[target_run_idx].get("notes", "")
+
         total_accepted = sum(r.get("quantity_completed", 0) - r.get("reject_qty", 0) - r.get("rework_qty", 0) for r in runs)
         total_completed = sum(r.get("quantity_completed", 0) for r in runs)
         target_op["quantity_completed"] = total_completed
@@ -4809,9 +4827,10 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
         target_op["quantity_rejected"] = sum(r.get("reject_qty", 0) for r in runs)
         target_op["quantity_rework"] = sum(r.get("rework_qty", 0) for r in runs)
         target_op["runs"] = runs
-        target_op["status"] = "stopped"
+        # Op status derived from runs: in_progress if ANY run still open, else stopped
+        target_op["status"] = "in_progress" if any(r.get("ended_at") is None for r in runs) else "stopped"
     
-    # COMPLETE operation
+    # COMPLETE operation (per-run)
     elif op_data.status == "completed":
         # Block outsourced operation completion if SC order not received
         if target_op.get("is_job_work"):
@@ -4825,27 +4844,51 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
         
         runs = target_op.get("runs", [])
         produced_qty = min(op_data.quantity_completed or mo_qty, mo_qty)
-        # Close any open run
-        if runs and runs[-1].get("ended_at") is None:
-            runs[-1]["ended_at"] = datetime.now(timezone.utc)
-            runs[-1]["quantity_completed"] = produced_qty
-            runs[-1]["quality_result"] = op_data.quality_result or "accept"
-            runs[-1]["reject_qty"] = min(op_data.reject_qty or 0, produced_qty)
-            runs[-1]["rework_qty"] = min(op_data.rework_qty or 0, produced_qty)
+        # Pick run to close (same precedence as stop)
+        target_run_idx = None
+        if op_data.run_number is not None:
+            for _i, _r in enumerate(runs):
+                if _r.get("run_number") == op_data.run_number and _r.get("ended_at") is None:
+                    target_run_idx = _i
+                    break
+        if target_run_idx is None and op_data.operator:
+            for _i in range(len(runs) - 1, -1, -1):
+                if runs[_i].get("ended_at") is None and runs[_i].get("operator") == op_data.operator:
+                    target_run_idx = _i
+                    break
+        if target_run_idx is None:
+            for _i in range(len(runs) - 1, -1, -1):
+                if runs[_i].get("ended_at") is None:
+                    target_run_idx = _i
+                    break
+        # Close the target run (if any open)
+        if target_run_idx is not None:
+            runs[target_run_idx]["ended_at"] = datetime.now(timezone.utc)
+            runs[target_run_idx]["quantity_completed"] = produced_qty
+            runs[target_run_idx]["quality_result"] = op_data.quality_result or "accept"
+            runs[target_run_idx]["reject_qty"] = min(op_data.reject_qty or 0, produced_qty)
+            runs[target_run_idx]["rework_qty"] = min(op_data.rework_qty or 0, produced_qty)
         
         total_completed = sum(r.get("quantity_completed", 0) for r in runs)
         total_accepted = sum(r.get("quantity_completed", 0) - r.get("reject_qty", 0) - r.get("rework_qty", 0) for r in runs)
         
-        target_op["actual_end"] = datetime.now(timezone.utc)
         target_op["quantity_completed"] = total_completed
         target_op["quantity_accepted"] = total_accepted
         target_op["quantity_rejected"] = sum(r.get("reject_qty", 0) for r in runs)
         target_op["quantity_rework"] = sum(r.get("rework_qty", 0) for r in runs)
         target_op["runs"] = runs
-        target_op["status"] = "completed"
+        # Status derivation: any open run → in_progress; else, completed ONLY if target_op qty >= mo_qty
+        if any(r.get("ended_at") is None for r in runs):
+            target_op["status"] = "in_progress"
+        elif total_completed >= mo_qty:
+            target_op["status"] = "completed"
+            target_op["actual_end"] = datetime.now(timezone.utc)
+        else:
+            # All runs closed but partial qty — user should allocate remaining first
+            target_op["status"] = "stopped"
         
-        # Calculate actual time
-        if target_op.get("actual_start"):
+        # Calculate actual time only when truly completed
+        if target_op["status"] == "completed" and target_op.get("actual_start"):
             actual_start = target_op["actual_start"]
             if isinstance(actual_start, str):
                 actual_start = datetime.fromisoformat(actual_start.replace('Z', '+00:00'))
@@ -5985,14 +6028,17 @@ async def seed_sample_data():
 
 
 async def migrate_operations_status():
-    """One-time migration: fix work orders with operation_name stored as dict {name, cost}."""
+    """One-time migration: fix work orders with operation_name stored as dict {name, cost}.
+    Also correct op.status when open runs still exist but op was previously marked 'stopped'
+    due to the old shared-Stop bug that closed only one run but flagged the whole op stopped."""
     try:
-        cursor = db.work_orders.find({"operations_status": {"$exists": True, "$ne": []}}, {"_id": 0, "id": 1, "operations_status": 1})
+        cursor = db.work_orders.find({"operations_status": {"$exists": True, "$ne": []}}, {"_id": 0, "id": 1, "operations_status": 1, "quantity": 1})
         fixed = 0
         async for wo in cursor:
             ops = wo.get("operations_status") or []
             changed = False
             new_ops = []
+            mo_qty = wo.get("quantity") or 0
             for op in ops:
                 on = op.get("operation_name")
                 if isinstance(on, dict):
@@ -6000,12 +6046,26 @@ async def migrate_operations_status():
                     if "process_cost_per_unit" not in op:
                         op["process_cost_per_unit"] = float(on.get("cost", 0) or 0)
                     changed = True
+                # Re-derive status from runs
+                runs = op.get("runs") or []
+                if runs:
+                    any_open = any(r.get("ended_at") is None for r in runs)
+                    total_done = sum((r.get("quantity_completed") or 0) for r in runs)
+                    desired_status = (
+                        "in_progress" if any_open
+                        else ("completed" if total_done >= mo_qty else "stopped")
+                    )
+                    if op.get("status") != desired_status and op.get("status") != "completed":
+                        # Don't override explicit completed state
+                        if not (desired_status == "stopped" and op.get("status") == "completed"):
+                            op["status"] = desired_status
+                            changed = True
                 new_ops.append(op)
             if changed:
                 await db.work_orders.update_one({"id": wo["id"]}, {"$set": {"operations_status": new_ops}})
                 fixed += 1
         if fixed:
-            logger.info(f"Migrated operation_name on {fixed} work orders")
+            logger.info(f"Migrated operation_name/status on {fixed} work orders")
     except Exception as e:
         logger.exception(f"migrate_operations_status failed: {e}")
 
