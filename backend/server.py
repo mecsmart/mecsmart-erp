@@ -6820,6 +6820,35 @@ async def get_subcontract_orders(request: Request, status: str = None):
                     _names = _bc.get("process_names") or []
                     if _names:
                         part["process_names"] = _names
+        # Enrich Job Card OS SCs with aggregated RM list from each Part's BOM, so the
+        # Subcontract Orders UI can show the RMs in the "RM" column (and the DC dialog
+        # can prefill RM lines). Plain MO→SC already has `lines` (RM) filled.
+        if order.get("subcontract_type") == "without_material" and (order.get("reference_operation_seqs") or order.get("reference_operation_seq")):
+            seen_rm_idx = {}
+            rm_agg = []
+            for jp in order.get("job_work_parts", []):
+                part_qty = float(jp.get("quantity", 0) or 0)
+                part_bom = await db.boms.find_one({"parent_item_id": jp.get("item_id"), "status": "active"}, {"_id": 0})
+                if not part_bom:
+                    continue
+                for comp in part_bom.get("components", []):
+                    rm_id = comp.get("item_id")
+                    if not rm_id:
+                        continue
+                    rm_qty = float(comp.get("quantity", 0) or 0) * part_qty
+                    rm_item = items_map.get(rm_id) or (await db.items.find_one({"id": rm_id}, {"_id": 0}))
+                    rm_rate = float((rm_item or {}).get("unit_cost", 0) or 0)
+                    if rm_id in seen_rm_idx:
+                        rm_agg[seen_rm_idx[rm_id]]["quantity"] += rm_qty
+                    else:
+                        seen_rm_idx[rm_id] = len(rm_agg)
+                        rm_agg.append({
+                            "item_id": rm_id,
+                            "item": rm_item,
+                            "quantity": rm_qty,
+                            "rate": rm_rate,
+                        })
+            order["rm_items"] = rm_agg
     return orders
 
 @jobwork_router.post("/orders", status_code=201)

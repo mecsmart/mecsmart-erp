@@ -154,16 +154,18 @@ export default function JobWorkPage() {
     setDcDialog(true);
   };
 
-  // Open DC dialog for Job Card OS SC — prefills Part + underlying RM from each Part's BOM
+  // Open DC dialog for Job Card OS SC — prefills ONLY the RM (what's physically sent to vendor).
+  // The Part is what comes BACK from the vendor — it's not shipped on the DC.
   const openJobOSDCDialog = async (order) => {
     try {
       const { data } = await api.get(`/api/job-work/orders/${order.id}/dc-lines`);
-      if (!Array.isArray(data) || data.length === 0) {
-        alert('Unable to expand parts for DC. Please check BOM setup.');
+      const rmOnly = (Array.isArray(data) ? data : []).filter(l => l.type === 'rm');
+      if (rmOnly.length === 0) {
+        alert('No raw materials to send. Please ensure each Part has a BOM with RM components.');
         return;
       }
       setDcOrder({ ...order, _is_job_os: true });
-      setDcLines(data.map(l => ({ item_id: l.item_id, quantity: l.quantity, rate: l.rate || 0, type: l.type, item: l.item })));
+      setDcLines(rmOnly.map(l => ({ item_id: l.item_id, quantity: l.quantity, rate: l.rate || 0, type: l.type, item: l.item })));
       setDcWarehouse('');
       setDcDialog(true);
     } catch (e) { alert(e.response?.data?.detail || 'Failed to load DC lines'); }
@@ -173,12 +175,11 @@ export default function JobWorkPage() {
     if (dcLines.length === 0) { alert('No items to send'); return; }
     try {
       const isJobOS = !!dcOrder?._is_job_os;
-      // For Job Card OS DC: the Part rows don't deduct stock (parts are in WIP, not finished stock);
-      // the RM rows DO deduct from stock. Backend `skip_stock_deduct` is all-or-nothing, so we send
-      // only the RM lines with stock deduction, and auto-append Part lines after.
+      // For Job Card OS DC: only RM goes out (Part is received back from vendor). RM
+      // stock MUST be deducted — it's physical inventory leaving the warehouse.
       const payloadLines = dcLines.map(l => ({ item_id: l.item_id, quantity: l.quantity, rate: l.rate || 0 }));
-      const skipDeduct = isJobOS;  // Part qty is small & processing charges; don't deduct FG stock on DC send
-      const { data } = await api.post('/api/job-work/challans', { subcontract_order_id: dcOrder.id, lines: payloadLines, warehouse_id: dcWarehouse, notes: isJobOS ? 'Job Card OS DC (Part + RM)' : '', skip_stock_deduct: skipDeduct });
+      const skipDeduct = false;  // Both SC-with-RM and Job OS deduct RM stock on DC send
+      const { data } = await api.post('/api/job-work/challans', { subcontract_order_id: dcOrder.id, lines: payloadLines, warehouse_id: dcWarehouse, notes: isJobOS ? 'Job Card OS DC (RM to vendor)' : '', skip_stock_deduct: skipDeduct });
       if (data.success === false && data.insufficient_materials) {
         setDcSendResult({ open: true, data: { message: data.message, consumed: [], dcNumber: '', isError: true, insufficient: data.insufficient_materials } });
         return;
@@ -467,9 +468,16 @@ export default function JobWorkPage() {
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
     </body></html>`;
     const w = window.open('', '_blank');
+    if (!w) {
+      alert('Pop-up blocked. Please allow pop-ups for this site to print the DC.');
+      return;
+    }
+    w.document.open();
     w.document.write(html);
     w.document.close();
-    w.onload = () => w.print();
+    // Print immediately after document is written. Using onload sometimes doesn't fire
+    // when document.write completes synchronously (especially in Chrome).
+    setTimeout(() => { try { w.focus(); w.print(); } catch (e) { console.error('Print failed', e); } }, 300);
   };
 
   const getStatusColor = (s) => {
@@ -548,16 +556,21 @@ export default function JobWorkPage() {
                             return <div key={pi} className="mb-1"><div className="font-semibold text-[#1D3557]">{pit?.part_number} - {pit?.name || ''}</div><div className="text-[#6B7280] text-[11px]">Qty: {p.quantity}{p.charges ? <span className="text-[#723B13] ml-1">@{formatCurrency(p.charges)}</span> : ''}</div></div>;
                           }) : <span className="text-[#6B7280]">{o.fg_item_name || '-'}</span>}</td>
                           <td className="text-sm">{o.supplier?.name || '-'}</td>
-                          <td className="text-sm">{o.subcontract_type === 'without_material' ? <span className="text-[#9CA3AF] text-xs italic">No RM</span> : o.lines.map((l, li) => {
-                            const it = l.item || items.find(i => i.id === l.item_id);
-                            return <div key={li} className="mb-0.5"><div className="mono text-[11px] font-medium">{it?.part_number || '-'}</div><div className="text-[#4B5563] text-[11px]">{it?.name || ''} ({l.quantity})</div></div>;
-                          })}</td>
+                          <td className="text-sm">{(() => {
+                            const isJobOS = o.subcontract_type === 'without_material' && (o.reference_operation_seqs?.length || o.reference_operation_seq);
+                            const rmList = isJobOS ? (o.rm_items || []) : (o.lines || []);
+                            if (!rmList.length) return <span className="text-[#9CA3AF] text-xs italic">No RM</span>;
+                            return rmList.map((l, li) => {
+                              const it = l.item || items.find(i => i.id === l.item_id);
+                              return <div key={li} className="mb-0.5"><div className="mono text-[11px] font-medium">{it?.part_number || '-'}</div><div className="text-[#4B5563] text-[11px]">{it?.name || ''} ({l.quantity})</div></div>;
+                            });
+                          })()}</td>
                           <td className="mono">{sentQty}/{totalQty}</td>
                           <td className="mono">{recvQty}</td>
                           <td className="text-right mono">{formatCurrency((o.job_work_parts || []).reduce((s, p) => s + (p.quantity || 0) * (p.charges || 0), 0) || o.processing_charges || 0)}</td>
                           <td>
                             <span className={`status-badge ${getStatusColor(o.status)}`}>{o.status.replace('_', ' ')}</span>
-                            {o.subcontract_type === 'without_material' && <span className="ml-1 text-[9px] bg-[#E1EFFE] text-[#1D3557] px-1 rounded">No RM</span>}
+                            {o.subcontract_type === 'without_material' && !(o.reference_operation_seqs?.length || o.reference_operation_seq) && <span className="ml-1 text-[9px] bg-[#E1EFFE] text-[#1D3557] px-1 rounded">No RM</span>}
                           </td>
                           <td className="text-sm">{o.last_receipt_date ? new Date(o.last_receipt_date).toLocaleDateString() : o.expected_return_date ? new Date(o.expected_return_date).toLocaleDateString() : '-'}</td>
                           <td>
@@ -815,7 +828,7 @@ export default function JobWorkPage() {
 
       {/* Send DC Dialog */}
       <Dialog open={dcDialog} onOpenChange={setDcDialog}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="font-[Chivo]">Send Materials (DC) - {dcOrder?.order_number}{dcOrder?.fg_item_name ? ` — ${dcOrder.fg_item_name}` : ''}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3">
             <div><label className="block text-sm font-semibold mb-1">From Warehouse</label>
