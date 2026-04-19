@@ -229,7 +229,7 @@ export default function WarehousesPage() {
     // Calculate total for confirmation
     const totalQty = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0), 0);
     const totalCost = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0) * (l.verified_price || 0), 0);
-    if (!window.confirm(`Confirm GRN Receipt?\n\nTotal Items: ${grnForm.lines.filter(l => l.received_quantity > 0).length}\nTotal Qty: ${totalQty}\nTotal Cost: ₹${totalCost.toFixed(2)}\n\nReceived stock will be added to inventory.`)) return;
+    if (totalQty <= 0) { alert('Received quantity must be greater than 0'); return; }
     
     try {
       const payload = {
@@ -288,8 +288,7 @@ export default function WarehousesPage() {
     
     // Calculate total for confirmation
     const totalQty = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0), 0);
-    const totalCost = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0) * (l.verified_price || 0), 0);
-    if (!window.confirm(`Confirm JW GRN Receipt?\n\nJW Order: ${selectedJW?.order_number}\nTotal Qty: ${totalQty}\nTotal Cost: ₹${totalCost.toFixed(2)}\n\nReceived stock will be added to inventory.`)) return;
+    if (totalQty <= 0) { alert('Received quantity must be greater than 0'); return; }
     
     try {
       await api.post('/api/job-work/receive-grn', {

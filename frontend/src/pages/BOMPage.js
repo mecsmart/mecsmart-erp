@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { SearchableItemSelect } from '../components/SearchableItemSelect';
 
 const statusOptions = [
   { value: 'draft', label: 'Draft' },
@@ -407,21 +408,14 @@ export default function BOMPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-[#111827] mb-1">Parent Item *</label>
-                    <Select 
-                      value={formData.parent_item_id} 
-                      onValueChange={(v) => setFormData({ ...formData, parent_item_id: v })}
-                    >
-                      <SelectTrigger data-testid="bom-parent-item-select">
-                        <SelectValue placeholder="Select parent item" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {items.filter(i => ['sub_assembly', 'finished_good', 'component'].includes(i.category)).map((item) => (
-                          <SelectItem key={item.id} value={item.id}>
-                            {item.part_number} - {item.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchableItemSelect
+                      items={items}
+                      value={formData.parent_item_id}
+                      onChange={(v) => setFormData({ ...formData, parent_item_id: v })}
+                      filter={(i) => ['sub_assembly', 'finished_good', 'component'].includes(i.category)}
+                      placeholder="Select parent item"
+                      testId="bom-parent-item-select"
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-[#111827] mb-1">BOM Name *</label>
@@ -571,14 +565,13 @@ export default function BOMPage() {
                           <div key={index} className="p-2.5 bg-[#F3F4F6] rounded-sm space-y-2">
                             <div className="flex items-center gap-2">
                               <div className="flex-1">
-                                <Select value={comp.item_id} onValueChange={(v) => updateComponent(index, 'item_id', v)}>
-                                  <SelectTrigger className="bg-white" data-testid={`component-item-select-${index}`}><SelectValue placeholder="Select component" /></SelectTrigger>
-                                  <SelectContent>
-                                    {items.map((item) => (
-                                      <SelectItem key={item.id} value={item.id}>{item.part_number} - {item.name} <span className="text-[#9CA3AF]">({item.category})</span></SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                <SearchableItemSelect
+                                  items={items}
+                                  value={comp.item_id}
+                                  onChange={(v) => updateComponent(index, 'item_id', v)}
+                                  placeholder="Select component"
+                                  testId={`component-item-select-${index}`}
+                                />
                               </div>
                               <div className="w-24">
                                 <input type="number" min="0.01" step="0.01" value={comp.quantity} onChange={(e) => updateComponent(index, 'quantity', parseFloat(e.target.value) || 0)} className="input-field mono bg-white" placeholder="Qty" data-testid={`component-qty-input-${index}`} />

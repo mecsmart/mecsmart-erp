@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -116,17 +117,17 @@ export default function ProductionPage() {
   };
 
   const handleConfirm = async (order) => {
-    if (!window.confirm(`Confirm Sales Order ${order.order_number}?\n\nThis will make it available for MRP and Manufacturing.`)) return;
     try {
       await api.post(`/api/production/${order.id}/confirm`);
+      toast.success(`Sales Order ${order.order_number} confirmed`);
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.detail || 'Failed to confirm order');
+      toast.error(error.response?.data?.detail || 'Failed to confirm order');
     }
   };
 
   const handleCancel = async (order) => {
-    if (!window.confirm(`Cancel Sales Order ${order.order_number}?\n\nThis will:\n- Cancel all linked Manufacturing Orders\n- Reverse consumed materials back to stock\n- Reverse finished goods from inventory\n\nThis action cannot be undone.`)) return;
+    if (!window.confirm || window.confirm(`Cancel Sales Order ${order.order_number}?\n\nThis will cancel all linked Manufacturing Orders and reverse materials/finished goods.`)) {
     try {
       const { data } = await api.post(`/api/production/${order.id}/cancel`);
       let msg = data.message;
@@ -139,10 +140,11 @@ export default function ProductionPage() {
       if (data.reversed_finished_goods?.length > 0) {
         msg += `\n\nFinished goods reversed:\n${data.reversed_finished_goods.map(m => `- ${m.item} (${m.name}): ${m.quantity} pcs → MO ${m.mo_number}`).join('\n')}`;
       }
-      alert(msg);
+      toast.success(msg);
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.detail || 'Failed to cancel order');
+      toast.error(error.response?.data?.detail || 'Failed to cancel order');
+    }
     }
   };
 
