@@ -4848,17 +4848,36 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             sc_part = {"item_id": wo.get("item_id"), "quantity": mo_qty, "charges": outsource_charges, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost, 2), "process_name": op_name, "wo_id": wo_id}
             sc_lines = []  # No RM lines for operation outsourcing — only the part goes and comes back
             
-            # Check for existing SC order for same supplier (consolidate across all MOs)
-            # Only consolidate if DC hasn't been sent yet
-            existing_sc = await db.subcontract_orders.find_one({
+            # Check for existing SC order for same supplier (consolidate across all MOs).
+            # Consolidate ONLY if:
+            #   (a) SC is still open (draft/in_progress),
+            #   (b) It's a Job Card OS SC (has reference_operation_seqs — so we don't merge
+            #       into a plain MO→SC), AND
+            #   (c) NO delivery challan has been sent for it yet (dc_created must be falsy AND
+            #       no sent DC document linked). Once the vendor has received materials, the
+            #       next outsource for the same vendor MUST go into a fresh SC so that the
+            #       next DC/GRN cycle is independent.
+            candidate_scs = db.subcontract_orders.find({
                 "supplier_id": op_data.outsource_supplier_id,
                 "status": {"$in": ["draft", "in_progress"]},
                 "subcontract_type": "without_material",
+                "reference_operation_seqs": {"$exists": True, "$ne": []},
                 "$or": [
                     {"dc_created": {"$exists": False}},
+                    {"dc_created": None},
                     {"dc_created": False}
                 ]
-            })
+            }, {"_id": 0}).sort("created_at", -1)
+            existing_sc = None
+            async for _cand in candidate_scs:
+                # Double-check: no DC (draft OR sent) already linked to this SC
+                linked_dc = await db.delivery_challans.find_one({
+                    "subcontract_order_id": _cand["id"],
+                    "status": {"$in": ["sent", "draft"]}
+                })
+                if not linked_dc:
+                    existing_sc = _cand
+                    break
             
             if existing_sc:
                 # Consolidate into existing SC — add this part to job_work_parts
