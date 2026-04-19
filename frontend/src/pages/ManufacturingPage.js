@@ -313,7 +313,9 @@ export default function ManufacturingPage() {
       notes: '',
       is_outsource: isJW,
       outsource_supplier_id: op?.job_work_supplier_id || '',
-      outsource_charges: 0,
+      // Pre-populate Processing Charges from BOM routing cost (op.process_cost_per_unit)
+      // which is set at MO-creation time from the BOM's parent_routings entry for this op.
+      outsource_charges: op?.process_cost_per_unit || 0,
       work_center_id: op?._selected_wc || op?.work_center_id || '',
       process_cost_per_unit: op?.process_cost_per_unit || 0,
       run_number: runContext?.run_number || null,
@@ -330,13 +332,14 @@ export default function ManufacturingPage() {
       if (mode === 'start') {
         if (opForm.is_outsource) {
           if (!opForm.outsource_supplier_id) { alert('Select a supplier for outsourcing'); return; }
-          // Confirmation dialog for outsourcing
-          const supplierName = suppliers.find(s => s.id === opForm.outsource_supplier_id)?.name || 'selected supplier';
-          const opName = jobCardWO?.operations_status?.find(o => o.sequence === opDialog.sequence)?.operation_name || '';
-          if (!window.confirm(`Confirm outsource operation "${opName}" to ${supplierName}?\n\nThis will create/update a Job Work order for this supplier.`)) return;
+          // Direct action — the button label ("Start & Create OS Order") and the yellow info
+          // banner in the dialog already make the consequence clear. Previously a
+          // window.confirm() here was silently blocked in the preview iframe, breaking
+          // the OS flow entirely.
           payload = { status: 'in_progress', operator: suppliers.find(s => s.id === opForm.outsource_supplier_id)?.name || 'Outsourced', quantity_completed: opForm.quantity, notes: opForm.notes, is_outsource: true, outsource_supplier_id: opForm.outsource_supplier_id, outsource_charges: opForm.outsource_charges, work_center_id: opForm.work_center_id || '' };
         } else {
           if (!opForm.operator.trim()) { alert('Operator name is required'); return; }
+          if (!opForm.work_center_id) { alert('Work Center is required'); return; }
           payload = { status: 'in_progress', operator: opForm.operator, quantity_completed: opForm.quantity, work_center_id: opForm.work_center_id || '', process_cost_per_unit: opForm.process_cost_per_unit || 0 };
         }
       } else if (mode === 'stop') {
@@ -1159,6 +1162,7 @@ export default function ManufacturingPage() {
                               {canEdit && wo.status === 'in_progress' && !wo.is_subcontract && ops.length > 0 && wo.parent_wo_id && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'completed')} className="btn-primary text-xs px-2 py-1 bg-[#03543F] hover:bg-[#024733]" data-testid={`complete-child-mo-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />Complete MO</button>}
                               {canShowSC && wo.status !== 'in_progress' && <button onClick={() => handleMarkSubcontract(wo)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`subcontract-wo-${wo.id}`}><Truck className="w-3 h-3 inline mr-0.5" />SC</button>}
                               {wo.status === 'completed' && <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-wo-${wo.id}`}><Printer className="w-3 h-3 inline mr-0.5" />Print</button>}
+                              {wo.status === 'completed' && ops.length > 0 && <button onClick={() => printJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-jobcard-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Print Job Card</button>}
                             </div>
                             )}
                           </td>
@@ -1735,7 +1739,7 @@ export default function ManufacturingPage() {
                       </Select>
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-[#111827] mb-1">Processing Charges / Unit</label>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Processing Charges / Unit <span className="text-[11px] text-[#6B7280] font-normal">(auto-pulled from BOM routing)</span></label>
                       <input type="number" min="0" step="0.01" value={opForm.outsource_charges} onChange={e => setOpForm({...opForm, outsource_charges: parseFloat(e.target.value) || 0})} className="input-field mono" placeholder="0.00" data-testid="outsource-charges-input" />
                     </div>
                     <div>
@@ -1751,6 +1755,18 @@ export default function ManufacturingPage() {
                   </>
                 ) : (
                   <>
+                    <div>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Work Center *</label>
+                      <Select value={opForm.work_center_id} onValueChange={v => setOpForm({...opForm, work_center_id: v})}>
+                        <SelectTrigger data-testid="op-work-center-select"><SelectValue placeholder="Select work center" /></SelectTrigger>
+                        <SelectContent>
+                          {workCenters.filter(wc => wc.status !== 'inactive').map(wc => (
+                            <SelectItem key={wc.id} value={wc.id}>{wc.code} - {wc.name}{wc.hourly_rate ? ` (₹${wc.hourly_rate}/hr)` : ''}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {!opForm.work_center_id && <p className="text-xs text-[#9B1C1C] mt-1">Work Center is required</p>}
+                    </div>
                     <div>
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Operator Name *</label>
                       <input type="text" value={opForm.operator} onChange={e => setOpForm({...opForm, operator: e.target.value})} className="input-field" placeholder="Enter operator name" data-testid="op-operator-input" required />
@@ -1825,7 +1841,7 @@ export default function ManufacturingPage() {
             )}
             <div className="flex justify-end space-x-3 pt-3 border-t border-[#E5E7EB]">
               <button onClick={() => setOpDialog({ open: false, mode: '', sequence: 0 })} className="btn-secondary">Cancel</button>
-              <button onClick={handleOpDialogSubmit} className="btn-primary" disabled={opDialog.mode === 'start' && !opForm.is_outsource && !opForm.operator.trim()} data-testid="op-dialog-submit">
+              <button onClick={handleOpDialogSubmit} className="btn-primary" disabled={opDialog.mode === 'start' && !opForm.is_outsource && (!opForm.operator.trim() || !opForm.work_center_id)} data-testid="op-dialog-submit">
                 {opDialog.mode === 'start' ? (opForm.is_outsource ? 'Start & Create OS Order' : 'Start') : opDialog.mode === 'stop' ? 'Stop & Record' : 'Complete'}
               </button>
             </div>
