@@ -4943,10 +4943,11 @@ async def get_work_order_print_data(wo_id: str, request: Request):
     routing = await db.routings.find_one({"id": wo.get("routing_id")}, {"_id": 0})
     wo["routing"] = routing
     
-    # Get work center names for operations
+    # Get work center names (+ hourly rate) for operations
     for op in wo.get("operations_status", []):
         wc = await db.work_centers.find_one({"id": op.get("work_center_id")}, {"_id": 0})
         op["work_center_name"] = wc.get("name", "") if wc else ""
+        op["work_center"] = wc  # Full WC object (contains hourly_rate) used by Job Card print
     
     # Get consumed materials (stored on WO doc or from inventory transactions)
     consumed = wo.get("consumed_materials", [])

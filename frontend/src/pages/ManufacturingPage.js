@@ -104,12 +104,12 @@ export default function ManufacturingPage() {
     fetchData();
   }, []);
 
-  // Refresh duration display every 30s when Job Card is open and an op is running
+  // Refresh duration display every 5s when Job Card is open and an op is running
   useEffect(() => {
     if (!isJobCardOpen) return;
     const hasRunning = (jobCardWO?.operations_status || []).some(o => o.status === 'in_progress' && !o.is_job_work);
     if (!hasRunning) return;
-    const timer = setInterval(() => setClockTick(t => t + 1), 30000);
+    const timer = setInterval(() => setClockTick(t => t + 1), 5000);
     return () => clearInterval(timer);
   }, [isJobCardOpen, jobCardWO]);
 
@@ -673,66 +673,121 @@ export default function ManufacturingPage() {
       const item = data.item || {};
       const ops = data.operations_status || [];
 
+      const fmtDt = (iso) => {
+        if (!iso) return '-';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return '-';
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yy = String(d.getFullYear()).slice(-2);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mi = String(d.getMinutes()).padStart(2, '0');
+        return `${dd}/${mm}/${yy}<br/>${hh}:${mi}`;
+      };
+
+      // Build rows: one row per operator-run; if no runs, single placeholder row.
+      // First run in each op renders SL No / Operation / Work Center cells with rowSpan.
+      const rowsHtml = ops.map((op, opIdx) => {
+        const opName = typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : (op.operation_name || '-');
+        const wcName = op.work_center_name || op.work_center?.name || '-';
+        const hourly = (op.work_center && op.work_center.hourly_rate) || 0;
+        const runs = op.runs || [];
+        if (runs.length === 0) {
+          return `<tr>
+            <td class="center">${opIdx + 1}</td>
+            <td>${item.part_number || ''}${item.part_number ? ', ' : ''}${item.name || ''}<br/><span class="op-name">${opName}</span></td>
+            <td>${wcName}</td>
+            <td>-</td>
+            <td class="center mono">-</td>
+            <td class="center mono">-</td>
+            <td class="center mono">-</td>
+            <td class="center mono">-</td>
+            <td class="right mono">-</td>
+            <td class="sig"></td>
+          </tr>`;
+        }
+        return runs.map((r, ri) => {
+          const s = r?.started_at || r?.actual_start;
+          const e = r?.ended_at || r?.actual_end;
+          let mins = 0;
+          if (s && e) {
+            const ds = new Date(s).getTime(), de = new Date(e).getTime();
+            if (!isNaN(ds) && !isNaN(de)) mins = Math.max(0, (de - ds) / 60000);
+          }
+          const cost = (mins / 60) * hourly;
+          const startStr = s ? fmtDt(s) : '-';
+          const endStr = e ? fmtDt(e) : (s ? '(running)' : '-');
+          return `<tr>
+            ${ri === 0 ? `<td class="center" rowspan="${runs.length}">${opIdx + 1}</td>` : ''}
+            ${ri === 0 ? `<td rowspan="${runs.length}">${item.part_number || ''}${item.part_number ? ', ' : ''}${item.name || ''}<br/><span class="op-name">${opName}</span></td>` : ''}
+            ${ri === 0 ? `<td rowspan="${runs.length}">${wcName}</td>` : ''}
+            <td>${r.operator || '-'}</td>
+            <td class="center mono">${r.quantity_completed || 0} PCS</td>
+            <td class="center mono">${startStr}</td>
+            <td class="center mono">${endStr}</td>
+            <td class="center mono">${mins ? mins.toFixed(0) : '-'}</td>
+            <td class="right mono">${cost ? cost.toFixed(2) : '-'}</td>
+            <td class="sig"></td>
+          </tr>`;
+        }).join('');
+      }).join('');
+
       const html = `<!DOCTYPE html><html><head><title>Job Card - ${data.wo_number}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #111; padding: 20px; }
-        .header { text-align: center; border-bottom: 2px solid #1D3557; padding-bottom: 10px; margin-bottom: 15px; }
+        .header { text-align: center; border-bottom: 2px solid #1D3557; padding-bottom: 10px; margin-bottom: 10px; }
         .header h1 { font-size: 16px; color: #1D3557; }
         .header p { font-size: 10px; color: #555; }
-        .title { font-size: 14px; font-weight: bold; color: #1D3557; margin: 10px 0 5px; text-transform: uppercase; }
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; }
-        .info-box { border: 1px solid #ddd; padding: 6px 8px; }
-        .info-box label { font-size: 9px; color: #888; text-transform: uppercase; display: block; }
-        .info-box span { font-weight: 600; font-size: 11px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
-        th { background: #1D3557; color: white; padding: 6px 8px; text-align: left; font-size: 10px; text-transform: uppercase; }
-        td { padding: 8px; border-bottom: 1px solid #ddd; font-size: 11px; }
-        tr:nth-child(even) { background: #f9f9f9; }
-        .text-right { text-align: right; }
-        .text-center { text-align: center; }
-        .mono { font-family: 'Courier New', monospace; }
-        .status-done { color: #03543F; font-weight: 600; }
-        .status-wip { color: #B45309; font-weight: 600; }
-        .op-sign { height: 40px; border: 1px solid #ddd; }
+        .title { font-size: 13px; font-weight: bold; text-align:center; margin: 10px 0; }
+        .meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; font-size: 11px; }
+        .meta-box { border: 1px solid #ccc; padding: 6px 8px; }
+        .meta-box label { font-size: 9px; color: #888; text-transform: uppercase; display: block; }
+        .meta-box span { font-weight: 600; font-size: 11px; }
+        table.jc { width: 100%; border-collapse: collapse; margin-top: 8px; table-layout: fixed; }
+        table.jc th, table.jc td { border: 1px solid #333; padding: 6px 5px; vertical-align: middle; font-size: 11px; word-wrap: break-word; }
+        table.jc th { background: #F3F4F6; text-align: center; font-weight: 700; font-size: 11px; }
+        table.jc td.center { text-align: center; }
+        table.jc td.right { text-align: right; }
+        table.jc .mono { font-family: 'Courier New', monospace; }
+        table.jc .op-name { font-weight: 600; color: #1D3557; font-size: 10.5px; }
+        table.jc .sig { height: 32px; }
+        /* Alternating zebra shading per op group is visual-only; keeping simple */
         @media print { body { padding: 10px; } }
       </style></head><body>
       <div class="header">
         <h1>${company.company_name || 'Manufacturing ERP'}</h1>
         ${company.address ? `<p>${company.address}</p>` : ''}
       </div>
-      <div class="title">Job Card: ${data.wo_number}</div>
-      <div class="info-grid">
-        <div class="info-box"><label>Item</label><span class="mono">${item.part_number || ''}</span> - ${item.name || ''}</div>
-        <div class="info-box"><label>Quantity</label><span class="mono">${data.quantity || 0}</span></div>
-        <div class="info-box"><label>Status</label><span>${(data.status || '').replace('_',' ').toUpperCase()}</span></div>
+      <div class="title">Job Card Printing</div>
+      <div class="meta-grid">
+        <div class="meta-box"><label>MO Number</label><span class="mono">${data.wo_number}</span></div>
+        <div class="meta-box"><label>Item</label><span class="mono">${item.part_number || ''}</span> - ${item.name || ''}</div>
+        <div class="meta-box"><label>Quantity</label><span class="mono">${data.quantity || 0}</span></div>
       </div>
-      <table>
+      <table class="jc">
         <thead><tr>
-          <th style="width:40px">Seq</th><th>Operation</th><th>Work Center</th>
-          <th>Operator</th><th class="text-center">Status</th>
-          <th>Start</th><th>End</th><th class="text-right">Time (min)</th><th style="width:80px" class="text-center">Signature</th>
+          <th style="width:5%">SL. No.</th>
+          <th style="width:14%">Operation</th>
+          <th style="width:11%">Work Center</th>
+          <th style="width:10%">Operator</th>
+          <th style="width:9%">Qty produced</th>
+          <th style="width:11%">Start</th>
+          <th style="width:11%">Stop</th>
+          <th style="width:8%">Duration (Min)</th>
+          <th style="width:9%">Cost</th>
+          <th style="width:12%">Signature</th>
         </tr></thead>
-        <tbody>${ops.map(op => `<tr>
-          <td class="mono">${op.sequence}</td>
-          <td style="font-weight:600">${op.operation_name}</td>
-          <td>${op.work_center_name || '-'}</td>
-          <td style="font-weight:600">${op.operator || '-'}</td>
-          <td class="text-center ${op.status === 'completed' ? 'status-done' : op.status === 'in_progress' ? 'status-wip' : ''}">${(op.status || '').replace('_',' ')}</td>
-          <td class="mono">${op.actual_start ? new Date(op.actual_start).toLocaleString() : '-'}</td>
-          <td class="mono">${op.actual_end ? new Date(op.actual_end).toLocaleString() : '-'}</td>
-          <td class="text-right mono">${op.actual_time_min ? op.actual_time_min : '-'}</td>
-          <td class="op-sign"></td>
-        </tr>`).join('')}</tbody>
+        <tbody>${rowsHtml}</tbody>
       </table>
-      ${data.notes ? `<div style="margin:10px 0;"><strong>Notes:</strong> ${data.notes}</div>` : ''}
+      ${data.notes ? `<div style="margin:12px 0;font-size:11px;"><strong>Notes:</strong> ${data.notes}</div>` : ''}
       <div style="margin-top:30px;display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10px;">
         <div><div style="border-top:1px solid #333;padding-top:4px;text-align:center;">Production Supervisor</div></div>
         <div><div style="border-top:1px solid #333;padding-top:4px;text-align:center;">Quality Approved By</div></div>
       </div>
       <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
       </body></html>`;
-      const w = window.open('', '_blank', 'width=800,height=600');
+      const w = window.open('', '_blank', 'width=900,height=700');
       w.document.write(html);
       w.document.close();
       w.focus();
@@ -1353,7 +1408,7 @@ export default function ManufacturingPage() {
                       <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Qty Done</th>
                       <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Accept/Reject</th>
                       <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Duration</th>
-                      <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Cost/Unit</th>
+                      <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Cost</th>
                       <th className="text-center py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Action</th>
                     </tr>
                   </thead>
@@ -1361,156 +1416,141 @@ export default function ManufacturingPage() {
                     {jobCardWO.operations_status?.map((op, idx) => {
                       const wc = workCenters.find(w => w.id === op.work_center_id);
                       const prevDone = idx === 0 || jobCardWO.operations_status.slice(0, idx).every(p => ['completed', 'stopped'].includes(p.status));
-                      const totalDone = op.runs?.reduce((s, r) => s + (r.quantity_completed || 0), 0) || op.quantity_completed || 0;
+                      const runs = op.runs || [];
+                      const totalDone = runs.reduce((s, r) => s + (r.quantity_completed || 0), 0) || op.quantity_completed || 0;
                       const totalAccepted = op.quantity_accepted || (totalDone - (op.quantity_rejected || 0) - (op.quantity_rework || 0));
                       const remaining = jobCardWO.quantity - totalDone;
-                      return (
-                        <tr key={op.sequence} className={`border-t ${op.status === 'in_progress' ? 'bg-[#FDF6B2]/30' : op.status === 'completed' ? 'bg-[#DEF7EC]/30' : op.status === 'stopped' ? 'bg-[#FDE8E8]/10' : ''}`} data-testid={`op-row-${op.sequence}`}>
-                          <td className="py-3 px-3 mono font-medium">{op.sequence}</td>
-                          <td className="py-3 px-3 font-medium">{typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : op.operation_name}</td>
-                          <td className="py-3 px-3 text-sm text-[#4B5563]">
-                            {op.work_center_id ? (wc?.name || op.work_center_name || '-') : (
-                              op.status === 'pending' || op.status === 'stopped' ? (
-                                <select value={op._selected_wc || ''} onChange={(e) => {
-                                  const updated = { ...jobCardWO };
-                                  updated.operations_status = updated.operations_status.map(o => o.sequence === op.sequence ? { ...o, _selected_wc: e.target.value } : o);
-                                  setJobCardWO(updated);
-                                }} className="input-field text-xs py-1 px-2" data-testid={`wc-select-${op.sequence}`}>
-                                  <option value="">Select WC</option>
-                                  {workCenters.map(w => <option key={w.id} value={w.id}>{w.code} - {w.name}</option>)}
-                                </select>
-                              ) : '-'
-                            )}
-                          </td>
-                          <td className="py-3 px-3 text-center">
-                            <span className={`status-badge ${
-                              op.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' :
-                              op.status === 'in_progress' ? 'bg-[#FDF6B2] text-[#723B13]' :
-                              op.status === 'stopped' ? 'bg-[#E1EFFE] text-[#1E429F]' :
-                              'bg-[#F3F4F6] text-[#4B5563]'
-                            }`}>{op.status?.replace('_', ' ')}</span>
-                          </td>
-                          <td className="py-3 px-3 text-sm">
-                            {op.runs?.length > 0 ? (
-                              <div className="space-y-0.5">
-                                {op.runs.map((r, ri) => (
-                                  <div key={ri} className="flex items-center gap-1 text-xs">
-                                    <User className="w-3 h-3 text-[#6B7280]" />
-                                    <span>{r.operator}</span>
-                                    <span className="mono text-[#6B7280]">({r.quantity_completed || 0} pcs)</span>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (op.operator || '-')}
-                          </td>
-                          <td className="py-3 px-3 text-right mono text-sm">
-                            <span className="font-medium">{totalDone}</span>
-                            <span className="text-[#6B7280]">/{jobCardWO.quantity}</span>
-                            {remaining > 0 && totalDone > 0 && (
-                              <p className="text-[10px] text-[#9B1C1C]">{remaining} remaining</p>
-                            )}
-                          </td>
-                          <td className="py-3 px-3 text-right text-xs">
-                            {totalDone > 0 && (
-                              <div className="space-y-0.5">
-                                <div className="text-[#03543F]">A: {totalAccepted}</div>
-                                {(op.quantity_rejected || 0) > 0 && <div className="text-[#9B1C1C]">R: {op.quantity_rejected}</div>}
-                                {(op.quantity_rework || 0) > 0 && <div className="text-[#723B13]">RW: {op.quantity_rework}</div>}
-                              </div>
-                            )}
-                          </td>
-                          {(() => {
-                            // Compute total duration (minutes) across runs and cost based on WC hourly_rate
-                            const runs = op.runs || [];
-                            let totalMinutes = 0;
-                            let running = false;
-                            runs.forEach(r => {
-                              const s = r?.started_at || r?.actual_start || r?.start_time;
-                              const e = r?.ended_at || r?.actual_end || r?.end_time;
-                              if (s && e) {
-                                const ds = new Date(s).getTime();
-                                const de = new Date(e).getTime();
-                                if (!isNaN(ds) && !isNaN(de)) totalMinutes += Math.max(0, (de - ds) / 60000);
-                              } else if (s && !e) {
-                                // Active run (started but not ended) → live clock
-                                const ds = new Date(s).getTime();
-                                if (!isNaN(ds)) { totalMinutes += Math.max(0, (Date.now() - ds) / 60000); running = true; }
-                              }
-                            });
-                            if (!totalMinutes && op.actual_start && op.actual_end) {
-                              const ds = new Date(op.actual_start).getTime();
-                              const de = new Date(op.actual_end).getTime();
-                              if (!isNaN(ds) && !isNaN(de)) totalMinutes = Math.max(0, (de - ds) / 60000);
-                            }
-                            if (!totalMinutes && op.status === 'in_progress' && op.actual_start) {
-                              const ds = new Date(op.actual_start).getTime();
-                              if (!isNaN(ds)) { totalMinutes = Math.max(0, (Date.now() - ds) / 60000); running = true; }
-                            }
-                            const hourlyRate = wc?.hourly_rate || 0;
-                            const totalCost = (totalMinutes / 60) * hourlyRate;
-                            const costPerUnit = totalDone > 0 ? totalCost / totalDone : 0;
-                            let durationNode;
-                            if (!totalMinutes || isNaN(totalMinutes)) {
-                              durationNode = <span className="text-[#9CA3AF]">-</span>;
-                            } else if (running) {
-                              durationNode = <span className="text-[#1E429F]" title="Live — updates on refresh">{totalMinutes.toFixed(0)} min (running)</span>;
-                            } else {
-                              const h = Math.floor(totalMinutes / 60);
-                              const m = Math.round(totalMinutes % 60);
-                              durationNode = <span className="text-[#111827]">{h > 0 ? `${h}h ${m}m` : `${m} min`}</span>;
-                            }
-                            let costNode;
-                            if (!hourlyRate) {
-                              costNode = <span className="text-[#9CA3AF]" title="Set WC hourly rate to compute cost">-</span>;
-                            } else if (totalDone === 0 && !running) {
-                              costNode = <span className="text-[#9CA3AF]">-</span>;
-                            } else {
-                              const perUnitDisp = costPerUnit > 0 ? costPerUnit : totalCost; // show total when no qty yet
-                              costNode = (
-                                <span className="text-[#111827] font-medium" title={`Duration: ${totalMinutes.toFixed(1)} min × WC rate: ₹${hourlyRate}/hr × Qty: ${totalDone}\nTotal labour cost: ₹${totalCost.toFixed(2)}`}>
-                                  ₹{perUnitDisp.toFixed(2)}{totalDone === 0 && <span className="text-[10px] text-[#9CA3AF] ml-1">total</span>}
-                                </span>
-                              );
-                            }
-                            return (
-                              <>
-                                <td className="py-3 px-3 text-right mono text-xs" data-testid={`op-duration-${op.sequence}`}>{durationNode}</td>
-                                <td className="py-3 px-3 text-right mono text-xs font-medium" data-testid={`op-cost-${op.sequence}`}>{costNode}</td>
-                              </>
-                            );
-                          })()}
-                          <td className="py-3 px-3 text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              {/* Start button */}
-                              {(op.status === 'pending' || op.status === 'stopped') && prevDone && canEdit && (
-                                <button onClick={() => openOpDialog('start', op.sequence)} className="btn-primary text-xs px-2 py-1" data-testid={`start-op-${op.sequence}`}>
-                                  <Play className="w-3 h-3 inline mr-1" />{op.status === 'stopped' ? 'Resume' : 'Start'}
-                                </button>
-                              )}
-                              {/* Stop button */}
-                              {op.status === 'in_progress' && !op.is_job_work && canEdit && (
-                                <>
-                                  <button onClick={() => openOpDialog('stop', op.sequence)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`stop-op-${op.sequence}`}>
-                                    <Square className="w-3 h-3 inline mr-1" />Stop
-                                  </button>
-                                  <button onClick={() => openOpDialog('complete', op.sequence)} className="text-xs px-2 py-1 bg-[#03543F] text-white rounded-sm hover:bg-[#024733]" data-testid={`complete-op-${op.sequence}`}>
-                                    <CheckCircle2 className="w-3 h-3 inline mr-1" />Complete
-                                  </button>
-                                </>
-                              )}
-                              {/* Outsourced operation — hide Stop/Complete, show JW number + receive reminder */}
-                              {op.status === 'in_progress' && op.is_job_work && (
-                                <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium" data-testid={`outsourced-op-${op.sequence}`}>
-                                  {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'} — Receive via GRN
-                                </span>
-                              )}
-                              {op.status === 'completed' && (
-                                <CheckCircle2 className="w-4 h-4 text-[#03543F]" />
-                              )}
-                            </div>
-                          </td>
-                        </tr>
+                      const hourlyRate = wc?.hourly_rate || 0;
+
+                      const rowBg = op.status === 'in_progress' ? 'bg-[#FDF6B2]/30' : op.status === 'completed' ? 'bg-[#DEF7EC]/30' : op.status === 'stopped' ? 'bg-[#FDE8E8]/10' : '';
+                      const statusBadge = (
+                        <span className={`status-badge ${
+                          op.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' :
+                          op.status === 'in_progress' ? 'bg-[#FDF6B2] text-[#723B13]' :
+                          op.status === 'stopped' ? 'bg-[#E1EFFE] text-[#1E429F]' :
+                          'bg-[#F3F4F6] text-[#4B5563]'
+                        }`}>{op.status?.replace('_', ' ')}</span>
                       );
+
+                      const wcCell = op.work_center_id ? (wc?.name || op.work_center_name || '-') : (
+                        op.status === 'pending' || op.status === 'stopped' ? (
+                          <select value={op._selected_wc || ''} onChange={(e) => {
+                            const updated = { ...jobCardWO };
+                            updated.operations_status = updated.operations_status.map(o => o.sequence === op.sequence ? { ...o, _selected_wc: e.target.value } : o);
+                            setJobCardWO(updated);
+                          }} className="input-field text-xs py-1 px-2" data-testid={`wc-select-${op.sequence}`}>
+                            <option value="">Select WC</option>
+                            {workCenters.map(w => <option key={w.id} value={w.id}>{w.code} - {w.name}</option>)}
+                          </select>
+                        ) : '-'
+                      );
+
+                      const actionCell = (
+                        <div className="flex items-center justify-center gap-1">
+                          {(op.status === 'pending' || op.status === 'stopped') && prevDone && canEdit && (
+                            <button onClick={() => openOpDialog('start', op.sequence)} className="btn-primary text-xs px-2 py-1" data-testid={`start-op-${op.sequence}`}>
+                              <Play className="w-3 h-3 inline mr-1" />{op.status === 'stopped' ? 'Resume' : 'Start'}
+                            </button>
+                          )}
+                          {op.status === 'in_progress' && !op.is_job_work && canEdit && (
+                            <>
+                              <button onClick={() => openOpDialog('stop', op.sequence)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`stop-op-${op.sequence}`}>
+                                <Square className="w-3 h-3 inline mr-1" />Stop
+                              </button>
+                              <button onClick={() => openOpDialog('complete', op.sequence)} className="text-xs px-2 py-1 bg-[#03543F] text-white rounded-sm hover:bg-[#024733]" data-testid={`complete-op-${op.sequence}`}>
+                                <CheckCircle2 className="w-3 h-3 inline mr-1" />Complete
+                              </button>
+                            </>
+                          )}
+                          {op.status === 'in_progress' && op.is_job_work && (
+                            <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium" data-testid={`outsourced-op-${op.sequence}`}>
+                              {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'} — Receive via GRN
+                            </span>
+                          )}
+                          {op.status === 'completed' && (
+                            <CheckCircle2 className="w-4 h-4 text-[#03543F]" />
+                          )}
+                        </div>
+                      );
+
+                      // Helper to render per-run duration + cost cells
+                      const renderRunDurCost = (r) => {
+                        const s = r?.started_at || r?.actual_start || r?.start_time;
+                        const e = r?.ended_at || r?.actual_end || r?.end_time;
+                        let mins = 0;
+                        let running = false;
+                        if (s && e) {
+                          const ds = new Date(s).getTime(), de = new Date(e).getTime();
+                          if (!isNaN(ds) && !isNaN(de)) mins = Math.max(0, (de - ds) / 60000);
+                        } else if (s && !e) {
+                          const ds = new Date(s).getTime();
+                          if (!isNaN(ds)) { mins = Math.max(0, (Date.now() - ds) / 60000); running = true; }
+                        }
+                        const runCost = (mins / 60) * hourlyRate;
+                        const durNode = !mins ? <span className="text-[#9CA3AF]">-</span>
+                          : running ? <span className="text-[#1E429F]">{mins.toFixed(0)} min (running)</span>
+                          : (() => { const h = Math.floor(mins / 60); const m = Math.round(mins % 60); return <span className="text-[#111827]">{h > 0 ? `${h}h ${m}m` : `${m} min`}</span>; })();
+                        const costNode = (!hourlyRate || !mins) ? <span className="text-[#9CA3AF]" title={!hourlyRate ? 'Set WC hourly rate to compute cost' : ''}>-</span>
+                          : <span className="text-[#111827] font-medium" title={`${mins.toFixed(1)} min × ₹${hourlyRate}/hr = ₹${runCost.toFixed(2)}`}>₹{runCost.toFixed(2)}</span>;
+                        return { durNode, costNode };
+                      };
+
+                      // If there are runs, render one row per run with rowspan for merged columns.
+                      // Otherwise render single row (pending op).
+                      if (runs.length === 0) {
+                        return (
+                          <tr key={op.sequence} className={`border-t ${rowBg}`} data-testid={`op-row-${op.sequence}`}>
+                            <td className="py-3 px-3 mono font-medium">{op.sequence}</td>
+                            <td className="py-3 px-3 font-medium">{typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : op.operation_name}</td>
+                            <td className="py-3 px-3 text-sm text-[#4B5563]">{wcCell}</td>
+                            <td className="py-3 px-3 text-center">{statusBadge}</td>
+                            <td className="py-3 px-3 text-sm">{op.operator || '-'}</td>
+                            <td className="py-3 px-3 text-right mono text-sm"><span className="font-medium">{totalDone}</span><span className="text-[#6B7280]">/{jobCardWO.quantity}</span></td>
+                            <td className="py-3 px-3 text-right text-xs"><span className="text-[#9CA3AF]">-</span></td>
+                            <td className="py-3 px-3 text-right mono text-xs" data-testid={`op-duration-${op.sequence}`}><span className="text-[#9CA3AF]">-</span></td>
+                            <td className="py-3 px-3 text-right mono text-xs font-medium" data-testid={`op-cost-${op.sequence}`}><span className="text-[#9CA3AF]">-</span></td>
+                            <td className="py-3 px-3 text-center">{actionCell}</td>
+                          </tr>
+                        );
+                      }
+
+                      return runs.map((r, ri) => {
+                        const { durNode, costNode } = renderRunDurCost(r);
+                        const isFirst = ri === 0;
+                        return (
+                          <tr key={`${op.sequence}-${ri}`} className={`border-t ${rowBg}`} data-testid={`op-row-${op.sequence}-${ri}`}>
+                            {isFirst && <td rowSpan={runs.length} className="py-3 px-3 mono font-medium align-top">{op.sequence}</td>}
+                            {isFirst && <td rowSpan={runs.length} className="py-3 px-3 font-medium align-top">{typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : op.operation_name}</td>}
+                            {isFirst && <td rowSpan={runs.length} className="py-3 px-3 text-sm text-[#4B5563] align-top">{wcCell}</td>}
+                            {isFirst && <td rowSpan={runs.length} className="py-3 px-3 text-center align-top">{statusBadge}</td>}
+                            <td className="py-3 px-3 text-sm" data-testid={`op-operator-${op.sequence}-${ri}`}>
+                              <div className="flex items-center gap-1 text-xs">
+                                <User className="w-3 h-3 text-[#6B7280]" />
+                                <span className="font-medium">{r.operator || '-'}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 text-right mono text-sm" data-testid={`op-qty-${op.sequence}-${ri}`}>
+                              <span className="font-medium">{r.quantity_completed || 0}</span>
+                              <span className="text-[#6B7280]"> pcs</span>
+                            </td>
+                            {isFirst ? (
+                              <td rowSpan={runs.length} className="py-3 px-3 text-right text-xs align-top">
+                                {totalDone > 0 ? (
+                                  <div className="space-y-0.5">
+                                    <div className="text-[#03543F]">A: {totalAccepted}</div>
+                                    {(op.quantity_rejected || 0) > 0 && <div className="text-[#9B1C1C]">R: {op.quantity_rejected}</div>}
+                                    {(op.quantity_rework || 0) > 0 && <div className="text-[#723B13]">RW: {op.quantity_rework}</div>}
+                                    {remaining > 0 && <div className="text-[10px] text-[#9B1C1C]">{remaining} remaining</div>}
+                                  </div>
+                                ) : <span className="text-[#9CA3AF]">-</span>}
+                              </td>
+                            ) : null}
+                            <td className="py-3 px-3 text-right mono text-xs" data-testid={`op-duration-${op.sequence}-${ri}`}>{durNode}</td>
+                            <td className="py-3 px-3 text-right mono text-xs font-medium" data-testid={`op-cost-${op.sequence}-${ri}`}>{costNode}</td>
+                            {isFirst && <td rowSpan={runs.length} className="py-3 px-3 text-center align-top">{actionCell}</td>}
+                          </tr>
+                        );
+                      });
                     })}
                   </tbody>
                 </table>

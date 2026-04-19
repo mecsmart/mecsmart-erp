@@ -43,6 +43,7 @@ export default function ProductionPage() {
   
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
+  const [cancelConfirm, setCancelConfirm] = useState({ open: false, order: null });
   const [formData, setFormData] = useState({
     bom_id: '',
     quantity: 1,
@@ -126,16 +127,24 @@ export default function ProductionPage() {
     }
   };
 
-  const handleCancel = async (order) => {
-    // Direct action — avoid window.confirm which fails silently in iframes/preview
+  const handleCancel = (order) => {
+    // Open confirmation dialog (Shadcn). window.confirm is unreliable in iframes.
+    setCancelConfirm({ open: true, order });
+  };
+
+  const confirmCancel = async () => {
+    const order = cancelConfirm.order;
+    if (!order) return;
     try {
       const { data } = await api.post(`/api/production/${order.id}/cancel`);
       let msg = data.message || `Sales Order ${order.order_number} cancelled`;
       if (data.cancelled_mos?.length > 0) msg += ` | MOs: ${data.cancelled_mos.join(', ')}`;
       toast.success(msg);
+      setCancelConfirm({ open: false, order: null });
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to cancel order');
+      setCancelConfirm({ open: false, order: null });
     }
   };
 
@@ -460,6 +469,41 @@ export default function ProductionPage() {
           </div>
         )}
       </div>
+
+      {/* Cancel Confirmation Dialog */}
+      <Dialog open={cancelConfirm.open} onOpenChange={(o) => { if (!o) setCancelConfirm({ open: false, order: null }); }}>
+        <DialogContent className="max-w-md" data-testid="cancel-so-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-[Chivo] flex items-center gap-2 text-[#9B1C1C]">
+              <AlertTriangle className="w-5 h-5" />
+              Cancel Sales Order?
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-3 space-y-3 text-sm">
+            <p className="text-[#374151]">
+              Are you sure you want to cancel <span className="font-semibold mono">{cancelConfirm.order?.order_number}</span>?
+            </p>
+            <div className="bg-[#FDE8E8] border border-[#FDE8E8] rounded-sm p-3 text-xs text-[#9B1C1C]">
+              <p className="font-semibold mb-1">This will:</p>
+              <ul className="list-disc list-inside space-y-0.5">
+                <li>Cancel all linked Manufacturing Orders</li>
+                <li>Reverse any reserved/consumed stock</li>
+                <li>Close open Job Cards for this SO</li>
+              </ul>
+              <p className="mt-2 font-semibold">This action cannot be undone.</p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 mt-4">
+            <button onClick={() => setCancelConfirm({ open: false, order: null })} className="btn-secondary" data-testid="cancel-so-no-btn">
+              No, Keep Order
+            </button>
+            <button onClick={confirmCancel} className="bg-[#9B1C1C] hover:bg-[#7F1D1D] text-white px-4 py-2 rounded-sm text-sm font-medium flex items-center gap-1" data-testid="cancel-so-yes-btn">
+              <XCircle className="w-4 h-4" />
+              Yes, Cancel Order
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
