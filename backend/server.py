@@ -1038,13 +1038,17 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
             
             # Check for child BOM
             child_bom = await db.boms.find_one({"parent_item_id": comp.get("item_id"), "status": "active"}, {"_id": 0})
+            child_fg_process = 0
             if child_bom:
                 comp_data["child_bom_id"] = child_bom.get("id")
                 comp_data["children"] = await explode_level(child_bom.get("id"), level + 1, max_levels)
-                # Rollup cost from children (material + children process) + this child's FG process
+                # Material Cost (unit_cost column) = children's rolled-up Total × qty ONLY.
+                # The child's own parent_routings (its FG Process) goes into the Process column
+                # below, so that editing a sub-BOM's parent_routings visibly updates the Process
+                # Cost/Unit column on the parent tree (not buried into Material).
                 children_rollup = sum(c.get("extended_cost", 0) for c in comp_data["children"])
                 child_fg_process = routings_total_cost(child_bom.get("parent_routings", []))
-                comp_data["unit_cost"] = children_rollup + child_fg_process
+                comp_data["unit_cost"] = children_rollup
             else:
                 # Leaf node - use item unit_cost
                 comp_data["unit_cost"] = item.get("unit_cost", 0) if item else 0
@@ -1052,10 +1056,13 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
             comp_data["extended_cost"] = 0  # Will be recalculated after process cost
             
             # Calculate process cost:
-            # Priority 1: Sum of costs from BOM component routings (user-defined per operation)
-            # Priority 2: SC orders outsource charges
-            # Priority 3: Completed WO operations (inhouse process costs)
+            # Priority 1a: Sum of costs from BOM component routings (user-defined on parent's line)
+            # Priority 1b: PLUS the child BOM's parent_routings (its own FG Process) if present
+            # Priority 2 (fallback only if 1a/1b are zero): SC orders outsource charges
+            # Priority 3 (fallback): Completed WO operations (inhouse process costs)
             process_cost_per_unit = routings_total_cost(comp.get("routings", []))
+            if child_fg_process:
+                process_cost_per_unit += child_fg_process
             
             if not process_cost_per_unit:
                 # Check SC orders where this item was outsourced (job_work_parts charges)
