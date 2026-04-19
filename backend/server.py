@@ -3600,22 +3600,28 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
         operations_status = []
         # Find routings for this item:
         # 1) If this is the main/parent item, use bom.parent_routings
-        # 2) If this is a child, look for routings in parent's BOM component entry
+        # 2) If this is a child, first check the CHILD's OWN BOM.parent_routings (iter 74+ source of truth),
+        #    fall back to the parent BOM's component-level routings for legacy BOMs.
         item_routings_list = []
         if is_main:
             item_bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
             item_routings_list = item_bom.get("parent_routings", []) if item_bom else []
         else:
-            # Find the parent BOM that contains this child item as a component
-            parent_bom = await db.boms.find_one({
-                "components.item_id": item_id,
-                "status": "active"
-            }, {"_id": 0})
-            if parent_bom:
-                for comp in parent_bom.get("components", []):
-                    if comp.get("item_id") == item_id:
-                        item_routings_list = comp.get("routings", [])
-                        break
+            # Child MO — try the child's OWN BOM parent_routings first (unified source of truth)
+            own_bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
+            if own_bom and own_bom.get("parent_routings"):
+                item_routings_list = own_bom.get("parent_routings", [])
+            if not item_routings_list:
+                # Legacy fallback — parent BOM's component entry routings
+                parent_bom = await db.boms.find_one({
+                    "components.item_id": item_id,
+                    "status": "active"
+                }, {"_id": 0})
+                if parent_bom:
+                    for comp in parent_bom.get("components", []):
+                        if comp.get("item_id") == item_id:
+                            item_routings_list = comp.get("routings", [])
+                            break
         
         for seq, r_entry in enumerate(normalize_routings(item_routings_list), 1):
             operations_status.append({
@@ -6340,6 +6346,53 @@ async def migrate_sc_jw_charges_from_bom():
     except Exception as e:
         logger.exception(f"migrate_sc_jw_charges_from_bom failed: {e}")
 
+async def migrate_backfill_child_mo_operations_status():
+    """Child MOs created BEFORE iter-74 (which moved routings from parent BOM's component
+    entries to the child's own BOM parent_routings) may have empty operations_status. This
+    migration walks all pending/in_progress inhouse child MOs with no ops and populates
+    operations_status from the child item's own BOM.parent_routings."""
+    try:
+        cursor = db.work_orders.find({
+            "parent_wo_id": {"$exists": True, "$ne": None},
+            "is_subcontract": {"$ne": True},
+            "status": {"$in": ["pending", "in_progress"]}
+        }, {"_id": 0})
+        fixed = 0
+        async for wo in cursor:
+            ops = wo.get("operations_status") or []
+            if ops:
+                continue
+            item_id = wo.get("item_id")
+            if not item_id:
+                continue
+            own_bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
+            if not own_bom:
+                continue
+            routings_list = own_bom.get("parent_routings") or []
+            if not routings_list:
+                continue
+            new_ops = []
+            for seq, r_entry in enumerate(normalize_routings(routings_list), 1):
+                new_ops.append({
+                    "sequence": seq * 10,
+                    "operation_name": r_entry.get("name", ""),
+                    "process_cost_per_unit": float(r_entry.get("cost", 0) or 0),
+                    "work_center_id": "",
+                    "work_center_name": "",
+                    "is_job_work": False,
+                    "job_work_supplier_id": "",
+                    "status": "pending",
+                    "quantity_completed": 0
+                })
+            if new_ops:
+                await db.work_orders.update_one({"id": wo["id"]}, {"$set": {"operations_status": new_ops}})
+                fixed += 1
+        if fixed:
+            logger.info(f"Backfilled operations_status on {fixed} child MOs from their own BOM.parent_routings")
+    except Exception as e:
+        logger.exception(f"migrate_backfill_child_mo_operations_status failed: {e}")
+
+
 async def migrate_sync_component_routings_to_child_bom():
     """One-time migration: for every BOM component that has both (a) component-line routings
     AND (b) its own child BOM, copy those routings into the CHILD BOM's parent_routings (if
@@ -6404,6 +6457,7 @@ async def startup():
     await seed_sample_data()
     await migrate_operations_status()
     await migrate_sync_component_routings_to_child_bom()
+    await migrate_backfill_child_mo_operations_status()
     await migrate_sc_jw_charges_from_bom()
     
     # Write credentials file (dev environment only, non-fatal on Windows/other OS)
