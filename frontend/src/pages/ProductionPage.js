@@ -127,24 +127,19 @@ export default function ProductionPage() {
   };
 
   const handleCancel = async (order) => {
-    if (!window.confirm || window.confirm(`Cancel Sales Order ${order.order_number}?\n\nThis will cancel all linked Manufacturing Orders and reverse materials/finished goods.`)) {
+    // Simple inline confirmation via toast-style prompt — window.confirm fallback
+    const ok = typeof window !== 'undefined' && typeof window.confirm === 'function'
+      ? window.confirm(`Cancel Sales Order ${order.order_number}?\n\nThis will cancel linked MOs and reverse stock.`)
+      : true;
+    if (!ok) return;
     try {
       const { data } = await api.post(`/api/production/${order.id}/cancel`);
-      let msg = data.message;
-      if (data.cancelled_mos?.length > 0) {
-        msg += `\n\nCancelled MOs: ${data.cancelled_mos.join(', ')}`;
-      }
-      if (data.reversed_materials?.length > 0) {
-        msg += `\n\nMaterials restored to stock:\n${data.reversed_materials.map(m => `- ${m.item} (${m.name}): ${m.quantity} pcs → MO ${m.mo_number}`).join('\n')}`;
-      }
-      if (data.reversed_finished_goods?.length > 0) {
-        msg += `\n\nFinished goods reversed:\n${data.reversed_finished_goods.map(m => `- ${m.item} (${m.name}): ${m.quantity} pcs → MO ${m.mo_number}`).join('\n')}`;
-      }
+      let msg = data.message || `Sales Order ${order.order_number} cancelled`;
+      if (data.cancelled_mos?.length > 0) msg += ` | MOs: ${data.cancelled_mos.join(', ')}`;
       toast.success(msg);
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to cancel order');
-    }
     }
   };
 

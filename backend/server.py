@@ -2924,17 +2924,51 @@ async def get_transfer_history(request: Request, limit: int = 50):
 
 @grn_router.get("")
 async def get_grn_list(request: Request):
-    """Get all GRN records"""
+    """Get all GRN records with supplier + line items enriched (batch fetched)"""
     await get_current_user(request)
     grns = await db.grn.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    # Batch-fetch POs
+    po_ids = {g.get("po_id") for g in grns if g.get("po_id")}
+    pos_map = {}
+    if po_ids:
+        async for po in db.purchase_orders.find({"id": {"$in": list(po_ids)}}, {"_id": 0}):
+            pos_map[po["id"]] = po
+    # Batch-fetch JW orders for JW GRNs
+    jw_ids = {g.get("sc_order_id") or g.get("jw_order_id") for g in grns if (g.get("sc_order_id") or g.get("jw_order_id"))}
+    jws_map = {}
+    if jw_ids:
+        async for jw in db.subcontract_orders.find({"id": {"$in": list(jw_ids)}}, {"_id": 0}):
+            jws_map[jw["id"]] = jw
+    # Collect supplier ids
+    supplier_ids = {po.get("supplier_id") for po in pos_map.values() if po.get("supplier_id")}
+    for jw in jws_map.values():
+        if jw.get("supplier_id"):
+            supplier_ids.add(jw["supplier_id"])
+    suppliers_map = {}
+    if supplier_ids:
+        async for s in db.suppliers.find({"id": {"$in": list(supplier_ids)}}, {"_id": 0}):
+            suppliers_map[s["id"]] = s
+    # Collect item ids
+    item_ids = set()
+    for g in grns:
+        for line in g.get("lines", []):
+            if line.get("item_id"):
+                item_ids.add(line["item_id"])
+    items_map = {}
+    if item_ids:
+        async for it in db.items.find({"id": {"$in": list(item_ids)}}, {"_id": 0}):
+            items_map[it["id"]] = it
+    
     for grn in grns:
-        po = await db.purchase_orders.find_one({"id": grn.get("po_id")}, {"_id": 0})
+        po = pos_map.get(grn.get("po_id"))
         grn["po"] = po
-        supplier = await db.suppliers.find_one({"id": po.get("supplier_id")}, {"_id": 0}) if po else None
-        grn["supplier"] = supplier
+        jw = jws_map.get(grn.get("sc_order_id") or grn.get("jw_order_id"))
+        grn["jw_order"] = jw
+        supplier_id = (po and po.get("supplier_id")) or (jw and jw.get("supplier_id"))
+        grn["supplier"] = suppliers_map.get(supplier_id) if supplier_id else None
         for line in grn.get("lines", []):
-            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
-            line["item"] = item
+            line["item"] = items_map.get(line.get("item_id"))
     return grns
 
 @grn_router.get("/pending-pos")

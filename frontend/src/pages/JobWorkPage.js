@@ -730,9 +730,11 @@ export default function JobWorkPage() {
               </div>
               <div className="border rounded-sm overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs w-24">Qty</th><th className="text-right py-2 px-2 text-xs w-24">Rate</th><th className="w-8"></th></tr></thead>
+                  <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs w-24">Qty</th><th className="text-right py-2 px-2 text-xs w-24">Rate</th><th className="text-right py-2 px-2 text-xs w-28">Total</th><th className="w-8"></th></tr></thead>
                   <tbody>
-                    {orderForm.lines.map((l, idx) => (
+                    {orderForm.lines.map((l, idx) => {
+                      const lineTotal = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
+                      return (
                       <tr key={idx} className="border-t">
                         <td className="py-1 px-2">
                           <Select value={l.item_id} onValueChange={v => updateOrderLine(idx, 'item_id', v)}>
@@ -742,9 +744,18 @@ export default function JobWorkPage() {
                         </td>
                         <td className="py-1 px-2"><input type="number" min="1" value={l.quantity} onChange={e => updateOrderLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
                         <td className="py-1 px-2"><input type="number" min="0" value={l.rate} onChange={e => updateOrderLine(idx, 'rate', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                        <td className="py-1 px-2 text-right mono text-xs font-semibold" data-testid={`rm-line-total-${idx}`}>{currencySymbol}{lineTotal.toFixed(2)}</td>
                         <td className="py-1 px-1"><button onClick={() => removeOrderLine(idx)} className="text-[#9B1C1C] p-1"><X className="w-3 h-3" /></button></td>
                       </tr>
-                    ))}
+                      );
+                    })}
+                    {orderForm.lines.length > 0 && (
+                      <tr className="bg-[#F9FAFB] border-t font-semibold">
+                        <td colSpan="3" className="py-2 px-2 text-right text-xs">Grand Total RM:</td>
+                        <td className="py-2 px-2 text-right mono text-xs" data-testid="rm-grand-total">{currencySymbol}{orderForm.lines.reduce((s, l) => s + ((parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0)), 0).toFixed(2)}</td>
+                        <td></td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
