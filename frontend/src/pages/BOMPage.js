@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Download,
   Upload,
+  RefreshCw,
   Search,
   Printer
 } from 'lucide-react';
@@ -134,7 +135,12 @@ export default function BOMPage() {
       setIsDialogOpen(false);
       setEditingBom(null);
       resetForm();
-      fetchBoms();
+      await fetchBoms();
+      // If a BOM tree is currently being viewed, refresh its explosion so cost changes
+      // (nested BOM edits, routing updates, etc.) propagate to the displayed Material/Process/Total columns.
+      if (viewBom?.id) {
+        await fetchBomExplosion(viewBom.id);
+      }
     } catch (error) {
       console.error('Failed to save BOM:', error?.response?.data || error);
       alert(error.response?.data?.detail || JSON.stringify(error.response?.data) || 'Failed to save BOM');
@@ -822,6 +828,7 @@ export default function BOMPage() {
                           <span className="text-[11px] bg-[#FDF6B2] text-[#723B13] px-2 py-0.5 rounded mono font-medium" title="FG Parent Process Cost per unit">FG Process: {formatCurrency(explosion.fg_process_cost_per_unit)}</span>
                         )}
                         <span className="mono text-sm font-bold">Total: {formatCurrency(totalCost)}</span>
+                        {activeBom && <button onClick={() => { fetchBomExplosion(activeBom.id); }} className="p-1 hover:bg-white/20 rounded" title="Refresh Costs (re-pull from BOM)" data-testid={`refresh-bom-${pid}`}><RefreshCw className="w-4 h-4" /></button>}
                         {explosion && <button onClick={() => printBomExplosion(parentItem, explosion.explosion, totalCost, activeBom, explosion.fg_process_cost_per_unit || 0, explosion.components_cost || 0)} className="p-1 hover:bg-white/20 rounded" title="Print BOM" data-testid={`print-bom-${pid}`}><Printer className="w-4 h-4" /></button>}
                         {activeBom && <button onClick={() => handleBomExport(activeBom.id)} className="p-1 hover:bg-white/20 rounded" title="Export this BOM" data-testid={`export-bom-${pid}`}><Download className="w-4 h-4" /></button>}
                         <button onClick={() => handleView(activeBom)} className="p-1 hover:bg-white/20 rounded" title="View"><Eye className="w-4 h-4" /></button>
