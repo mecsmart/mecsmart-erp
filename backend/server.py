@@ -206,12 +206,21 @@ def routings_total_cost(routings: Optional[List[Any]]) -> float:
     return sum(r.get("cost", 0) for r in normalize_routings(routings))
 
 
-async def compute_bom_costs(item_id: str) -> Dict[str, Any]:
-    """Return {rm_cost, process_cost, process_names} for this item.
-    Strategy 1: Item is a BOM parent — rm_cost = sum(components.qty*unit_cost); process_cost = parent_routings + component_routings.
-    Strategy 2: Item appears as a component in another BOM — use that component's routings.
-    Strategy 3 (fallback): If Strategy 1 found a BOM but with NO process cost, ALSO check Strategy 2 and prefer its process_cost if non-zero.
-    Returns zeros/empty if item not found anywhere."""
+async def compute_bom_costs(item_id: str, _depth: int = 0, _visited: Optional[set] = None) -> Dict[str, Any]:
+    """Return {rm_cost, process_cost, process_names, fg_process_cost} for this item.
+    Recursive: for each BOM component, if that component itself has a BOM, use its RECURSIVE
+    Total/Unit (rm + process) as the child rate. Otherwise use item.unit_cost.
+    This matches how the BOM viewer calculates Material & Total/Unit up the tree.
+    
+    Strategy 1: Item IS a BOM parent.
+    Strategy 2: Item is a COMPONENT in another parent's BOM — use that component line's routings.
+    """
+    if _visited is None:
+        _visited = set()
+    if item_id in _visited or _depth > 25:  # cycle / depth guard
+        return {"rm_cost": 0.0, "process_cost": 0.0, "process_names": [], "fg_process_cost": 0.0}
+    _visited.add(item_id)
+    
     strategy1 = None
     # Strategy 1: this item IS a BOM parent
     bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
@@ -226,16 +235,34 @@ async def compute_bom_costs(item_id: str) -> Dict[str, Any]:
                 names.append(r["name"])
         for comp in bom.get("components", []):
             c_item = await db.items.find_one({"id": comp.get("item_id")}, {"_id": 0})
-            if c_item:
-                rm += comp.get("quantity", 0) * c_item.get("unit_cost", 0)
+            if not c_item:
+                continue
+            comp_qty = comp.get("quantity", 0)
+            # If the child has its own BOM → use recursive Total/Unit (material + process)
+            # This captures nested assemblies (e.g., SG-1 contains PT-1 which has its own BOM).
+            child_bom_exists = await db.boms.find_one(
+                {"parent_item_id": comp["item_id"]},
+                {"_id": 0, "id": 1}
+            )
+            if child_bom_exists and comp["item_id"] not in _visited:
+                child_costs = await compute_bom_costs(comp["item_id"], _depth + 1, _visited)
+                child_total_unit = (child_costs.get("rm_cost", 0) or 0) + (child_costs.get("process_cost", 0) or 0)
+                rm += comp_qty * child_total_unit
+            else:
+                # Leaf item (raw material or no BOM) → use items master unit_cost
+                rm += comp_qty * (c_item.get("unit_cost", 0) or 0)
             comp_proc += routings_total_cost(comp.get("routings", []))
             for r in normalize_routings(comp.get("routings", [])):
                 if r.get("name") and r["name"] not in names:
                     names.append(r["name"])
         parent_proc = routings_total_cost(bom.get("parent_routings", []))
-        strategy1 = {"rm_cost": round(rm, 2), "process_cost": round(parent_proc + comp_proc, 2), "process_names": names, "fg_process_cost": round(parent_proc, 2)}
-        # If process_cost is non-zero, return immediately
-        if strategy1["process_cost"] > 0:
+        strategy1 = {
+            "rm_cost": round(rm, 2),
+            "process_cost": round(parent_proc + comp_proc, 2),
+            "process_names": names,
+            "fg_process_cost": round(parent_proc, 2)
+        }
+        if strategy1["process_cost"] > 0 or strategy1["rm_cost"] > 0:
             return strategy1
     
     # Strategy 2: this item is a COMPONENT in some parent BOM — use that component's routings
@@ -247,15 +274,12 @@ async def compute_bom_costs(item_id: str) -> Dict[str, Any]:
             if comp.get("item_id") == item_id:
                 proc = routings_total_cost(comp.get("routings", []))
                 names = [r["name"] for r in normalize_routings(comp.get("routings", [])) if r.get("name")]
-                # Prefer strategy1's rm_cost (since it comes from the item's own BOM)
                 if strategy1:
                     return {"rm_cost": strategy1["rm_cost"], "process_cost": round(proc, 2), "process_names": names, "fg_process_cost": strategy1.get("fg_process_cost", 0)}
-                # Otherwise use item's unit_cost as RM
                 item_rec = await db.items.find_one({"id": item_id}, {"_id": 0})
                 rm = item_rec.get("unit_cost", 0) if item_rec else 0
                 return {"rm_cost": round(rm, 2), "process_cost": round(proc, 2), "process_names": names, "fg_process_cost": 0.0}
     
-    # No component-in-parent match — return strategy1 result (even if process_cost=0) or empty
     if strategy1:
         return strategy1
     return {"rm_cost": 0.0, "process_cost": 0.0, "process_names": [], "fg_process_cost": 0.0}
