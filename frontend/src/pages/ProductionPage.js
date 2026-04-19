@@ -127,11 +127,7 @@ export default function ProductionPage() {
   };
 
   const handleCancel = async (order) => {
-    // Simple inline confirmation via toast-style prompt — window.confirm fallback
-    const ok = typeof window !== 'undefined' && typeof window.confirm === 'function'
-      ? window.confirm(`Cancel Sales Order ${order.order_number}?\n\nThis will cancel linked MOs and reverse stock.`)
-      : true;
-    if (!ok) return;
+    // Direct action — avoid window.confirm which fails silently in iframes/preview
     try {
       const { data } = await api.post(`/api/production/${order.id}/cancel`);
       let msg = data.message || `Sales Order ${order.order_number} cancelled`;

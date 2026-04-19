@@ -4852,9 +4852,32 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
     if op_data.notes:
         target_op["notes"] = op_data.notes
     
-    # Save process cost per unit if provided (for both start and complete)
+    # Save process cost per unit if provided (explicit override)
     if op_data.process_cost_per_unit is not None and op_data.process_cost_per_unit > 0:
         target_op["process_cost_per_unit"] = op_data.process_cost_per_unit
+    elif op_data.status in ("stopped", "completed") and not target_op.get("is_job_work"):
+        # Auto-compute from Work Center hourly_rate × total run duration ÷ total qty
+        try:
+            wc_id = target_op.get("work_center_id")
+            wc_doc = await db.work_centers.find_one({"id": wc_id}, {"_id": 0}) if wc_id else None
+            hourly_rate = float((wc_doc or {}).get("hourly_rate", 0) or 0)
+            total_minutes = 0.0
+            for _r in (target_op.get("runs") or []):
+                _s = _r.get("started_at")
+                _e = _r.get("ended_at")
+                if _s and _e:
+                    _ds = _s if isinstance(_s, datetime) else datetime.fromisoformat(str(_s).replace('Z', '+00:00'))
+                    _de = _e if isinstance(_e, datetime) else datetime.fromisoformat(str(_e).replace('Z', '+00:00'))
+                    if _ds.tzinfo is None: _ds = _ds.replace(tzinfo=timezone.utc)
+                    if _de.tzinfo is None: _de = _de.replace(tzinfo=timezone.utc)
+                    total_minutes += max(0.0, (_de - _ds).total_seconds() / 60)
+            total_qty = sum((_r.get("quantity_completed") or 0) for _r in (target_op.get("runs") or []))
+            total_labor_cost = (total_minutes / 60.0) * hourly_rate
+            if total_qty > 0 and hourly_rate > 0:
+                target_op["process_cost_per_unit"] = round(total_labor_cost / total_qty, 2)
+                target_op["total_labor_cost"] = round(total_labor_cost, 2)
+        except Exception:
+            pass
     
     # Auto-determine WO status
     all_completed = all(op.get("status") == "completed" for op in operations)

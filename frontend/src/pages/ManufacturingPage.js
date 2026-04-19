@@ -97,10 +97,21 @@ export default function ManufacturingPage() {
   const [suppliers, setSuppliers] = useState([]);
   const [editingRouting, setEditingRouting] = useState(null);
   const [moTree, setMoTree] = useState(null);
+  // Live clock tick for Duration column while a run is active
+  const [, setClockTick] = useState(0);
 
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Refresh duration display every 30s when Job Card is open and an op is running
+  useEffect(() => {
+    if (!isJobCardOpen) return;
+    const hasRunning = (jobCardWO?.operations_status || []).some(o => o.status === 'in_progress' && !o.is_job_work);
+    if (!hasRunning) return;
+    const timer = setInterval(() => setClockTick(t => t + 1), 30000);
+    return () => clearInterval(timer);
+  }, [isJobCardOpen, jobCardWO]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -1341,8 +1352,8 @@ export default function ManufacturingPage() {
                       <th className="text-left py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Operator</th>
                       <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Qty Done</th>
                       <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Accept/Reject</th>
-                      <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Cost/Unit</th>
                       <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Duration</th>
+                      <th className="text-right py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Cost/Unit</th>
                       <th className="text-center py-2 px-3 text-xs font-semibold uppercase text-[#4B5563]">Action</th>
                     </tr>
                   </thead>
@@ -1408,48 +1419,66 @@ export default function ManufacturingPage() {
                               </div>
                             )}
                           </td>
-                          <td className="py-3 px-3 text-right mono text-xs font-medium">
-                            {op.process_cost_per_unit ? `₹${op.process_cost_per_unit.toFixed(2)}` : '-'}
-                          </td>
-                          <td className="py-3 px-3 text-right mono text-xs" data-testid={`op-duration-${op.sequence}`}>
-                            {(() => {
-                              try {
-                                const runs = op.runs || [];
-                                let totalMinutes = 0;
-                                runs.forEach(r => {
-                                  const s = r?.actual_start || r?.start_time;
-                                  const e = r?.actual_end || r?.end_time;
-                                  if (s && e) {
-                                    const ds = new Date(s).getTime();
-                                    const de = new Date(e).getTime();
-                                    if (!isNaN(ds) && !isNaN(de)) totalMinutes += Math.max(0, (de - ds) / 60000);
-                                  }
-                                });
-                                if (!totalMinutes && op.actual_start && op.actual_end) {
-                                  const ds = new Date(op.actual_start).getTime();
-                                  const de = new Date(op.actual_end).getTime();
-                                  if (!isNaN(ds) && !isNaN(de)) totalMinutes = Math.max(0, (de - ds) / 60000);
-                                }
-                                if (!totalMinutes && op.status === 'in_progress') {
-                                  const s = op.actual_start || runs[runs.length-1]?.actual_start;
-                                  if (s) {
-                                    const ds = new Date(s).getTime();
-                                    if (!isNaN(ds)) {
-                                      totalMinutes = Math.max(0, (Date.now() - ds) / 60000);
-                                      return <span className="text-[#1E429F]">{totalMinutes.toFixed(0)} min (running)</span>;
-                                    }
-                                  }
-                                  return <span className="text-[#9CA3AF]">-</span>;
-                                }
-                                if (!totalMinutes || isNaN(totalMinutes)) return <span className="text-[#9CA3AF]">-</span>;
-                                const h = Math.floor(totalMinutes / 60);
-                                const m = Math.round(totalMinutes % 60);
-                                return <span className="text-[#111827]">{h > 0 ? `${h}h ${m}m` : `${m} min`}</span>;
-                              } catch (e) {
-                                return <span className="text-[#9CA3AF]">-</span>;
+                          {(() => {
+                            // Compute total duration (minutes) across runs and cost based on WC hourly_rate
+                            const runs = op.runs || [];
+                            let totalMinutes = 0;
+                            let running = false;
+                            runs.forEach(r => {
+                              const s = r?.started_at || r?.actual_start || r?.start_time;
+                              const e = r?.ended_at || r?.actual_end || r?.end_time;
+                              if (s && e) {
+                                const ds = new Date(s).getTime();
+                                const de = new Date(e).getTime();
+                                if (!isNaN(ds) && !isNaN(de)) totalMinutes += Math.max(0, (de - ds) / 60000);
+                              } else if (s && !e) {
+                                // Active run (started but not ended) → live clock
+                                const ds = new Date(s).getTime();
+                                if (!isNaN(ds)) { totalMinutes += Math.max(0, (Date.now() - ds) / 60000); running = true; }
                               }
-                            })()}
-                          </td>
+                            });
+                            if (!totalMinutes && op.actual_start && op.actual_end) {
+                              const ds = new Date(op.actual_start).getTime();
+                              const de = new Date(op.actual_end).getTime();
+                              if (!isNaN(ds) && !isNaN(de)) totalMinutes = Math.max(0, (de - ds) / 60000);
+                            }
+                            if (!totalMinutes && op.status === 'in_progress' && op.actual_start) {
+                              const ds = new Date(op.actual_start).getTime();
+                              if (!isNaN(ds)) { totalMinutes = Math.max(0, (Date.now() - ds) / 60000); running = true; }
+                            }
+                            const hourlyRate = wc?.hourly_rate || 0;
+                            const totalCost = (totalMinutes / 60) * hourlyRate;
+                            const costPerUnit = totalDone > 0 ? totalCost / totalDone : 0;
+                            let durationNode;
+                            if (!totalMinutes || isNaN(totalMinutes)) {
+                              durationNode = <span className="text-[#9CA3AF]">-</span>;
+                            } else if (running) {
+                              durationNode = <span className="text-[#1E429F]" title="Live — updates on refresh">{totalMinutes.toFixed(0)} min (running)</span>;
+                            } else {
+                              const h = Math.floor(totalMinutes / 60);
+                              const m = Math.round(totalMinutes % 60);
+                              durationNode = <span className="text-[#111827]">{h > 0 ? `${h}h ${m}m` : `${m} min`}</span>;
+                            }
+                            let costNode;
+                            if (!hourlyRate) {
+                              costNode = <span className="text-[#9CA3AF]" title="Set WC hourly rate to compute cost">-</span>;
+                            } else if (totalDone === 0 && !running) {
+                              costNode = <span className="text-[#9CA3AF]">-</span>;
+                            } else {
+                              const perUnitDisp = costPerUnit > 0 ? costPerUnit : totalCost; // show total when no qty yet
+                              costNode = (
+                                <span className="text-[#111827] font-medium" title={`Duration: ${totalMinutes.toFixed(1)} min × WC rate: ₹${hourlyRate}/hr × Qty: ${totalDone}\nTotal labour cost: ₹${totalCost.toFixed(2)}`}>
+                                  ₹{perUnitDisp.toFixed(2)}{totalDone === 0 && <span className="text-[10px] text-[#9CA3AF] ml-1">total</span>}
+                                </span>
+                              );
+                            }
+                            return (
+                              <>
+                                <td className="py-3 px-3 text-right mono text-xs" data-testid={`op-duration-${op.sequence}`}>{durationNode}</td>
+                                <td className="py-3 px-3 text-right mono text-xs font-medium" data-testid={`op-cost-${op.sequence}`}>{costNode}</td>
+                              </>
+                            );
+                          })()}
                           <td className="py-3 px-3 text-center">
                             <div className="flex items-center justify-center gap-1">
                               {/* Start button */}
@@ -1570,14 +1599,10 @@ export default function ManufacturingPage() {
                       {!opForm.operator.trim() && <p className="text-xs text-[#9B1C1C] mt-1">Operator name is required</p>}
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-[#111827] mb-1">Process Cost / Unit</label>
-                      <input type="number" min="0" step="0.01" value={opForm.process_cost_per_unit} onChange={e => setOpForm({...opForm, process_cost_per_unit: parseFloat(e.target.value) || 0})} className="input-field mono" placeholder="0.00" data-testid="process-cost-input" />
-                      <p className="text-[10px] text-[#6B7280] mt-0.5">Cost per unit for this operation (rolls up to BOM costing)</p>
-                    </div>
-                    <div>
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity to Produce (max: {jobCardWO?.quantity || 0})</label>
                       <input type="number" min="1" max={jobCardWO?.quantity || 1} value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: Math.min(parseInt(e.target.value) || 0, jobCardWO?.quantity || 1)})} className="input-field mono" data-testid="op-qty-input" />
                     </div>
+                    <p className="text-[11px] text-[#6B7280] italic">Cost/Unit is auto-calculated from the Work Center hourly rate × actual duration when the operation is stopped/completed.</p>
                   </>
                 )}
               </>
@@ -1587,10 +1612,6 @@ export default function ManufacturingPage() {
                 <div>
                   <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity Produced (max: {jobCardWO?.quantity || 0})</label>
                   <input type="number" min="0" max={jobCardWO?.quantity || 1} value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: Math.min(parseInt(e.target.value) || 0, jobCardWO?.quantity || 1)})} className="input-field mono" data-testid="op-produced-qty-input" />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-[#111827] mb-1">Process Cost / Unit</label>
-                  <input type="number" min="0" step="0.01" value={opForm.process_cost_per_unit} onChange={e => setOpForm({...opForm, process_cost_per_unit: parseFloat(e.target.value) || 0})} className="input-field mono" placeholder="0.00" data-testid="process-cost-complete-input" />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-[#111827] mb-1">Quality Result</label>
