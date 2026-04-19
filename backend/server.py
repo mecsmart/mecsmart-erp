@@ -4640,29 +4640,11 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
     if update_data.get("status") == "completed" and wo.get("status") == "in_progress":
         operations = wo.get("operations_status", [])
         mo_qty = wo.get("quantity", 0)
-        is_child_mo = bool(wo.get("parent_wo_id"))
         
-        # Child MOs (Sub-Group / child item MOs) are completed in a single step
-        # without per-operation Job Card tracking. Auto-close any pending/in_progress ops
-        # to keep downstream reports (cost, production tree) consistent.
-        if is_child_mo and operations:
-            now_utc = datetime.now(timezone.utc)
-            for op in operations:
-                if op.get("status") != "completed":
-                    op["status"] = "completed"
-                    op["quantity_completed"] = mo_qty
-                    op["quantity_accepted"] = op.get("quantity_accepted") or mo_qty
-                    if not op.get("actual_start"):
-                        op["actual_start"] = now_utc
-                    op["actual_end"] = now_utc
-                    op["completed_by_direct"] = True
-            update_data["operations_status"] = operations
-        
-        # Block completion if ANY operation is not completed (only enforced for parent MOs)
-        if not is_child_mo:
-            for op in operations:
-                if op.get("status") != "completed":
-                    raise HTTPException(status_code=400, detail=f"Cannot complete: Operation '{op.get('operation_name')}' (Seq {op.get('sequence')}) is not completed yet. Complete all operations via Job Card first.")
+        # Block completion if ANY operation is not completed (enforced for ALL MOs — parent and child)
+        for op in operations:
+            if op.get("status") != "completed":
+                raise HTTPException(status_code=400, detail=f"Cannot complete: Operation '{op.get('operation_name')}' (Seq {op.get('sequence')}) is not completed yet. Complete all operations via Job Card first.")
         
         # Block completion if subcontracted and materials not received
         if wo.get("is_subcontract"):
@@ -4675,8 +4657,8 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
             if op.get("is_job_work") and op.get("outsource_status") == "sent":
                 raise HTTPException(status_code=400, detail=f"Cannot complete: Outsourced operation '{op.get('operation_name')}' materials not received back. Receive from vendor first.")
         
-        # Block completion if last operation produced less than MO quantity (skipped for child MOs)
-        if operations and not is_child_mo:
+        # Block completion if last operation produced less than MO quantity
+        if operations:
             last_op = operations[-1]
             last_op_qty = last_op.get("quantity_completed", 0)
             if last_op_qty < mo_qty:
@@ -4939,6 +4921,54 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                     "created_by": user["id"]
                 }
                 await db.subcontract_orders.insert_one(sc_order_doc)
+            
+            # Auto-create (or update existing draft) Delivery Challan for this Job OS.
+            # Stock is NOT deducted here — the Part is being processed and will return via GRN.
+            # The user can edit the DC on the Job Work page before pressing Send.
+            existing_draft_dc = await db.delivery_challans.find_one({
+                "subcontract_order_id": sc_order_doc["id"],
+                "status": "draft"
+            })
+            new_dc_line = {
+                "item_id": wo.get("item_id"),
+                "quantity": mo_qty,
+                "rate": round(bom_rollup_cost, 2),  # RM cost per part
+            }
+            if existing_draft_dc:
+                # Append or merge into existing draft DC (consolidation case)
+                dc_lines = existing_draft_dc.get("lines", [])
+                merged = False
+                for dl in dc_lines:
+                    if dl.get("item_id") == wo.get("item_id"):
+                        dl["quantity"] = (dl.get("quantity") or 0) + mo_qty
+                        merged = True
+                        break
+                if not merged:
+                    dc_lines.append(new_dc_line)
+                await db.delivery_challans.update_one(
+                    {"id": existing_draft_dc["id"]},
+                    {"$set": {"lines": dc_lines, "updated_at": datetime.now(timezone.utc)}}
+                )
+                dc_number = existing_draft_dc.get("dc_number")
+            else:
+                dc_count = await db.delivery_challans.count_documents({})
+                dc_number = f"DC-{str(dc_count + 1).zfill(6)}"
+                dc_doc = {
+                    "id": str(uuid.uuid4()),
+                    "dc_number": dc_number,
+                    "subcontract_order_id": sc_order_doc["id"],
+                    "reference_wo_id": wo_id,
+                    "lines": [new_dc_line],
+                    "status": "draft",
+                    "notes": f"Auto-DC for Job OS — operation {target_op.get('operation_name')} on MO {wo.get('wo_number')}",
+                    "created_at": datetime.now(timezone.utc),
+                    "created_by": user["id"]
+                }
+                await db.delivery_challans.insert_one(dc_doc)
+            # Note: dc_created stays False here — it's set to True only when the DC is
+            # actually SENT from the Job Work page (stock deducted there). Keeping it False
+            # allows further outsource ops for the same supplier to consolidate into the
+            # same SC + DC until it's sent.
             
             target_op["is_job_work"] = True
             target_op["job_work_supplier_id"] = op_data.outsource_supplier_id
