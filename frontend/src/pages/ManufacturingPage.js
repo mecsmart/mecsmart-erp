@@ -898,45 +898,76 @@ export default function ManufacturingPage() {
                   <form onSubmit={handleWorkOrderSubmit} className="space-y-4 mt-4">
                     <div>
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Sales Order *</label>
-                      <input
-                        type="text"
-                        placeholder="Search by item code or name..."
-                        value={workOrderForm.so_search || ''}
-                        onChange={(e) => setWorkOrderForm({ ...workOrderForm, so_search: e.target.value })}
-                        className="input-field mb-2"
-                        data-testid="wo-so-search"
-                      />
-                      <Select value={workOrderForm.production_order_id} onValueChange={(v) => {
-                        const so = productionOrders.find(po => po.id === v);
-                        const soQty = so?.quantity || 1;
-                        const moQtyCreated = so?.mo_qty_created || 0;
-                        const balanceQty = Math.max(soQty - moQtyCreated, 1);
-                        setWorkOrderForm({ ...workOrderForm, production_order_id: v, quantity: balanceQty });
-                      }}>
-                        <SelectTrigger data-testid="wo-production-order-select">
-                          <SelectValue placeholder="Select sales order" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {productionOrders
-                            .filter(po => ['confirmed', 'planned'].includes(po.status))
-                            .filter(po => {
-                              const q = (workOrderForm.so_search || '').trim().toLowerCase();
-                              if (!q) return true;
-                              const code = (po.item?.part_number || '').toLowerCase();
-                              const name = (po.item?.name || '').toLowerCase();
-                              const order = (po.order_number || '').toLowerCase();
-                              return code.includes(q) || name.includes(q) || order.includes(q);
-                            })
-                            .map((po) => {
-                            const balance = po.quantity - (po.mo_qty_created || 0);
-                            return (
-                              <SelectItem key={po.id} value={po.id} disabled={balance <= 0}>
-                                <span className="mono text-xs">{po.order_number}</span> — <span className="mono">{po.item?.part_number || '-'}</span> {po.item?.name || 'Unknown'} (Qty: {po.quantity}{balance < po.quantity ? `, Balance: ${balance}` : ''})
-                              </SelectItem>
-                            );
-                          })}
-                        </SelectContent>
-                      </Select>
+                      {(() => {
+                        const filteredSOs = productionOrders
+                          .filter(po => ['confirmed', 'planned'].includes(po.status))
+                          .filter(po => {
+                            const q = (workOrderForm.so_search || '').trim().toLowerCase();
+                            if (!q) return true;
+                            const code = (po.item?.part_number || '').toLowerCase();
+                            const name = (po.item?.name || '').toLowerCase();
+                            const order = (po.order_number || '').toLowerCase();
+                            return code.includes(q) || name.includes(q) || order.includes(q);
+                          });
+                        const selected = productionOrders.find(po => po.id === workOrderForm.production_order_id);
+                        return (
+                          <>
+                            {selected && (
+                              <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-3 py-2 mb-2" data-testid="wo-so-selected">
+                                <div className="text-xs">
+                                  <span className="mono font-semibold">{selected.order_number}</span>
+                                  <span className="mx-2">—</span>
+                                  <span className="mono">{selected.item?.part_number || '-'}</span>
+                                  <span className="ml-1">{selected.item?.name}</span>
+                                </div>
+                                <button type="button" className="text-xs text-[#9B1C1C] hover:underline" onClick={() => setWorkOrderForm({ ...workOrderForm, production_order_id: '', so_search: '', quantity: 1 })} data-testid="wo-so-clear">Clear</button>
+                              </div>
+                            )}
+                            {!selected && (
+                              <>
+                                <input
+                                  type="text"
+                                  placeholder="Search by SO#, part number or item name..."
+                                  value={workOrderForm.so_search || ''}
+                                  onChange={(e) => setWorkOrderForm({ ...workOrderForm, so_search: e.target.value })}
+                                  className="input-field"
+                                  data-testid="wo-so-search"
+                                  autoFocus
+                                />
+                                <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-56 overflow-auto bg-white" data-testid="wo-so-list">
+                                  {filteredSOs.length === 0 && (
+                                    <div className="px-3 py-4 text-center text-xs text-[#6B7280]">No matching sales orders. Try a different search.</div>
+                                  )}
+                                  {filteredSOs.map(po => {
+                                    const balance = po.quantity - (po.mo_qty_created || 0);
+                                    const disabled = balance <= 0;
+                                    return (
+                                      <button
+                                        key={po.id}
+                                        type="button"
+                                        disabled={disabled}
+                                        onClick={() => {
+                                          const soQty = po.quantity || 1;
+                                          const balanceQty = Math.max(soQty - (po.mo_qty_created || 0), 1);
+                                          setWorkOrderForm({ ...workOrderForm, production_order_id: po.id, quantity: balanceQty, so_search: '' });
+                                        }}
+                                        data-testid={`wo-so-option-${po.id}`}
+                                        className={`w-full text-left px-3 py-2 text-xs border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB] ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                      >
+                                        <span className="mono font-semibold">{po.order_number}</span>
+                                        <span className="mx-2">—</span>
+                                        <span className="mono">{po.item?.part_number || '-'}</span>
+                                        <span className="ml-1">{po.item?.name || 'Unknown'}</span>
+                                        <span className="ml-2 text-[#6B7280]">Qty: {po.quantity}{balance < po.quantity ? ` · Balance: ${balance}` : ''}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
 
                     <div>

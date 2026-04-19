@@ -3053,12 +3053,25 @@ async def get_pending_grn_pos(request: Request):
     pos = await db.purchase_orders.find(
         {"status": {"$in": ["approved", "sent", "partial"]}}, {"_id": 0}
     ).sort("created_at", -1).to_list(1000)
+    
+    # Batch fetch suppliers + items (avoid N+1)
+    supplier_ids = {po.get("supplier_id") for po in pos if po.get("supplier_id")}
+    item_ids = set()
     for po in pos:
-        supplier = await db.suppliers.find_one({"id": po.get("supplier_id")}, {"_id": 0})
-        po["supplier"] = supplier
         for line in po.get("lines", []):
-            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
-            line["item"] = item
+            if line.get("item_id"): item_ids.add(line["item_id"])
+    suppliers_map = {}
+    if supplier_ids:
+        async for s in db.suppliers.find({"id": {"$in": list(supplier_ids)}}, {"_id": 0}):
+            suppliers_map[s["id"]] = s
+    items_map = {}
+    if item_ids:
+        async for it in db.items.find({"id": {"$in": list(item_ids)}}, {"_id": 0}):
+            items_map[it["id"]] = it
+    for po in pos:
+        po["supplier"] = suppliers_map.get(po.get("supplier_id"))
+        for line in po.get("lines", []):
+            line["item"] = items_map.get(line.get("item_id"))
     return pos
 
 @grn_router.post("", status_code=201)
@@ -4388,6 +4401,10 @@ async def start_work_order(wo_id: str, request: Request):
             # For SC MOs without routing, use item_id directly
             item_id = wo.get("item_id")
             bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}) if item_id else None
+        elif wo.get("parent_wo_id"):
+            # Child MO (SG/Part) — no routing; use its own BOM (if any) for material consumption
+            item_id = wo.get("item_id")
+            bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}) if item_id else None
         else:
             raise HTTPException(status_code=404, detail="Routing not found")
     else:
@@ -4660,8 +4677,8 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
                 raise HTTPException(status_code=400, detail=f"Cannot complete: Last operation produced {last_op_qty}/{mo_qty} units. Full quantity must be produced before completing the MO.")
         
         routing = await db.routings.find_one({"id": wo.get("routing_id")})
-        if routing:
-            item_id = routing.get("item_id")
+        item_id = routing.get("item_id") if routing else wo.get("item_id")
+        if item_id:
             item = await db.items.find_one({"id": item_id})
             if item:
                 current_stock = item.get("current_stock", 0)
@@ -6618,44 +6635,78 @@ async def get_subcontract_orders(request: Request, status: str = None):
     if status:
         query["status"] = status
     orders = await db.subcontract_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    # Batch collect all referenced IDs
+    supplier_ids = set()
+    wo_ids = set()
+    item_ids = set()
     for order in orders:
-        supplier = await db.suppliers.find_one({"id": order.get("supplier_id")}, {"_id": 0})
-        order["supplier"] = supplier
+        if order.get("supplier_id"): supplier_ids.add(order["supplier_id"])
+        if order.get("reference_wo_ids"):
+            wo_ids.update(order["reference_wo_ids"])
+        elif order.get("reference_wo_id"):
+            wo_ids.add(order["reference_wo_id"])
+        for line in order.get("lines", []):
+            if line.get("item_id"): item_ids.add(line["item_id"])
+        for part in order.get("job_work_parts", []):
+            if part.get("item_id"): item_ids.add(part["item_id"])
+    
+    # Batch fetch (3 queries instead of N×4 per order)
+    suppliers_map = {}
+    if supplier_ids:
+        async for s in db.suppliers.find({"id": {"$in": list(supplier_ids)}}, {"_id": 0}):
+            suppliers_map[s["id"]] = s
+    wos_map = {}
+    if wo_ids:
+        async for w in db.work_orders.find({"id": {"$in": list(wo_ids)}}, {"_id": 0, "id": 1, "wo_number": 1}):
+            wos_map[w["id"]] = w.get("wo_number")
+    items_map = {}
+    if item_ids:
+        async for it in db.items.find({"id": {"$in": list(item_ids)}}, {"_id": 0}):
+            items_map[it["id"]] = it
+    
+    # BOM cost cache — avoid recomputing for the same item across multiple SCs
+    bom_cost_cache = {}
+    bom_total_cache = {}
+    
+    for order in orders:
+        order["supplier"] = suppliers_map.get(order.get("supplier_id"))
         # Include linked MO numbers (single or bulk)
         mo_numbers = []
         if order.get("reference_wo_ids"):
-            for wid in order["reference_wo_ids"]:
-                ref_wo = await db.work_orders.find_one({"id": wid}, {"_id": 0, "wo_number": 1})
-                if ref_wo:
-                    mo_numbers.append(ref_wo["wo_number"])
-        elif order.get("reference_wo_id"):
-            ref_wo = await db.work_orders.find_one({"id": order["reference_wo_id"]}, {"_id": 0, "wo_number": 1})
-            if ref_wo:
-                mo_numbers.append(ref_wo["wo_number"])
+            mo_numbers = [wos_map[w] for w in order["reference_wo_ids"] if w in wos_map]
+        elif order.get("reference_wo_id") and order["reference_wo_id"] in wos_map:
+            mo_numbers = [wos_map[order["reference_wo_id"]]]
         order["mo_number"] = ", ".join(mo_numbers) if mo_numbers else None
         order["mo_numbers"] = mo_numbers
+        
+        is_live = order.get("status") in ("draft", "in_progress")
         for line in order.get("lines", []):
-            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
+            item = items_map.get(line.get("item_id"))
             line["item"] = item
             # Auto-refresh rate from BOM Total/Unit for Part/SA lines on draft/in_progress SCs
-            # so the DC send dialog always shows a non-zero, current rate.
-            if (order.get("status") in ("draft", "in_progress")
-                and item
-                and item.get("category") in ("component", "sub_assembly")):
-                try:
-                    _tu = await compute_bom_total_unit_cost(line["item_id"])
-                    if _tu > 0:
-                        line["rate"] = round(_tu, 2)
-                except Exception:
-                    pass
+            if is_live and item and item.get("category") in ("component", "sub_assembly"):
+                iid = line["item_id"]
+                if iid not in bom_total_cache:
+                    try:
+                        bom_total_cache[iid] = await compute_bom_total_unit_cost(iid)
+                    except Exception:
+                        bom_total_cache[iid] = 0
+                _tu = bom_total_cache[iid]
+                if _tu > 0:
+                    line["rate"] = round(_tu, 2)
         for part in order.get("job_work_parts", []):
-            part_item = await db.items.find_one({"id": part.get("item_id")}, {"_id": 0})
-            part["item"] = part_item
-            # Auto-refresh charges/bom_rollup from latest BOM for draft/in_progress SCs
-            # so the edit dialog always shows the current BOM's FG Process cost.
-            if order.get("status") in ("draft", "in_progress") and part.get("item_id"):
-                try:
-                    _bc = await compute_bom_costs(part["item_id"])
+            part["item"] = items_map.get(part.get("item_id"))
+            # Auto-refresh charges/bom_rollup from latest BOM for live SCs
+            if is_live and part.get("item_id"):
+                iid = part["item_id"]
+                if iid not in bom_cost_cache:
+                    try:
+                        bom_cost_cache[iid] = await compute_bom_costs(iid)
+                    except Exception:
+                        bom_cost_cache[iid] = None
+                _bc = bom_cost_cache[iid]
+                if _bc:
                     _fg = round(_bc.get("fg_process_cost", 0) or 0, 2)
                     _total_unit = round((_bc.get("rm_cost", 0) or 0) + (_bc.get("process_cost", 0) or 0), 2)
                     if _fg:
@@ -6665,8 +6716,6 @@ async def get_subcontract_orders(request: Request, status: str = None):
                     _names = _bc.get("process_names") or []
                     if _names:
                         part["process_names"] = _names
-                except Exception:
-                    pass
     return orders
 
 @jobwork_router.post("/orders", status_code=201)
@@ -6929,20 +6978,40 @@ async def create_po_from_sc(request: Request, data: dict = Body(...)):
 async def get_delivery_challans(request: Request):
     user = await get_current_user(request)
     challans = await db.delivery_challans.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    # Batch fetch related SCs, suppliers, items
+    sc_ids = {dc.get("subcontract_order_id") for dc in challans if dc.get("subcontract_order_id")}
+    scs_map = {}
+    if sc_ids:
+        async for sc in db.subcontract_orders.find({"id": {"$in": list(sc_ids)}}, {"_id": 0}):
+            scs_map[sc["id"]] = sc
+    supplier_ids = {sc.get("supplier_id") for sc in scs_map.values() if sc.get("supplier_id")}
+    suppliers_map = {}
+    if supplier_ids:
+        async for s in db.suppliers.find({"id": {"$in": list(supplier_ids)}}, {"_id": 0}):
+            suppliers_map[s["id"]] = s
+    item_ids = set()
     for dc in challans:
-        order = await db.subcontract_orders.find_one({"id": dc.get("subcontract_order_id")}, {"_id": 0})
+        for line in dc.get("lines", []):
+            if line.get("item_id"): item_ids.add(line["item_id"])
+    for sc in scs_map.values():
+        for part in sc.get("job_work_parts", []):
+            if part.get("item_id"): item_ids.add(part["item_id"])
+    items_map = {}
+    if item_ids:
+        async for it in db.items.find({"id": {"$in": list(item_ids)}}, {"_id": 0}):
+            items_map[it["id"]] = it
+    
+    for dc in challans:
+        order = scs_map.get(dc.get("subcontract_order_id"))
         dc["order"] = order
         dc["fg_item_name"] = order.get("fg_item_name", "") if order else ""
-        supplier = await db.suppliers.find_one({"id": order.get("supplier_id") if order else ""}, {"_id": 0})
-        dc["supplier"] = supplier
+        dc["supplier"] = suppliers_map.get(order.get("supplier_id")) if order else None
         for line in dc.get("lines", []):
-            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
-            line["item"] = item
-        # Enrich job_work_parts with item details for DC print
+            line["item"] = items_map.get(line.get("item_id"))
         if order:
             for part in order.get("job_work_parts", []):
-                part_item = await db.items.find_one({"id": part.get("item_id")}, {"_id": 0})
-                part["item"] = part_item
+                part["item"] = items_map.get(part.get("item_id"))
     return challans
 
 @jobwork_router.post("/challans", status_code=201)
@@ -7274,14 +7343,30 @@ async def receive_grn_from_jw(request: Request, data: dict = Body(...)):
 async def get_subcontract_receipts(request: Request):
     user = await get_current_user(request)
     receipts = await db.subcontract_receipts.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    sc_ids = {r.get("subcontract_order_id") for r in receipts if r.get("subcontract_order_id")}
+    scs_map = {}
+    if sc_ids:
+        async for sc in db.subcontract_orders.find({"id": {"$in": list(sc_ids)}}, {"_id": 0}):
+            scs_map[sc["id"]] = sc
+    supplier_ids = {sc.get("supplier_id") for sc in scs_map.values() if sc.get("supplier_id")}
+    suppliers_map = {}
+    if supplier_ids:
+        async for s in db.suppliers.find({"id": {"$in": list(supplier_ids)}}, {"_id": 0}):
+            suppliers_map[s["id"]] = s
+    item_ids = set()
+    for r in receipts:
+        for line in r.get("lines", []):
+            if line.get("item_id"): item_ids.add(line["item_id"])
+    items_map = {}
+    if item_ids:
+        async for it in db.items.find({"id": {"$in": list(item_ids)}}, {"_id": 0}):
+            items_map[it["id"]] = it
     for rec in receipts:
-        order = await db.subcontract_orders.find_one({"id": rec.get("subcontract_order_id")}, {"_id": 0})
+        order = scs_map.get(rec.get("subcontract_order_id"))
         rec["order"] = order
-        supplier = await db.suppliers.find_one({"id": order.get("supplier_id") if order else ""}, {"_id": 0})
-        rec["supplier"] = supplier
+        rec["supplier"] = suppliers_map.get(order.get("supplier_id")) if order else None
         for line in rec.get("lines", []):
-            item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
-            line["item"] = item
+            line["item"] = items_map.get(line.get("item_id"))
     return receipts
 
 @jobwork_router.post("/receipts", status_code=201)
