@@ -1356,7 +1356,7 @@ export default function ManufacturingPage() {
                       return (
                         <tr key={op.sequence} className={`border-t ${op.status === 'in_progress' ? 'bg-[#FDF6B2]/30' : op.status === 'completed' ? 'bg-[#DEF7EC]/30' : op.status === 'stopped' ? 'bg-[#FDE8E8]/10' : ''}`} data-testid={`op-row-${op.sequence}`}>
                           <td className="py-3 px-3 mono font-medium">{op.sequence}</td>
-                          <td className="py-3 px-3 font-medium">{op.operation_name}</td>
+                          <td className="py-3 px-3 font-medium">{typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : op.operation_name}</td>
                           <td className="py-3 px-3 text-sm text-[#4B5563]">
                             {op.work_center_id ? (wc?.name || op.work_center_name || '-') : (
                               op.status === 'pending' || op.status === 'stopped' ? (

@@ -44,25 +44,53 @@ export default function PurchaseInvoicePage() {
   const handleGRNSelect = (grnId) => {
     const grn = pendingGRNs.find(g => g.id === grnId);
     if (!grn) return;
+    const isJW = !!(grn.is_jw || grn.jw_order_id || grn.sc_order_id);
+    const supplierId = grn.supplier_id || grn.supplier?.id || grn.jw_order?.supplier_id || '';
+    let lines = [];
+    if (isJW) {
+      // JW GRN: invoice is for processing charges (service). Each GRN line has process_charges.
+      lines = (grn.lines || []).map(l => {
+        const it = items.find(i => i.id === l.item_id);
+        return {
+          item_id: l.item_id,
+          quantity: l.received_quantity || 0,
+          unit_price: l.process_charges || 0,
+          discount: 0,
+          hsn_code: l.hsn_code || it?.hsn_code || '',
+          // Services usually GST 18%, but respect item gst_rate as default
+          gst_rate: it?.gst_rate || 18,
+          is_process_charge: true,
+          description: `Processing charges for ${it?.part_number || ''} (JW: ${grn.jw_order_number || ''})`
+        };
+      });
+    } else {
+      // PO GRN: material purchase
+      lines = (grn.lines || []).map(l => {
+        const it = items.find(i => i.id === l.item_id);
+        return {
+          item_id: l.item_id,
+          quantity: l.received_quantity || 0,
+          unit_price: l.verified_price || l.po_price || 0,
+          discount: 0,
+          hsn_code: l.hsn_code || it?.hsn_code || '',
+          gst_rate: it?.gst_rate || 18,
+          is_process_charge: false,
+          description: ''
+        };
+      });
+    }
     setFormData({
       ...formData,
       grn_id: grnId,
-      supplier_id: grn.supplier_id || '',
+      supplier_id: supplierId,
       po_id: grn.po_id || '',
       invoice_no: grn.supplier_invoice_no || '',
       invoice_date: grn.supplier_invoice_date ? grn.supplier_invoice_date.split('T')[0] : '',
-      lines: grn.lines?.map(l => ({
-        item_id: l.item_id,
-        quantity: l.received_quantity || 0,
-        unit_price: l.verified_price || l.po_price || 0,
-        discount: 0,
-        hsn_code: l.hsn_code || '',
-        gst_rate: items.find(i => i.id === l.item_id)?.gst_rate || 18
-      })) || []
+      lines
     });
   };
 
-  const addLine = () => setFormData({ ...formData, lines: [...formData.lines, { item_id: '', quantity: 0, unit_price: 0, discount: 0, hsn_code: '', gst_rate: 18 }] });
+  const addLine = () => setFormData({ ...formData, lines: [...formData.lines, { item_id: '', quantity: 0, unit_price: 0, discount: 0, hsn_code: '', gst_rate: 18, is_process_charge: false, description: '' }] });
   const removeLine = (idx) => setFormData({ ...formData, lines: formData.lines.filter((_, i) => i !== idx) });
   const updateLine = (idx, field, val) => {
     const lines = [...formData.lines];
@@ -217,12 +245,16 @@ export default function PurchaseInvoicePage() {
               <Select value={formData.grn_id || undefined} onValueChange={handleGRNSelect}>
                 <SelectTrigger data-testid="inv-grn-select"><SelectValue placeholder="Select a received GRN" /></SelectTrigger>
                 <SelectContent>
-                  {pendingGRNs.map(grn => (
-                    <SelectItem key={grn.id} value={grn.id}>
-                      {grn.grn_number} — PO: {grn.po?.po_number || grn.po_number || '-'} — {grn.supplier?.name || 'Unknown'}
-                      {grn.lines?.length > 0 && ` (${grn.lines.length} items)`}
-                    </SelectItem>
-                  ))}
+                  {pendingGRNs.map(grn => {
+                    const isJW = !!(grn.is_jw || grn.jw_order_id || grn.sc_order_id);
+                    const ref = isJW ? (grn.jw_order_number || grn.jw_order?.order_number || '-') : (grn.po?.po_number || grn.po_number || '-');
+                    return (
+                      <SelectItem key={grn.id} value={grn.id}>
+                        {grn.grn_number} — {isJW ? 'JW' : 'PO'}: {ref} — {grn.supplier?.name || 'Unknown'}
+                        {grn.lines?.length > 0 && ` (${grn.lines.length} ${isJW ? 'services' : 'items'})`}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
               {pendingGRNs.length === 0 && <p className="text-xs text-[#9B1C1C] mt-1">No GRNs pending invoice. Create a GRN from Stores first.</p>}
@@ -230,6 +262,21 @@ export default function PurchaseInvoicePage() {
 
             {formData.grn_id && (
               <>
+                {/* GRN Type Banner */}
+                {(() => {
+                  const g = pendingGRNs.find(x => x.id === formData.grn_id);
+                  const isJW = !!(g?.is_jw || g?.jw_order_id || g?.sc_order_id);
+                  return isJW ? (
+                    <div className="bg-[#FDF6B2]/50 border border-[#FDF6B2] rounded-sm px-3 py-2 text-xs text-[#723B13]" data-testid="jw-invoice-banner">
+                      <span className="font-semibold">Job Work Invoice</span> — Supplier is billing processing charges for work done on materials you sent. JW Ref: <span className="mono">{g?.jw_order_number || g?.jw_order?.order_number || '-'}</span>
+                    </div>
+                  ) : (
+                    <div className="bg-[#E1EFFE]/60 border border-[#E1EFFE] rounded-sm px-3 py-2 text-xs text-[#1E429F]" data-testid="po-invoice-banner">
+                      <span className="font-semibold">Material Purchase Invoice</span> — Supplier is billing for materials received against PO.
+                    </div>
+                  );
+                })()}
+
                 {/* Auto-filled info */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -239,9 +286,18 @@ export default function PurchaseInvoicePage() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">PO Reference</label>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">
+                      {(() => {
+                        const g = pendingGRNs.find(x => x.id === formData.grn_id);
+                        return (g?.is_jw || g?.jw_order_id || g?.sc_order_id) ? 'JW Order' : 'PO Reference';
+                      })()}
+                    </label>
                     <div className="input-field bg-[#F9FAFB] mono text-[#374151]">
-                      {pendingGRNs.find(g => g.id === formData.grn_id)?.po?.po_number || pendingGRNs.find(g => g.id === formData.grn_id)?.po_number || '-'}
+                      {(() => {
+                        const g = pendingGRNs.find(x => x.id === formData.grn_id);
+                        if (g?.is_jw || g?.jw_order_id || g?.sc_order_id) return g?.jw_order_number || g?.jw_order?.order_number || '-';
+                        return g?.po?.po_number || g?.po_number || '-';
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -264,7 +320,10 @@ export default function PurchaseInvoicePage() {
                 {/* Line items (auto-populated from GRN) */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm font-semibold text-[#111827]">Line Items (from GRN)</label>
+                    <label className="text-sm font-semibold text-[#111827]">{(() => {
+                      const g = pendingGRNs.find(x => x.id === formData.grn_id);
+                      return (g?.is_jw || g?.jw_order_id || g?.sc_order_id) ? 'Processing Charges (from JW GRN)' : 'Line Items (from GRN)';
+                    })()}</label>
                     <button onClick={addLine} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1"><Plus className="w-3 h-3" />Add Line</button>
                   </div>
                   <div className="border rounded-sm overflow-hidden">
@@ -286,6 +345,8 @@ export default function PurchaseInvoicePage() {
                             <tr key={idx} className="border-t">
                               <td className="py-1 px-2">
                                 <div className="text-xs"><span className="mono font-medium">{it?.part_number || '-'}</span> {it?.name || ''}</div>
+                                {line.is_process_charge && <div className="text-[10px] text-[#723B13] bg-[#FDF6B2] inline-block px-1 rounded mt-0.5" data-testid={`inv-line-process-${idx}`}>Processing Charge</div>}
+                                {line.description && <div className="text-[10px] text-[#6B7280] italic truncate max-w-[240px]" title={line.description}>{line.description}</div>}
                               </td>
                               <td className="py-1 px-2"><input type="number" min="0" value={line.quantity} onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
                               <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={line.unit_price} onChange={e => updateLine(idx, 'unit_price', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>

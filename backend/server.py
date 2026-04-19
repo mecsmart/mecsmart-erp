@@ -450,6 +450,8 @@ class PurchaseInvoiceLineItem(BaseModel):
     discount: Optional[float] = 0
     hsn_code: Optional[str] = ""
     gst_rate: Optional[float] = 18.0
+    is_process_charge: Optional[bool] = False
+    description: Optional[str] = ""
 
 class PurchaseInvoiceCreate(BaseModel):
     supplier_id: str
@@ -3461,10 +3463,11 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
                         item_routings_list = comp.get("routings", [])
                         break
         
-        for seq, op_name in enumerate(item_routings_list, 1):
+        for seq, r_entry in enumerate(normalize_routings(item_routings_list), 1):
             operations_status.append({
                 "sequence": seq * 10,
-                "operation_name": op_name,
+                "operation_name": r_entry.get("name", ""),
+                "process_cost_per_unit": float(r_entry.get("cost", 0) or 0),
                 "work_center_id": "",  # Work centre decided at Job Card runtime
                 "work_center_name": "",
                 "is_job_work": False,
@@ -5948,6 +5951,32 @@ async def seed_sample_data():
     await db.routings.insert_many(routings)
     logger.info("Sample routings seeded")
 
+
+async def migrate_operations_status():
+    """One-time migration: fix work orders with operation_name stored as dict {name, cost}."""
+    try:
+        cursor = db.work_orders.find({"operations_status": {"$exists": True, "$ne": []}}, {"_id": 0, "id": 1, "operations_status": 1})
+        fixed = 0
+        async for wo in cursor:
+            ops = wo.get("operations_status") or []
+            changed = False
+            new_ops = []
+            for op in ops:
+                on = op.get("operation_name")
+                if isinstance(on, dict):
+                    op["operation_name"] = on.get("name", "")
+                    if "process_cost_per_unit" not in op:
+                        op["process_cost_per_unit"] = float(on.get("cost", 0) or 0)
+                    changed = True
+                new_ops.append(op)
+            if changed:
+                await db.work_orders.update_one({"id": wo["id"]}, {"$set": {"operations_status": new_ops}})
+                fixed += 1
+        if fixed:
+            logger.info(f"Migrated operation_name on {fixed} work orders")
+    except Exception as e:
+        logger.exception(f"migrate_operations_status failed: {e}")
+
 # ================== APP SETUP ==================
 
 @app.on_event("startup")
@@ -5972,6 +6001,7 @@ async def startup():
     # Seed data
     await seed_admin()
     await seed_sample_data()
+    await migrate_operations_status()
     
     # Write credentials file (dev environment only, non-fatal on Windows/other OS)
     try:
@@ -6020,7 +6050,7 @@ async def get_purchase_invoices(request: Request, status: str = None):
 
 @purchase_invoices_router.get("/pending-grns")
 async def get_grns_pending_invoice(request: Request):
-    """Get GRNs that don't have a purchase invoice yet"""
+    """Get GRNs (PO-based and JW-based) that don't have a purchase invoice yet"""
     user = await get_current_user(request)
     # Get all GRN IDs that already have invoices
     invoiced_grn_ids = set()
@@ -6034,10 +6064,33 @@ async def get_grns_pending_invoice(request: Request):
     for grn in grns:
         if grn.get("id") in invoiced_grn_ids:
             continue
-        supplier = await db.suppliers.find_one({"id": grn.get("supplier_id")}, {"_id": 0})
-        grn["supplier"] = supplier
-        po = await db.purchase_orders.find_one({"id": grn.get("po_id")}, {"_id": 0})
-        grn["po"] = po
+        
+        # Determine GRN type
+        is_jw = bool(grn.get("jw_order_id") or grn.get("sc_order_id"))
+        grn["is_jw"] = is_jw
+        
+        # Fetch supplier from JW order or PO
+        supplier_id = grn.get("supplier_id")
+        if is_jw and not supplier_id:
+            jw_id = grn.get("jw_order_id") or grn.get("sc_order_id")
+            jw_order = await db.subcontract_orders.find_one({"id": jw_id}, {"_id": 0})
+            if jw_order:
+                supplier_id = jw_order.get("supplier_id")
+                grn["jw_order"] = jw_order
+        elif is_jw:
+            jw_id = grn.get("jw_order_id") or grn.get("sc_order_id")
+            grn["jw_order"] = await db.subcontract_orders.find_one({"id": jw_id}, {"_id": 0})
+        
+        if not supplier_id:
+            po = await db.purchase_orders.find_one({"id": grn.get("po_id")}, {"_id": 0})
+            grn["po"] = po
+            supplier_id = po.get("supplier_id") if po else None
+        else:
+            if grn.get("po_id"):
+                grn["po"] = await db.purchase_orders.find_one({"id": grn.get("po_id")}, {"_id": 0})
+        
+        grn["supplier"] = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0}) if supplier_id else None
+        
         for line in grn.get("lines", []):
             item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
             line["item"] = item
@@ -6092,7 +6145,9 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request)
             "hsn_code": line.hsn_code or item.get("hsn_code", ""),
             "gst_rate": gst_rate,
             "line_total": line_after_discount,
-            "gst_amount": gst_amount
+            "gst_amount": gst_amount,
+            "is_process_charge": bool(getattr(line, "is_process_charge", False)),
+            "description": line.description or ""
         })
     
     total_tax = total_cgst + total_sgst + total_igst
