@@ -348,6 +348,7 @@ export default function JobWorkPage() {
     //  • Fallback for pure material transfer DCs → "Delivery Challan"
     const scType = dc.order?.subcontract_type;
     const hasJobParts = (dc.order?.job_work_parts || []).length > 0;
+    const isJobOS = scType === 'without_material' && hasJobParts;
     let dcTitle = 'Delivery Challan';
     if (scType === 'with_material') {
       dcTitle = 'Job Order Cum Delivery Challan';
@@ -491,17 +492,28 @@ export default function JobWorkPage() {
     </div>
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
     </body></html>`;
-    const w = window.open('', '_blank');
-    if (!w) {
-      alert('Pop-up blocked. Please allow pop-ups for this site to print the DC.');
-      return;
+    // Use a Blob URL so the browser treats the new window as a same-origin document with
+    // a real URL. This avoids Chrome's behavior where a direct document.write() page
+    // sometimes fails to trigger window.print() reliably.
+    try {
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const w = window.open(url, '_blank');
+      if (!w) {
+        alert('Pop-up blocked. Please allow pop-ups for this site to print the DC.');
+        URL.revokeObjectURL(url);
+        return;
+      }
+      // Once the printable page loads, trigger print. revokeObjectURL after a delay so
+      // the browser's print preview has time to fetch the blob.
+      w.addEventListener('load', () => {
+        try { w.focus(); w.print(); } catch (e) { console.error('Print failed', e); }
+      });
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      console.error('Print DC failed:', err);
+      alert('Unable to open print window: ' + err.message);
     }
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-    // Print immediately after document is written. Using onload sometimes doesn't fire
-    // when document.write completes synchronously (especially in Chrome).
-    setTimeout(() => { try { w.focus(); w.print(); } catch (e) { console.error('Print failed', e); } }, 300);
   };
 
   const getStatusColor = (s) => {
@@ -997,7 +1009,7 @@ export default function JobWorkPage() {
             </div>
             <div className="flex justify-end space-x-3 pt-3 border-t">
               <button onClick={() => setDcPrintDialog(false)} className="btn-secondary">Cancel</button>
-              <button onClick={() => { setDcPrintDialog(false); if (dcPrintTarget) printDC(dcPrintTarget, dcTerms); }} className="btn-primary flex items-center space-x-2" data-testid="dc-print-confirm">
+              <button onClick={() => { if (dcPrintTarget) printDC(dcPrintTarget, dcTerms); setDcPrintDialog(false); }} className="btn-primary flex items-center space-x-2" data-testid="dc-print-confirm">
                 <Printer className="w-4 h-4" /><span>Print DC</span>
               </button>
             </div>

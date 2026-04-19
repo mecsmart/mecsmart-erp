@@ -6807,9 +6807,23 @@ async def get_subcontract_orders(request: Request, status: str = None):
         if order.get("subcontract_type") == "without_material" and (order.get("reference_operation_seqs") or order.get("reference_operation_seq")):
             seen_rm_idx = {}
             rm_agg = []
+            # Pre-fetch RM items (components of each Part's BOM) in a single batch
+            part_item_ids = [jp.get("item_id") for jp in order.get("job_work_parts", []) if jp.get("item_id")]
+            part_boms = {}
+            if part_item_ids:
+                async for pb in db.boms.find({"parent_item_id": {"$in": part_item_ids}, "status": "active"}, {"_id": 0}):
+                    part_boms[pb.get("parent_item_id")] = pb
+            rm_ids_all = set()
+            for pb in part_boms.values():
+                for comp in pb.get("components", []):
+                    if comp.get("item_id"): rm_ids_all.add(comp["item_id"])
+            rm_items_cache = {}
+            if rm_ids_all:
+                async for ri in db.items.find({"id": {"$in": list(rm_ids_all)}}, {"_id": 0}):
+                    rm_items_cache[ri["id"]] = ri
             for jp in order.get("job_work_parts", []):
                 part_qty = float(jp.get("quantity", 0) or 0)
-                part_bom = await db.boms.find_one({"parent_item_id": jp.get("item_id"), "status": "active"}, {"_id": 0})
+                part_bom = part_boms.get(jp.get("item_id"))
                 if not part_bom:
                     continue
                 for comp in part_bom.get("components", []):
@@ -6817,7 +6831,7 @@ async def get_subcontract_orders(request: Request, status: str = None):
                     if not rm_id:
                         continue
                     rm_qty = float(comp.get("quantity", 0) or 0) * part_qty
-                    rm_item = items_map.get(rm_id) or (await db.items.find_one({"id": rm_id}, {"_id": 0}))
+                    rm_item = rm_items_cache.get(rm_id) or items_map.get(rm_id)
                     rm_rate = float((rm_item or {}).get("unit_cost", 0) or 0)
                     if rm_id in seen_rm_idx:
                         rm_agg[seen_rm_idx[rm_id]]["quantity"] += rm_qty
