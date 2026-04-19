@@ -510,32 +510,51 @@ export function GRNPrintDialog({ grn, open, onClose }) {
         ${company.gstin ? `<div class="sub">GSTIN: ${company.gstin}</div>` : ''}</div>`;
     }
 
+    const isJW = !!d.is_jw;
+    const jwOrder = d.jw_order || {};
+    const dc = d.dc || {};
+
     let tableHTML = '';
     if (opts.template === 'detailed' || opts.showMismatch) {
-      tableHTML = `<table><thead><tr><th>SN</th><th>Item Code</th><th>Description</th><th>HSN</th><th class="text-right">PO Qty</th><th class="text-right">Recd Qty</th><th>UOM</th><th class="text-right">PO Price</th><th class="text-right">Verified</th><th class="text-center">Status</th></tr></thead><tbody>`;
+      // For JW GRNs, "PO" columns become "Sent" columns (from DC/JW). For PO GRNs, stays as PO.
+      const qtyColLabel = isJW ? 'Sent Qty' : 'PO Qty';
+      const priceColLabel = isJW ? 'Rate/Unit' : 'PO Price';
+      tableHTML = `<table><thead><tr><th>SN</th><th>Item Code</th><th>Description</th><th>HSN</th><th class="text-right">${qtyColLabel}</th><th class="text-right">Recd Qty</th><th>UOM</th><th class="text-right">${priceColLabel}</th><th class="text-right">Verified</th><th class="text-center">Status</th></tr></thead><tbody>`;
       lines.forEach((l, i) => {
-        const qM = l.received_quantity === l.po_quantity;
-        const pM = l.verified_price === l.po_price;
-        tableHTML += `<tr><td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${l.item?.name||''}</td><td class="mono">${l.hsn_code||''}</td><td class="text-right mono">${l.po_quantity||0}</td><td class="text-right mono ${!qM?'mismatch':''}">${l.received_quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${(l.po_price||0).toFixed(2)}</td><td class="text-right mono ${!pM?'mismatch':''}">${(l.verified_price||0).toFixed(2)}</td><td class="text-center">${qM&&pM?'<span class="ok">OK</span>':'<span class="mismatch">Mismatch</span>'}</td></tr>`;
+        const sentQty = isJW ? (l.jw_sent_quantity || 0) : (l.po_quantity || 0);
+        const refPrice = isJW ? (l.jw_rate || 0) : (l.po_price || 0);
+        const verifiedPrice = isJW ? (l.verified_price || l.jw_rate || 0) : (l.verified_price || 0);
+        const qM = l.received_quantity === sentQty;
+        const pM = verifiedPrice === refPrice;
+        tableHTML += `<tr><td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${l.item?.name||''}</td><td class="mono">${l.hsn_code||''}</td><td class="text-right mono">${sentQty}</td><td class="text-right mono ${!qM?'mismatch':''}">${l.received_quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${refPrice.toFixed(2)}</td><td class="text-right mono ${!pM?'mismatch':''}">${verifiedPrice.toFixed(2)}</td><td class="text-center">${qM&&pM?'<span class="ok">OK</span>':'<span class="mismatch">Mismatch</span>'}</td></tr>`;
       });
       tableHTML += `</tbody></table>`;
     } else {
       tableHTML = `<table><thead><tr><th>SN</th><th>Item Code</th><th>Description</th><th class="text-right">Recd Qty</th><th>UOM</th><th class="text-right">Price</th><th class="text-right">Amount</th></tr></thead><tbody>`;
       let total = 0;
       lines.forEach((l, i) => {
-        const amt = l.received_quantity * l.verified_price;
+        const price = isJW ? (l.jw_rate || l.verified_price || 0) : (l.verified_price || 0);
+        const amt = l.received_quantity * price;
         total += amt;
-        tableHTML += `<tr><td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${l.item?.name||''}</td><td class="text-right mono">${l.received_quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${(l.verified_price||0).toFixed(2)}</td><td class="text-right mono">${amt.toFixed(2)}</td></tr>`;
+        tableHTML += `<tr><td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${l.item?.name||''}</td><td class="text-right mono">${l.received_quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${price.toFixed(2)}</td><td class="text-right mono">${amt.toFixed(2)}</td></tr>`;
       });
       tableHTML += `<tr class="total-row"><td colspan="6" class="text-right">Total</td><td class="text-right mono">${total.toFixed(2)}</td></tr></tbody></table>`;
     }
 
+    // Reference box — right side. Shows JW + DC numbers for JW GRNs, or PO for PO GRNs.
+    const refBoxHtml = isJW
+      ? `<div class="info-block"><div class="label">Job Work Reference</div>
+          <div class="value mono">JW: ${jwOrder.order_number || '-'}</div>
+          ${dc.dc_number ? `<div class="detail mono">DC: ${dc.dc_number}${dc.dc_date ? ` · Sent: ${new Date(dc.dc_date).toLocaleDateString()}` : ''}</div>` : ''}
+          ${jwOrder.subcontract_type ? `<div class="detail">Type: ${jwOrder.subcontract_type === 'with_material' ? 'With Material' : 'Processing only'}</div>` : ''}</div>`
+      : `<div class="info-block"><div class="label">PO Reference</div><div class="value mono">${d.po_number||'-'}</div></div>`;
+
     return `<!DOCTYPE html><html><head><title>GRN ${d.grn_number}</title><style>${styles}</style></head><body>
       <div class="page">${letterhead}
-        <div class="doc-title">Goods Receipt Note: ${d.grn_number}</div>
+        <div class="doc-title">Goods Receipt Note: ${d.grn_number}${isJW ? ' (Job Work Receipt)' : ''}</div>
         <div class="info-section">
-          <div class="info-block"><div class="label">PO Reference</div><div class="value mono">${d.po_number||''}</div></div>
           <div class="info-block"><div class="label">Supplier</div><div class="value">${supplier.name||''}</div><div class="detail">${supplier.code||''}${supplier.gstin ? ` | GSTIN: ${supplier.gstin}` : ''}</div>${(supplier.address || supplier.city) ? `<div class="detail">${formatFullAddress(supplier)}</div>` : ''}</div>
+          ${refBoxHtml}
           <div class="info-block"><div class="label">Supplier Invoice / Doc Ref</div><div class="value mono">${d.supplier_invoice_no||'-'}</div>${d.supplier_invoice_date ? `<div class="detail">Dated: ${new Date(d.supplier_invoice_date).toLocaleDateString()}</div>` : ''}</div>
           <div class="info-block"><div class="label">Receiving Warehouse</div><div class="value">${wh.name||''} ${wh.code ? `(${wh.code})` : ''}</div>${wh.address ? `<div class="detail">${wh.address}</div>` : ''}</div>
         </div>

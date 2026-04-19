@@ -3146,18 +3146,66 @@ async def create_grn(grn_data: GRNCreate, request: Request):
 
 @grn_router.get("/{grn_id}/print-data")
 async def get_grn_print_data(grn_id: str, request: Request):
-    """Get GRN data for printing"""
+    """Get GRN data for printing. Supports both PO-based GRNs and JW (subcontract) GRNs."""
     await get_current_user(request)
     grn = await db.grn.find_one({"id": grn_id}, {"_id": 0})
     if not grn:
         raise HTTPException(status_code=404, detail="GRN not found")
-    po = await db.purchase_orders.find_one({"id": grn.get("po_id")}, {"_id": 0})
+    
+    is_jw = bool(grn.get("jw_order_id") or grn.get("sc_order_id"))
+    grn["is_jw"] = is_jw
+    
+    # PO reference (PO GRNs only)
+    po = await db.purchase_orders.find_one({"id": grn.get("po_id")}, {"_id": 0}) if grn.get("po_id") else None
     grn["po"] = po
-    supplier = await db.suppliers.find_one({"id": grn.get("supplier_id")}, {"_id": 0})
-    grn["supplier"] = supplier
+    
+    # JW reference + DC — fetch JW order details
+    jw_order = None
+    dc = None
+    if is_jw:
+        jw_id = grn.get("jw_order_id") or grn.get("sc_order_id")
+        jw_order = await db.subcontract_orders.find_one({"id": jw_id}, {"_id": 0}) if jw_id else None
+        grn["jw_order"] = jw_order
+        # Find the DC referenced by this GRN (or the latest sent DC for this SC)
+        if grn.get("dc_id"):
+            dc = await db.delivery_challans.find_one({"id": grn["dc_id"]}, {"_id": 0})
+        elif jw_id:
+            dc = await db.delivery_challans.find_one(
+                {"subcontract_order_id": jw_id, "status": "sent"},
+                {"_id": 0}, sort=[("created_at", -1)]
+            )
+        grn["dc"] = dc
+    
+    # Supplier — resolve from GRN, fall back to JW order
+    supplier_id = grn.get("supplier_id") or (jw_order.get("supplier_id") if jw_order else None)
+    grn["supplier"] = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0}) if supplier_id else None
+    
+    # Enrich lines with item info; for JW GRNs replace po_quantity/po_price with DC sent_quantity/rate
     for line in grn.get("lines", []):
         item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
         line["item"] = item
+        if is_jw:
+            # Pull sent qty and rate from the matching DC/SC line for this item
+            _sent_qty = 0
+            _rate = 0
+            if dc:
+                for dl in (dc.get("lines") or []):
+                    if dl.get("item_id") == line.get("item_id"):
+                        _sent_qty = dl.get("quantity") or dl.get("sent_quantity") or 0
+                        _rate = dl.get("rate") or 0
+                        break
+            # Fallback: SC order's lines
+            if (_sent_qty == 0 or _rate == 0) and jw_order:
+                for sl in (jw_order.get("lines") or []):
+                    if sl.get("item_id") == line.get("item_id"):
+                        if _sent_qty == 0:
+                            _sent_qty = sl.get("sent_quantity") or sl.get("quantity") or 0
+                        if _rate == 0:
+                            _rate = sl.get("rate") or 0
+                        break
+            line["jw_sent_quantity"] = _sent_qty
+            line["jw_rate"] = _rate
+    
     company = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
     grn["company"] = company
     if grn.get("warehouse_id"):
@@ -6117,6 +6165,68 @@ async def migrate_operations_status():
     except Exception as e:
         logger.exception(f"migrate_operations_status failed: {e}")
 
+async def migrate_sc_jw_charges_from_bom():
+    """Refresh job_work_parts.charges & bom_rollup_cost and lines[].rate (for Part/SA lines) on non-completed SC orders.
+    Legacy SCs were created with incorrect process cost (either 0 or summed parent+component routings) and lines
+    for completed Parts carried unit_cost=0 instead of BOM Total/Unit, which made DC send dialogs show ₹0 rates.
+    Per user spec, charges/pc must equal the FG parent routing cost only, and Part/SA line rates must equal BOM Total/Unit."""
+    try:
+        cursor = db.subcontract_orders.find(
+            {"status": {"$in": ["draft", "in_progress"]}},
+            {"_id": 0, "id": 1, "job_work_parts": 1, "lines": 1}
+        )
+        touched = 0
+        async for sc in cursor:
+            changed = False
+            # 1) Refresh job_work_parts
+            parts = sc.get("job_work_parts") or []
+            new_parts = []
+            for p in parts:
+                iid = p.get("item_id")
+                if not iid:
+                    new_parts.append(p); continue
+                try:
+                    bc = await compute_bom_costs(iid)
+                    _fg = round(bc.get("fg_process_cost", 0) or 0, 2)
+                    _total_unit = round((bc.get("rm_cost", 0) or 0) + (bc.get("process_cost", 0) or 0), 2)
+                    if _fg and p.get("charges") != _fg:
+                        p["charges"] = _fg
+                        changed = True
+                    if _total_unit and p.get("bom_rollup_cost") != _total_unit:
+                        p["bom_rollup_cost"] = _total_unit
+                        changed = True
+                    _names = bc.get("process_names") or []
+                    if _names and p.get("process_names") != _names:
+                        p["process_names"] = _names
+                        changed = True
+                except Exception:
+                    pass
+                new_parts.append(p)
+            # 2) Refresh lines[].rate for Part/SA items from BOM Total/Unit
+            lines = sc.get("lines") or []
+            new_lines = []
+            for ln in lines:
+                iid = ln.get("item_id")
+                if not iid:
+                    new_lines.append(ln); continue
+                try:
+                    it = await db.items.find_one({"id": iid}, {"_id": 0, "category": 1})
+                    if it and it.get("category") in ("component", "sub_assembly"):
+                        _tu = await compute_bom_total_unit_cost(iid)
+                        if _tu > 0 and ln.get("rate") != round(_tu, 2):
+                            ln["rate"] = round(_tu, 2)
+                            changed = True
+                except Exception:
+                    pass
+                new_lines.append(ln)
+            if changed:
+                await db.subcontract_orders.update_one({"id": sc["id"]}, {"$set": {"job_work_parts": new_parts, "lines": new_lines}})
+                touched += 1
+        if touched:
+            logger.info(f"Refreshed job_work_parts charges and lines rates from BOM on {touched} SC orders")
+    except Exception as e:
+        logger.exception(f"migrate_sc_jw_charges_from_bom failed: {e}")
+
 # ================== APP SETUP ==================
 
 @app.on_event("startup")
@@ -6142,6 +6252,7 @@ async def startup():
     await seed_admin()
     await seed_sample_data()
     await migrate_operations_status()
+    await migrate_sc_jw_charges_from_bom()
     
     # Write credentials file (dev environment only, non-fatal on Windows/other OS)
     try:
@@ -6391,9 +6502,36 @@ async def get_subcontract_orders(request: Request, status: str = None):
         for line in order.get("lines", []):
             item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
             line["item"] = item
+            # Auto-refresh rate from BOM Total/Unit for Part/SA lines on draft/in_progress SCs
+            # so the DC send dialog always shows a non-zero, current rate.
+            if (order.get("status") in ("draft", "in_progress")
+                and item
+                and item.get("category") in ("component", "sub_assembly")):
+                try:
+                    _tu = await compute_bom_total_unit_cost(line["item_id"])
+                    if _tu > 0:
+                        line["rate"] = round(_tu, 2)
+                except Exception:
+                    pass
         for part in order.get("job_work_parts", []):
             part_item = await db.items.find_one({"id": part.get("item_id")}, {"_id": 0})
             part["item"] = part_item
+            # Auto-refresh charges/bom_rollup from latest BOM for draft/in_progress SCs
+            # so the edit dialog always shows the current BOM's FG Process cost.
+            if order.get("status") in ("draft", "in_progress") and part.get("item_id"):
+                try:
+                    _bc = await compute_bom_costs(part["item_id"])
+                    _fg = round(_bc.get("fg_process_cost", 0) or 0, 2)
+                    _total_unit = round((_bc.get("rm_cost", 0) or 0) + (_bc.get("process_cost", 0) or 0), 2)
+                    if _fg:
+                        part["charges"] = _fg
+                    if _total_unit:
+                        part["bom_rollup_cost"] = _total_unit
+                    _names = _bc.get("process_names") or []
+                    if _names:
+                        part["process_names"] = _names
+                except Exception:
+                    pass
     return orders
 
 @jobwork_router.post("/orders", status_code=201)

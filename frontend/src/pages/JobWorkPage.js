@@ -784,12 +784,24 @@ export default function JobWorkPage() {
                 <tbody>
                   {dcLines.map((l, idx) => {
                     const it = items.find(i => i.id === l.item_id);
-                    const rate = it?.unit_cost || 0;
+                    // Rate comes from the SC line (BOM Total/Unit for completed Parts, unit_cost for RMs).
+                    // Fall back to item.unit_cost only if the SC line rate was not populated.
+                    const rate = (l.rate || 0) > 0 ? l.rate : (it?.unit_cost || 0);
                     const totalRMCost = (l.quantity || 0) * rate;
                     return (
                       <tr key={idx} className="border-t">
                         <td className="py-2 px-2"><span className="mono text-xs">{it?.part_number}</span> - {it?.name} <span className="text-[10px] text-[#6B7280]">(Stock: {it?.current_stock || 0})</span></td>
-                        <td className="py-2 px-2 text-right mono text-xs">{currencySymbol}{rate.toFixed(2)}</td>
+                        <td className="py-2 px-2 text-right">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={rate}
+                            onChange={e => { const ls = [...dcLines]; ls[idx].rate = parseFloat(e.target.value) || 0; setDcLines(ls); }}
+                            className="w-24 px-2 py-1 border rounded-sm mono text-right text-xs"
+                            data-testid={`dc-rate-${idx}`}
+                          />
+                        </td>
                         <td className="py-2 px-2"><input type="number" min="0" max={it?.current_stock || 0} value={l.quantity} onChange={e => { const ls = [...dcLines]; ls[idx].quantity = Math.min(parseFloat(e.target.value) || 0, it?.current_stock || 0); setDcLines(ls); }} className="w-24 px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
                         <td className="py-2 px-2 text-right mono text-xs font-semibold">{currencySymbol}{totalRMCost.toFixed(2)}</td>
                       </tr>
@@ -797,7 +809,7 @@ export default function JobWorkPage() {
                   })}
                   <tr className="bg-[#F9FAFB] border-t font-semibold">
                     <td colSpan="3" className="py-2 px-2 text-right">Grand Total RM Cost:</td>
-                    <td className="py-2 px-2 text-right mono">{currencySymbol}{dcLines.reduce((s, l) => { const it = items.find(i => i.id === l.item_id); return s + ((l.quantity || 0) * (it?.unit_cost || 0)); }, 0).toFixed(2)}</td>
+                    <td className="py-2 px-2 text-right mono">{currencySymbol}{dcLines.reduce((s, l) => { const it = items.find(i => i.id === l.item_id); const r = (l.rate || 0) > 0 ? l.rate : (it?.unit_cost || 0); return s + ((l.quantity || 0) * r); }, 0).toFixed(2)}</td>
                   </tr>
                 </tbody>
               </table>
