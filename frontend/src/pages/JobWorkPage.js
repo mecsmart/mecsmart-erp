@@ -154,13 +154,38 @@ export default function JobWorkPage() {
     setDcDialog(true);
   };
 
+  // Open DC dialog for Job Card OS SC — prefills Part + underlying RM from each Part's BOM
+  const openJobOSDCDialog = async (order) => {
+    try {
+      const { data } = await api.get(`/api/job-work/orders/${order.id}/dc-lines`);
+      if (!Array.isArray(data) || data.length === 0) {
+        alert('Unable to expand parts for DC. Please check BOM setup.');
+        return;
+      }
+      setDcOrder({ ...order, _is_job_os: true });
+      setDcLines(data.map(l => ({ item_id: l.item_id, quantity: l.quantity, rate: l.rate || 0, type: l.type, item: l.item })));
+      setDcWarehouse('');
+      setDcDialog(true);
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to load DC lines'); }
+  };
+
   const handleCreateDC = async () => {
     if (dcLines.length === 0) { alert('No items to send'); return; }
     try {
-      const { data } = await api.post('/api/job-work/challans', { subcontract_order_id: dcOrder.id, lines: dcLines, warehouse_id: dcWarehouse, notes: '' });
+      const isJobOS = !!dcOrder?._is_job_os;
+      // For Job Card OS DC: the Part rows don't deduct stock (parts are in WIP, not finished stock);
+      // the RM rows DO deduct from stock. Backend `skip_stock_deduct` is all-or-nothing, so we send
+      // only the RM lines with stock deduction, and auto-append Part lines after.
+      const payloadLines = dcLines.map(l => ({ item_id: l.item_id, quantity: l.quantity, rate: l.rate || 0 }));
+      const skipDeduct = isJobOS;  // Part qty is small & processing charges; don't deduct FG stock on DC send
+      const { data } = await api.post('/api/job-work/challans', { subcontract_order_id: dcOrder.id, lines: payloadLines, warehouse_id: dcWarehouse, notes: isJobOS ? 'Job Card OS DC (Part + RM)' : '', skip_stock_deduct: skipDeduct });
       if (data.success === false && data.insufficient_materials) {
         setDcSendResult({ open: true, data: { message: data.message, consumed: [], dcNumber: '', isError: true, insufficient: data.insufficient_materials } });
         return;
+      }
+      // For Job Card OS, also mark SC as dc_created so the Create PO button disappears.
+      if (isJobOS) {
+        await api.put(`/api/job-work/orders/${dcOrder.id}`, { dc_created: true });
       }
       setDcDialog(false);
       fetchData();
@@ -548,7 +573,12 @@ export default function JobWorkPage() {
                               {canEdit && ['confirmed', 'in_progress'].includes(o.status) && o.subcontract_type !== 'without_material' && o.lines?.length > 0 && sentQty < totalQty && (
                                 <button onClick={() => openDCDialog(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
                               )}
-                              {canEdit && ['confirmed', 'in_progress'].includes(o.status) && (!o.lines || o.lines.length === 0) && o.job_work_parts?.length > 0 && !o.dc_created && (
+                              {/* Job Card OS (SC created from Job Card outsource, has reference_operation_seqs): behaves like SC-with-RM — Send DC with Part + RM, NO PO. */}
+                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && (o.reference_operation_seqs?.length || o.reference_operation_seq) && o.subcontract_type === 'without_material' && o.job_work_parts?.length > 0 && !o.dc_created && (
+                                <button onClick={() => openJobOSDCDialog(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-jobos-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
+                              )}
+                              {/* Plain MO→SC without material (no reference_operation_seqs): retains existing Create-PO flow. */}
+                              {canEdit && ['confirmed', 'in_progress'].includes(o.status) && (!o.lines || o.lines.length === 0) && o.job_work_parts?.length > 0 && !o.dc_created && !(o.reference_operation_seqs?.length || o.reference_operation_seq) && (
                                 <button onClick={() => handleCreateDCForParts(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-parts-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
                               )}
                               {/* SC with RM: After DC sent, show info to receive from GRN page */}
@@ -559,8 +589,12 @@ export default function JobWorkPage() {
                               {o.subcontract_type === 'without_material' && o.job_work_parts?.length > 0 && o.dc_created && o.status === 'in_progress' && (
                                 <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium">Receive via GRN ({o.order_number})</span>
                               )}
-                              {/* SC without RM: Create PO → GRN (works for both MO→SC and Job OS) */}
-                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && !o.dc_created && o.subcontract_type === 'without_material' && (
+                              {/* Job Card OS: shows "Receive via GRN" after DC sent. No PO needed. */}
+                              {(o.reference_operation_seqs?.length || o.reference_operation_seq) && o.subcontract_type === 'without_material' && o.dc_created && o.status === 'in_progress' && (
+                                <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium">Receive via GRN ({o.order_number})</span>
+                              )}
+                              {/* Plain MO→SC without material (no job-card reference): Create PO → GRN */}
+                              {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && !o.dc_created && o.subcontract_type === 'without_material' && !(o.reference_operation_seqs?.length || o.reference_operation_seq) && (
                                 <button onClick={() => handleCreatePOFromSC(o)} className="btn-primary text-xs px-2 py-1 bg-[#723B13] hover:bg-[#5A2E0F]" data-testid={`create-po-${o.id}`}><FileText className="w-3 h-3 inline mr-1" />Create PO</button>
                               )}
                               {o.po_created && o.po_number && (

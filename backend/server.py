@@ -6665,6 +6665,54 @@ async def mark_invoice_paid(invoice_id: str, request: Request):
 
 # ================== JOB WORK / SUBCONTRACTING ROUTES ==================
 
+@jobwork_router.get("/orders/{sc_id}/dc-lines")
+async def get_dc_lines_for_job_os(sc_id: str, request: Request):
+    """Expand a Job Card OS SC's job_work_parts into DC lines: each Part (to be sent for processing)
+    plus its underlying Raw Materials (from the Part's BOM). Used by the Send DC dialog on the
+    Job Work page for Job Card OS SCs (which have reference_operation_seqs set)."""
+    await get_current_user(request)
+    sc = await db.subcontract_orders.find_one({"id": sc_id}, {"_id": 0})
+    if not sc:
+        raise HTTPException(status_code=404, detail="SC not found")
+    out_lines = []
+    seen_rm = {}
+    for jp in sc.get("job_work_parts", []):
+        part_item = await db.items.find_one({"id": jp.get("item_id")}, {"_id": 0}) or {}
+        qty = float(jp.get("quantity", 0) or 0)
+        out_lines.append({
+            "type": "part",
+            "item_id": jp.get("item_id"),
+            "item": part_item,
+            "quantity": qty,
+            "rate": float(jp.get("bom_rollup_cost", 0) or 0),
+        })
+        # Look up BOM of this Part to get its RMs
+        part_bom = await db.boms.find_one({"parent_item_id": jp.get("item_id"), "status": "active"}, {"_id": 0})
+        if not part_bom:
+            continue
+        for comp in part_bom.get("components", []):
+            rm_id = comp.get("item_id")
+            if not rm_id:
+                continue
+            rm_qty_per_unit = float(comp.get("quantity", 0) or 0)
+            total_rm_qty = rm_qty_per_unit * qty
+            rm_item = await db.items.find_one({"id": rm_id}, {"_id": 0}) or {}
+            rm_rate = float(rm_item.get("unit_cost", 0) or 0)
+            if rm_id in seen_rm:
+                out_lines[seen_rm[rm_id]]["quantity"] += total_rm_qty
+            else:
+                seen_rm[rm_id] = len(out_lines)
+                out_lines.append({
+                    "type": "rm",
+                    "item_id": rm_id,
+                    "item": rm_item,
+                    "quantity": total_rm_qty,
+                    "rate": rm_rate,
+                    "for_part_id": jp.get("item_id"),
+                })
+    return out_lines
+
+
 @jobwork_router.get("/orders")
 async def get_subcontract_orders(request: Request, status: str = None):
     user = await get_current_user(request)

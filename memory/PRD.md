@@ -62,6 +62,10 @@
   (5) **GRN receive** → GRN-000031 with supplier invoice INV-001,
   (6) **Purchase Invoice** → GRN appears in `/api/purchase-invoices/pending-grns` with supplier "Precision Components Ltd." linked to JW-000003.
   UI verified: Job Work page shows [Edit] [Send DC] → [Create PO] → [Receive via GRN] progression per SC.
+- 2026-02-19 (iter 82): **Job Card OS SCs now behave like SC-with-RM (no PO step)**. Differentiator: Job Card OS SCs have `reference_operation_seqs` set. Frontend:
+  (a) Job Card OS → [Edit] [Send DC] only. NO Create PO. After DC sent → "Receive via GRN" badge.
+  (b) Plain MO→SC → retains [Send DC-parts] → [Create PO] → [Receive via GRN] flow.
+  New endpoint `GET /api/job-work/orders/{sc_id}/dc-lines` expands a Job OS SC into Part lines (rate = BOM RM rollup) + RM lines (qty = per-unit × part_qty, rate = item unit_cost). Frontend `openJobOSDCDialog(order)` opens the DC dialog pre-populated with Part + RM. On save, `handleCreateDC` uses `skip_stock_deduct=true` (Parts are WIP) and tags SC as `dc_created=true`. DC print title stays "Job Work Order Cum Delivery Challan" for without_material + job_work_parts. Verified: 22 Job OS rows show [Send DC] only; `dc-lines` endpoint returns Part + RM for JW-000165.
 
 ### Previous iter 74 (retained for history)
 Unified BOM process-cost source of truth. Previous design stored a component's process cost in TWO places — (a) the parent BOM's component-line `routings` array AND (b) the component's OWN BOM's `parent_routings`. Fix: treat the child's own BOM `parent_routings` as the SOLE source of truth. `explode_level` and `compute_bom_costs` now use `child_fg_process` exclusively; `migrate_sync_component_routings_to_child_bom()` moves any stored comp-line routings into the child BOM's `parent_routings` on startup; Frontend BOM edit dialog replaces routings buttons with a notice and "Edit child BOM" shortcut when a component has its own BOM.
