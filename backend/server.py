@@ -4785,7 +4785,7 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
         raise HTTPException(status_code=404, detail="Work order not found")
     
     if wo.get("status") == "pending":
-        raise HTTPException(status_code=400, detail="Cannot update operations: Manufacturing order has not been started. Please start the MO first.")
+        raise HTTPException(status_code=400, detail="Cannot start Job Card operation: the Manufacturing Order is still pending. Please click 'Inhouse Start' on the MO first (this will consume RM from inventory), then re-open the Job Card.")
     if wo.get("status") not in ["in_progress"]:
         raise HTTPException(status_code=400, detail=f"Cannot update operations on {wo.get('status')} manufacturing order")
     
