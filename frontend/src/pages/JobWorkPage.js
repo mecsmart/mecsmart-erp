@@ -154,18 +154,25 @@ export default function JobWorkPage() {
     setDcDialog(true);
   };
 
-  // Open DC dialog for Job Card OS SC — prefills ONLY the RM (what's physically sent to vendor).
-  // The Part is what comes BACK from the vendor — it's not shipped on the DC.
+  // Open DC dialog for Job Card OS SC — each Part row carries charges_per_unit and
+  // rm_cost_per_unit so the DC table can show: Part | HSN | Qty | UOM | Charges/Unit |
+  // Total Charges | RM Cost/Unit | Total Amount (per user-specified DC format).
   const openJobOSDCDialog = async (order) => {
     try {
       const { data } = await api.get(`/api/job-work/orders/${order.id}/dc-lines`);
-      const rmOnly = (Array.isArray(data) ? data : []).filter(l => l.type === 'rm');
-      if (rmOnly.length === 0) {
-        alert('No raw materials to send. Please ensure each Part has a BOM with RM components.');
+      if (!Array.isArray(data) || data.length === 0) {
+        alert('Unable to expand parts for DC. Please check BOM setup.');
         return;
       }
       setDcOrder({ ...order, _is_job_os: true });
-      setDcLines(rmOnly.map(l => ({ item_id: l.item_id, quantity: l.quantity, rate: l.rate || 0, type: l.type, item: l.item })));
+      setDcLines(data.map(l => ({
+        item_id: l.item_id,
+        quantity: l.quantity,
+        charges_per_unit: l.charges_per_unit || 0,
+        rm_cost_per_unit: l.rm_cost_per_unit || 0,
+        item: l.item,
+        type: 'part',
+      })));
       setDcWarehouse('');
       setDcDialog(true);
     } catch (e) { alert(e.response?.data?.detail || 'Failed to load DC lines'); }
@@ -175,11 +182,19 @@ export default function JobWorkPage() {
     if (dcLines.length === 0) { alert('No items to send'); return; }
     try {
       const isJobOS = !!dcOrder?._is_job_os;
-      // For Job Card OS DC: only RM goes out (Part is received back from vendor). RM
-      // stock MUST be deducted — it's physical inventory leaving the warehouse.
-      const payloadLines = dcLines.map(l => ({ item_id: l.item_id, quantity: l.quantity, rate: l.rate || 0 }));
-      const skipDeduct = false;  // Both SC-with-RM and Job OS deduct RM stock on DC send
-      const { data } = await api.post('/api/job-work/challans', { subcontract_order_id: dcOrder.id, lines: payloadLines, warehouse_id: dcWarehouse, notes: isJobOS ? 'Job Card OS DC (RM to vendor)' : '', skip_stock_deduct: skipDeduct });
+      // For Job Card OS: lines carry charges_per_unit + rm_cost_per_unit. Persist them in
+      // the `rate` field (so existing print logic works) and in `processing_charges` so
+      // the Print DC template can render Charges/Unit + RM Cost/Unit columns. Stock is
+      // NOT deducted (parts going out are the finished Parts back for a next-op, which
+      // are already in WIP accounting, not FG stock).
+      const payloadLines = dcLines.map(l => isJobOS ? ({
+        item_id: l.item_id,
+        quantity: l.quantity,
+        rate: l.rm_cost_per_unit || 0,
+        processing_charges: l.charges_per_unit || 0,
+      }) : ({ item_id: l.item_id, quantity: l.quantity, rate: l.rate || 0 }));
+      const skipDeduct = isJobOS;
+      const { data } = await api.post('/api/job-work/challans', { subcontract_order_id: dcOrder.id, lines: payloadLines, warehouse_id: dcWarehouse, notes: isJobOS ? 'Job Card OS DC' : '', skip_stock_deduct: skipDeduct });
       if (data.success === false && data.insufficient_materials) {
         setDcSendResult({ open: true, data: { message: data.message, consumed: [], dcNumber: '', isError: true, insufficient: data.insufficient_materials } });
         return;
@@ -405,20 +420,29 @@ export default function JobWorkPage() {
     ${isJobOS ? `
     <div class="section-title">Job Work Part Details</div>
     <table>
-      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>Process</th><th>HSN</th><th class="text-right">QTY</th><th>UOM</th><th class="text-right">Charges/Unit</th><th class="text-right">Total Charges</th><th class="text-right">RM Cost/Unit</th><th class="text-right">Total Amount</th></tr></thead>
+      <thead><tr><th>Sl. No.</th><th>Part No. &amp; Name</th><th>HSN</th><th class="text-right">Qty</th><th>UOM</th><th class="text-right">Charges/Unit</th><th class="text-right">Total Charges</th><th class="text-right">RM Cost/Unit</th><th class="text-right">Total Amount</th></tr></thead>
       <tbody>
-      ${jwParts.length > 0 ? jwParts.map((p, i) => {
-        const pit = p.item || items.find(it => it.id === p.item_id) || {};
-        const charges = p.charges || 0;
-        const rmCost = p.bom_rollup_cost || pit.unit_cost || 0;
-        const totalCharges = (p.quantity || 0) * charges;
-        const totalAmount = (p.quantity || 0) * rmCost;
-        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td>${p.process_name || (p.process_names || []).join(', ') || '-'}</td><td>${pit.hsn_code || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td>${pit.unit_of_measure || 'Nos'}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${totalCharges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${rmCost.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${totalAmount.toFixed(2)}</td></tr>`;
-      }).join('') : `<tr><td>1</td><td>${parentItemName || '-'}</td><td>-</td><td>-</td><td class="text-right mono">${parentItemQty || '-'}</td><td>Nos</td><td class="text-right mono">-</td><td class="text-right mono">-</td><td class="text-right mono">-</td><td class="text-right mono">-</td></tr>`}
       ${(() => {
-        const grandCharges = jwParts.reduce((s, p) => s + ((p.quantity || 0) * (p.charges || 0)), 0);
-        const grandAmount = jwParts.reduce((s, p) => s + ((p.quantity || 0) * (p.bom_rollup_cost || (p.item || items.find(it => it.id === p.item_id) || {}).unit_cost || 0)), 0);
-        return `<tr class="total-row"><td colspan="7" class="text-right">Total</td><td class="text-right mono">${currencySymbol}${grandCharges.toFixed(2)}</td><td></td><td class="text-right mono">${currencySymbol}${grandAmount.toFixed(2)}</td></tr>`;
+        // Prefer DC line-level values (what was saved at Send DC time). Fall back to SC job_work_parts.
+        const rows = (dc.lines && dc.lines.length) ? dc.lines.map(l => {
+          const it = l.item || items.find(i => i.id === l.item_id) || {};
+          const qty = l.quantity || 0;
+          const charges = l.processing_charges || 0;
+          const rmCost = l.rate || 0;
+          return { it, qty, charges, rmCost };
+        }) : jwParts.map(p => {
+          const pit = p.item || items.find(it => it.id === p.item_id) || {};
+          return { it: pit, qty: p.quantity || 0, charges: p.charges || 0, rmCost: p.bom_rollup_cost || pit.unit_cost || 0 };
+        });
+        const body = rows.map((r, i) => {
+          const totalCharges = r.qty * r.charges;
+          const totalAmount = r.qty * r.rmCost;
+          return `<tr><td>${i+1}</td><td>${r.it.part_number || '-'}, ${r.it.name || '-'}</td><td>${r.it.hsn_code || '-'}</td><td class="text-right mono">${r.qty}</td><td>${r.it.unit_of_measure || 'Nos'}</td><td class="text-right mono">${currencySymbol}${r.charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${totalCharges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${r.rmCost.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${totalAmount.toFixed(2)}</td></tr>`;
+        }).join('');
+        const grandCharges = rows.reduce((s, r) => s + r.qty * r.charges, 0);
+        const grandAmount = rows.reduce((s, r) => s + r.qty * r.rmCost, 0);
+        const totalRow = `<tr class="total-row"><td colspan="6" class="text-right">Total Process Charges</td><td class="text-right mono">${currencySymbol}${grandCharges.toFixed(2)}</td><td class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${grandAmount.toFixed(2)}</td></tr>`;
+        return body + totalRow;
       })()}
       </tbody>
     </table>
@@ -838,40 +862,78 @@ export default function JobWorkPage() {
               </Select>
             </div>
             <div className="border rounded-sm overflow-hidden">
-              <table className="w-full text-sm">
-                <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs">Rate/Unit</th><th className="text-right py-2 px-2 text-xs">Send Qty</th><th className="text-right py-2 px-2 text-xs">Total RM Cost</th></tr></thead>
-                <tbody>
-                  {dcLines.map((l, idx) => {
-                    const it = items.find(i => i.id === l.item_id);
-                    // Rate comes from the SC line (BOM Total/Unit for completed Parts, unit_cost for RMs).
-                    // Fall back to item.unit_cost only if the SC line rate was not populated.
-                    const rate = (l.rate || 0) > 0 ? l.rate : (it?.unit_cost || 0);
-                    const totalRMCost = (l.quantity || 0) * rate;
-                    return (
-                      <tr key={idx} className="border-t">
-                        <td className="py-2 px-2"><span className="mono text-xs">{it?.part_number}</span> - {it?.name} <span className="text-[10px] text-[#6B7280]">(Stock: {it?.current_stock || 0})</span></td>
-                        <td className="py-2 px-2 text-right">
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={rate}
-                            onChange={e => { const ls = [...dcLines]; ls[idx].rate = parseFloat(e.target.value) || 0; setDcLines(ls); }}
-                            className="w-24 px-2 py-1 border rounded-sm mono text-right text-xs"
-                            data-testid={`dc-rate-${idx}`}
-                          />
-                        </td>
-                        <td className="py-2 px-2"><input type="number" min="0" max={it?.current_stock || 0} value={l.quantity} onChange={e => { const ls = [...dcLines]; ls[idx].quantity = Math.min(parseFloat(e.target.value) || 0, it?.current_stock || 0); setDcLines(ls); }} className="w-24 px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
-                        <td className="py-2 px-2 text-right mono text-xs font-semibold">{currencySymbol}{totalRMCost.toFixed(2)}</td>
-                      </tr>
-                    );
-                  })}
-                  <tr className="bg-[#F9FAFB] border-t font-semibold">
-                    <td colSpan="3" className="py-2 px-2 text-right">Grand Total RM Cost:</td>
-                    <td className="py-2 px-2 text-right mono">{currencySymbol}{dcLines.reduce((s, l) => { const it = items.find(i => i.id === l.item_id); const r = (l.rate || 0) > 0 ? l.rate : (it?.unit_cost || 0); return s + ((l.quantity || 0) * r); }, 0).toFixed(2)}</td>
-                  </tr>
-                </tbody>
-              </table>
+              {dcOrder?._is_job_os ? (
+                <table className="w-full text-sm">
+                  <thead><tr className="bg-[#F3F4F6]">
+                    <th className="text-left py-2 px-2 text-xs">Sl.</th>
+                    <th className="text-left py-2 px-2 text-xs">Part No &amp; Name</th>
+                    <th className="text-left py-2 px-2 text-xs">HSN</th>
+                    <th className="text-right py-2 px-2 text-xs">Qty</th>
+                    <th className="text-left py-2 px-2 text-xs">UOM</th>
+                    <th className="text-right py-2 px-2 text-xs">Charges/Unit</th>
+                    <th className="text-right py-2 px-2 text-xs">Total Charges</th>
+                    <th className="text-right py-2 px-2 text-xs">RM Cost/Unit</th>
+                    <th className="text-right py-2 px-2 text-xs">Total Amount</th>
+                  </tr></thead>
+                  <tbody>
+                    {dcLines.map((l, idx) => {
+                      const it = l.item || items.find(i => i.id === l.item_id) || {};
+                      const totalCharges = (l.quantity || 0) * (l.charges_per_unit || 0);
+                      const totalAmount = (l.quantity || 0) * (l.rm_cost_per_unit || 0);
+                      return (
+                        <tr key={idx} className="border-t">
+                          <td className="py-2 px-2 mono text-xs">{idx + 1}</td>
+                          <td className="py-2 px-2"><span className="mono text-xs font-medium">{it.part_number || '-'}</span>, {it.name || '-'}</td>
+                          <td className="py-2 px-2 mono text-xs">{it.hsn_code || '-'}</td>
+                          <td className="py-2 px-2 text-right">
+                            <input type="number" min="1" value={l.quantity} onChange={e => { const ls = [...dcLines]; ls[idx].quantity = parseFloat(e.target.value) || 0; setDcLines(ls); }} className="w-20 px-2 py-1 border rounded-sm mono text-right text-xs" data-testid={`dc-qty-${idx}`} />
+                          </td>
+                          <td className="py-2 px-2 text-xs">{it.unit_of_measure || 'Nos'}</td>
+                          <td className="py-2 px-2 text-right">
+                            <input type="number" min="0" step="0.01" value={l.charges_per_unit} onChange={e => { const ls = [...dcLines]; ls[idx].charges_per_unit = parseFloat(e.target.value) || 0; setDcLines(ls); }} className="w-20 px-2 py-1 border rounded-sm mono text-right text-xs" data-testid={`dc-charges-${idx}`} />
+                          </td>
+                          <td className="py-2 px-2 text-right mono text-xs">{currencySymbol}{totalCharges.toFixed(2)}</td>
+                          <td className="py-2 px-2 text-right">
+                            <input type="number" min="0" step="0.01" value={l.rm_cost_per_unit} onChange={e => { const ls = [...dcLines]; ls[idx].rm_cost_per_unit = parseFloat(e.target.value) || 0; setDcLines(ls); }} className="w-20 px-2 py-1 border rounded-sm mono text-right text-xs" data-testid={`dc-rmcost-${idx}`} />
+                          </td>
+                          <td className="py-2 px-2 text-right mono text-xs font-semibold">{currencySymbol}{totalAmount.toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="bg-[#F9FAFB] border-t font-semibold">
+                      <td colSpan="6" className="py-2 px-2 text-right text-xs">Total Process Charges</td>
+                      <td className="py-2 px-2 text-right mono text-xs">{currencySymbol}{dcLines.reduce((s, l) => s + ((l.quantity || 0) * (l.charges_per_unit || 0)), 0).toFixed(2)}</td>
+                      <td className="py-2 px-2 text-right text-xs">Total RM Cost</td>
+                      <td className="py-2 px-2 text-right mono text-xs">{currencySymbol}{dcLines.reduce((s, l) => s + ((l.quantity || 0) * (l.rm_cost_per_unit || 0)), 0).toFixed(2)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs">Rate/Unit</th><th className="text-right py-2 px-2 text-xs">Send Qty</th><th className="text-right py-2 px-2 text-xs">Total RM Cost</th></tr></thead>
+                  <tbody>
+                    {dcLines.map((l, idx) => {
+                      const it = items.find(i => i.id === l.item_id);
+                      const rate = (l.rate || 0) > 0 ? l.rate : (it?.unit_cost || 0);
+                      const totalRMCost = (l.quantity || 0) * rate;
+                      return (
+                        <tr key={idx} className="border-t">
+                          <td className="py-2 px-2"><span className="mono text-xs">{it?.part_number}</span> - {it?.name} <span className="text-[10px] text-[#6B7280]">(Stock: {it?.current_stock || 0})</span></td>
+                          <td className="py-2 px-2 text-right">
+                            <input type="number" min="0" step="0.01" value={rate} onChange={e => { const ls = [...dcLines]; ls[idx].rate = parseFloat(e.target.value) || 0; setDcLines(ls); }} className="w-24 px-2 py-1 border rounded-sm mono text-right text-xs" data-testid={`dc-rate-${idx}`} />
+                          </td>
+                          <td className="py-2 px-2"><input type="number" min="0" max={it?.current_stock || 0} value={l.quantity} onChange={e => { const ls = [...dcLines]; ls[idx].quantity = Math.min(parseFloat(e.target.value) || 0, it?.current_stock || 0); setDcLines(ls); }} className="w-24 px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                          <td className="py-2 px-2 text-right mono text-xs font-semibold">{currencySymbol}{totalRMCost.toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="bg-[#F9FAFB] border-t font-semibold">
+                      <td colSpan="3" className="py-2 px-2 text-right">Grand Total RM Cost:</td>
+                      <td className="py-2 px-2 text-right mono">{currencySymbol}{dcLines.reduce((s, l) => { const it = items.find(i => i.id === l.item_id); const r = (l.rate || 0) > 0 ? l.rate : (it?.unit_cost || 0); return s + ((l.quantity || 0) * r); }, 0).toFixed(2)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              )}
             </div>
             <div className="flex justify-end space-x-3 pt-3 border-t"><button onClick={() => setDcDialog(false)} className="btn-secondary">Cancel</button><button onClick={handleCreateDC} className="btn-primary" data-testid="jw-send-dc">Send Materials</button></div>
           </div>
