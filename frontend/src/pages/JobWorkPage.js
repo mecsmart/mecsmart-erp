@@ -403,7 +403,7 @@ export default function JobWorkPage() {
     
     <div class="section-title">Raw Material Issued</div>
     <table>
-      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th class="text-right">Rate</th><th class="text-right">Total RM Cost</th></tr></thead>
+      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th class="text-right">Rate/Unit</th><th class="text-right">Total RM Cost</th></tr></thead>
       <tbody>
       ${dc.lines.map((l, i) => {
         const it = l.item || {};
@@ -693,7 +693,7 @@ export default function JobWorkPage() {
               </div>
               <div className="border rounded-sm overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead><tr className="bg-[#E1EFFE]"><th className="text-left py-2 px-2 text-xs">Part (FG/SA)</th><th className="text-right py-2 px-2 text-xs w-20">Qty</th><th className="text-right py-2 px-2 text-xs w-28">Charges/pc</th><th className="text-right py-2 px-2 text-xs w-24">Total</th><th className="w-8"></th></tr></thead>
+                  <thead><tr className="bg-[#E1EFFE]"><th className="text-left py-2 px-2 text-xs">Part (FG/SA)</th><th className="text-right py-2 px-2 text-xs w-20">Qty</th><th className="text-right py-2 px-2 text-xs w-28">Process Cost/Unit</th><th className="text-right py-2 px-2 text-xs w-24">Total</th><th className="w-8"></th></tr></thead>
                   <tbody>
                     {orderForm.job_work_parts.map((p, idx) => {
                       const total = (p.quantity || 0) * (p.charges || 0);
@@ -730,7 +730,7 @@ export default function JobWorkPage() {
               </div>
               <div className="border rounded-sm overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs w-24">Qty</th><th className="text-right py-2 px-2 text-xs w-24">Rate</th><th className="text-right py-2 px-2 text-xs w-28">Total</th><th className="w-8"></th></tr></thead>
+                  <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs w-24">Qty</th><th className="text-right py-2 px-2 text-xs w-24">Rate/Unit</th><th className="text-right py-2 px-2 text-xs w-28">Total</th><th className="w-8"></th></tr></thead>
                   <tbody>
                     {orderForm.lines.map((l, idx) => {
                       const lineTotal = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
@@ -780,7 +780,7 @@ export default function JobWorkPage() {
             </div>
             <div className="border rounded-sm overflow-hidden">
               <table className="w-full text-sm">
-                <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs">Rate</th><th className="text-right py-2 px-2 text-xs">Send Qty</th><th className="text-right py-2 px-2 text-xs">Total RM Cost</th></tr></thead>
+                <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs">Rate/Unit</th><th className="text-right py-2 px-2 text-xs">Send Qty</th><th className="text-right py-2 px-2 text-xs">Total RM Cost</th></tr></thead>
                 <tbody>
                   {dcLines.map((l, idx) => {
                     const it = items.find(i => i.id === l.item_id);

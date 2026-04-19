@@ -233,7 +233,7 @@ async def compute_bom_costs(item_id: str) -> Dict[str, Any]:
                 if r.get("name") and r["name"] not in names:
                     names.append(r["name"])
         parent_proc = routings_total_cost(bom.get("parent_routings", []))
-        strategy1 = {"rm_cost": round(rm, 2), "process_cost": round(parent_proc + comp_proc, 2), "process_names": names}
+        strategy1 = {"rm_cost": round(rm, 2), "process_cost": round(parent_proc + comp_proc, 2), "process_names": names, "fg_process_cost": round(parent_proc, 2)}
         # If process_cost is non-zero, return immediately
         if strategy1["process_cost"] > 0:
             return strategy1
@@ -249,16 +249,30 @@ async def compute_bom_costs(item_id: str) -> Dict[str, Any]:
                 names = [r["name"] for r in normalize_routings(comp.get("routings", [])) if r.get("name")]
                 # Prefer strategy1's rm_cost (since it comes from the item's own BOM)
                 if strategy1:
-                    return {"rm_cost": strategy1["rm_cost"], "process_cost": round(proc, 2), "process_names": names}
+                    return {"rm_cost": strategy1["rm_cost"], "process_cost": round(proc, 2), "process_names": names, "fg_process_cost": strategy1.get("fg_process_cost", 0)}
                 # Otherwise use item's unit_cost as RM
                 item_rec = await db.items.find_one({"id": item_id}, {"_id": 0})
                 rm = item_rec.get("unit_cost", 0) if item_rec else 0
-                return {"rm_cost": round(rm, 2), "process_cost": round(proc, 2), "process_names": names}
+                return {"rm_cost": round(rm, 2), "process_cost": round(proc, 2), "process_names": names, "fg_process_cost": 0.0}
     
     # No component-in-parent match — return strategy1 result (even if process_cost=0) or empty
     if strategy1:
         return strategy1
-    return {"rm_cost": 0.0, "process_cost": 0.0, "process_names": []}
+    return {"rm_cost": 0.0, "process_cost": 0.0, "process_names": [], "fg_process_cost": 0.0}
+
+
+async def compute_bom_total_unit_cost(item_id: str) -> float:
+    """BOM Total/Unit = RM cost (material) + process cost (parent + component routings).
+    Used as the RATE for Part/SA RM lines in SC (with material) and Job OS."""
+    costs = await compute_bom_costs(item_id)
+    return round(costs.get("rm_cost", 0) + costs.get("process_cost", 0), 2)
+
+
+async def compute_bom_fg_process_only(item_id: str) -> float:
+    """FG Process = ONLY the parent_routings cost of the item's own BOM. This is what the user
+    sees in the BOM header as "FG Process: ₹X". Used as the processing_charges for SC (with RM)."""
+    costs = await compute_bom_costs(item_id)
+    return round(costs.get("fg_process_cost", 0), 2)
 
 
 def routing_cost_for_process(bom: Dict[str, Any], item_id: str, process_name: str) -> float:
@@ -3607,13 +3621,21 @@ async def bulk_subcontract(request: Request, data: dict = Body(...)):
         routing = await db.routings.find_one({"id": wo.get("routing_id")})
         item_id = routing.get("item_id") if routing else wo.get("item_id")
         
-        # Add to job work parts (the FG/SA/Part being processed)
-        all_job_work_parts.append({"item_id": item_id, "quantity": wo.get("quantity", 1), "charges": 0, "wo_id": wo_id})
+        # Add to job work parts (the FG/SA/Part being processed). Charges/pc = item's own BOM parent routing cost.
+        _fg_charge = 0
+        try:
+            _fg_charge = await compute_bom_fg_process_only(item_id)
+        except Exception:
+            _fg_charge = 0
+        all_job_work_parts.append({"item_id": item_id, "quantity": wo.get("quantity", 1), "charges": _fg_charge, "wo_id": wo_id})
         
         if sc_type == "without_material":
             wo_item = await db.items.find_one({"id": item_id}, {"_id": 0})
             if wo_item:
-                all_sc_lines.append({"item_id": item_id, "quantity": wo.get("quantity", 1), "sent_quantity": 0, "received_quantity": 0, "rate": wo_item.get("unit_cost", 0), "wo_id": wo_id})
+                # SC without RM: Part/SA rate = BOM material cost (RM only), process cost lives on job_work_parts.charges
+                _no_rm_costs = await compute_bom_costs(item_id)
+                _rate_no_rm = _no_rm_costs.get("rm_cost", 0) or wo_item.get("unit_cost", 0)
+                all_sc_lines.append({"item_id": item_id, "quantity": wo.get("quantity", 1), "sent_quantity": 0, "received_quantity": 0, "rate": round(_rate_no_rm, 2), "wo_id": wo_id})
         else:
             consumed = wo.get("consumed_materials", [])
             if consumed:
@@ -3660,16 +3682,21 @@ async def bulk_subcontract(request: Request, data: dict = Body(...)):
                         cq = c.get("quantity", 1) * mult
                         cat = ci.get("category", "")
                         if cat == "raw_material":
+                            # RM rate = item.unit_cost (material rate per unit)
                             res.append({"item_id": c["item_id"], "quantity": int(cq), "sent_quantity": int(cq), "received_quantity": 0, "rate": ci.get("unit_cost", 0), "wo_id": wo_id})
                         elif cat in ["component", "sub_assembly"]:
                             if c["item_id"] in completed_items:
-                                res.append({"item_id": c["item_id"], "quantity": int(cq), "sent_quantity": int(cq), "received_quantity": 0, "rate": ci.get("unit_cost", 0), "wo_id": wo_id})
+                                # Completed Part/SA — send as BOM Total/Unit (material + all process rolled up)
+                                _rate = await compute_bom_total_unit_cost(c["item_id"]) or ci.get("unit_cost", 0)
+                                res.append({"item_id": c["item_id"], "quantity": int(cq), "sent_quantity": int(cq), "received_quantity": 0, "rate": round(_rate, 2), "wo_id": wo_id})
                             else:
                                 child_rm = await bulk_smart_resolve(c["item_id"], cq, visited)
                                 if child_rm:
                                     res.extend(child_rm)
                                 else:
-                                    res.append({"item_id": c["item_id"], "quantity": int(cq), "sent_quantity": int(cq), "received_quantity": 0, "rate": ci.get("unit_cost", 0), "wo_id": wo_id})
+                                    # Not yet produced and no BOM to explode — send as BOM Total/Unit too
+                                    _rate = await compute_bom_total_unit_cost(c["item_id"]) or ci.get("unit_cost", 0)
+                                    res.append({"item_id": c["item_id"], "quantity": int(cq), "sent_quantity": int(cq), "received_quantity": 0, "rate": round(_rate, 2), "wo_id": wo_id})
                     return res
                 
                 resolved = await bulk_smart_resolve(item_id, wo.get("quantity", 1))
@@ -3924,7 +3951,11 @@ async def create_sc_for_wo(wo_id: str, request: Request):
     # Build lines — smart resolution based on MO completion status across the work order tree
     sc_lines = []
     if sc_type == "without_material":
-        sc_lines = [{"item_id": item_id, "quantity": qty, "sent_quantity": 0, "received_quantity": 0, "rate": item.get("unit_cost", 0) if item else 0}]
+        # SC without RM: FG/SA/Part rate = BOM RM cost (material only). No process cost embedded here —
+        # process cost lives on job_work_parts.charges (FG parent routing).
+        _no_rm_costs = await compute_bom_costs(item_id)
+        _no_rm_rate = _no_rm_costs.get("rm_cost", 0) or (item.get("unit_cost", 0) if item else 0)
+        sc_lines = [{"item_id": item_id, "quantity": qty, "sent_quantity": 0, "received_quantity": 0, "rate": round(_no_rm_rate, 2)}]
     else:
         # Walk up to find root parent MO, then collect ALL MOs in the tree
         root_wo_id = wo_id
@@ -3948,27 +3979,18 @@ async def create_sc_for_wo(wo_id: str, request: Request):
         all_tree_mos = await collect_tree_mos(root_wo_id)
         completed_item_ids = {m["item_id"] for m in all_tree_mos if m.get("status") == "completed"}
         
-        # Helper to calculate BOM rollup cost for a Part/SA
+        # Helper to calculate BOM Total/Unit (material + all process rollup) for a completed Part/SA
+        # being sent in an SC-with-material flow. Matches what the BOM viewer shows in the Total/Unit column.
         async def calc_bom_rollup(item_id_calc):
-            item_bom = await db.boms.find_one({"parent_item_id": item_id_calc, "status": "active"}, {"_id": 0})
-            if not item_bom:
-                ci_for_cost = await db.items.find_one({"id": item_id_calc}, {"_id": 0})
-                return ci_for_cost.get("unit_cost", 0) if ci_for_cost else 0
-            material_cost = 0
-            for bcomp in item_bom.get("components", []):
-                bci = await db.items.find_one({"id": bcomp.get("item_id")}, {"_id": 0})
-                if bci:
-                    material_cost += bcomp.get("quantity", 0) * bci.get("unit_cost", 0)
-            # Add process costs from latest completed WO
-            process_cost = 0
-            lwo = await db.work_orders.find_one(
-                {"item_id": item_id_calc, "status": "completed", "operations_status": {"$exists": True}},
-                {"_id": 0, "operations_status": 1}, sort=[("actual_end", -1)]
-            )
-            if lwo:
-                for lop in lwo.get("operations_status", []):
-                    process_cost += lop.get("process_cost_per_unit", 0)
-            return material_cost + process_cost
+            try:
+                val = await compute_bom_total_unit_cost(item_id_calc)
+                if val and val > 0:
+                    return val
+            except Exception:
+                pass
+            # Fallback to item.unit_cost
+            ci_fallback = await db.items.find_one({"id": item_id_calc}, {"_id": 0})
+            return ci_fallback.get("unit_cost", 0) if ci_fallback else 0
         
         # Smart resolve: completed parts sent as-is, unprocessed parts resolved to RM
         async def smart_resolve(parent_item_id, multiplier, visited=None):
@@ -4056,13 +4078,37 @@ async def create_sc_for_wo(wo_id: str, request: Request):
         # Merge parts and lines into existing SC
         parts = consolidate_sc.get("job_work_parts", [])
         part_found = False
+        # Compute FG process charge once (used if we need to append a new part entry)
+        _fg_charge = 0
+        _bom_rollup = 0
+        _process_names = []
+        try:
+            _bc = await compute_bom_costs(item_id)
+            _fg_charge = _bc.get("fg_process_cost", 0) or 0
+            _bom_rollup = (_bc.get("rm_cost", 0) or 0) + (_bc.get("process_cost", 0) or 0)
+            _process_names = _bc.get("process_names", []) or []
+        except Exception:
+            pass
         for ep in parts:
             if ep.get("item_id") == item_id:
                 ep["quantity"] = ep.get("quantity", 0) + qty
+                # Populate charges from BOM if currently 0 (migration safe)
+                if not ep.get("charges"):
+                    ep["charges"] = _fg_charge
+                if not ep.get("bom_rollup_cost"):
+                    ep["bom_rollup_cost"] = round(_bom_rollup, 2)
+                if not ep.get("process_names") and _process_names:
+                    ep["process_names"] = _process_names
                 part_found = True
                 break
         if not part_found:
-            parts.append({"item_id": item_id, "quantity": qty, "charges": 0, "received_quantity": 0})
+            parts.append({
+                "item_id": item_id, "quantity": qty,
+                "charges": _fg_charge,
+                "bom_rollup_cost": round(_bom_rollup, 2),
+                "process_names": _process_names,
+                "received_quantity": 0
+            })
         
         lines = consolidate_sc.get("lines", [])
         for nl in sc_lines:
@@ -4104,13 +4150,15 @@ async def create_sc_for_wo(wo_id: str, request: Request):
     
     # Create SC order
     sc_count = await db.subcontract_orders.count_documents({})
-    # Pull BOM-based RM cost and process cost for the FG/SA item
+    # Pull BOM-based costs for the FG/SA item
     bom_costs = await compute_bom_costs(item_id)
-    bom_rollup_cost_val = bom_costs["rm_cost"]
-    # Default process charges = BOM process cost (FG parent + component routings)
-    default_process_charges = bom_costs["process_cost"]
+    # For SC (with material) — job_work_parts.charges/pc = FG PARENT ROUTING cost only ("FG Process")
+    # For SC (without material) — same: charges/pc = FG parent routing cost of the item's BOM
+    fg_process_only = bom_costs.get("fg_process_cost", 0) or 0
+    bom_rollup_cost_val = bom_costs["rm_cost"] + bom_costs["process_cost"]  # Total/Unit for reference
+    default_process_charges = fg_process_only
     
-    # Pull previous process charges for this item from latest SC order (override only if BOM has no routing costs)
+    # Pull previous process charges for this item from latest SC order (override only if BOM has no FG routing)
     prev_charges = 0
     if not default_process_charges:
         prev_sc = await db.subcontract_orders.find_one(
