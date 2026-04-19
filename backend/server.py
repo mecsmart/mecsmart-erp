@@ -248,13 +248,16 @@ async def compute_bom_costs(item_id: str, _depth: int = 0, _visited: Optional[se
                 child_costs = await compute_bom_costs(comp["item_id"], _depth + 1, _visited)
                 child_total_unit = (child_costs.get("rm_cost", 0) or 0) + (child_costs.get("process_cost", 0) or 0)
                 rm += comp_qty * child_total_unit
+                # Skip component-line routings — the child's own BOM parent_routings is already
+                # rolled into child_total_unit. Adding comp.routings here would double-count.
             else:
                 # Leaf item (raw material or no BOM) → use items master unit_cost
                 rm += comp_qty * (c_item.get("unit_cost", 0) or 0)
-            comp_proc += routings_total_cost(comp.get("routings", []))
-            for r in normalize_routings(comp.get("routings", [])):
-                if r.get("name") and r["name"] not in names:
-                    names.append(r["name"])
+                # Leaf: component-line routings ARE the source of truth for this item's process.
+                comp_proc += routings_total_cost(comp.get("routings", []))
+                for r in normalize_routings(comp.get("routings", [])):
+                    if r.get("name") and r["name"] not in names:
+                        names.append(r["name"])
         parent_proc = routings_total_cost(bom.get("parent_routings", []))
         strategy1 = {
             "rm_cost": round(rm, 2),
@@ -1055,14 +1058,16 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
             
             comp_data["extended_cost"] = 0  # Will be recalculated after process cost
             
-            # Calculate process cost:
-            # Priority 1a: Sum of costs from BOM component routings (user-defined on parent's line)
-            # Priority 1b: PLUS the child BOM's parent_routings (its own FG Process) if present
-            # Priority 2 (fallback only if 1a/1b are zero): SC orders outsource charges
-            # Priority 3 (fallback): Completed WO operations (inhouse process costs)
-            process_cost_per_unit = routings_total_cost(comp.get("routings", []))
-            if child_fg_process:
-                process_cost_per_unit += child_fg_process
+            # Calculate process cost — ONE source of truth model:
+            #   • If the component has its own BOM → use THAT BOM's parent_routings (child_fg_process).
+            #     Component-line routings on the parent's BOM line are ignored to prevent double counting.
+            #     User edits PT-1's process in ONE place (PT-1's BOM parent_routings) and it flows up.
+            #   • If the component is a leaf (no child BOM) → use component-line routings on parent's line.
+            #   • Fallback: SC order charges, then completed WO actuals.
+            if child_bom:
+                process_cost_per_unit = child_fg_process
+            else:
+                process_cost_per_unit = routings_total_cost(comp.get("routings", []))
             
             if not process_cost_per_unit:
                 # Check SC orders where this item was outsourced (job_work_parts charges)
@@ -6278,6 +6283,44 @@ async def migrate_sc_jw_charges_from_bom():
     except Exception as e:
         logger.exception(f"migrate_sc_jw_charges_from_bom failed: {e}")
 
+async def migrate_sync_component_routings_to_child_bom():
+    """One-time migration: for every BOM component that has both (a) component-line routings
+    AND (b) its own child BOM, copy those routings into the CHILD BOM's parent_routings (if
+    the child's parent_routings is empty or has less cost). Then clear the component-line
+    routings on the parent. This unifies the "one source of truth" model — PT-1's process
+    cost now lives exclusively on PT-1's own BOM parent_routings."""
+    try:
+        all_boms = await db.boms.find({}, {"_id": 0}).to_list(5000)
+        synced = 0
+        for bom in all_boms:
+            changed = False
+            new_components = []
+            for comp in (bom.get("components") or []):
+                comp_routings = comp.get("routings") or []
+                if comp_routings:
+                    child_bom = await db.boms.find_one({"parent_item_id": comp.get("item_id")}, {"_id": 0})
+                    if child_bom:
+                        child_parent_routings = child_bom.get("parent_routings") or []
+                        child_total = routings_total_cost(child_parent_routings)
+                        comp_total = routings_total_cost(comp_routings)
+                        # Only migrate if child has empty OR smaller parent_routings (avoid overwrites)
+                        if comp_total > child_total:
+                            await db.boms.update_one(
+                                {"id": child_bom["id"]},
+                                {"$set": {"parent_routings": normalize_routings(comp_routings)}}
+                            )
+                        # Clear parent's component-line routings — child BOM is now source of truth
+                        comp["routings"] = []
+                        changed = True
+                new_components.append(comp)
+            if changed:
+                await db.boms.update_one({"id": bom["id"]}, {"$set": {"components": new_components}})
+                synced += 1
+        if synced:
+            logger.info(f"Synced component-line routings → child BOM parent_routings on {synced} BOMs")
+    except Exception as e:
+        logger.exception(f"migrate_sync_component_routings_to_child_bom failed: {e}")
+
 # ================== APP SETUP ==================
 
 @app.on_event("startup")
@@ -6303,6 +6346,7 @@ async def startup():
     await seed_admin()
     await seed_sample_data()
     await migrate_operations_status()
+    await migrate_sync_component_routings_to_child_bom()
     await migrate_sc_jw_charges_from_bom()
     
     # Write credentials file (dev environment only, non-fatal on Windows/other OS)

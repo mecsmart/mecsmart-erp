@@ -589,7 +589,25 @@ export default function BOMPage() {
                               <button type="button" onClick={() => removeComponent(index)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"><X className="w-4 h-4" /></button>
                             </div>
                             {/* Routings with per-operation cost (non-RM components only) */}
-                            {comp.item_id && !isRM && (
+                            {comp.item_id && !isRM && (() => {
+                              const childBom = boms.find(b => b.parent_item_id === comp.item_id);
+                              if (childBom) {
+                                // Child has its own BOM — process cost must be set on that BOM's parent_routings.
+                                const childRoutings = childBom.parent_routings || [];
+                                const total = childRoutings.reduce((s, cr) => s + (typeof cr === 'string' ? 0 : (cr.cost || 0)), 0);
+                                const names = childRoutings.map(cr => typeof cr === 'string' ? cr : cr.name).join(', ');
+                                return (
+                                  <div className="pl-1 text-[10px] text-[#6B7280] italic bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 flex items-center justify-between gap-2" data-testid={`comp-${index}-has-child-bom`}>
+                                    <span>
+                                      Process cost is set on <span className="font-semibold text-[#1E429F]">{compItem?.part_number}</span>'s own BOM (Parent Item Routings): <span className="mono">{names || 'none'}</span> = <span className="mono font-semibold">{formatCurrency(total)}</span>
+                                    </span>
+                                    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsDialogOpen(false); setTimeout(() => handleEdit(childBom), 100); }} className="text-[10px] text-[#1D3557] underline hover:no-underline flex items-center gap-0.5" data-testid={`comp-${index}-goto-child-bom`}>
+                                      <Edit2 className="w-3 h-3" />Edit {compItem?.part_number} BOM
+                                    </button>
+                                  </div>
+                                );
+                              }
+                              return (
                               <div className="pl-1 space-y-1">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="text-[10px] font-semibold text-[#6B7280] uppercase">Routings:</span>
@@ -657,7 +675,8 @@ export default function BOMPage() {
                                   </div>
                                 )}
                               </div>
-                            )}
+                              );
+                            })()}
                           </div>
                         );
                       })}
