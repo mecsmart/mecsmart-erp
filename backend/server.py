@@ -4755,7 +4755,15 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             
             # Initialize or append to runs list
             runs = target_op.get("runs", [])
-            planned_qty = min(op_data.quantity_completed or mo_qty, mo_qty)
+            # Prevent over-allocation across parallel operators
+            already_allocated = sum((r.get("quantity_completed") or 0) if r.get("ended_at") else (r.get("quantity_planned") or r.get("quantity_completed") or 0) for r in runs)
+            remaining_to_allocate = max(0, mo_qty - already_allocated)
+            req_qty = op_data.quantity_completed or remaining_to_allocate or mo_qty
+            if remaining_to_allocate <= 0:
+                raise HTTPException(status_code=400, detail=f"Cannot start: all {mo_qty} units are already allocated across operators. Stop/complete existing runs first.")
+            if req_qty > remaining_to_allocate:
+                raise HTTPException(status_code=400, detail=f"Requested quantity {req_qty} exceeds remaining unallocated quantity {remaining_to_allocate}.")
+            planned_qty = req_qty
             run_entry = {
                 "run_number": len(runs) + 1,
                 "operator": op_data.operator.strip(),

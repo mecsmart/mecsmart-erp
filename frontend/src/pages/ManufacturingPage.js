@@ -100,6 +100,19 @@ export default function ManufacturingPage() {
   // Live clock tick for Duration column while a run is active
   const [, setClockTick] = useState(0);
 
+  // Parse backend datetime strings as UTC. MongoDB/FastAPI sometimes return naive ISO
+  // strings (no 'Z' suffix) which the browser would otherwise interpret as LOCAL time,
+  // producing a bogus initial duration equal to the TZ offset (e.g. 330 min for IST).
+  const parseUTC = (s) => {
+    if (!s) return null;
+    if (s instanceof Date) return s;
+    const str = String(s);
+    // Has timezone info already (Z or +HH:MM / -HH:MM at end)?
+    if (/Z$|[+-]\d{2}:?\d{2}$/.test(str)) return new Date(str);
+    // Naive datetime — assume UTC
+    return new Date(str + 'Z');
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -280,12 +293,20 @@ export default function ManufacturingPage() {
   const openOpDialog = (mode, sequence) => {
     const op = jobCardWO?.operations_status?.find(o => o.sequence === sequence);
     const moQty = jobCardWO?.quantity || 0;
-    const totalDone = op?.runs?.reduce((s, r) => s + (r.quantity_completed || 0), 0) || 0;
+    const runs = op?.runs || [];
+    const totalDone = runs.reduce((s, r) => s + (r.quantity_completed || 0), 0);
+    // Allocated = completed (for ended runs) + planned (for still-open runs)
+    const allocated = runs.reduce((s, r) => r.ended_at ? s + (r.quantity_completed || 0) : s + (r.quantity_planned || r.quantity_completed || 0), 0);
     const remaining = moQty - totalDone;
+    const remainingToAllocate = Math.max(0, moQty - allocated);
     const isJW = op?.is_job_work || false;
+    // For Start: default to remaining un-allocated qty so parallel operators can't overbook.
+    // For Stop/Complete: default to what the current run still needs to finish.
+    const defaultStartQty = remainingToAllocate > 0 ? remainingToAllocate : (remaining > 0 ? remaining : moQty);
+    const defaultStopQty = remaining > 0 ? remaining : moQty;
     setOpForm({
-      operator: op?.operator || '',
-      quantity: mode === 'start' ? (remaining > 0 ? remaining : moQty) : (remaining > 0 ? remaining : moQty),
+      operator: mode === 'start' ? '' : (op?.operator || ''),  // blank operator when starting a NEW run
+      quantity: mode === 'start' ? defaultStartQty : defaultStopQty,
       quality_result: 'accept',
       reject_qty: 0,
       rework_qty: 0,
@@ -675,8 +696,8 @@ export default function ManufacturingPage() {
 
       const fmtDt = (iso) => {
         if (!iso) return '-';
-        const d = new Date(iso);
-        if (isNaN(d.getTime())) return '-';
+        const d = parseUTC(iso);
+        if (!d || isNaN(d.getTime())) return '-';
         const dd = String(d.getDate()).padStart(2, '0');
         const mm = String(d.getMonth() + 1).padStart(2, '0');
         const yy = String(d.getFullYear()).slice(-2);
@@ -709,10 +730,11 @@ export default function ManufacturingPage() {
         return runs.map((r, ri) => {
           const s = r?.started_at || r?.actual_start;
           const e = r?.ended_at || r?.actual_end;
+          const ds = parseUTC(s);
+          const de = parseUTC(e);
           let mins = 0;
-          if (s && e) {
-            const ds = new Date(s).getTime(), de = new Date(e).getTime();
-            if (!isNaN(ds) && !isNaN(de)) mins = Math.max(0, (de - ds) / 60000);
+          if (ds && de) {
+            mins = Math.max(0, (de.getTime() - ds.getTime()) / 60000);
           }
           const cost = (mins / 60) * hourly;
           const startStr = s ? fmtDt(s) : '-';
@@ -1421,6 +1443,16 @@ export default function ManufacturingPage() {
                       const totalAccepted = op.quantity_accepted || (totalDone - (op.quantity_rejected || 0) - (op.quantity_rework || 0));
                       const remaining = jobCardWO.quantity - totalDone;
                       const hourlyRate = wc?.hourly_rate || 0;
+                      // Allocated qty across all runs (completed + currently planned-but-open). Used
+                      // to decide if a NEW operator can still take some qty while another is running.
+                      const allocatedQty = runs.reduce((s, r) => {
+                        if (r.ended_at) return s + (r.quantity_completed || 0);
+                        return s + (r.quantity_planned || r.quantity_completed || 0);
+                      }, 0);
+                      const remainingToAllocate = Math.max(0, jobCardWO.quantity - allocatedQty);
+                      const canStartMore = canEdit && !op.is_job_work && remainingToAllocate > 0
+                        && (op.status === 'pending' || op.status === 'stopped' || op.status === 'in_progress')
+                        && prevDone;
 
                       const rowBg = op.status === 'in_progress' ? 'bg-[#FDF6B2]/30' : op.status === 'completed' ? 'bg-[#DEF7EC]/30' : op.status === 'stopped' ? 'bg-[#FDE8E8]/10' : '';
                       const statusBadge = (
@@ -1446,10 +1478,12 @@ export default function ManufacturingPage() {
                       );
 
                       const actionCell = (
-                        <div className="flex items-center justify-center gap-1">
-                          {(op.status === 'pending' || op.status === 'stopped') && prevDone && canEdit && (
+                        <div className="flex items-center justify-center gap-1 flex-wrap">
+                          {/* Start button — visible whenever there is remaining qty to allocate (incl. in_progress) */}
+                          {canStartMore && (
                             <button onClick={() => openOpDialog('start', op.sequence)} className="btn-primary text-xs px-2 py-1" data-testid={`start-op-${op.sequence}`}>
-                              <Play className="w-3 h-3 inline mr-1" />{op.status === 'stopped' ? 'Resume' : 'Start'}
+                              <Play className="w-3 h-3 inline mr-1" />
+                              {op.status === 'stopped' ? 'Resume' : op.status === 'in_progress' ? `Start (${remainingToAllocate} rem)` : 'Start'}
                             </button>
                           )}
                           {op.status === 'in_progress' && !op.is_job_work && canEdit && (
@@ -1479,12 +1513,13 @@ export default function ManufacturingPage() {
                         const e = r?.ended_at || r?.actual_end || r?.end_time;
                         let mins = 0;
                         let running = false;
-                        if (s && e) {
-                          const ds = new Date(s).getTime(), de = new Date(e).getTime();
-                          if (!isNaN(ds) && !isNaN(de)) mins = Math.max(0, (de - ds) / 60000);
-                        } else if (s && !e) {
-                          const ds = new Date(s).getTime();
-                          if (!isNaN(ds)) { mins = Math.max(0, (Date.now() - ds) / 60000); running = true; }
+                        const ds = parseUTC(s);
+                        const de = parseUTC(e);
+                        if (ds && de) {
+                          mins = Math.max(0, (de.getTime() - ds.getTime()) / 60000);
+                        } else if (ds && !de) {
+                          mins = Math.max(0, (Date.now() - ds.getTime()) / 60000);
+                          running = true;
                         }
                         const runCost = (mins / 60) * hourlyRate;
                         const durNode = !mins ? <span className="text-[#9CA3AF]">-</span>
@@ -1626,7 +1661,12 @@ export default function ManufacturingPage() {
                       <input type="number" min="0" step="0.01" value={opForm.outsource_charges} onChange={e => setOpForm({...opForm, outsource_charges: parseFloat(e.target.value) || 0})} className="input-field mono" placeholder="0.00" data-testid="outsource-charges-input" />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity to Send (max: {jobCardWO?.quantity || 0})</label>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity to Send (max: {(() => {
+                        const _op = jobCardWO?.operations_status?.find(o => o.sequence === opDialog.sequence);
+                        const _runs = _op?.runs || [];
+                        const _alloc = _runs.reduce((s, r) => r.ended_at ? s + (r.quantity_completed || 0) : s + (r.quantity_planned || r.quantity_completed || 0), 0);
+                        return Math.max(0, (jobCardWO?.quantity || 0) - _alloc) || (jobCardWO?.quantity || 0);
+                      })()})</label>
                       <input type="number" min="1" max={jobCardWO?.quantity || 1} value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: Math.min(parseInt(e.target.value) || 0, jobCardWO?.quantity || 1)})} className="input-field mono" data-testid="op-qty-input" />
                     </div>
                     <p className="text-xs text-[#723B13] bg-[#FDF6B2]/50 p-2 rounded-sm">A Subcontract Order and Delivery Challan will be auto-created when you start this operation.</p>
@@ -1639,10 +1679,26 @@ export default function ManufacturingPage() {
                       {!opForm.operator.trim() && <p className="text-xs text-[#9B1C1C] mt-1">Operator name is required</p>}
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity to Produce (max: {jobCardWO?.quantity || 0})</label>
-                      <input type="number" min="1" max={jobCardWO?.quantity || 1} value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: Math.min(parseInt(e.target.value) || 0, jobCardWO?.quantity || 1)})} className="input-field mono" data-testid="op-qty-input" />
+                      {(() => {
+                        const _op = jobCardWO?.operations_status?.find(o => o.sequence === opDialog.sequence);
+                        const _runs = _op?.runs || [];
+                        const _alloc = _runs.reduce((s, r) => r.ended_at ? s + (r.quantity_completed || 0) : s + (r.quantity_planned || r.quantity_completed || 0), 0);
+                        const _rem = Math.max(0, (jobCardWO?.quantity || 0) - _alloc);
+                        const _hasOpen = _runs.some(r => !r.ended_at);
+                        return (
+                          <>
+                            <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity to Produce (max: {_rem || jobCardWO?.quantity || 0})</label>
+                            <input type="number" min="1" max={_rem || jobCardWO?.quantity || 1} value={opForm.quantity} onChange={e => setOpForm({...opForm, quantity: Math.min(parseInt(e.target.value) || 0, _rem || jobCardWO?.quantity || 1)})} className="input-field mono" data-testid="op-qty-input" />
+                            {_hasOpen && _rem > 0 && (
+                              <p className="text-[11px] text-[#1E429F] bg-[#E1EFFE]/60 p-2 rounded-sm mt-1">
+                                Another operator is currently running this operation. Starting here will add a parallel run for <strong>{_rem}</strong> remaining unit(s).
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
-                    <p className="text-[11px] text-[#6B7280] italic">Cost/Unit is auto-calculated from the Work Center hourly rate × actual duration when the operation is stopped/completed.</p>
+                    <p className="text-[11px] text-[#6B7280] italic">Cost is auto-calculated from the Work Center hourly rate × actual duration when the operation is stopped/completed.</p>
                   </>
                 )}
               </>
