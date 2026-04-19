@@ -4617,11 +4617,29 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
     if update_data.get("status") == "completed" and wo.get("status") == "in_progress":
         operations = wo.get("operations_status", [])
         mo_qty = wo.get("quantity", 0)
+        is_child_mo = bool(wo.get("parent_wo_id"))
         
-        # Block completion if ANY operation is not completed
-        for op in operations:
-            if op.get("status") != "completed":
-                raise HTTPException(status_code=400, detail=f"Cannot complete: Operation '{op.get('operation_name')}' (Seq {op.get('sequence')}) is not completed yet. Complete all operations via Job Card first.")
+        # Child MOs (Sub-Group / child item MOs) are completed in a single step
+        # without per-operation Job Card tracking. Auto-close any pending/in_progress ops
+        # to keep downstream reports (cost, production tree) consistent.
+        if is_child_mo and operations:
+            now_utc = datetime.now(timezone.utc)
+            for op in operations:
+                if op.get("status") != "completed":
+                    op["status"] = "completed"
+                    op["quantity_completed"] = mo_qty
+                    op["quantity_accepted"] = op.get("quantity_accepted") or mo_qty
+                    if not op.get("actual_start"):
+                        op["actual_start"] = now_utc
+                    op["actual_end"] = now_utc
+                    op["completed_by_direct"] = True
+            update_data["operations_status"] = operations
+        
+        # Block completion if ANY operation is not completed (only enforced for parent MOs)
+        if not is_child_mo:
+            for op in operations:
+                if op.get("status") != "completed":
+                    raise HTTPException(status_code=400, detail=f"Cannot complete: Operation '{op.get('operation_name')}' (Seq {op.get('sequence')}) is not completed yet. Complete all operations via Job Card first.")
         
         # Block completion if subcontracted and materials not received
         if wo.get("is_subcontract"):
@@ -4634,8 +4652,8 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
             if op.get("is_job_work") and op.get("outsource_status") == "sent":
                 raise HTTPException(status_code=400, detail=f"Cannot complete: Outsourced operation '{op.get('operation_name')}' materials not received back. Receive from vendor first.")
         
-        # Block completion if last operation produced less than MO quantity
-        if operations:
+        # Block completion if last operation produced less than MO quantity (skipped for child MOs)
+        if operations and not is_child_mo:
             last_op = operations[-1]
             last_op_qty = last_op.get("quantity_completed", 0)
             if last_op_qty < mo_qty:
@@ -6875,8 +6893,13 @@ async def create_po_from_sc(request: Request, data: dict = Body(...)):
                         "notes": ""
                     })
     
-    po_count = await db.purchase_orders.count_documents({})
     po_number = await get_next_series_number("po_number")
+    # Determine PO status based on SC types:
+    #   - SC with RM (with_material): PO → DRAFT (awaits approval). The supervisor must approve it.
+    #   - SC without RM / Job OS (without_material): PO → APPROVED directly. No RM risk.
+    # If ANY SC in the bundle has RM, entire PO goes to draft (safer).
+    has_with_material = any((sc.get("subcontract_type") == "with_material") for sc in sc_orders)
+    po_status = "draft" if has_with_material else "approved"
     po_doc = {
         "id": str(uuid.uuid4()),
         "po_number": po_number,
@@ -6887,7 +6910,7 @@ async def create_po_from_sc(request: Request, data: dict = Body(...)):
         "subtotal": total_amount,
         "additional_charges": [],
         "total_amount": total_amount,
-        "status": "approved",
+        "status": po_status,
         "notes": f"Auto-created from SC Orders: {', '.join(sc_refs)}",
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
@@ -6899,7 +6922,7 @@ async def create_po_from_sc(request: Request, data: dict = Body(...)):
     for sc_id in sc_order_ids:
         await db.subcontract_orders.update_one({"id": sc_id}, {"$set": {"po_created": True, "po_number": po_number}})
     
-    return {"po_number": po_number, "po_id": po_doc["id"], "total_amount": total_amount}
+    return {"po_number": po_number, "po_id": po_doc["id"], "total_amount": total_amount, "status": po_status}
 
 
 @jobwork_router.get("/challans")

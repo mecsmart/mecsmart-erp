@@ -26,7 +26,7 @@ import { toast } from 'sonner';
 
 export default function WarehousesPage() {
   const { user } = useAuth();
-  const { formatCurrency } = useCompanySettings();
+  const { formatCurrency, currencySymbol } = useCompanySettings();
   const [searchParams, setSearchParams] = useSearchParams();
   const [warehouses, setWarehouses] = useState([]);
   const [transfers, setTransfers] = useState([]);
