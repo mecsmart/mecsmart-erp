@@ -424,12 +424,17 @@ export default function JobWorkPage() {
       <thead><tr><th>Sl. No.</th><th>Part No. &amp; Name</th><th>HSN</th><th class="text-right">Qty</th><th>UOM</th><th class="text-right">Charges/Unit</th><th class="text-right">Total Charges</th><th class="text-right">RM Cost/Unit</th><th class="text-right">Total Amount</th></tr></thead>
       <tbody>
       ${(() => {
-        // Prefer DC line-level values (what was saved at Send DC time). Fall back to SC job_work_parts.
+        // Build Part lookup from SC.job_work_parts so older DC lines (created before
+        // processing_charges was persisted on DC lines) can still show Charges/Unit.
+        const jwByItem = {};
+        (dc.order?.job_work_parts || []).forEach(p => { jwByItem[p.item_id] = p; });
+        // Prefer DC line-level values; fall back to SC job_work_parts by item_id.
         const rows = (dc.lines && dc.lines.length) ? dc.lines.map(l => {
           const it = l.item || items.find(i => i.id === l.item_id) || {};
           const qty = l.quantity || 0;
-          const charges = l.processing_charges || 0;
-          const rmCost = l.rate || 0;
+          const fallback = jwByItem[l.item_id] || {};
+          const charges = l.processing_charges || fallback.charges || 0;
+          const rmCost = l.rate || fallback.bom_rollup_cost || 0;
           return { it, qty, charges, rmCost };
         }) : jwParts.map(p => {
           const pit = p.item || items.find(it => it.id === p.item_id) || {};
@@ -598,7 +603,13 @@ export default function JobWorkPage() {
                             if (!rmList.length) return <span className="text-[#9CA3AF] text-xs italic">No RM</span>;
                             return rmList.map((l, li) => {
                               const it = l.item || items.find(i => i.id === l.item_id);
-                              return <div key={li} className="mb-0.5"><div className="mono text-[11px] font-medium">{it?.part_number || '-'}</div><div className="text-[#4B5563] text-[11px]">{it?.name || ''} ({l.quantity})</div></div>;
+                              const rate = l.rate || 0;
+                              return (
+                                <div key={li} className="mb-0.5">
+                                  <div className="mono text-[11px] font-medium">{it?.part_number || '-'}</div>
+                                  <div className="text-[#4B5563] text-[11px]">{it?.name || ''} ({l.quantity}{rate ? ` @${currencySymbol}${rate.toFixed(2)}` : ''})</div>
+                                </div>
+                              );
                             });
                           })()}</td>
                           <td className="mono">{sentQty}/{totalQty}</td>

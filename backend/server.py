@@ -517,6 +517,7 @@ class JobWorkLineItem(BaseModel):
     item_id: str
     quantity: float
     rate: Optional[float] = 0
+    processing_charges: Optional[float] = 0  # Per-unit processing charge (used on Job Card OS DC lines)
 
 class JobWorkPartItem(BaseModel):
     item_id: str
@@ -6801,48 +6802,23 @@ async def get_subcontract_orders(request: Request, status: str = None):
                     _names = _bc.get("process_names") or []
                     if _names:
                         part["process_names"] = _names
-        # Enrich Job Card OS SCs with aggregated RM list from each Part's BOM, so the
-        # Subcontract Orders UI can show the RMs in the "RM" column (and the DC dialog
-        # can prefill RM lines). Plain MO→SC already has `lines` (RM) filled.
+        # Enrich Job Card OS SCs with the list of Parts (from job_work_parts) — the Part
+        # IS what physically goes to the vendor for the outsource operation. Cost = BOM
+        # rollup (RM cost per Part). This populates the "RM" column on the SC list with
+        # the Part itself, not the underlying raw materials.
         if order.get("subcontract_type") == "without_material" and (order.get("reference_operation_seqs") or order.get("reference_operation_seq")):
-            seen_rm_idx = {}
             rm_agg = []
-            # Pre-fetch RM items (components of each Part's BOM) in a single batch
-            part_item_ids = [jp.get("item_id") for jp in order.get("job_work_parts", []) if jp.get("item_id")]
-            part_boms = {}
-            if part_item_ids:
-                async for pb in db.boms.find({"parent_item_id": {"$in": part_item_ids}, "status": "active"}, {"_id": 0}):
-                    part_boms[pb.get("parent_item_id")] = pb
-            rm_ids_all = set()
-            for pb in part_boms.values():
-                for comp in pb.get("components", []):
-                    if comp.get("item_id"): rm_ids_all.add(comp["item_id"])
-            rm_items_cache = {}
-            if rm_ids_all:
-                async for ri in db.items.find({"id": {"$in": list(rm_ids_all)}}, {"_id": 0}):
-                    rm_items_cache[ri["id"]] = ri
             for jp in order.get("job_work_parts", []):
                 part_qty = float(jp.get("quantity", 0) or 0)
-                part_bom = part_boms.get(jp.get("item_id"))
-                if not part_bom:
-                    continue
-                for comp in part_bom.get("components", []):
-                    rm_id = comp.get("item_id")
-                    if not rm_id:
-                        continue
-                    rm_qty = float(comp.get("quantity", 0) or 0) * part_qty
-                    rm_item = rm_items_cache.get(rm_id) or items_map.get(rm_id)
-                    rm_rate = float((rm_item or {}).get("unit_cost", 0) or 0)
-                    if rm_id in seen_rm_idx:
-                        rm_agg[seen_rm_idx[rm_id]]["quantity"] += rm_qty
-                    else:
-                        seen_rm_idx[rm_id] = len(rm_agg)
-                        rm_agg.append({
-                            "item_id": rm_id,
-                            "item": rm_item,
-                            "quantity": rm_qty,
-                            "rate": rm_rate,
-                        })
+                part_id = jp.get("item_id")
+                part_item = items_map.get(part_id) or (await db.items.find_one({"id": part_id}, {"_id": 0}))
+                rm_rate = float(jp.get("bom_rollup_cost", 0) or 0)
+                rm_agg.append({
+                    "item_id": part_id,
+                    "item": part_item,
+                    "quantity": part_qty,
+                    "rate": rm_rate,
+                })
             order["rm_items"] = rm_agg
     return orders
 
@@ -7213,7 +7189,8 @@ async def create_delivery_challan(data: DCCreate, request: Request):
         dc_lines.append({
             "item_id": line.item_id,
             "quantity": line.quantity,
-            "rate": line.rate or 0
+            "rate": line.rate or 0,
+            "processing_charges": line.processing_charges or 0
         })
         
         # Update sent quantity in order lines
