@@ -299,8 +299,18 @@ export default function JobWorkPage() {
       return s + (l.quantity * (it?.unit_cost || l.rate || 0));
     }, 0);
     
-    const isJobOS = dc.order?.subcontract_type === 'without_material' && (dc.order?.job_work_parts?.length > 0);
-    const dcTitle = isJobOS ? 'Job Work Order Cum Delivery Challan' : 'Delivery Challan';
+    // Rename title based on SC type:
+    //  • "with_material" (SC with RM) → "Job Order Cum Delivery Challan"
+    //  • "without_material" (Job OS — only processing) → "Job Work Order Cum Delivery Challan"
+    //  • Fallback for pure material transfer DCs → "Delivery Challan"
+    const scType = dc.order?.subcontract_type;
+    const hasJobParts = (dc.order?.job_work_parts || []).length > 0;
+    let dcTitle = 'Delivery Challan';
+    if (scType === 'with_material') {
+      dcTitle = 'Job Order Cum Delivery Challan';
+    } else if (scType === 'without_material' && hasJobParts) {
+      dcTitle = 'Job Work Order Cum Delivery Challan';
+    }
     
     const html = `<!DOCTYPE html><html><head><title>${dcTitle} - ${dc.dc_number}</title>
     <style>

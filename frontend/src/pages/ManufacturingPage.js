@@ -898,6 +898,14 @@ export default function ManufacturingPage() {
                   <form onSubmit={handleWorkOrderSubmit} className="space-y-4 mt-4">
                     <div>
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Sales Order *</label>
+                      <input
+                        type="text"
+                        placeholder="Search by item code or name..."
+                        value={workOrderForm.so_search || ''}
+                        onChange={(e) => setWorkOrderForm({ ...workOrderForm, so_search: e.target.value })}
+                        className="input-field mb-2"
+                        data-testid="wo-so-search"
+                      />
                       <Select value={workOrderForm.production_order_id} onValueChange={(v) => {
                         const so = productionOrders.find(po => po.id === v);
                         const soQty = so?.quantity || 1;
@@ -909,11 +917,21 @@ export default function ManufacturingPage() {
                           <SelectValue placeholder="Select sales order" />
                         </SelectTrigger>
                         <SelectContent>
-                          {productionOrders.filter(po => ['confirmed', 'planned'].includes(po.status)).map((po) => {
+                          {productionOrders
+                            .filter(po => ['confirmed', 'planned'].includes(po.status))
+                            .filter(po => {
+                              const q = (workOrderForm.so_search || '').trim().toLowerCase();
+                              if (!q) return true;
+                              const code = (po.item?.part_number || '').toLowerCase();
+                              const name = (po.item?.name || '').toLowerCase();
+                              const order = (po.order_number || '').toLowerCase();
+                              return code.includes(q) || name.includes(q) || order.includes(q);
+                            })
+                            .map((po) => {
                             const balance = po.quantity - (po.mo_qty_created || 0);
                             return (
                               <SelectItem key={po.id} value={po.id} disabled={balance <= 0}>
-                                {po.order_number} - {po.item?.name || 'Unknown'} (Qty: {po.quantity}{balance < po.quantity ? `, Balance: ${balance}` : ''})
+                                <span className="mono text-xs">{po.order_number}</span> — <span className="mono">{po.item?.part_number || '-'}</span> {po.item?.name || 'Unknown'} (Qty: {po.quantity}{balance < po.quantity ? `, Balance: ${balance}` : ''})
                               </SelectItem>
                             );
                           })}

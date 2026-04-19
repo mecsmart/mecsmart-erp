@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { GRNPrintDialog } from '../components/PrintDialogs';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { toast } from 'sonner';
 
 export default function WarehousesPage() {
   const { user } = useAuth();
@@ -74,6 +75,7 @@ export default function WarehousesPage() {
     notes: '',
     lines: [],
   });
+  const [confirmGrnModal, setConfirmGrnModal] = useState({ open: false, kind: null, payload: null, summary: null });
 
   useEffect(() => {
     fetchData();
@@ -223,33 +225,62 @@ export default function WarehousesPage() {
 
   const handleGRNSubmit = async (e) => {
     e.preventDefault();
-    if (!grnForm.supplier_invoice_no.trim()) { alert('Supplier Invoice No. is mandatory'); return; }
-    if (!grnForm.supplier_invoice_date) { alert('Supplier Invoice Date is mandatory'); return; }
-    
-    // Calculate total for confirmation
+    if (!grnForm.supplier_invoice_no.trim()) { toast.error('Supplier Invoice No. is mandatory'); return; }
+    if (!grnForm.supplier_invoice_date) { toast.error('Supplier Invoice Date is mandatory'); return; }
     const totalQty = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0), 0);
     const totalCost = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0) * (l.verified_price || 0), 0);
-    if (totalQty <= 0) { alert('Received quantity must be greater than 0'); return; }
-    
+    if (totalQty <= 0) { toast.error('Received quantity must be greater than 0'); return; }
+    const qtyMismatches = grnForm.lines.filter(l => (l.received_quantity || 0) !== (l.po_quantity || 0));
+    const priceMismatches = grnForm.lines.filter(l => (l.verified_price || 0) !== (l.po_price || 0));
+    const payload = {
+      po_id: selectedPO.id,
+      supplier_invoice_no: grnForm.supplier_invoice_no,
+      supplier_invoice_date: grnForm.supplier_invoice_date ? new Date(grnForm.supplier_invoice_date).toISOString() : null,
+      warehouse_id: grnForm.warehouse_id,
+      notes: grnForm.notes,
+      lines: grnForm.lines.map(l => ({
+        item_id: l.item_id,
+        received_quantity: l.received_quantity,
+        verified_price: l.verified_price,
+      })),
+    };
+    setConfirmGrnModal({
+      open: true,
+      kind: 'po',
+      payload,
+      summary: {
+        title: 'Confirm Goods Receipt',
+        supplier: selectedPO?.supplier?.name || '-',
+        reference: `PO: ${selectedPO?.po_number || '-'}`,
+        invoice: grnForm.supplier_invoice_no,
+        invoiceDate: grnForm.supplier_invoice_date,
+        warehouse: warehouses.find(w => w.id === grnForm.warehouse_id)?.name,
+        totalQty,
+        totalCost,
+        lineCount: grnForm.lines.length,
+        qtyMismatches: qtyMismatches.length,
+        priceMismatches: priceMismatches.length,
+      }
+    });
+  };
+
+  const confirmGRNSave = async () => {
+    const { kind, payload } = confirmGrnModal;
     try {
-      const payload = {
-        po_id: selectedPO.id,
-        supplier_invoice_no: grnForm.supplier_invoice_no,
-        supplier_invoice_date: grnForm.supplier_invoice_date ? new Date(grnForm.supplier_invoice_date).toISOString() : null,
-        warehouse_id: grnForm.warehouse_id,
-        notes: grnForm.notes,
-        lines: grnForm.lines.map(l => ({
-          item_id: l.item_id,
-          received_quantity: l.received_quantity,
-          verified_price: l.verified_price,
-        })),
-      };
-      await api.post('/api/grn', payload);
+      if (kind === 'po') {
+        await api.post('/api/grn', payload);
+        toast.success('Goods receipt confirmed. Stock updated.');
+      } else if (kind === 'jw') {
+        await api.post('/api/job-work/receive-grn', payload);
+        toast.success('JW receipt confirmed. Stock updated for processed items.');
+      }
+      setConfirmGrnModal({ open: false, kind: null, payload: null, summary: null });
       setGrnDialogOpen(false);
       setSelectedPO(null);
+      setSelectedJW(null);
       fetchData();
     } catch (error) {
-      alert(error.response?.data?.detail || 'Failed to create GRN');
+      toast.error(error.response?.data?.detail || 'Failed to create GRN');
     }
   };
 
@@ -282,29 +313,38 @@ export default function WarehousesPage() {
   };
 
   const handleJWGRNSubmit = async () => {
-    if (!grnForm.supplier_invoice_no.trim()) { alert('Supplier Invoice No. is mandatory'); return; }
-    if (!grnForm.supplier_invoice_date) { alert('Invoice Date is mandatory'); return; }
-    if (grnForm.lines.every(l => !l.received_quantity)) { alert('Enter received quantities'); return; }
-    
-    // Calculate total for confirmation
+    if (!grnForm.supplier_invoice_no.trim()) { toast.error('Supplier Invoice No. is mandatory'); return; }
+    if (!grnForm.supplier_invoice_date) { toast.error('Invoice Date is mandatory'); return; }
+    if (grnForm.lines.every(l => !l.received_quantity)) { toast.error('Enter received quantities'); return; }
     const totalQty = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0), 0);
-    if (totalQty <= 0) { alert('Received quantity must be greater than 0'); return; }
-    
-    try {
-      await api.post('/api/job-work/receive-grn', {
-        subcontract_order_id: selectedJW.id,
-        supplier_invoice_no: grnForm.supplier_invoice_no,
-        supplier_invoice_date: grnForm.supplier_invoice_date,
-        lines: grnForm.lines.filter(l => l.received_quantity > 0).map(l => ({
-          item_id: l.item_id,
-          received_quantity: l.received_quantity,
-          process_charges: l.verified_price
-        }))
-      });
-      setGrnDialogOpen(false);
-      setSelectedJW(null);
-      fetchData();
-    } catch (e) { alert(e.response?.data?.detail || 'Failed to create JW GRN'); }
+    const totalCost = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0) * (l.verified_price || 0), 0);
+    if (totalQty <= 0) { toast.error('Received quantity must be greater than 0'); return; }
+    const payload = {
+      subcontract_order_id: selectedJW.id,
+      supplier_invoice_no: grnForm.supplier_invoice_no,
+      supplier_invoice_date: grnForm.supplier_invoice_date,
+      lines: grnForm.lines.filter(l => l.received_quantity > 0).map(l => ({
+        item_id: l.item_id,
+        received_quantity: l.received_quantity,
+        process_charges: l.verified_price,
+      })),
+    };
+    setConfirmGrnModal({
+      open: true,
+      kind: 'jw',
+      payload,
+      summary: {
+        title: 'Confirm Job Work Receipt',
+        supplier: selectedJW?.supplier?.name || '-',
+        reference: `JW: ${selectedJW?.order_number || '-'}`,
+        invoice: grnForm.supplier_invoice_no,
+        invoiceDate: grnForm.supplier_invoice_date,
+        totalQty,
+        totalCost,
+        lineCount: payload.lines.length,
+        isJW: true,
+      }
+    });
   };
 
 
@@ -895,7 +935,7 @@ export default function WarehousesPage() {
                   <thead>
                     <tr>
                       <th>GRN No.</th>
-                      <th>PO No.</th>
+                      <th>PO / DC Number</th>
                       <th>Supplier</th>
                       <th>Supplier Invoice</th>
                       <th>Items Received</th>
@@ -908,7 +948,19 @@ export default function WarehousesPage() {
                     {grnList.map(grn => (
                       <tr key={grn.id} data-testid={`grn-row-${grn.id}`}>
                         <td className="mono font-semibold text-[#03543F]">{grn.grn_number}</td>
-                        <td className="mono">{grn.po_number}</td>
+                        <td className="mono">
+                          {grn.po_number ? (
+                            <div>
+                              <span className="text-[10px] text-[#6B7280] uppercase">PO</span>
+                              <div>{grn.po_number}</div>
+                            </div>
+                          ) : (grn.jw_order_id || grn.sc_order_id) ? (
+                            <div>
+                              {grn.jw_order_number && <div><span className="text-[10px] text-[#723B13] uppercase font-semibold">JW</span> {grn.jw_order_number}</div>}
+                              {grn.dc_number && <div className="text-xs"><span className="text-[10px] text-[#6B7280] uppercase">DC</span> {grn.dc_number}</div>}
+                            </div>
+                          ) : <span className="text-[#9CA3AF]">-</span>}
+                        </td>
                         <td>
                           <span className="mono text-xs">{grn.supplier?.code}</span>
                           <p className="text-sm">{grn.supplier?.name}</p>
@@ -1076,6 +1128,48 @@ export default function WarehousesPage() {
 
       {/* GRN Print Dialog */}
       <GRNPrintDialog grn={printGRN} open={!!printGRN} onClose={() => setPrintGRN(null)} />
+
+      {/* Confirm GRN Modal */}
+      <Dialog open={confirmGrnModal.open} onOpenChange={(o) => { if (!o) setConfirmGrnModal({ open: false, kind: null, payload: null, summary: null }); }}>
+        <DialogContent className="max-w-md" data-testid="confirm-grn-modal">
+          <DialogHeader>
+            <DialogTitle className="font-[Chivo] flex items-center gap-2 text-[#03543F]">
+              <CheckCircle2 className="w-5 h-5" />
+              {confirmGrnModal.summary?.title || 'Confirm Receipt'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-3 space-y-3 text-sm">
+            <p className="text-[#374151]">Please review the receipt details below. Stock will be updated once confirmed.</p>
+            <div className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm p-3 text-xs space-y-1.5">
+              <div className="flex justify-between"><span className="text-[#6B7280]">Supplier:</span><span className="font-semibold text-right">{confirmGrnModal.summary?.supplier}</span></div>
+              <div className="flex justify-between"><span className="text-[#6B7280]">Reference:</span><span className="font-semibold mono text-right">{confirmGrnModal.summary?.reference}</span></div>
+              <div className="flex justify-between"><span className="text-[#6B7280]">Supplier Invoice:</span><span className="font-semibold mono">{confirmGrnModal.summary?.invoice}</span></div>
+              {confirmGrnModal.summary?.invoiceDate && <div className="flex justify-between"><span className="text-[#6B7280]">Invoice Date:</span><span className="font-semibold">{confirmGrnModal.summary?.invoiceDate}</span></div>}
+              {confirmGrnModal.summary?.warehouse && <div className="flex justify-between"><span className="text-[#6B7280]">Warehouse:</span><span className="font-semibold">{confirmGrnModal.summary?.warehouse}</span></div>}
+              <div className="border-t pt-1.5 mt-1.5 flex justify-between"><span className="text-[#6B7280]">Lines:</span><span className="font-semibold mono">{confirmGrnModal.summary?.lineCount}</span></div>
+              <div className="flex justify-between"><span className="text-[#6B7280]">Total Qty:</span><span className="font-semibold mono">{confirmGrnModal.summary?.totalQty}</span></div>
+              <div className="flex justify-between text-sm pt-1"><span className="text-[#111827] font-semibold">Total Value:</span><span className="font-bold mono text-[#03543F]">{currencySymbol}{(confirmGrnModal.summary?.totalCost || 0).toFixed(2)}</span></div>
+            </div>
+            {((confirmGrnModal.summary?.qtyMismatches || 0) > 0 || (confirmGrnModal.summary?.priceMismatches || 0) > 0) && (
+              <div className="bg-[#FDF6B2]/40 border border-[#FDF6B2] rounded-sm p-2.5 text-xs text-[#723B13]">
+                <div className="font-semibold mb-1 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" />Mismatches vs PO</div>
+                {(confirmGrnModal.summary?.qtyMismatches || 0) > 0 && <div>• {confirmGrnModal.summary.qtyMismatches} line(s) with quantity mismatch</div>}
+                {(confirmGrnModal.summary?.priceMismatches || 0) > 0 && <div>• {confirmGrnModal.summary.priceMismatches} line(s) with price mismatch</div>}
+                <div className="mt-1 text-[10px]">These will be recorded and flagged on the GRN print.</div>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-3 mt-4">
+            <button onClick={() => setConfirmGrnModal({ open: false, kind: null, payload: null, summary: null })} className="btn-secondary" data-testid="confirm-grn-cancel">
+              Back to Edit
+            </button>
+            <button onClick={confirmGRNSave} className="bg-[#03543F] hover:bg-[#024733] text-white px-4 py-2 rounded-sm text-sm font-medium flex items-center gap-1" data-testid="confirm-grn-ok">
+              <CheckCircle2 className="w-4 h-4" />
+              Yes, Confirm Receipt
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

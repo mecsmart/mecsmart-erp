@@ -1244,7 +1244,7 @@ async def get_production_orders(request: Request, status: Optional[str] = None):
     query = {}
     if status:
         query["status"] = status
-    orders = await db.production_orders.find(query, {"_id": 0}).to_list(1000)
+    orders = await db.production_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     
     for order in orders:
         bom = await db.boms.find_one({"id": order.get("bom_id")}, {"_id": 0})
@@ -3016,11 +3016,30 @@ async def get_grn_list(request: Request):
         async for it in db.items.find({"id": {"$in": list(item_ids)}}, {"_id": 0}):
             items_map[it["id"]] = it
     
+    # Batch-fetch DCs for JW GRNs
+    dc_ids = {g.get("dc_id") for g in grns if g.get("dc_id")}
+    dcs_map = {}
+    if dc_ids:
+        async for dc in db.delivery_challans.find({"id": {"$in": list(dc_ids)}}, {"_id": 0}):
+            dcs_map[dc["id"]] = dc
+    
     for grn in grns:
         po = pos_map.get(grn.get("po_id"))
         grn["po"] = po
         jw = jws_map.get(grn.get("sc_order_id") or grn.get("jw_order_id"))
         grn["jw_order"] = jw
+        if jw and not grn.get("jw_order_number"):
+            grn["jw_order_number"] = jw.get("order_number")
+        # Enrich DC number for JW GRNs (prefer explicit dc_id; otherwise, fall back to latest sent DC for this SC)
+        dc = dcs_map.get(grn.get("dc_id")) if grn.get("dc_id") else None
+        if not dc and jw:
+            dc = await db.delivery_challans.find_one(
+                {"subcontract_order_id": jw["id"], "status": "sent"},
+                {"_id": 0}, sort=[("created_at", -1)]
+            )
+        grn["dc"] = dc
+        if dc and not grn.get("dc_number"):
+            grn["dc_number"] = dc.get("dc_number")
         supplier_id = (po and po.get("supplier_id")) or (jw and jw.get("supplier_id"))
         grn["supplier"] = suppliers_map.get(supplier_id) if supplier_id else None
         for line in grn.get("lines", []):
