@@ -1045,6 +1045,8 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
             if child_bom:
                 comp_data["child_bom_id"] = child_bom.get("id")
                 comp_data["children"] = await explode_level(child_bom.get("id"), level + 1, max_levels)
+                # Routings column — source from child BOM's parent_routings (single source of truth model)
+                comp_data["routings"] = normalize_routings(child_bom.get("parent_routings", []))
                 # Material Cost (unit_cost column) = children's rolled-up Total × qty ONLY.
                 # The child's own parent_routings (its FG Process) goes into the Process column
                 # below, so that editing a sub-BOM's parent_routings visibly updates the Process
@@ -1053,8 +1055,9 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
                 child_fg_process = routings_total_cost(child_bom.get("parent_routings", []))
                 comp_data["unit_cost"] = children_rollup
             else:
-                # Leaf node - use item unit_cost
+                # Leaf node - use item unit_cost. Routings stay as comp-line routings (for leaves).
                 comp_data["unit_cost"] = item.get("unit_cost", 0) if item else 0
+                comp_data["routings"] = normalize_routings(comp.get("routings", []))
             
             comp_data["extended_cost"] = 0  # Will be recalculated after process cost
             
