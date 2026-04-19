@@ -3185,7 +3185,14 @@ async def get_grn_print_data(grn_id: str, request: Request):
         item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
         line["item"] = item
         if is_jw:
-            # Pull sent qty and rate from the matching DC/SC line for this item
+            # Pull sent qty and rate from matching DC/SC line for this item.
+            # Three strategies:
+            #   1) Match by DC line item_id (works for processing-only JW where the same Part
+            #      was sent and received)
+            #   2) Match by SC-order lines item_id
+            #   3) Match by SC job_work_parts (works for JW WITH RM where the line being received
+            #      is the FG — FG is not in DC/SC.lines but IS in job_work_parts). Sent qty here
+            #      means the qty we expected back; rate means the processing charges per unit.
             _sent_qty = 0
             _rate = 0
             if dc:
@@ -3194,7 +3201,6 @@ async def get_grn_print_data(grn_id: str, request: Request):
                         _sent_qty = dl.get("quantity") or dl.get("sent_quantity") or 0
                         _rate = dl.get("rate") or 0
                         break
-            # Fallback: SC order's lines
             if (_sent_qty == 0 or _rate == 0) and jw_order:
                 for sl in (jw_order.get("lines") or []):
                     if sl.get("item_id") == line.get("item_id"):
@@ -3202,6 +3208,15 @@ async def get_grn_print_data(grn_id: str, request: Request):
                             _sent_qty = sl.get("sent_quantity") or sl.get("quantity") or 0
                         if _rate == 0:
                             _rate = sl.get("rate") or 0
+                        break
+            # Strategy 3 — JW with RM: FG item we receive is in job_work_parts
+            if (_sent_qty == 0 or _rate == 0) and jw_order:
+                for jwp in (jw_order.get("job_work_parts") or []):
+                    if jwp.get("item_id") == line.get("item_id"):
+                        if _sent_qty == 0:
+                            _sent_qty = jwp.get("quantity") or 0
+                        if _rate == 0:
+                            _rate = jwp.get("charges") or 0
                         break
             line["jw_sent_quantity"] = _sent_qty
             line["jw_rate"] = _rate
