@@ -3204,11 +3204,16 @@ async def get_grn_print_data(grn_id: str, request: Request):
     supplier_id = grn.get("supplier_id") or (jw_order.get("supplier_id") if jw_order else None)
     grn["supplier"] = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0}) if supplier_id else None
     
-    # Enrich lines with item info; for JW GRNs replace po_quantity/po_price with DC sent_quantity/rate
+    # Enrich lines with item info; for JW GRNs also surface the stored process_charges as
+    # verified_price so the print template (which is written for PO GRNs) renders correctly.
     for line in grn.get("lines", []):
         item = await db.items.find_one({"id": line.get("item_id")}, {"_id": 0})
         line["item"] = item
         if is_jw:
+            # JW GRN stores `process_charges` (the rate user entered at receiving) — expose it as
+            # `verified_price` so the print template can compare it to the expected jw_rate.
+            if "verified_price" not in line or not line.get("verified_price"):
+                line["verified_price"] = line.get("process_charges", 0) or 0
             # Pull sent qty and rate from matching DC/SC line for this item.
             # Three strategies:
             #   1) Match by DC line item_id (works for processing-only JW where the same Part
