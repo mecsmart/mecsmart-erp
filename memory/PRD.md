@@ -30,11 +30,16 @@
 - 2026-02-18 (iter 60): Two critical fixes from deployed-env inspection: (A) compute_bom_costs cascade — when an item has its OWN BOM (no routings) AND is also a component in another BOM (with routings), Strategy 1 used to shadow Strategy 2 (returning process_cost=0). Now if Strategy 1 has process_cost=0, cascade to Strategy 2 but preserve Strategy 1's rm_cost. Fixes user's PT-2 case. (B) GET /api/work-orders performance — was 6.7s for 425 MOs due to N+1 queries (routings/items/production_orders fetched per-WO). Replaced with 3 batch $in queries → 0.26s (30× faster). Manufacturing page now snappy.
 - 2026-02-18 (iter 61): Three bug fixes + 1 UX: (1) SO Confirm button — removed window.confirm() blocking popup; click = immediate action + sonner toast. (2) GRN Confirm button — same fix for both PO-GRN and JW-GRN forms; added totalQty>0 validation as safety. (3) Job Card page — verified working 100% in preview; user's slow experience was likely stale browser cache. (4) BOM Parent & Component item dropdowns — new SearchableItemSelect component with real-time filter by part_number OR name, category filter support, keyboard nav, and 200-item display cap for perf.
 - 2026-02-18 (iter 62): Four items: (1) SO Cancel button — rewrote handler to avoid bad indentation wrapping try/catch in if/else; now clean toast-based flow. (2) SC with RM edit dialog — added Total column per RM line + Grand Total RM row. (3) GRN list supplier name populated for JW GRNs — backend now resolves supplier from subcontract_orders when sc_order_id present; also batched N+1 queries (PO/JW/supplier/item fetches). (4) Job Card loading — verified 100% working in preview (88 MOs, all open within 2s). User's issue is browser cache on deployed env.
+- 2026-02-19 (iter 63): Two fixes (P0+P1). (P0) React Error #31 white-screen crash on Manufacturing/Job Card — root cause: MO creation stored `operation_name = routing_entry` where routing entries are now `{name, cost}` dicts; React blew up rendering the dict in JSX. Fixed backend MO creation to use normalize_routings() → stores operation_name as plain string + process_cost_per_unit as float. Added one-time startup migration `migrate_operations_status()` that cleaned 267 legacy WOs with dict operation_name. Added defensive frontend guard on `op.operation_name` render. (P1) Purchase Invoice from GRN now supports JW (Job Work) GRNs with process costs. Backend: `/api/purchase-invoices/pending-grns` returns both PO-based and JW-based completed GRNs with `is_jw` flag, `jw_order` enriched. `PurchaseInvoiceLineItem` gained `is_process_charge` + `description` fields. Frontend: PurchaseInvoicePage.js detects JW GRNs, auto-fills lines with `process_charges` as rate, shows yellow "Job Work Invoice" banner, "Processing Charge" badge per line, dynamic label "Processing Charges (from JW GRN)". Tested via testing agent — 17/18 backend + FE passed.
 
 ## BOM
 - Extended Cost = Total/Unit × Qty (material + process)
 - Process cost from SC charges (priority) + WO operations (fallback)
 
 ## Backlog
-- [ ] Purchase Invoice from GRN with process cost
-- [ ] P1: GST Phase 2, P2: Backend refactoring
+- [x] Purchase Invoice from GRN with process cost (iter 63)
+- [ ] P1: GST Phase 2 (GST-compliant invoice generation + tax breakup reports), P2: Backend refactoring (split server.py into routers/models)
+- [ ] P3: GSTR-1/3B report formats + ITC tracking
+- [ ] P4: Barcode/QR scanning for inventory transactions
+- [ ] P5: Gantt chart for work order scheduling
+- [ ] Future: Windows-native desktop wrapper (Electron/Tauri)
