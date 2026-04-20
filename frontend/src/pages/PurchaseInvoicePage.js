@@ -16,6 +16,11 @@ export default function PurchaseInvoicePage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);  // Bulk Tally XML selection
+  // Manual PI toggle — when true, the GRN search/lock is bypassed and user enters everything by hand.
+  const [manualMode, setManualMode] = useState(false);
+  const [grnSearchQuery, setGrnSearchQuery] = useState('');
+  const [suppliers, setSuppliers] = useState([]);
   const [formData, setFormData] = useState({
     supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '',
     lines: []
@@ -28,14 +33,16 @@ export default function PurchaseInvoicePage() {
     setLoading(true);
     try {
       const params = statusFilter ? `?status=${statusFilter}` : '';
-      const [invRes, grnRes, itemRes] = await Promise.all([
+      const [invRes, grnRes, itemRes, supRes] = await Promise.all([
         api.get(`/api/purchase-invoices${params}`),
         api.get('/api/purchase-invoices/pending-grns'),
         api.get('/api/items'),
+        api.get('/api/suppliers'),
       ]);
       setInvoices(invRes.data);
       setPendingGRNs(grnRes.data);
       setItems(itemRes.data);
+      setSuppliers(supRes.data);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, [statusFilter]);
 
@@ -102,12 +109,15 @@ export default function PurchaseInvoicePage() {
   const calcGST = () => formData.lines.reduce((s, l) => s + ((l.quantity * l.unit_price - (l.discount || 0)) * (l.gst_rate || 18) / 100), 0);
 
   const handleSubmit = async () => {
-    if (!formData.grn_id) { alert('Please select a GRN'); return; }
+    // In manual mode, skip GRN check. Still require supplier + invoice_no + at least one line.
+    if (!manualMode && !formData.grn_id) { alert('Please select a GRN (or switch to Manual entry mode)'); return; }
+    if (manualMode && !formData.supplier_id) { alert('Please select a supplier'); return; }
     if (!formData.invoice_no) { alert('Please enter supplier invoice number'); return; }
-    if (formData.lines.length === 0) { alert('No line items'); return; }
+    if (formData.lines.length === 0) { alert('Add at least one line item'); return; }
     try {
       await api.post('/api/purchase-invoices', {
         ...formData,
+        is_manual: manualMode,
         invoice_date: formData.invoice_date ? new Date(formData.invoice_date).toISOString() : new Date().toISOString(),
         due_date: formData.due_date ? new Date(formData.due_date).toISOString() : null,
       });
@@ -117,7 +127,7 @@ export default function PurchaseInvoicePage() {
     } catch (e) { alert(e.response?.data?.detail || 'Failed to create invoice'); }
   };
 
-  const resetForm = () => setFormData({ supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', lines: [] });
+  const resetForm = () => { setFormData({ supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', lines: [] }); setManualMode(false); setGrnSearchQuery(''); };
 
   const handleApprove = async (id) => {
     if (!window.confirm('Approve this invoice?')) return;
@@ -186,14 +196,11 @@ export default function PurchaseInvoicePage() {
   };
 
   const downloadTallyXMLBulk = async () => {
-    const ids = invoices
-      .filter(inv => !invoiceSearch.trim() || [inv.invoice_number, inv.invoice_no, inv.supplier?.name].some(v => (v || '').toLowerCase().includes(invoiceSearch.toLowerCase())))
-      .map(inv => inv.id);
-    if (ids.length === 0) { alert('No invoices to export'); return; }
+    if (selectedIds.length === 0) { alert('Select at least one invoice to export (use the checkboxes).'); return; }
     try {
-      const res = await api.post('/api/purchase-invoices/tally-xml-bulk', { invoice_ids: ids }, { responseType: 'text' });
+      const res = await api.post('/api/purchase-invoices/tally-xml-bulk', { invoice_ids: selectedIds }, { responseType: 'text' });
       const xml = typeof res.data === 'string' ? res.data : await (res.data.text ? res.data.text() : Promise.resolve(String(res.data)));
-      showTallyViewer(xml, `tally_purchase_invoices_${new Date().toISOString().slice(0, 10)}.xml`);
+      showTallyViewer(xml, `tally_purchase_invoices_${new Date().toISOString().slice(0, 10)}_${selectedIds.length}.xml`);
     } catch (e) {
       alert(e.response?.data?.detail || e.message || 'Failed to generate bulk Tally XML');
     }
@@ -219,10 +226,10 @@ export default function PurchaseInvoicePage() {
         </div>
         {canEdit && (
           <div className="flex items-center gap-2">
-            <button onClick={downloadTallyXMLBulk} className="btn-secondary flex items-center space-x-2" data-testid="tally-bulk-export-btn" title="Download all filtered invoices as Tally-compatible XML">
-              <Download className="w-4 h-4" /><span>Tally XML (Bulk)</span>
+            <button onClick={downloadTallyXMLBulk} className="btn-secondary flex items-center space-x-2 disabled:opacity-50" data-testid="tally-bulk-export-btn" disabled={selectedIds.length === 0} title={selectedIds.length === 0 ? 'Select at least one invoice via checkbox' : `Download ${selectedIds.length} selected invoice(s) as Tally XML`}>
+              <Download className="w-4 h-4" /><span>Tally XML ({selectedIds.length})</span>
             </button>
-            <button onClick={() => { resetForm(); setDialogOpen(true); }} className="btn-primary flex items-center space-x-2" data-testid="create-invoice-btn" disabled={pendingGRNs.length === 0} title={pendingGRNs.length === 0 ? 'No pending GRNs to invoice' : ''}>
+            <button onClick={() => { resetForm(); setDialogOpen(true); }} className="btn-primary flex items-center space-x-2" data-testid="create-invoice-btn">
               <Plus className="w-4 h-4" /><span>New Invoice</span>
             </button>
           </div>
@@ -267,15 +274,37 @@ export default function PurchaseInvoicePage() {
         ) : (
           <div className="overflow-x-auto sticky-header-scroll">
             <table className="w-full data-table" data-testid="invoice-table">
-              <thead><tr><th>Invoice #</th><th>Supplier Inv.</th><th>Supplier</th><th>PO Ref</th><th>GRN Ref</th><th>Date</th><th>Due Date</th><th className="text-right">Amount</th><th>Status</th><th>Actions</th></tr></thead>
+              <thead><tr>
+                <th className="w-10 text-center">
+                  <input type="checkbox" data-testid="select-all-invoices" checked={(() => {
+                    const visible = invoices.filter(inv => !invoiceSearch.trim() || [inv.invoice_number, inv.invoice_no, inv.supplier?.name].some(v => (v || '').toLowerCase().includes(invoiceSearch.toLowerCase())));
+                    return visible.length > 0 && visible.every(inv => selectedIds.includes(inv.id));
+                  })()} onChange={(e) => {
+                    const visible = invoices.filter(inv => !invoiceSearch.trim() || [inv.invoice_number, inv.invoice_no, inv.supplier?.name].some(v => (v || '').toLowerCase().includes(invoiceSearch.toLowerCase())));
+                    if (e.target.checked) {
+                      setSelectedIds([...new Set([...selectedIds, ...visible.map(v => v.id)])]);
+                    } else {
+                      const visibleIds = new Set(visible.map(v => v.id));
+                      setSelectedIds(selectedIds.filter(id => !visibleIds.has(id)));
+                    }
+                  }} className="w-4 h-4 accent-[#1D3557] cursor-pointer" />
+                </th>
+                <th>Invoice #</th><th>Supplier Inv.</th><th>Supplier</th><th>PO Ref</th><th>GRN Ref</th><th>Date</th><th>Due Date</th><th className="text-right">Amount</th><th>Status</th><th>Actions</th>
+              </tr></thead>
               <tbody>
                 {invoices.filter(inv => {
                   if (!invoiceSearch.trim()) return true;
                   const q = invoiceSearch.toLowerCase();
                   return inv.invoice_number?.toLowerCase().includes(q) || inv.invoice_no?.toLowerCase().includes(q) || inv.supplier?.name?.toLowerCase().includes(q);
                 }).map(inv => (
-                  <tr key={inv.id} data-testid={`invoice-row-${inv.id}`}>
-                    <td className="mono font-medium">{inv.invoice_number}</td>
+                  <tr key={inv.id} data-testid={`invoice-row-${inv.id}`} className={selectedIds.includes(inv.id) ? 'bg-[#F0FDF4]' : ''}>
+                    <td className="text-center">
+                      <input type="checkbox" data-testid={`select-inv-${inv.id}`} checked={selectedIds.includes(inv.id)} onChange={(e) => {
+                        if (e.target.checked) setSelectedIds([...selectedIds, inv.id]);
+                        else setSelectedIds(selectedIds.filter(id => id !== inv.id));
+                      }} className="w-4 h-4 accent-[#1D3557] cursor-pointer" />
+                    </td>
+                    <td className="mono font-medium">{inv.invoice_number}{inv.is_manual && <span className="ml-1 text-[9px] bg-[#FEF3C7] text-[#723B13] px-1 py-0.5 rounded">MAN</span>}</td>
                     <td className="mono">{inv.invoice_no}</td>
                     <td>{inv.supplier?.name || '-'}</td>
                     <td className="mono text-sm">{inv.po?.po_number || '-'}</td>
@@ -314,33 +343,92 @@ export default function PurchaseInvoicePage() {
       {/* Create Invoice Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="font-[Chivo]">New Purchase Invoice from GRN</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-[Chivo]">{manualMode ? 'Manual Purchase Invoice' : 'New Purchase Invoice from GRN'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3">
-            {/* GRN Selection */}
-            <div className="bg-[#F0F4F8] border border-[#D1D5DB] rounded-sm p-4">
-              <label className="block text-sm font-semibold text-[#111827] mb-2">Select GRN *</label>
-              <Select value={formData.grn_id || undefined} onValueChange={handleGRNSelect}>
-                <SelectTrigger data-testid="inv-grn-select"><SelectValue placeholder="Select a received GRN" /></SelectTrigger>
-                <SelectContent>
-                  {pendingGRNs.map(grn => {
-                    const isJW = !!(grn.is_jw || grn.jw_order_id || grn.sc_order_id);
-                    const ref = isJW ? (grn.jw_order_number || grn.jw_order?.order_number || '-') : (grn.po?.po_number || grn.po_number || '-');
-                    return (
-                      <SelectItem key={grn.id} value={grn.id}>
-                        {grn.grn_number} — {isJW ? 'JW' : 'PO'}: {ref} — {grn.supplier?.name || 'Unknown'}
-                        {grn.lines?.length > 0 && ` (${grn.lines.length} ${isJW ? 'services' : 'items'})`}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-              {pendingGRNs.length === 0 && <p className="text-xs text-[#9B1C1C] mt-1">No GRNs pending invoice. Create a GRN from Stores first.</p>}
+            {/* Mode Toggle */}
+            <div className="flex items-center gap-3 bg-[#F3F4F6] border border-[#D1D5DB] rounded-sm p-2">
+              <button type="button" onClick={() => { setManualMode(false); }} className={`flex-1 text-xs py-1.5 rounded-sm transition-colors ${!manualMode ? 'bg-white border border-[#1D3557] text-[#1D3557] font-semibold shadow-sm' : 'text-[#6B7280] hover:text-[#111827]'}`} data-testid="pi-mode-grn">From GRN (standard)</button>
+              <button type="button" onClick={() => { setManualMode(true); setFormData({ supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', lines: [] }); }} className={`flex-1 text-xs py-1.5 rounded-sm transition-colors ${manualMode ? 'bg-white border border-[#1D3557] text-[#1D3557] font-semibold shadow-sm' : 'text-[#6B7280] hover:text-[#111827]'}`} data-testid="pi-mode-manual">Manual Entry (no GRN)</button>
             </div>
 
-            {formData.grn_id && (
-              <>
-                {/* GRN Type Banner */}
+            {manualMode ? (
+              /* Manual Supplier + info */
+              <div className="bg-[#F0F4F8] border border-[#D1D5DB] rounded-sm p-4 space-y-3">
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-2">Supplier *</label>
+                  <Select value={formData.supplier_id || undefined} onValueChange={(v) => setFormData({ ...formData, supplier_id: v })}>
+                    <SelectTrigger data-testid="manual-pi-supplier"><SelectValue placeholder="Select a supplier..." /></SelectTrigger>
+                    <SelectContent>
+                      {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}{s.gstin ? ` (${s.gstin})` : ''}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-[#723B13] bg-[#FDF6B2] border border-[#FDF6B2] rounded-sm px-3 py-2">
+                  <strong>Manual entry mode:</strong> Use this for invoices not tied to a GRN (freight, services, direct expenses). No stock movement happens. Add line items manually below.
+                </p>
+              </div>
+            ) : (
+              /* GRN Selection with search */
+              <div className="bg-[#F0F4F8] border border-[#D1D5DB] rounded-sm p-4">
+                <label className="block text-sm font-semibold text-[#111827] mb-2">Select GRN *</label>
+                <div className="relative mb-2">
+                  <Search className="w-4 h-4 text-[#9CA3AF] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input type="text" placeholder="Search by GRN #, PO #, JW order # or supplier name..." value={grnSearchQuery} onChange={(e) => setGrnSearchQuery(e.target.value)} className="input-field pl-9" data-testid="grn-search-input" />
+                </div>
                 {(() => {
+                  const q = grnSearchQuery.trim().toLowerCase();
+                  const filtered = pendingGRNs.filter(grn => {
+                    if (!q) return true;
+                    const isJW = !!(grn.is_jw || grn.jw_order_id || grn.sc_order_id);
+                    const ref = isJW ? (grn.jw_order_number || grn.jw_order?.order_number || '') : (grn.po?.po_number || grn.po_number || '');
+                    return [grn.grn_number, ref, grn.supplier?.name].some(v => (v || '').toLowerCase().includes(q));
+                  });
+                  const selected = pendingGRNs.find(g => g.id === formData.grn_id);
+                  if (selected) {
+                    const isJW = !!(selected.is_jw || selected.jw_order_id || selected.sc_order_id);
+                    const ref = isJW ? (selected.jw_order_number || selected.jw_order?.order_number || '-') : (selected.po?.po_number || selected.po_number || '-');
+                    return (
+                      <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-3 py-2" data-testid="grn-selected">
+                        <div className="text-xs">
+                          <span className="mono font-semibold">{selected.grn_number}</span>
+                          <span className="mx-2">—</span>
+                          <span className="text-[#6B7280]">{isJW ? 'JW' : 'PO'}: <span className="mono">{ref}</span></span>
+                          <span className="mx-2">·</span>
+                          <span>{selected.supplier?.name}</span>
+                          {selected.lines?.length > 0 && <span className="ml-2 text-[#6B7280]">({selected.lines.length} {isJW ? 'services' : 'items'})</span>}
+                        </div>
+                        <button type="button" className="text-xs text-[#9B1C1C] hover:underline" onClick={() => { setFormData({ supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', lines: [] }); setGrnSearchQuery(''); }} data-testid="grn-clear">Clear</button>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="border border-[#E5E7EB] rounded-sm max-h-56 overflow-auto bg-white" data-testid="grn-list">
+                      {filtered.length === 0 && (<div className="px-3 py-4 text-center text-xs text-[#6B7280]">{pendingGRNs.length === 0 ? 'No GRNs pending invoice. Create a GRN from Stores first.' : 'No matching GRNs.'}</div>)}
+                      {filtered.slice(0, 200).map(grn => {
+                        const isJW = !!(grn.is_jw || grn.jw_order_id || grn.sc_order_id);
+                        const ref = isJW ? (grn.jw_order_number || grn.jw_order?.order_number || '-') : (grn.po?.po_number || grn.po_number || '-');
+                        return (
+                          <button key={grn.id} type="button" onClick={() => handleGRNSelect(grn.id)} data-testid={`grn-option-${grn.id}`} className="w-full text-left px-3 py-2 text-xs border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]">
+                            <span className="mono font-semibold">{grn.grn_number}</span>
+                            <span className="mx-2 text-[#6B7280]">—</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${isJW ? 'bg-[#FDF6B2] text-[#723B13]' : 'bg-[#E1EFFE] text-[#1E429F]'}`}>{isJW ? 'JW' : 'PO'}</span>
+                            <span className="ml-2 mono">{ref}</span>
+                            <span className="mx-2">·</span>
+                            <span>{grn.supplier?.name || 'Unknown'}</span>
+                            {grn.lines?.length > 0 && <span className="ml-2 text-[#6B7280]">({grn.lines.length} {isJW ? 'services' : 'items'})</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {(formData.grn_id || manualMode) && (
+              <>
+                {/* GRN Type Banner (only in GRN mode) */}
+                {!manualMode && (() => {
                   const g = pendingGRNs.find(x => x.id === formData.grn_id);
                   const isJW = !!(g?.is_jw || g?.jw_order_id || g?.sc_order_id);
                   return isJW ? (
@@ -354,7 +442,8 @@ export default function PurchaseInvoicePage() {
                   );
                 })()}
 
-                {/* Auto-filled info */}
+                {/* Auto-filled supplier info (GRN mode only) */}
+                {!manualMode && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier</label>
@@ -378,6 +467,7 @@ export default function PurchaseInvoicePage() {
                     </div>
                   </div>
                 </div>
+                )}
 
                 <div className="grid grid-cols-3 gap-4">
                   <div>
@@ -421,9 +511,28 @@ export default function PurchaseInvoicePage() {
                           return (
                             <tr key={idx} className="border-t">
                               <td className="py-1 px-2">
-                                <div className="text-xs"><span className="mono font-medium">{it?.part_number || '-'}</span> {it?.name || ''}</div>
-                                {line.is_process_charge && <div className="text-[10px] text-[#723B13] bg-[#FDF6B2] inline-block px-1 rounded mt-0.5" data-testid={`inv-line-process-${idx}`}>Processing Charge</div>}
-                                {line.description && <div className="text-[10px] text-[#6B7280] italic truncate max-w-[240px]" title={line.description}>{line.description}</div>}
+                                {manualMode ? (
+                                  <select value={line.item_id || ''} onChange={e => {
+                                    const picked = items.find(i => i.id === e.target.value);
+                                    updateLine(idx, 'item_id', e.target.value);
+                                    if (picked) {
+                                      updateLine(idx, 'unit_price', picked.purchase_price || picked.unit_cost || 0);
+                                      updateLine(idx, 'gst_rate', picked.gst_rate || 18);
+                                      updateLine(idx, 'hsn_code', picked.hsn_code || '');
+                                    }
+                                  }} className="w-full px-2 py-1 border rounded-sm text-xs" data-testid={`manual-pi-line-item-${idx}`}>
+                                    <option value="">Select item...</option>
+                                    {items.map(i => <option key={i.id} value={i.id}>{i.part_number} — {i.name}</option>)}
+                                  </select>
+                                ) : (
+                                  <>
+                                    <div className="text-xs"><span className="mono font-medium">{it?.part_number || '-'}</span> {it?.name || ''}</div>
+                                    {line.is_process_charge && <div className="text-[10px] text-[#723B13] bg-[#FDF6B2] inline-block px-1 rounded mt-0.5" data-testid={`inv-line-process-${idx}`}>Processing Charge</div>}
+                                  </>
+                                )}
+                                {line.description !== undefined && (
+                                  <input type="text" placeholder="Description (optional)" value={line.description || ''} onChange={e => updateLine(idx, 'description', e.target.value)} className="w-full mt-1 px-2 py-0.5 border rounded-sm text-[10px] italic" />
+                                )}
                               </td>
                               <td className="py-1 px-2"><input type="number" min="0" value={line.quantity} onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
                               <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={line.unit_price} onChange={e => updateLine(idx, 'unit_price', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
@@ -459,7 +568,7 @@ export default function PurchaseInvoicePage() {
 
             <div className="flex justify-end space-x-3 pt-3 border-t">
               <button onClick={() => setDialogOpen(false)} className="btn-secondary">Cancel</button>
-              <button onClick={handleSubmit} className="btn-primary" disabled={!formData.grn_id} data-testid="inv-save-btn">Create Invoice</button>
+              <button onClick={handleSubmit} className="btn-primary" disabled={manualMode ? !formData.supplier_id : !formData.grn_id} data-testid="inv-save-btn">Create Invoice</button>
             </div>
           </div>
         </DialogContent>

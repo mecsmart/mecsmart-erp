@@ -290,128 +290,33 @@ export default function UserManagementPage() {
                   <label className="text-sm font-medium text-[#374151]">{editingUser ? 'New Password (leave blank to keep)' : 'Password *'}</label>
                   <input type="password" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder={editingUser ? 'Leave blank to keep current' : ''} data-testid="user-password-input" />
                 </div>
-                <div>
-                  <label className="text-sm font-medium text-[#374151]">Role *</label>
-                  <Select value={formData.role} onValueChange={v => {
-                    const newPerms = permsTouched ? formData.permissions : (modulesData?.default_permissions?.[v] || {});
-                    setFormData({ ...formData, role: v, permissions: newPerms });
-                  }}>
-                    <SelectTrigger data-testid="user-role-select"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {ROLES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {roleGroups.length > 0 && (
-                  <div className="col-span-2">
-                    <label className="text-sm font-medium text-[#374151]">Role Group (optional)</label>
-                    <Select value={formData.role_group_id || '__none__'} onValueChange={v => setFormData({ ...formData, role_group_id: v === '__none__' ? '' : v })}>
-                      <SelectTrigger data-testid="user-group-select"><SelectValue placeholder="— No group —" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">— No group —</SelectItem>
-                        {roleGroups.map(g => (
-                          <SelectItem key={g.id} value={g.id}>
-                            {g.name}{g.is_admin_group ? ' (Admin Group)' : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-[11px] text-[#6B7280] mt-1">Mapping a user to a group overrides the individual permissions above. Admin Group members see BOM rollup costs.</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Access Rights — per-module granular permissions */}
-              <div className="pt-3 border-t border-[#E5E7EB]">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <h3 className="text-sm font-semibold text-[#1D3557]">Access Rights</h3>
-                    <p className="text-xs text-[#6B7280]">Tick each action per sub-module. Read = View, Write = Edit existing record.</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn-secondary text-xs"
-                    onClick={() => {
-                      const defaults = modulesData?.default_permissions?.[formData.role] || {};
-                      setFormData({ ...formData, permissions: JSON.parse(JSON.stringify(defaults)) });
-                      setPermsTouched(false);
-                    }}
-                    data-testid="perms-reset-defaults-btn"
-                  >
-                    <Key className="w-3 h-3 inline mr-1" />Reset to Role Defaults
-                  </button>
-                </div>
-
-                <div className="border rounded-sm overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-[#F3F4F6] text-[#4B5563]">
-                        <th className="text-left py-2 px-3 text-xs font-semibold uppercase">Main Module / Sub-module</th>
-                        {['view','create','edit','delete'].map(a => (
-                          <th key={a} className="text-center py-2 px-2 text-xs font-semibold uppercase w-20">{ACTION_LABELS[a]}</th>
-                        ))}
-                        <th className="text-center py-2 px-2 text-xs font-semibold uppercase w-16">All</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {MODULE_GROUPS.map(grp => (
-                        <React.Fragment key={grp.main}>
-                          <tr className="bg-[#F9FAFB]">
-                            <td colSpan={6} className="py-1.5 px-3 text-[11px] font-semibold text-[#374151] uppercase tracking-wide">{grp.main}</td>
-                          </tr>
-                          {grp.subs.map(sub => {
-                            const modulePerms = formData.permissions?.[sub.key] || [];
-                            const moduleActions = (modulesData?.module_actions || {})[sub.key] || ['view','create','edit','delete'];
-                            const hasAll = moduleActions.every(a => modulePerms.includes(a));
-                            return (
-                              <tr key={sub.key} className="border-t hover:bg-[#F9FAFB]">
-                                <td className="py-1.5 px-3 pl-6 text-[13px] text-[#111827]">{sub.label}</td>
-                                {['view','create','edit','delete'].map(a => (
-                                  <td key={a} className="text-center py-1.5 px-2">
-                                    {moduleActions.includes(a) ? (
-                                      <input
-                                        type="checkbox"
-                                        checked={modulePerms.includes(a)}
-                                        onChange={e => {
-                                          const current = [...(formData.permissions?.[sub.key] || [])];
-                                          const next = e.target.checked ? [...new Set([...current, a])] : current.filter(x => x !== a);
-                                          setFormData({ ...formData, permissions: { ...formData.permissions, [sub.key]: next } });
-                                          setPermsTouched(true);
-                                        }}
-                                        data-testid={`perm-${sub.key}-${a}`}
-                                        className="w-4 h-4 accent-[#1D3557] cursor-pointer"
-                                      />
-                                    ) : (
-                                      <span className="text-[#D1D5DB]">—</span>
-                                    )}
-                                  </td>
-                                ))}
-                                <td className="text-center py-1.5 px-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={hasAll}
-                                    onChange={e => {
-                                      const next = e.target.checked ? [...moduleActions] : [];
-                                      setFormData({ ...formData, permissions: { ...formData.permissions, [sub.key]: next } });
-                                      setPermsTouched(true);
-                                    }}
-                                    data-testid={`perm-${sub.key}-all`}
-                                    className="w-4 h-4 accent-[#1D3557] cursor-pointer"
-                                  />
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </React.Fragment>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="col-span-2">
+                  <label className="text-sm font-medium text-[#374151]">Role Group *</label>
+                  {roleGroups.length === 0 ? (
+                    <div className="mt-1 px-3 py-3 border border-[#F59E0B] bg-[#FEF3C7] rounded-sm text-xs text-[#723B13]">
+                      <strong>No role groups exist yet.</strong> Go to the <em>Role Groups</em> tab and create at least one group (e.g. "Production Admin", "Purchase User") before adding users. Permissions are defined at the group level.
+                    </div>
+                  ) : (
+                    <>
+                      <Select value={formData.role_group_id || ''} onValueChange={v => setFormData({ ...formData, role_group_id: v })}>
+                        <SelectTrigger data-testid="user-group-select"><SelectValue placeholder="Select role group..." /></SelectTrigger>
+                        <SelectContent>
+                          {roleGroups.map(g => (
+                            <SelectItem key={g.id} value={g.id}>
+                              {g.name}{g.is_admin_group ? ' (Admin Group)' : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-[#6B7280] mt-1">Permissions are defined at the role group level. Admin Group members see BOM rollup costs.</p>
+                    </>
+                  )}
                 </div>
               </div>
 
-              <div className="flex justify-end space-x-2 pt-2 border-t border-[#E5E7EB]">
+              <div className="flex justify-end space-x-2 pt-4 border-t border-[#E5E7EB]">
                 <button className="btn-secondary" onClick={() => { setIsCreateOpen(false); setEditingUser(null); }}>Cancel</button>
-                <button className="btn-primary" onClick={editingUser ? handleUpdate : handleCreate} data-testid="save-user-btn">
+                <button className="btn-primary" onClick={editingUser ? handleUpdate : handleCreate} data-testid="save-user-btn" disabled={roleGroups.length === 0 || !formData.role_group_id}>
                   {editingUser ? 'Update' : 'Create'} User
                 </button>
               </div>
@@ -428,8 +333,7 @@ export default function UserManagementPage() {
               <tr>
                 <th>Name</th>
                 <th>Email</th>
-                <th>Role</th>
-                <th>Group</th>
+                <th>Role Group</th>
                 <th>Status</th>
                 <th>Created</th>
                 <th>Actions</th>
@@ -440,11 +344,6 @@ export default function UserManagementPage() {
                 <tr key={u.id} data-testid={`user-row-${u.email}`}>
                   <td className="font-medium text-[#1D3557]">{u.name}</td>
                   <td className="mono text-sm">{u.email}</td>
-                  <td>
-                    <span className={`status-badge ${getRoleColor(u.role)}`}>
-                      {ROLES.find(r => r.value === u.role)?.label || u.role}
-                    </span>
-                  </td>
                   <td className="text-sm">
                     {(() => {
                       const g = roleGroups.find(x => x.id === u.role_group_id);
@@ -462,9 +361,6 @@ export default function UserManagementPage() {
                   </td>
                   <td>
                     <div className="flex items-center space-x-1">
-                      <button onClick={() => openPermissions(u)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Permissions" data-testid={`perm-user-${u.email}`}>
-                        <Shield className="w-4 h-4" />
-                      </button>
                       <button onClick={() => handleEdit(u)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`edit-user-${u.email}`}>
                         <Edit2 className="w-4 h-4" />
                       </button>

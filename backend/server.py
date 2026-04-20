@@ -63,9 +63,9 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     name: str
-    role: str = "inventory_manager"
+    role: str = "user"  # legacy field — real permissions now come from role_group_id
     permissions: Optional[dict] = None
-    role_group_id: Optional[str] = None
+    role_group_id: str  # REQUIRED — all users must be mapped to a group
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
@@ -552,6 +552,7 @@ class PurchaseInvoiceCreate(BaseModel):
     due_date: Optional[datetime] = None
     lines: List[PurchaseInvoiceLineItem]
     notes: Optional[str] = ""
+    is_manual: Optional[bool] = False  # Manual PI — no parent GRN, direct entry (services, freight etc.)
 
 class PurchaseInvoiceUpdate(BaseModel):
     invoice_no: Optional[str] = None
@@ -6916,6 +6917,7 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request)
         "supplier_id": data.supplier_id,
         "po_id": data.po_id or "",
         "grn_id": data.grn_id or "",
+        "is_manual": bool(data.is_manual),
         "invoice_no": data.invoice_no,
         "invoice_date": data.invoice_date,
         "due_date": data.due_date,
