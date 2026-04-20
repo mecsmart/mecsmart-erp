@@ -446,7 +446,7 @@ export default function ItemsPage() {
             <p>No items found</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto sticky-header-scroll">
             <table className="w-full data-table" data-testid="items-table">
               <thead>
                 <tr>

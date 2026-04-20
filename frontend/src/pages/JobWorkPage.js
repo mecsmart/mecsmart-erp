@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
-import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, FileText, Edit2, Printer, AlertCircle } from 'lucide-react';
+import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, FileText, Edit2, Printer, AlertCircle, ChevronDown } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -18,6 +18,8 @@ export default function JobWorkPage() {
   const [warehouses, setWarehouses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('orders');
+  // Collapsible section state — Subcontract Orders open by default; others closed.
+  const [sectionsOpen, setSectionsOpen] = useState({ orders: true, challans: false, receipts: false });
 
   // Order dialog
   const [orderDialog, setOrderDialog] = useState(false);
@@ -552,15 +554,16 @@ export default function JobWorkPage() {
         <div className="card-flat p-4"><p className="kpi-label">Processing Charges</p><p className="kpi-value">{formatCurrency(orders.reduce((s, o) => s + (o.processing_charges || 0), 0))}</p></div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="orders">Subcontract Orders</TabsTrigger>
-          <TabsTrigger value="challans" data-testid="challans-tab">Delivery Challans</TabsTrigger>
-          <TabsTrigger value="receipts" data-testid="receipts-tab">Receipts</TabsTrigger>
-        </TabsList>
-
-        {/* Orders Tab */}
-        <TabsContent value="orders" className="mt-4">
+      {/* Collapsible sections (user-requested accordion layout). Each section can be
+          expanded/collapsed independently; default = orders open, others closed. */}
+      <div className="space-y-3">
+        {/* Subcontract Orders */}
+        <details className="card-flat" open={activeTab === 'orders' || sectionsOpen.orders} onToggle={(e) => setSectionsOpen(s => ({ ...s, orders: e.target.open }))}>
+          <summary className="cursor-pointer px-4 py-3 flex items-center justify-between hover:bg-[#F9FAFB] select-none font-semibold text-[#111827] rounded-sm">
+            <span className="flex items-center gap-2"><Truck className="w-4 h-4 text-[#1D3557]" /> Subcontract Orders <span className="text-xs text-[#6B7280] font-normal">({orders.length})</span></span>
+            <ChevronDown className="w-4 h-4 text-[#6B7280] details-chevron" />
+          </summary>
+          <div className="px-4 pb-4">
           <div className="flex justify-end mb-4">
             {canEdit && <button onClick={() => setOrderDialog(true)} className="btn-primary flex items-center space-x-2" data-testid="create-jw-order-btn"><Plus className="w-4 h-4" /><span>New Subcontract Order</span></button>}
           </div>
@@ -568,7 +571,7 @@ export default function JobWorkPage() {
             {orders.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><Truck className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No subcontract orders</p></div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="jw-orders-table">
                   <thead><tr>
                     <th style={{width:'90px'}}>Order #</th>
@@ -676,15 +679,21 @@ export default function JobWorkPage() {
               </div>
             )}
           </div>
-        </TabsContent>
+          </div>
+        </details>
 
-        {/* Challans Tab */}
-        <TabsContent value="challans" className="mt-4">
+        {/* Delivery Challans */}
+        <details className="card-flat" open={sectionsOpen.challans} onToggle={(e) => setSectionsOpen(s => ({ ...s, challans: e.target.open }))}>
+          <summary className="cursor-pointer px-4 py-3 flex items-center justify-between hover:bg-[#F9FAFB] select-none font-semibold text-[#111827] rounded-sm">
+            <span className="flex items-center gap-2"><FileText className="w-4 h-4 text-[#1D3557]" /> Delivery Challans <span className="text-xs text-[#6B7280] font-normal">({challans.length})</span></span>
+            <ChevronDown className="w-4 h-4 text-[#6B7280] details-chevron" />
+          </summary>
+          <div className="px-4 pb-4">
           <div className="card-flat overflow-hidden">
             {challans.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><FileText className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No delivery challans</p></div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="challans-table">
                   <thead><tr><th>DC #</th><th>Order #</th><th>FG/SA/Part</th><th>Supplier</th><th>Items</th><th className="text-right">RM Price</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
                   <tbody>
@@ -741,15 +750,21 @@ export default function JobWorkPage() {
               </div>
             )}
           </div>
-        </TabsContent>
+          </div>
+        </details>
 
-        {/* Receipts Tab */}
-        <TabsContent value="receipts" className="mt-4">
+        {/* Receipts */}
+        <details className="card-flat" open={sectionsOpen.receipts} onToggle={(e) => setSectionsOpen(s => ({ ...s, receipts: e.target.open }))}>
+          <summary className="cursor-pointer px-4 py-3 flex items-center justify-between hover:bg-[#F9FAFB] select-none font-semibold text-[#111827] rounded-sm">
+            <span className="flex items-center gap-2"><Package className="w-4 h-4 text-[#1D3557]" /> Receipts <span className="text-xs text-[#6B7280] font-normal">({receipts.length})</span></span>
+            <ChevronDown className="w-4 h-4 text-[#6B7280] details-chevron" />
+          </summary>
+          <div className="px-4 pb-4">
           <div className="card-flat overflow-hidden">
             {receipts.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><Package className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No receipts</p></div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="receipts-table">
                   <thead><tr><th>Receipt #</th><th>Order #</th><th>Supplier</th><th>Items</th><th>Accepted</th><th>Rejected</th><th>Date</th></tr></thead>
                   <tbody>
@@ -769,8 +784,9 @@ export default function JobWorkPage() {
               </div>
             )}
           </div>
-        </TabsContent>
-      </Tabs>
+          </div>
+        </details>
+      </div>
 
       {/* Create Order Dialog */}
       <Dialog open={orderDialog} onOpenChange={setOrderDialog}>

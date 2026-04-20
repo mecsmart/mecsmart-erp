@@ -580,20 +580,6 @@ export default function WarehousesPage() {
           >
             Warehouses
           </TabsTrigger>
-          <TabsTrigger 
-            value="transfers" 
-            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
-            data-testid="tab-transfers"
-          >
-            Transfer History
-          </TabsTrigger>
-          <TabsTrigger 
-            value="grn" 
-            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
-            data-testid="tab-grn"
-          >
-            GRN
-          </TabsTrigger>
         </TabsList>
 
         {/* Stock Tab - Inventory Overview */}
@@ -610,7 +596,7 @@ export default function WarehousesPage() {
             ) : inventory.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><Package className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No stock items found</p></div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="stores-stock-table">
                   <thead>
                     <tr>
@@ -773,7 +759,7 @@ export default function WarehousesPage() {
                 <p>No transfers recorded yet</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="transfers-table">
                   <thead>
                     <tr>
@@ -827,7 +813,7 @@ export default function WarehousesPage() {
                   <ClipboardCheck className="w-4 h-4" /> Pending POs for GRN
                 </h3>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="pending-grn-table">
                   <thead>
                     <tr>
@@ -872,7 +858,7 @@ export default function WarehousesPage() {
                 </h3>
                 <p className="text-xs text-[#6B7280] mt-1">Receive processed materials from subcontractors</p>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="pending-jw-grn-table">
                   <thead>
                     <tr>
@@ -930,7 +916,7 @@ export default function WarehousesPage() {
                 <p className="text-xs text-[#9CA3AF] mt-1">GRN entries appear here after material verification from sent POs</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="grn-table">
                   <thead>
                     <tr>

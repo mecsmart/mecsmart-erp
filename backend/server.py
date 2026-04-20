@@ -692,6 +692,8 @@ class CompanySettingsUpdate(BaseModel):
     tagline: Optional[str] = None
     primary_currency: Optional[str] = None
     secondary_currency: Optional[str] = None
+    # Default Terms & Conditions printed on every Purchase Order. Multi-line string.
+    po_terms_conditions: Optional[str] = None
 
 class CustomerCreate(BaseModel):
     code: Optional[str] = ""  # Auto-generated from number series if blank

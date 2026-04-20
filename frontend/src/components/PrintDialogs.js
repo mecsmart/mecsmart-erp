@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../context/AuthContext';
+import { useCompanySettings } from '../context/CompanySettingsContext';
 import { Printer, Eye, Settings2, FileText, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -51,9 +52,20 @@ const defaultOpts = {
 };
 
 export function POPrintDialog({ po, open, onClose }) {
+  const companySettings = useCompanySettings();
+  const defaultTerms = companySettings?.po_terms_conditions || '';
   const [opts, setOpts] = useState({ ...defaultOpts });
   const [printData, setPrintData] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // When the dialog opens and company-settings default T&C are available, pre-fill
+  // termsText IF the user hasn't already entered/edited anything for this session.
+  useEffect(() => {
+    if (open && defaultTerms && !opts.termsText) {
+      setOpts(o => ({ ...o, termsText: defaultTerms }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaultTerms]);
 
   useEffect(() => {
     if (open && po) {

@@ -105,6 +105,29 @@ code, .mono {
   @apply bg-[#F3F4F6] text-[#4B5563] text-xs font-semibold uppercase tracking-wider py-2 px-3 border-b border-[#E5E7EB];
 }
 
+/* Sticky-header wrapper: use on the overflow container that wraps the table */
+.sticky-header-scroll {
+  @apply overflow-auto;
+  max-height: calc(100vh - 280px);
+}
+
+.sticky-header-scroll table thead th,
+.sticky-header-scroll table thead tr,
+.sticky-header thead th,
+.sticky-header thead tr {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background-color: #F3F4F6;
+  box-shadow: 0 1px 0 #E5E7EB;
+}
+
+/* Collapsible details summary styling (remove default marker + rotate chevron) */
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary .details-chevron { transition: transform 180ms ease; }
+details[open] > summary .details-chevron { transform: rotate(180deg); }
+
 .data-table td {
   @apply py-2 px-3 text-sm text-[#111827] border-b border-[#E5E7EB];
 }

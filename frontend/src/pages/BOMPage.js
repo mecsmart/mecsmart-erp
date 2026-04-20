@@ -781,7 +781,11 @@ export default function BOMPage() {
                   const cat = item.category || '';
                   const key = `${parentKey}-${idx}`;
                   const hasChildren = node.children && node.children.length > 0;
-                  const isExpanded = expandedItems[key] !== false;
+                  // Default collapsed for sub-assemblies / sub-trees (level > 0). Level 0 (the
+                  // FG/root) stays expanded so the user can see the top-level components.
+                  const isExpanded = expandedItems[key] !== undefined
+                    ? expandedItems[key]
+                    : (level === 0);
                   
                   rows.push({
                     key,
@@ -858,6 +862,7 @@ export default function BOMPage() {
                     </div>
                     
                     {/* Explosion Table */}
+                    <div className="sticky-header-scroll">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-[#F3F4F6] text-[#374151] text-xs uppercase">
@@ -924,6 +929,7 @@ export default function BOMPage() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                     
                     {/* Other revisions */}
                     {group.boms.length > 1 && (

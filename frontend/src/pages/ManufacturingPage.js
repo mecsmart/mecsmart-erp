@@ -1188,7 +1188,7 @@ export default function ManufacturingPage() {
                           {parentMO.is_subcontract && <span className="text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">Sub-Contract</span>}
                           <span className="text-xs text-[#6B7280] ml-auto">{1 + children.length} MO(s)</span>
                         </summary>
-                        <div className="overflow-x-auto">
+                        <div className="overflow-x-auto sticky-header-scroll">
                           <table className="w-full data-table"><thead><tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
                           <tbody>{renderMORow(parentMO, 0)}</tbody></table>
                         </div>
