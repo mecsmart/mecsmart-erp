@@ -4,7 +4,7 @@ import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import {
   Plus, Edit2, Trash2, MessageSquare, UserCheck, AlertTriangle, Clock,
-  Megaphone, Headphones, X, Search, CheckCircle2, XCircle
+  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -56,27 +56,34 @@ export default function CRMPage() {
   const [activeTab, setActiveTab] = useState('marketing');
   const [leads, setLeads] = useState([]);
   const [tickets, setTickets] = useState([]);
+  const [quotations, setQuotations] = useState([]);
+  const [items, setItems] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [users, setUsers] = useState([]);
   const [search, setSearch] = useState('');
+  const [quotationFromLead, setQuotationFromLead] = useState(null);
 
   // Sync tab with URL
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const t = params.get('tab');
-    if (t === 'support' || t === 'marketing') setActiveTab(t);
+    if (t === 'support' || t === 'marketing' || t === 'quotations') setActiveTab(t);
   }, [location.search]);
 
   const fetchData = useCallback(async () => {
     try {
-      const [lRes, tRes, cRes, uRes] = await Promise.all([
+      const [lRes, tRes, qRes, iRes, cRes, uRes] = await Promise.all([
         api.get('/api/crm/leads'),
         api.get('/api/crm/tickets'),
+        api.get('/api/crm/quotations'),
+        api.get('/api/items').catch(() => ({ data: [] })),
         api.get('/api/customers'),
         api.get('/api/users').catch(() => ({ data: [] })),
       ]);
       setLeads(lRes.data || []);
       setTickets(tRes.data || []);
+      setQuotations(qRes.data || []);
+      setItems(iRes.data || []);
       setCustomers(cRes.data || []);
       setUsers(uRes.data || []);
     } catch (e) { console.error(e); }
@@ -109,6 +116,13 @@ export default function CRMPage() {
           <Megaphone className="w-4 h-4" /> Marketing ({leads.length})
         </button>
         <button
+          className={`px-4 py-2 text-sm font-medium flex items-center gap-2 ${activeTab === 'quotations' ? 'text-[#1D3557] border-b-2 border-[#1D3557]' : 'text-[#6B7280] hover:text-[#111827]'}`}
+          onClick={() => { setActiveTab('quotations'); navigate('/crm?tab=quotations'); }}
+          data-testid="crm-tab-quotations"
+        >
+          <FileText className="w-4 h-4" /> Quotations ({quotations.length})
+        </button>
+        <button
           className={`px-4 py-2 text-sm font-medium flex items-center gap-2 ${activeTab === 'support' ? 'text-[#1D3557] border-b-2 border-[#1D3557]' : 'text-[#6B7280] hover:text-[#111827]'}`}
           onClick={() => { setActiveTab('support'); navigate('/crm?tab=support'); }}
           data-testid="crm-tab-support"
@@ -118,7 +132,27 @@ export default function CRMPage() {
       </div>
 
       {activeTab === 'marketing' && (
-        <MarketingPanel leads={leads} users={users} search={search} onRefresh={fetchData} canEdit={user?.role === 'admin' || user?.permissions?.crm_marketing?.includes('create')} />
+        <MarketingPanel
+          leads={leads}
+          users={users}
+          search={search}
+          onRefresh={fetchData}
+          canEdit={user?.role === 'admin' || user?.permissions?.crm_marketing?.includes('create')}
+          onCreateQuotation={(lead) => { setQuotationFromLead(lead); setActiveTab('quotations'); navigate('/crm?tab=quotations'); }}
+        />
+      )}
+      {activeTab === 'quotations' && (
+        <QuotationsPanel
+          quotations={quotations}
+          leads={leads}
+          customers={customers}
+          items={items}
+          search={search}
+          onRefresh={fetchData}
+          canEdit={user?.role === 'admin' || user?.permissions?.crm_marketing?.includes('create')}
+          prefillFromLead={quotationFromLead}
+          onPrefillConsumed={() => setQuotationFromLead(null)}
+        />
       )}
       {activeTab === 'support' && (
         <SupportPanel tickets={tickets} customers={customers} users={users} search={search} onRefresh={fetchData} canEdit={user?.role === 'admin' || user?.permissions?.crm_support?.includes('create')} />
@@ -130,10 +164,10 @@ export default function CRMPage() {
 /* ============================================================================
  *  MARKETING PANEL — Leads
  * ========================================================================= */
-function MarketingPanel({ leads, users, search, onRefresh, canEdit }) {
+function MarketingPanel({ leads, users, search, onRefresh, canEdit, onCreateQuotation }) {
   const [dialog, setDialog] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: '', customer_name: '', contact_person: '', email: '', phone: '', source: 'website', estimated_value: 0, assignee_id: '', next_followup: '', notes: '', stage: 'new' });
+  const [form, setForm] = useState({ name: '', customer_name: '', contact_person: '', email: '', phone: '', source: 'website', estimated_value: 0, assignee_id: '', next_followup: '', notes: '', stage: 'enquiry' });
   const [activityDialog, setActivityDialog] = useState({ open: false, lead: null, note: '' });
   const [convertDialog, setConvertDialog] = useState({ open: false, lead: null, code: '', gstin: '', address: '' });
 
@@ -155,7 +189,7 @@ function MarketingPanel({ leads, users, search, onRefresh, canEdit }) {
       });
     } else {
       setEditing(null);
-      setForm({ name: '', customer_name: '', contact_person: '', email: '', phone: '', source: 'website', estimated_value: 0, assignee_id: '', next_followup: '', notes: '', stage: 'new' });
+      setForm({ name: '', customer_name: '', contact_person: '', email: '', phone: '', source: 'website', estimated_value: 0, assignee_id: '', next_followup: '', notes: '', stage: 'enquiry' });
     }
     setDialog(true);
   };
@@ -263,7 +297,7 @@ function MarketingPanel({ leads, users, search, onRefresh, canEdit }) {
                 <td className="text-xs capitalize">{(l.source || '').replace('_', ' ')}</td>
                 <td>
                   {canEdit ? (
-                    <Select value={l.stage || 'new'} onValueChange={(v) => quickStageChange(l, v)}>
+                    <Select value={l.stage || 'enquiry'} onValueChange={(v) => quickStageChange(l, v)}>
                       <SelectTrigger className="h-7 text-xs" data-testid={`lead-stage-${l.id}`}><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {LEAD_STAGES.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}
@@ -278,7 +312,10 @@ function MarketingPanel({ leads, users, search, onRefresh, canEdit }) {
                 <td>
                   <div className="flex items-center gap-0.5">
                     <button onClick={() => setActivityDialog({ open: true, lead: l, note: '' })} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Activity log" data-testid={`lead-activity-${l.id}`}><MessageSquare className="w-4 h-4" /></button>
-                    {canEdit && !l.customer_id && ['qualified', 'proposal', 'negotiation', 'won'].includes(l.stage) && (
+                    {canEdit && ['enquiry', 'quotation', 'negotiation'].includes(l.stage) && onCreateQuotation && (
+                      <button onClick={() => onCreateQuotation(l)} className="p-1.5 text-[#1E429F] hover:bg-[#E1EFFE] rounded" title="Create Quotation" data-testid={`lead-quotation-${l.id}`}><FileText className="w-4 h-4" /></button>
+                    )}
+                    {canEdit && !l.customer_id && ['quotation', 'negotiation', 'won'].includes(l.stage) && (
                       <button onClick={() => setConvertDialog({ open: true, lead: l, code: '', gstin: '', address: '' })} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Convert to Customer" data-testid={`lead-convert-${l.id}`}><UserCheck className="w-4 h-4" /></button>
                     )}
                     {canEdit && <button onClick={() => openDialog(l)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`lead-edit-${l.id}`}><Edit2 className="w-4 h-4" /></button>}
@@ -425,7 +462,7 @@ function MarketingPanel({ leads, users, search, onRefresh, canEdit }) {
 function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit }) {
   const [dialog, setDialog] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ subject: '', customer_id: '', description: '', priority: 'medium', assignee_id: '', linked_so_id: '', stage: 'new' });
+  const [form, setForm] = useState({ subject: '', customer_id: '', description: '', priority: 'medium', assignee_id: '', linked_so_id: '', stage: 'complaint' });
   const [activityDialog, setActivityDialog] = useState({ open: false, ticket: null, note: '' });
 
   const openDialog = (t) => {
@@ -442,7 +479,7 @@ function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit })
       });
     } else {
       setEditing(null);
-      setForm({ subject: '', customer_id: '', description: '', priority: 'medium', assignee_id: '', linked_so_id: '', stage: 'new' });
+      setForm({ subject: '', customer_id: '', description: '', priority: 'medium', assignee_id: '', linked_so_id: '', stage: 'complaint' });
     }
     setDialog(true);
   };
@@ -491,7 +528,7 @@ function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit })
 
   // Breach summary
   const breachedCount = filtered.filter(t => t.sla_breached).length;
-  const openCount = filtered.filter(t => !['resolved', 'closed'].includes(t.stage)).length;
+  const openCount = filtered.filter(t => !['closed'].includes(t.stage)).length;
 
   return (
     <div className="space-y-4">
@@ -548,7 +585,7 @@ function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit })
                   </td>
                   <td>
                     {canEdit ? (
-                      <Select value={t.stage || 'new'} onValueChange={(v) => quickStageChange(t, v)}>
+                      <Select value={t.stage || 'complaint'} onValueChange={(v) => quickStageChange(t, v)}>
                         <SelectTrigger className="h-7 text-xs" data-testid={`ticket-stage-${t.id}`}><SelectValue /></SelectTrigger>
                         <SelectContent>{TICKET_STAGES.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
                       </Select>
@@ -560,7 +597,7 @@ function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit })
                   <td className="text-xs">
                     {t.sla_breached ? (
                       <span className="flex items-center gap-1 text-[#9B1C1C] font-semibold"><AlertTriangle className="w-3 h-3" />BREACHED</span>
-                    ) : t.sla_due && !['resolved', 'closed'].includes(t.stage) ? (
+                    ) : t.sla_due && !['closed'].includes(t.stage) ? (
                       <span className="flex items-center gap-1 text-[#374151]"><Clock className="w-3 h-3" />{formatDateTime(t.sla_due)}</span>
                     ) : (
                       <span className="text-[#9CA3AF]">—</span>
@@ -660,6 +697,446 @@ function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit })
             <div className="flex justify-end gap-2">
               <button className="btn-secondary" onClick={() => setActivityDialog({ open: false, ticket: null, note: '' })}>Close</button>
               <button className="btn-primary" onClick={addActivity} disabled={!activityDialog.note.trim()} data-testid="ticket-activity-save-btn">Add Activity</button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+
+/* ============================================================================
+ *  QUOTATIONS PANEL — CRM Enquiry → Quotation → SO
+ * ========================================================================= */
+const QUOTATION_STATUSES = [
+  { key: 'draft', label: 'Draft', color: 'bg-[#F3F4F6] text-[#4B5563]' },
+  { key: 'sent', label: 'Sent', color: 'bg-[#E1EFFE] text-[#1E429F]' },
+  { key: 'accepted', label: 'Accepted', color: 'bg-[#DEF7EC] text-[#03543F]' },
+  { key: 'rejected', label: 'Rejected', color: 'bg-[#FDE8E8] text-[#9B1C1C]' },
+  { key: 'converted', label: 'Converted → SO', color: 'bg-[#FCE7F3] text-[#9D174D]' },
+];
+
+function emptyQuotationLine() {
+  return { item_id: '', description: '', quantity: 1, uom: 'Nos', rate: 0, gst_rate: 18 };
+}
+
+function QuotationsPanel({ quotations, leads, customers, items, search, onRefresh, canEdit, prefillFromLead, onPrefillConsumed }) {
+  const [dialog, setDialog] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const emptyForm = {
+    lead_id: '',
+    customer_id: '',
+    customer_name: '',
+    contact_person: '',
+    email: '',
+    phone: '',
+    quotation_date: new Date().toISOString().slice(0, 10),
+    valid_until: '',
+    notes: '',
+    terms: '',
+    status: 'draft',
+    lines: [emptyQuotationLine()],
+  };
+  const [form, setForm] = useState(emptyForm);
+  const [convertDialog, setConvertDialog] = useState({ open: false, quotation: null });
+
+  const openDialog = useCallback((q, fromLead) => {
+    if (q) {
+      setEditing(q);
+      setForm({
+        lead_id: q.lead_id || '',
+        customer_id: q.customer_id || '',
+        customer_name: q.customer_name || '',
+        contact_person: q.contact_person || '',
+        email: q.email || '',
+        phone: q.phone || '',
+        quotation_date: q.quotation_date ? String(q.quotation_date).slice(0, 10) : new Date().toISOString().slice(0, 10),
+        valid_until: q.valid_until ? String(q.valid_until).slice(0, 10) : '',
+        notes: q.notes || '',
+        terms: q.terms || '',
+        status: q.status || 'draft',
+        lines: (q.lines && q.lines.length) ? q.lines.map(l => ({ ...l })) : [emptyQuotationLine()],
+      });
+    } else if (fromLead) {
+      setEditing(null);
+      setForm({
+        ...emptyForm,
+        lead_id: fromLead.id || '',
+        customer_id: fromLead.customer_id || '',
+        customer_name: fromLead.customer_name || '',
+        contact_person: fromLead.contact_person || '',
+        email: fromLead.email || '',
+        phone: fromLead.phone || '',
+      });
+    } else {
+      setEditing(null);
+      setForm(emptyForm);
+    }
+    setDialog(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-open when arriving from "Create Quotation" on a lead
+  useEffect(() => {
+    if (prefillFromLead) {
+      openDialog(null, prefillFromLead);
+      onPrefillConsumed && onPrefillConsumed();
+    }
+  }, [prefillFromLead, openDialog, onPrefillConsumed]);
+
+  const addLine = () => setForm(f => ({ ...f, lines: [...f.lines, emptyQuotationLine()] }));
+  const removeLine = (idx) => setForm(f => ({ ...f, lines: f.lines.length > 1 ? f.lines.filter((_, i) => i !== idx) : f.lines }));
+  const updateLine = (idx, patch) => setForm(f => ({ ...f, lines: f.lines.map((l, i) => i === idx ? { ...l, ...patch } : l) }));
+  const onPickItem = (idx, itemId) => {
+    const it = items.find(i => i.id === itemId);
+    updateLine(idx, {
+      item_id: itemId,
+      description: it?.name || '',
+      uom: it?.uom || 'Nos',
+      rate: it?.sale_price || it?.unit_cost || 0,
+      gst_rate: it?.gst_rate ?? 18,
+    });
+  };
+
+  const totals = React.useMemo(() => {
+    let sub = 0, gst = 0;
+    form.lines.forEach(l => {
+      const a = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
+      sub += a;
+      gst += a * ((parseFloat(l.gst_rate) || 0) / 100);
+    });
+    return { sub, gst, total: sub + gst };
+  }, [form.lines]);
+
+  const save = async () => {
+    try {
+      if (!form.customer_name.trim()) { alert('Customer name is required'); return; }
+      if (!form.lines.length || form.lines.some(l => !(parseFloat(l.quantity) > 0))) {
+        alert('Each line must have quantity > 0'); return;
+      }
+      const payload = {
+        lead_id: form.lead_id || '',
+        customer_id: form.customer_id || '',
+        customer_name: form.customer_name,
+        contact_person: form.contact_person,
+        email: form.email,
+        phone: form.phone,
+        quotation_date: form.quotation_date ? new Date(form.quotation_date).toISOString() : null,
+        valid_until: form.valid_until ? new Date(form.valid_until).toISOString() : null,
+        notes: form.notes,
+        terms: form.terms,
+        status: form.status,
+        lines: form.lines.map(l => ({
+          item_id: l.item_id || '',
+          description: l.description || '',
+          quantity: parseFloat(l.quantity) || 0,
+          uom: l.uom || 'Nos',
+          rate: parseFloat(l.rate) || 0,
+          gst_rate: parseFloat(l.gst_rate) || 0,
+        })),
+      };
+      if (editing) await api.put(`/api/crm/quotations/${editing.id}`, payload);
+      else await api.post('/api/crm/quotations', payload);
+      setDialog(false); setEditing(null); setForm(emptyForm); onRefresh();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to save quotation'); }
+  };
+
+  const deleteQuotation = async (q) => {
+    if (!window.confirm(`Delete quotation ${q.quotation_no}?`)) return;
+    try { await api.delete(`/api/crm/quotations/${q.id}`); onRefresh(); }
+    catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const quickStatusChange = async (q, status) => {
+    try { await api.put(`/api/crm/quotations/${q.id}`, { status }); onRefresh(); }
+    catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const convertToSO = async () => {
+    try {
+      const q = convertDialog.quotation;
+      await api.post(`/api/crm/quotations/${q.id}/convert-to-so`, { order_type: 'auto' });
+      setConvertDialog({ open: false, quotation: null });
+      onRefresh();
+      alert(`Quotation ${q.quotation_no} converted to Sales Order successfully. Review in the Sales Orders page.`);
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to convert'); }
+  };
+
+  const filtered = quotations.filter(q => {
+    if (!search.trim()) return true;
+    const term = search.toLowerCase();
+    return [q.quotation_no, q.customer_name, q.customer?.name, q.lead?.lead_no].some(v => (v || '').toLowerCase().includes(term));
+  });
+
+  const statusCounts = QUOTATION_STATUSES.map(s => ({
+    ...s,
+    count: filtered.filter(q => q.status === s.key).length,
+    value: filtered.filter(q => q.status === s.key).reduce((a, q) => a + (parseFloat(q.grand_total) || 0), 0),
+  }));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex gap-3 overflow-x-auto">
+          {statusCounts.map(s => (
+            <div key={s.key} className={`border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[120px] ${s.count > 0 ? 'shadow-sm' : 'opacity-70'}`}>
+              <div className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 inline-block rounded ${s.color}`}>{s.label}</div>
+              <div className="text-sm font-semibold mono mt-1">{s.count} · {formatCurrency(s.value)}</div>
+            </div>
+          ))}
+        </div>
+        {canEdit && (
+          <button className="btn-primary flex items-center gap-1" onClick={() => openDialog(null, null)} data-testid="add-quotation-btn">
+            <Plus className="w-4 h-4" /> New Quotation
+          </button>
+        )}
+      </div>
+
+      <div className="card-flat overflow-hidden">
+        <table className="w-full data-table" data-testid="quotations-table">
+          <thead>
+            <tr>
+              <th>Quotation #</th><th>Customer</th><th>Lead</th><th>Date</th><th>Valid Until</th><th>Lines</th><th>Total</th><th>Status</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && <tr><td colSpan={9} className="text-center py-6 text-sm text-[#6B7280]">No quotations yet. Click "New Quotation" to create one.</td></tr>}
+            {filtered.map(q => {
+              const statusData = QUOTATION_STATUSES.find(s => s.key === q.status);
+              const isLocked = q.status === 'converted';
+              return (
+                <tr key={q.id} data-testid={`quotation-row-${q.id}`}>
+                  <td className="mono font-medium">{q.quotation_no}</td>
+                  <td>
+                    <div className="font-medium text-[#1D3557]">{q.customer_name}</div>
+                    {q.contact_person && <div className="text-xs text-[#4B5563]">{q.contact_person}</div>}
+                  </td>
+                  <td className="text-xs mono">
+                    {q.lead?.lead_no ? <span className="text-[#1E429F]">{q.lead.lead_no}</span> : <span className="text-[#9CA3AF]">—</span>}
+                  </td>
+                  <td className="text-xs">{q.quotation_date ? new Date(q.quotation_date).toLocaleDateString('en-IN') : '-'}</td>
+                  <td className="text-xs">{q.valid_until ? new Date(q.valid_until).toLocaleDateString('en-IN') : '-'}</td>
+                  <td className="text-xs">{(q.lines || []).length}</td>
+                  <td className="mono font-semibold text-sm">{formatCurrency(q.grand_total)}</td>
+                  <td>
+                    {canEdit && !isLocked ? (
+                      <Select value={q.status || 'draft'} onValueChange={(v) => quickStatusChange(q, v)}>
+                        <SelectTrigger className="h-7 text-xs" data-testid={`quotation-status-${q.id}`}><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {QUOTATION_STATUSES.filter(s => s.key !== 'converted').map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className={`status-badge ${statusData?.color || ''}`}>{statusData?.label || q.status}
+                        {q.converted_so_no && <span className="ml-1 text-[10px]">({q.converted_so_no})</span>}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-0.5">
+                      {canEdit && !isLocked && q.status !== 'rejected' && (
+                        <button onClick={() => setConvertDialog({ open: true, quotation: q })} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Convert to Sales Order" data-testid={`quotation-convert-${q.id}`}><Send className="w-4 h-4" /></button>
+                      )}
+                      {canEdit && !isLocked && <button onClick={() => openDialog(q, null)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`quotation-edit-${q.id}`}><Edit2 className="w-4 h-4" /></button>}
+                      {canEdit && !isLocked && <button onClick={() => deleteQuotation(q)} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`quotation-delete-${q.id}`}><Trash2 className="w-4 h-4" /></button>}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Create / Edit Quotation dialog */}
+      <Dialog open={dialog} onOpenChange={(o) => { setDialog(o); if (!o) { setEditing(null); setForm(emptyForm); } }}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" data-testid="quotation-dialog">
+          <DialogHeader><DialogTitle className="font-[Chivo]">{editing ? `Edit Quotation — ${editing.quotation_no}` : 'New Quotation'}</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-3">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1">Link to Lead (optional)</label>
+                <Select value={form.lead_id || '__none__'} onValueChange={v => {
+                  if (v === '__none__') { setForm(f => ({ ...f, lead_id: '' })); return; }
+                  const lead = leads.find(l => l.id === v);
+                  setForm(f => ({
+                    ...f,
+                    lead_id: v,
+                    customer_id: lead?.customer_id || f.customer_id,
+                    customer_name: lead?.customer_name || f.customer_name,
+                    contact_person: lead?.contact_person || f.contact_person,
+                    email: lead?.email || f.email,
+                    phone: lead?.phone || f.phone,
+                  }));
+                }}>
+                  <SelectTrigger data-testid="quotation-lead-select"><SelectValue placeholder="— Unlinked —" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— Unlinked —</SelectItem>
+                    {leads.map(l => <SelectItem key={l.id} value={l.id}>{l.lead_no} · {l.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Existing Customer (optional)</label>
+                <Select value={form.customer_id || '__none__'} onValueChange={v => {
+                  if (v === '__none__') { setForm(f => ({ ...f, customer_id: '' })); return; }
+                  const c = customers.find(x => x.id === v);
+                  setForm(f => ({ ...f, customer_id: v, customer_name: c?.name || f.customer_name, contact_person: c?.contact_person || f.contact_person, email: c?.email || f.email, phone: c?.phone || f.phone }));
+                }}>
+                  <SelectTrigger data-testid="quotation-customer-select"><SelectValue placeholder="— Free text only —" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— Free text only —</SelectItem>
+                    {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}{c.customer_code ? ` (${c.customer_code})` : ''}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Customer Name *</label>
+                <input type="text" className="input-field" value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} data-testid="quotation-customer-name" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Contact Person</label>
+                <input type="text" className="input-field" value={form.contact_person} onChange={e => setForm(f => ({ ...f, contact_person: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Email</label>
+                <input type="email" className="input-field" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Phone</label>
+                <input type="text" className="input-field mono" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Quotation Date</label>
+                <input type="date" className="input-field" value={form.quotation_date} onChange={e => setForm(f => ({ ...f, quotation_date: e.target.value }))} data-testid="quotation-date" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Valid Until</label>
+                <input type="date" className="input-field" value={form.valid_until} onChange={e => setForm(f => ({ ...f, valid_until: e.target.value }))} data-testid="quotation-valid-until" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Status</label>
+                <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v }))}>
+                  <SelectTrigger data-testid="quotation-status-form"><SelectValue /></SelectTrigger>
+                  <SelectContent>{QUOTATION_STATUSES.filter(s => s.key !== 'converted').map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Lines editor */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm font-semibold text-[#1D3557]">Line Items</div>
+                <button className="btn-secondary flex items-center gap-1 text-xs" onClick={addLine} data-testid="quotation-add-line"><Plus className="w-3 h-3" /> Add Line</button>
+              </div>
+              <div className="border border-[#E5E7EB] rounded-sm overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-[#F3F4F6]">
+                    <tr>
+                      <th className="text-left p-2 w-10">#</th>
+                      <th className="text-left p-2 min-w-[200px]">Item</th>
+                      <th className="text-left p-2 min-w-[180px]">Description</th>
+                      <th className="text-left p-2 w-20">Qty</th>
+                      <th className="text-left p-2 w-20">UOM</th>
+                      <th className="text-left p-2 w-24">Rate (₹)</th>
+                      <th className="text-left p-2 w-20">GST %</th>
+                      <th className="text-right p-2 w-28">Amount</th>
+                      <th className="w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {form.lines.map((l, idx) => {
+                      const amount = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
+                      return (
+                        <tr key={idx} className="border-t border-[#E5E7EB]" data-testid={`quotation-line-${idx}`}>
+                          <td className="p-2 mono">{idx + 1}</td>
+                          <td className="p-2">
+                            <Select value={l.item_id || '__none__'} onValueChange={v => { if (v === '__none__') updateLine(idx, { item_id: '' }); else onPickItem(idx, v); }}>
+                              <SelectTrigger className="h-7 text-xs" data-testid={`quotation-line-item-${idx}`}><SelectValue placeholder="Pick item..." /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">— Free text —</SelectItem>
+                                {items.slice(0, 500).map(it => <SelectItem key={it.id} value={it.id}>{it.part_number} · {it.name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </td>
+                          <td className="p-2">
+                            <input type="text" className="input-field h-7 text-xs" value={l.description} onChange={e => updateLine(idx, { description: e.target.value })} />
+                          </td>
+                          <td className="p-2">
+                            <input type="number" step="0.01" className="input-field mono h-7 text-xs" value={l.quantity} onChange={e => updateLine(idx, { quantity: e.target.value })} data-testid={`quotation-line-qty-${idx}`} />
+                          </td>
+                          <td className="p-2">
+                            <input type="text" className="input-field h-7 text-xs" value={l.uom} onChange={e => updateLine(idx, { uom: e.target.value })} />
+                          </td>
+                          <td className="p-2">
+                            <input type="number" step="0.01" className="input-field mono h-7 text-xs" value={l.rate} onChange={e => updateLine(idx, { rate: e.target.value })} data-testid={`quotation-line-rate-${idx}`} />
+                          </td>
+                          <td className="p-2">
+                            <input type="number" step="0.01" className="input-field mono h-7 text-xs" value={l.gst_rate} onChange={e => updateLine(idx, { gst_rate: e.target.value })} />
+                          </td>
+                          <td className="p-2 text-right mono">{formatCurrency(amount)}</td>
+                          <td className="p-2">
+                            {form.lines.length > 1 && (
+                              <button className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded p-1" onClick={() => removeLine(idx)} title="Remove" data-testid={`quotation-line-remove-${idx}`}><X className="w-3 h-3" /></button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex justify-end mt-2 text-xs">
+                <div className="w-64 space-y-1">
+                  <div className="flex justify-between"><span>Subtotal:</span><span className="mono">{formatCurrency(totals.sub)}</span></div>
+                  <div className="flex justify-between"><span>GST:</span><span className="mono">{formatCurrency(totals.gst)}</span></div>
+                  <div className="flex justify-between font-semibold border-t border-[#E5E7EB] pt-1"><span>Grand Total:</span><span className="mono">{formatCurrency(totals.total)}</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1">Notes</label>
+                <textarea rows={3} className="input-field" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Terms &amp; Conditions</label>
+                <textarea rows={3} className="input-field" value={form.terms} onChange={e => setForm(f => ({ ...f, terms: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t">
+              <button className="btn-secondary" onClick={() => { setDialog(false); setEditing(null); }}>Cancel</button>
+              <button className="btn-primary" onClick={save} data-testid="quotation-save-btn">{editing ? 'Update' : 'Create'} Quotation</button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Convert to SO dialog */}
+      <Dialog open={convertDialog.open} onOpenChange={(o) => !o && setConvertDialog({ open: false, quotation: null })}>
+        <DialogContent className="max-w-lg" data-testid="quotation-convert-dialog">
+          <DialogHeader><DialogTitle className="font-[Chivo]">Convert Quotation to Sales Order</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-3">
+            <div className="bg-[#F0FDF4] border border-[#03543F] rounded-sm p-3 text-xs space-y-1">
+              <div><strong>{convertDialog.quotation?.quotation_no}</strong> — {convertDialog.quotation?.customer_name}</div>
+              <div>Total: <strong>{formatCurrency(convertDialog.quotation?.grand_total)}</strong></div>
+              <div>Lines: <strong>{(convertDialog.quotation?.lines || []).length}</strong></div>
+            </div>
+            <div className="bg-[#FEF3C7] border border-[#92400E] rounded-sm p-2 text-xs">
+              <div className="font-semibold mb-1">Before you convert:</div>
+              <ul className="list-disc list-inside space-y-0.5">
+                <li>Each line must reference an <strong>Item with an active BOM</strong>.</li>
+                <li>Order type defaults to <strong>auto</strong> (smart MTS/MTO split) per line — you can change it later on the SO.</li>
+                <li>The quotation becomes read-only once converted.</li>
+                {convertDialog.quotation?.lead_id && <li>The linked Lead will be moved to <strong>Won</strong> stage.</li>}
+              </ul>
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <button className="btn-secondary" onClick={() => setConvertDialog({ open: false, quotation: null })}>Cancel</button>
+              <button className="btn-primary flex items-center gap-1" onClick={convertToSO} data-testid="quotation-convert-confirm"><Send className="w-4 h-4" /> Convert to SO</button>
             </div>
           </div>
         </DialogContent>

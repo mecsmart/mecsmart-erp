@@ -8241,7 +8241,7 @@ class LeadCreate(BaseModel):
     assignee_id: Optional[str] = ""
     next_followup: Optional[datetime] = None
     notes: Optional[str] = ""
-    stage: Optional[str] = "new"  # new | contacted | qualified | proposal | negotiation | won | lost
+    stage: Optional[str] = "enquiry"  # enquiry | quotation | negotiation | won | lost
 
 class LeadUpdate(BaseModel):
     name: Optional[str] = None
@@ -8266,7 +8266,7 @@ class TicketCreate(BaseModel):
     assignee_id: Optional[str] = ""
     linked_so_id: Optional[str] = ""
     linked_item_id: Optional[str] = ""
-    stage: Optional[str] = "new"  # new | open | in_progress | waiting_customer | resolved | closed
+    stage: Optional[str] = "complaint"  # complaint | open | in_progress | pending | closed
 
 class TicketUpdate(BaseModel):
     subject: Optional[str] = None
@@ -8317,7 +8317,7 @@ async def _enrich_ticket(t):
     # Compute SLA breach flag on the fly
     sla_due = _compute_sla_due(t.get("created_at"), t.get("priority"))
     t["sla_due"] = sla_due
-    terminal = t.get("stage") in ("resolved", "closed")
+    terminal = t.get("stage") in ("closed",)
     if sla_due and not terminal:
         t["sla_breached"] = datetime.now(timezone.utc) > sla_due
     else:
@@ -8406,7 +8406,7 @@ async def convert_lead_to_customer(lead_id: str, payload: dict = Body(default={}
     cust_code = payload.get("customer_code") or f"CUST-{str(customers_count + 1).zfill(6)}"
     cust_doc = {
         "id": str(uuid.uuid4()),
-        "customer_code": cust_code,
+        "code": cust_code,  # Use 'code' to match the unique index
         "name": payload.get("name") or lead.get("customer_name"),
         "contact_person": payload.get("contact_person") or lead.get("contact_person", ""),
         "email": payload.get("email") or lead.get("email", ""),
@@ -8423,7 +8423,7 @@ async def convert_lead_to_customer(lead_id: str, payload: dict = Body(default={}
         {
             "$set": {"customer_id": cust_doc["id"], "updated_at": datetime.now(timezone.utc)},
             "$push": {"activities": {
-                "note": f"Converted to Customer: {cust_doc['customer_code']} — {cust_doc['name']}",
+                "note": f"Converted to Customer: {cust_code} — {cust_doc['name']}",
                 "created_at": datetime.now(timezone.utc),
                 "created_by": user["id"],
                 "author_name": user.get("name")
@@ -8525,6 +8525,262 @@ async def delete_ticket(ticket_id: str, request: Request):
     if not res.deleted_count:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return {"message": "Ticket deleted"}
+
+
+# --------- QUOTATIONS (CRM — Enquiry → Quotation → SO) ---------
+class QuotationLine(BaseModel):
+    line_no: Optional[int] = None
+    item_id: Optional[str] = ""   # optional; free-text only quotes allowed
+    description: Optional[str] = ""
+    quantity: float
+    uom: Optional[str] = "Nos"
+    rate: float
+    gst_rate: Optional[float] = 18.0
+    amount: Optional[float] = 0.0  # qty * rate (excl. GST)
+
+class QuotationCreate(BaseModel):
+    lead_id: Optional[str] = ""
+    customer_id: Optional[str] = ""
+    customer_name: str  # required display name
+    contact_person: Optional[str] = ""
+    email: Optional[str] = ""
+    phone: Optional[str] = ""
+    quotation_date: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
+    lines: List[QuotationLine]
+    notes: Optional[str] = ""
+    terms: Optional[str] = ""
+    status: Optional[str] = "draft"   # draft | sent | accepted | rejected | converted
+
+class QuotationUpdate(BaseModel):
+    lead_id: Optional[str] = None
+    customer_id: Optional[str] = None
+    customer_name: Optional[str] = None
+    contact_person: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    quotation_date: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
+    lines: Optional[List[QuotationLine]] = None
+    notes: Optional[str] = None
+    terms: Optional[str] = None
+    status: Optional[str] = None
+
+def _compute_quotation_totals(lines):
+    subtotal = 0.0
+    total_gst = 0.0
+    for idx, l in enumerate(lines, start=1):
+        qty = float(l.get("quantity") or 0)
+        rate = float(l.get("rate") or 0)
+        gst_rate = float(l.get("gst_rate") or 0)
+        amount = qty * rate
+        l["line_no"] = idx
+        l["amount"] = round(amount, 2)
+        subtotal += amount
+        total_gst += amount * gst_rate / 100.0
+    return {
+        "subtotal": round(subtotal, 2),
+        "total_gst": round(total_gst, 2),
+        "grand_total": round(subtotal + total_gst, 2),
+    }
+
+async def _enrich_quotation(q):
+    q.pop("_id", None)
+    if q.get("customer_id"):
+        c = await db.customers.find_one({"id": q["customer_id"]}, {"_id": 0})
+        q["customer"] = c
+    if q.get("lead_id"):
+        l = await db.crm_leads.find_one({"id": q["lead_id"]}, {"_id": 0, "lead_no": 1, "name": 1, "stage": 1})
+        q["lead"] = l
+    if q.get("converted_so_id"):
+        so = await db.production_orders.find_one({"id": q["converted_so_id"]}, {"_id": 0, "order_number": 1, "status": 1})
+        q["converted_so"] = so
+    # Hydrate item details on each line
+    for ln in (q.get("lines") or []):
+        if ln.get("item_id"):
+            it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1})
+            if it:
+                ln["item"] = it
+    return q
+
+@crm_router.get("/quotations")
+async def list_quotations(request: Request, status: Optional[str] = None, lead_id: Optional[str] = None):
+    await get_current_user(request)
+    q = {}
+    if status:
+        q["status"] = status
+    if lead_id:
+        q["lead_id"] = lead_id
+    docs = await db.crm_quotations.find(q).sort("created_at", -1).to_list(2000)
+    return [await _enrich_quotation(d) for d in docs]
+
+@crm_router.post("/quotations", status_code=201)
+async def create_quotation(data: QuotationCreate, request: Request):
+    user = await get_current_user(request)
+    if not data.lines:
+        raise HTTPException(status_code=400, detail="At least one line item is required")
+    count = await db.crm_quotations.count_documents({})
+    q_no = f"QUO-{str(count + 1).zfill(6)}"
+    lines = [l.model_dump() for l in data.lines]
+    totals = _compute_quotation_totals(lines)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "quotation_no": q_no,
+        **data.model_dump(exclude={"lines"}, exclude_none=False),
+        "lines": lines,
+        **totals,
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"],
+    }
+    if not doc.get("quotation_date"):
+        doc["quotation_date"] = datetime.now(timezone.utc)
+    await db.crm_quotations.insert_one(doc)
+    # If linked to a lead, bump lead stage to 'quotation' and add activity
+    if data.lead_id:
+        await db.crm_leads.update_one(
+            {"id": data.lead_id},
+            {
+                "$set": {"stage": "quotation", "updated_at": datetime.now(timezone.utc)},
+                "$push": {"activities": {
+                    "note": f"Quotation {q_no} created (₹{totals['grand_total']:.2f})",
+                    "created_at": datetime.now(timezone.utc),
+                    "created_by": user["id"],
+                    "author_name": user.get("name"),
+                }},
+            },
+        )
+    return await _enrich_quotation(doc)
+
+@crm_router.put("/quotations/{qid}")
+async def update_quotation(qid: str, data: QuotationUpdate, request: Request):
+    await get_current_user(request)
+    existing = await db.crm_quotations.find_one({"id": qid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    if existing.get("status") == "converted":
+        raise HTTPException(status_code=400, detail="Cannot edit a converted quotation")
+    update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
+    if "lines" in update:
+        lines = [l if isinstance(l, dict) else l.model_dump() for l in update["lines"]]
+        totals = _compute_quotation_totals(lines)
+        update["lines"] = lines
+        update.update(totals)
+    update["updated_at"] = datetime.now(timezone.utc)
+    await db.crm_quotations.update_one({"id": qid}, {"$set": update})
+    return await _enrich_quotation(await db.crm_quotations.find_one({"id": qid}))
+
+@crm_router.delete("/quotations/{qid}")
+async def delete_quotation(qid: str, request: Request):
+    await get_current_user(request)
+    existing = await db.crm_quotations.find_one({"id": qid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    if existing.get("status") == "converted":
+        raise HTTPException(status_code=400, detail="Cannot delete a quotation already converted to SO")
+    await db.crm_quotations.delete_one({"id": qid})
+    return {"message": "Quotation deleted"}
+
+@crm_router.post("/quotations/{qid}/convert-to-so")
+async def convert_quotation_to_so(qid: str, payload: dict = Body(default={}), request: Request = None):
+    """Convert a quotation into a multi-line Sales Order (Production Order).
+    Each quotation line must reference an item that has an active BOM.
+    Payload can override order_type per line: {line_order_types: {line_no: 'auto|mts|mto'}, due_date: ISO}.
+    """
+    user = await get_current_user(request)
+    q = await db.crm_quotations.find_one({"id": qid})
+    if not q:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    if q.get("status") == "converted":
+        raise HTTPException(status_code=400, detail="Quotation already converted", )
+    lines = q.get("lines") or []
+    if not lines:
+        raise HTTPException(status_code=400, detail="Quotation has no lines to convert")
+    line_order_types = payload.get("line_order_types") or {}
+    default_order_type = payload.get("order_type") or "auto"
+    due_date_raw = payload.get("due_date")
+    due_date = None
+    if due_date_raw:
+        try:
+            due_date = datetime.fromisoformat(str(due_date_raw).replace("Z", "+00:00"))
+        except Exception:
+            due_date = None
+
+    # Resolve each line's BOM
+    so_lines = []
+    for ln in lines:
+        item_id = ln.get("item_id")
+        if not item_id:
+            raise HTTPException(status_code=400, detail=f"Line {ln.get('line_no')}: no item selected — cannot convert to SO. Attach an item (with BOM) to each line.")
+        bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0, "id": 1})
+        if not bom:
+            # fallback to any BOM for that item
+            bom = await db.boms.find_one({"parent_item_id": item_id}, {"_id": 0, "id": 1})
+        if not bom:
+            it = await db.items.find_one({"id": item_id}, {"_id": 0, "part_number": 1, "name": 1})
+            pn = (it or {}).get("part_number", item_id)
+            raise HTTPException(status_code=400, detail=f"No BOM found for item {pn}. Create a BOM before converting.")
+        lno = ln.get("line_no")
+        otype = line_order_types.get(str(lno)) or line_order_types.get(lno) or default_order_type
+        so_lines.append({
+            "line_id": str(uuid.uuid4()),
+            "line_no": lno,
+            "bom_id": bom["id"],
+            "quantity": int(ln.get("quantity") or 0),
+            "due_date": due_date,
+            "order_type": otype,
+            "notes": ln.get("description") or "",
+            "reserved_qty": 0,
+            "mo_qty": 0,
+            "status": "draft",
+        })
+    total_qty = sum(l["quantity"] for l in so_lines)
+    # Build the SO doc — mirrors existing create_production_order shape for compat
+    count = await db.production_orders.count_documents({})
+    order_number = f"SO-{str(count + 1).zfill(6)}"
+    so_doc = {
+        "id": str(uuid.uuid4()),
+        "order_number": order_number,
+        "lines": so_lines,
+        "customer_id": q.get("customer_id") or "",
+        "bom_id": so_lines[0]["bom_id"],
+        "quantity": total_qty,
+        "due_date": due_date,
+        "priority": "medium",
+        "notes": f"Generated from Quotation {q['quotation_no']}",
+        "status": "draft",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"],
+        "source_quotation_id": qid,
+        "source_quotation_no": q["quotation_no"],
+    }
+    await db.production_orders.insert_one(so_doc)
+    so_doc.pop("_id", None)
+    # Mark quotation as converted
+    await db.crm_quotations.update_one(
+        {"id": qid},
+        {"$set": {
+            "status": "converted",
+            "converted_so_id": so_doc["id"],
+            "converted_so_no": order_number,
+            "converted_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
+        }},
+    )
+    # If linked lead exists, mark it won (quotation accepted path)
+    if q.get("lead_id"):
+        await db.crm_leads.update_one(
+            {"id": q["lead_id"]},
+            {
+                "$set": {"stage": "won", "updated_at": datetime.now(timezone.utc)},
+                "$push": {"activities": {
+                    "note": f"Quotation {q['quotation_no']} converted to SO {order_number}",
+                    "created_at": datetime.now(timezone.utc),
+                    "created_by": user["id"],
+                    "author_name": user.get("name"),
+                }},
+            },
+        )
+    return {"quotation": await _enrich_quotation(await db.crm_quotations.find_one({"id": qid})), "sales_order": so_doc}
 
 
 # Include routers
