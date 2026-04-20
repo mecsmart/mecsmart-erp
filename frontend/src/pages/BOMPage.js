@@ -34,6 +34,8 @@ const statusOptions = [
 export default function BOMPage() {
   const { user } = useAuth();
   const { formatCurrency, currencySymbol, companySettings } = useCompanySettings();
+  // Cost visibility: admins + explicit "admin group" members see rollup/material/process/extended/total cost columns.
+  const canSeeCosts = user?.role === 'admin' || user?.is_admin_group === true;
   const [boms, setBoms] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -278,7 +280,7 @@ export default function BOMPage() {
         const routingsText = (node.routings || []).map(r => {
           const n = typeof r === 'string' ? r : r.name;
           const c = typeof r === 'string' ? 0 : (r.cost || 0);
-          return c > 0 ? `${n} (${c.toFixed(2)})` : n;
+          return canSeeCosts && c > 0 ? `${n} (${c.toFixed(2)})` : n;
         }).join(', ') || '-';
         html += `<tr style="background:${bgColor}">
           <td style="padding:4px 8px;padding-left:${indent + 8}px;font-size:10px;font-weight:600;">${catLabel(item.category || '')}</td>
@@ -287,9 +289,9 @@ export default function BOMPage() {
           <td style="padding:4px 8px;font-size:10px;color:#1E429F;">${routingsText}</td>
           <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;">${node.quantity}</td>
           <td style="padding:4px 8px;font-size:11px;">${item.unit_of_measure || '-'}</td>
-          <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;">${node.unit_cost != null ? node.unit_cost.toFixed(2) : '-'}</td>
+          ${canSeeCosts ? `<td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;">${node.unit_cost != null ? node.unit_cost.toFixed(2) : '-'}</td>
           <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;color:#723B13;">${node.process_cost_per_unit != null && node.process_cost_per_unit > 0 ? node.process_cost_per_unit.toFixed(2) : '-'}</td>
-          <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;font-weight:600;">${node.extended_cost != null ? node.extended_cost.toFixed(2) : '-'}</td>
+          <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;font-weight:600;">${node.extended_cost != null ? node.extended_cost.toFixed(2) : '-'}</td>` : ''}
         </tr>`;
         if (node.children && node.children.length > 0) {
           html += renderPrintRows(node.children, level + 1);
@@ -315,13 +317,13 @@ export default function BOMPage() {
     ${buildLetterheadHTML(companySettings || {})}
     <h1>${parentItem?.part_number || ''} - ${parentItem?.name || ''}</h1>
     <h2>BOM Explosion | Rev ${bomInfo?.revision || '-'} | ${bomInfo?.status || '-'}${parentRoutingsText ? ' | FG Routings: ' + parentRoutingsText : ''}</h2>
-    <table><thead><tr><th>Type</th><th>Part Number</th><th>Description</th><th>Routings (cost)</th><th style="text-align:right">QTY</th><th>UOM</th><th style="text-align:right">Material Cost/Unit</th><th style="text-align:right">Process Cost/Unit</th><th style="text-align:right">Extended Cost</th></tr></thead>
+    <table><thead><tr><th>Type</th><th>Part Number</th><th>Description</th><th>Routings${canSeeCosts ? ' (cost)' : ''}</th><th style="text-align:right">QTY</th><th>UOM</th>${canSeeCosts ? '<th style="text-align:right">Material Cost/Unit</th><th style="text-align:right">Process Cost/Unit</th><th style="text-align:right">Extended Cost</th>' : ''}</tr></thead>
     <tbody>${renderPrintRows(explosion)}</tbody></table>
-    <div class="summary">
+    ${canSeeCosts ? `<div class="summary">
       <div class="row"><span>Components Cost (material + component process):</span><span style="font-family:monospace">${formatCurrency(componentsCost)}</span></div>
       <div class="row"><span>FG Parent Process Cost (${parentRoutingsText || '—'}):</span><span style="font-family:monospace;color:#723B13">${formatCurrency(fgProcessCost)}</span></div>
       <div class="row total"><span>Total Rollup Cost:</span><span style="font-family:monospace">${formatCurrency(totalCost)}</span></div>
-    </div>
+    </div>` : ''}
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:30px">Printed on ${new Date().toLocaleString()}</p>
     </body></html>`;
     const w = window.open('', '_blank');
@@ -362,8 +364,8 @@ export default function BOMPage() {
             <td className="py-2 px-3 text-sm">{item.item?.name || 'Unknown'}</td>
             <td className="py-2 px-3 text-sm text-right mono">{item.quantity}</td>
             <td className="py-2 px-3 text-sm">{item.item?.unit_of_measure || '-'}</td>
-            <td className="py-2 px-3 text-sm text-right mono">{item.unit_cost != null ? formatCurrency(item.unit_cost) : '-'}</td>
-            <td className="py-2 px-3 text-sm text-right mono font-medium">{item.extended_cost != null ? formatCurrency(item.extended_cost) : '-'}</td>
+            {canSeeCosts && <td className="py-2 px-3 text-sm text-right mono">{item.unit_cost != null ? formatCurrency(item.unit_cost) : '-'}</td>}
+            {canSeeCosts && <td className="py-2 px-3 text-sm text-right mono font-medium">{item.extended_cost != null ? formatCurrency(item.extended_cost) : '-'}</td>}
             <td className="py-2 px-3">
               {item.is_alternate && (
                 <span className="status-badge bg-[#FDF6B2] text-[#723B13]">Alternate</span>
@@ -850,10 +852,10 @@ export default function BOMPage() {
                         {activeBom && <span className="text-xs bg-white/15 px-2 py-0.5 rounded">Rev {activeBom.revision} - {activeBom.status}</span>}
                       </div>
                       <div className="flex items-center gap-2">
-                        {explosion?.fg_process_cost_per_unit > 0 && (
+                        {canSeeCosts && explosion?.fg_process_cost_per_unit > 0 && (
                           <span className="text-[11px] bg-[#FDF6B2] text-[#723B13] px-2 py-0.5 rounded mono font-medium" title="FG Parent Process Cost per unit">FG Process: {formatCurrency(explosion.fg_process_cost_per_unit)}</span>
                         )}
-                        <span className="mono text-sm font-bold">Total: {formatCurrency(totalCost)}</span>
+                        {canSeeCosts && <span className="mono text-sm font-bold">Total: {formatCurrency(totalCost)}</span>}
                         {activeBom && <button onClick={() => { fetchBomExplosion(activeBom.id); }} className="p-1 hover:bg-white/20 rounded" title="Refresh Costs (re-pull from BOM)" data-testid={`refresh-bom-${pid}`}><RefreshCw className="w-4 h-4" /></button>}
                         {explosion && <button onClick={() => printBomExplosion(parentItem, explosion.explosion, totalCost, activeBom, explosion.fg_process_cost_per_unit || 0, explosion.components_cost || 0)} className="p-1 hover:bg-white/20 rounded" title="Print BOM" data-testid={`print-bom-${pid}`}><Printer className="w-4 h-4" /></button>}
                         {activeBom && <button onClick={() => handleBomExport(activeBom.id)} className="p-1 hover:bg-white/20 rounded" title="Export this BOM" data-testid={`export-bom-${pid}`}><Download className="w-4 h-4" /></button>}
@@ -876,10 +878,10 @@ export default function BOMPage() {
                           <th className="text-right py-2 px-2">QTY</th>
                           <th className="text-left py-2 px-2">UOM</th>
                           <th className="text-left py-2 px-2">Routings</th>
-                          <th className="text-right py-2 px-2">Material Cost</th>
-                          <th className="text-right py-2 px-2">Process Cost/Unit</th>
-                          <th className="text-right py-2 px-2">Total/Unit</th>
-                          <th className="text-right py-2 px-3">Extended Cost</th>
+                          {canSeeCosts && <th className="text-right py-2 px-2">Material Cost</th>}
+                          {canSeeCosts && <th className="text-right py-2 px-2">Process Cost/Unit</th>}
+                          {canSeeCosts && <th className="text-right py-2 px-2">Total/Unit</th>}
+                          {canSeeCosts && <th className="text-right py-2 px-3">Extended Cost</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -919,15 +921,15 @@ export default function BOMPage() {
                                   {row.routings.map((r, ri) => {
                                     const rn = typeof r === 'string' ? r : r.name;
                                     const rc = typeof r === 'string' ? 0 : (r.cost || 0);
-                                    return <span key={ri} className="text-xs text-[#1E429F] font-medium">{rn}{rc > 0 && <span className="text-[#723B13] mono ml-1">({formatCurrency(rc)})</span>}</span>;
+                                    return <span key={ri} className="text-xs text-[#1E429F] font-medium">{rn}{canSeeCosts && rc > 0 && <span className="text-[#723B13] mono ml-1">({formatCurrency(rc)})</span>}</span>;
                                   })}
                                 </div>
                               ) : <span className="text-xs text-[#9CA3AF]">-</span>}
                             </td>
-                            <td className="py-2 px-2 text-right mono">{formatCurrency(row.unit_cost)}</td>
-                            <td className="py-2 px-2 text-right mono">{row.process_cost_per_unit > 0 ? <span className="text-[#723B13]">{formatCurrency(row.process_cost_per_unit)}</span> : <span className="text-[#9CA3AF]">-</span>}</td>
-                            <td className="py-2 px-2 text-right mono font-semibold">{formatCurrency(row.total_cost_per_unit)}</td>
-                            <td className="py-2 px-3 text-right mono font-medium">{formatCurrency(row.extended_cost)}</td>
+                            {canSeeCosts && <td className="py-2 px-2 text-right mono">{formatCurrency(row.unit_cost)}</td>}
+                            {canSeeCosts && <td className="py-2 px-2 text-right mono">{row.process_cost_per_unit > 0 ? <span className="text-[#723B13]">{formatCurrency(row.process_cost_per_unit)}</span> : <span className="text-[#9CA3AF]">-</span>}</td>}
+                            {canSeeCosts && <td className="py-2 px-2 text-right mono font-semibold">{formatCurrency(row.total_cost_per_unit)}</td>}
+                            {canSeeCosts && <td className="py-2 px-3 text-right mono font-medium">{formatCurrency(row.extended_cost)}</td>}
                           </tr>
                         ))}
                       </tbody>
@@ -973,9 +975,11 @@ export default function BOMPage() {
                     <span>{bomExplosion.parent_item?.name}</span>
                   </div>
                   <div className="flex items-center space-x-4">
-                    <span className="mono font-semibold text-[#1D3557]" data-testid="bom-total-cost">
-                      Total Cost: {formatCurrency(bomExplosion.total_rollup_cost != null ? bomExplosion.total_rollup_cost : 0)}
-                    </span>
+                    {canSeeCosts && (
+                      <span className="mono font-semibold text-[#1D3557]" data-testid="bom-total-cost">
+                        Total Cost: {formatCurrency(bomExplosion.total_rollup_cost != null ? bomExplosion.total_rollup_cost : 0)}
+                      </span>
+                    )}
                     <span className={`status-badge status-${bomExplosion.bom?.status}`}>
                       Rev {bomExplosion.bom?.revision} &bull; {bomExplosion.bom?.status}
                     </span>
@@ -997,8 +1001,8 @@ export default function BOMPage() {
                         <th className="text-left py-2 px-3">Description</th>
                         <th className="text-right py-2 px-3">Qty</th>
                         <th className="text-left py-2 px-3">UOM</th>
-                        <th className="text-right py-2 px-3">Unit Cost</th>
-                        <th className="text-right py-2 px-3">Extended Cost</th>
+                        {canSeeCosts && <th className="text-right py-2 px-3">Unit Cost</th>}
+                        {canSeeCosts && <th className="text-right py-2 px-3">Extended Cost</th>}
                         <th className="text-left py-2 px-3">Type</th>
                       </tr>
                     </thead>

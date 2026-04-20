@@ -6,10 +6,10 @@
 export function letterheadCSS(accentColor = '#1D3557') {
   return `
     .lh-wrap { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; border-bottom:2px solid ${accentColor}; padding-bottom:14px; margin-bottom:16px; }
-    .lh-left { flex:0 0 34%; display:flex; flex-direction:column; align-items:flex-start; }
+    .lh-left { flex:0 0 30%; display:flex; flex-direction:column; align-items:flex-start; }
     .lh-left img { max-height:78px; max-width:210px; object-fit:contain; }
     .lh-left .lh-tagline { font-size:10px; color:#6b7280; font-style:italic; margin-top:6px; letter-spacing:0.3px; }
-    .lh-right { flex:1 1 auto; text-align:left; font-size:11px; color:#111827; line-height:1.55; }
+    .lh-right { flex:0 0 50%; text-align:left; font-size:11px; color:#111827; line-height:1.55; margin-left:auto; }
     .lh-right .lh-name { font-size:17px; font-weight:700; color:${accentColor}; margin-bottom:6px; line-height:1.2; }
     .lh-right .lh-addr { color:#374151; white-space:pre-line; }
     .lh-right .lh-contact { margin-top:4px; color:#374151; }

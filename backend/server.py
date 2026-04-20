@@ -65,6 +65,7 @@ class UserCreate(BaseModel):
     name: str
     role: str = "inventory_manager"
     permissions: Optional[dict] = None
+    role_group_id: Optional[str] = None
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
@@ -72,6 +73,7 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
     permissions: Optional[dict] = None
     status: Optional[str] = None
+    role_group_id: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -130,7 +132,8 @@ class ItemCreate(BaseModel):
     category: str  # raw_material, component, sub_assembly, finished_good
     unit_of_measure: str = "pcs"
     unit_cost: float = 0.0
-    purchase_price: float = 0.0  # Last PO price; auto-updates from new POs
+    purchase_price: float = 0.0  # Last PO price; auto-updates from new POs (RM only)
+    sale_price: float = 0.0  # Selling price to customers (all categories)
     lead_time_days: int = 0
     safety_stock: int = 0
     current_stock: int = 0
@@ -145,6 +148,7 @@ class ItemUpdate(BaseModel):
     unit_of_measure: Optional[str] = None
     unit_cost: Optional[float] = None
     purchase_price: Optional[float] = None
+    sale_price: Optional[float] = None
     lead_time_days: Optional[int] = None
     safety_stock: Optional[int] = None
     current_stock: Optional[int] = None
@@ -852,7 +856,28 @@ async def login(user_data: UserLogin, response: Response, request: Request):
         response.set_cookie(key="access_token", value=access_token, httponly=True, secure=get_cookie_settings()["secure"], samesite=get_cookie_settings()["samesite"], max_age=900, path="/")
         response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=get_cookie_settings()["secure"], samesite=get_cookie_settings()["samesite"], max_age=604800, path="/")
         
-        return {"id": user_id, "email": user["email"], "name": user["name"], "role": user["role"], "permissions": user.get("permissions") or get_default_permissions(user["role"])}
+        # Overlay role group permissions + admin flag if assigned.
+        effective_perms = user.get("permissions") or get_default_permissions(user["role"])
+        is_admin_group = False
+        role_group = None
+        if user.get("role_group_id"):
+            group = await db.role_groups.find_one({"id": user["role_group_id"]}, {"_id": 0})
+            if group:
+                role_group = group
+                if group.get("permissions"):
+                    effective_perms = group["permissions"]
+                is_admin_group = bool(group.get("is_admin_group"))
+
+        return {
+            "id": user_id,
+            "email": user["email"],
+            "name": user["name"],
+            "role": user["role"],
+            "permissions": effective_perms,
+            "role_group_id": user.get("role_group_id"),
+            "role_group": role_group,
+            "is_admin_group": is_admin_group,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -871,6 +896,15 @@ async def get_me(request: Request):
     # Ensure permissions exist (for older users without permissions)
     if "permissions" not in user or not user["permissions"]:
         user["permissions"] = get_default_permissions(user.get("role", "inventory_manager"))
+    # If user is mapped to a role group, overlay its permissions + expose is_admin_group flag
+    group_id = user.get("role_group_id")
+    if group_id:
+        group = await db.role_groups.find_one({"id": group_id}, {"_id": 0})
+        if group:
+            user["role_group"] = group
+            if group.get("permissions"):
+                user["permissions"] = group["permissions"]
+            user["is_admin_group"] = bool(group.get("is_admin_group"))
     return user
 
 @auth_router.post("/refresh")
@@ -1966,6 +2000,7 @@ async def create_user(user_data: UserCreate, request: Request):
         "name": user_data.name,
         "role": user_data.role,
         "permissions": user_data.permissions or get_default_permissions(user_data.role),
+        "role_group_id": user_data.role_group_id,
         "status": "active",
         "created_at": datetime.now(timezone.utc),
         "created_by": admin["id"]
@@ -1993,6 +2028,9 @@ async def update_user(user_id: str, data: UserUpdate, request: Request):
         update_data["status"] = data.status
     if data.password is not None and data.password.strip():
         update_data["password_hash"] = hash_password(data.password)
+    if data.role_group_id is not None:
+        # Empty string means clear the mapping
+        update_data["role_group_id"] = data.role_group_id or None
     
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
@@ -2048,6 +2086,76 @@ async def get_modules(request: Request):
         "actions": ALL_ACTIONS,
         "default_permissions": DEFAULT_PERMISSIONS
     }
+
+# ================== ROLE GROUPS ==================
+# Admin can create named role groups (e.g. "Production Admin", "Purchase User") with
+# custom permission matrices. Users are then mapped to a group and inherit its permissions.
+# Only groups flagged `is_admin_group=true` can see BOM rollup costs.
+
+class RoleGroupCreate(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    permissions: dict = {}
+    is_admin_group: bool = False
+
+class RoleGroupUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    permissions: Optional[dict] = None
+    is_admin_group: Optional[bool] = None
+
+@users_router.get("/role-groups")
+async def list_role_groups(request: Request):
+    await get_current_user(request)
+    groups = await db.role_groups.find({}, {"_id": 0}).sort("name", 1).to_list(500)
+    return groups
+
+@users_router.post("/role-groups", status_code=201)
+async def create_role_group(data: RoleGroupCreate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can create role groups")
+    existing = await db.role_groups.find_one({"name": data.name})
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Role group '{data.name}' already exists")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": data.name,
+        "description": data.description or "",
+        "permissions": data.permissions or {},
+        "is_admin_group": bool(data.is_admin_group),
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.role_groups.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@users_router.put("/role-groups/{group_id}")
+async def update_role_group(group_id: str, data: RoleGroupUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can update role groups")
+    update = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="No data to update")
+    update["updated_at"] = datetime.now(timezone.utc)
+    result = await db.role_groups.update_one({"id": group_id}, {"$set": update})
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Role group not found")
+    return await db.role_groups.find_one({"id": group_id}, {"_id": 0})
+
+@users_router.delete("/role-groups/{group_id}")
+async def delete_role_group(group_id: str, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can delete role groups")
+    # Unassign users from this group before delete
+    await db.users.update_many({"role_group_id": group_id}, {"$unset": {"role_group_id": ""}})
+    result = await db.role_groups.delete_one({"id": group_id})
+    if not result.deleted_count:
+        raise HTTPException(status_code=404, detail="Role group not found")
+    return {"message": "Role group deleted"}
 
 # ================== DASHBOARD ROUTES ==================
 
