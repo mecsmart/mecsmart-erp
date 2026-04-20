@@ -170,8 +170,17 @@ Unified BOM process-cost source of truth. Previous design stored a component's p
 
 ## Backlog
 - [x] Purchase Invoice from GRN with process cost (iter 63)
+- [x] V1 CRM — Leads + Tickets + Quotations with Enquiry → Quotation → SO flow (iter 98)
 - [ ] P1: GST Phase 2 (GST-compliant invoice generation + tax breakup reports), P2: Backend refactoring (split server.py into routers/models)
 - [ ] P3: GSTR-1/3B report formats + ITC tracking
 - [ ] P4: Barcode/QR scanning for inventory transactions
 - [ ] P5: Gantt chart for work order scheduling
 - [ ] Future: Windows-native desktop wrapper (Electron/Tauri)
+
+## CRM (iter 98)
+- **Marketing stages**: Enquiry → Quotation → Negotiation → Won / Lost (aligned to customer diagram)
+- **Support stages**: Complaint → Open/Assigned → In Progress → Closed / Pending
+- **Quotations tab** (embedded in CRM): Create multi-line quotations with item picker, auto GST computation, Convert-to-SO action. Creating a quotation linked to a Lead auto-bumps the lead to `quotation` stage. Converting a quotation marks it `converted`, creates a multi-line Sales Order (each line resolves its BOM via item_id), and moves the linked lead to `won`.
+- Endpoints: `GET/POST/PUT/DELETE /api/crm/quotations`, `POST /api/crm/quotations/{id}/convert-to-so`.
+- Fixed convert_lead_to_customer DB field mismatch (was using `customer_code`, DB index is on `code`).
+
