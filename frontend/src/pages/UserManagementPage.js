@@ -54,6 +54,10 @@ const MODULE_GROUPS = [
   { main: 'Job Work', subs: [
     { key: 'job_work', label: 'Job Work / Subcontracting' },
   ] },
+  { main: 'CRM', subs: [
+    { key: 'crm_marketing', label: 'Marketing (Leads)' },
+    { key: 'crm_support', label: 'Support (Tickets)' },
+  ] },
   { main: 'Quality', subs: [{ key: 'quality', label: 'Quality Inspection' }] },
   { main: 'Settings', subs: [{ key: 'settings', label: 'Settings & User Management' }] },
 ];

@@ -52,6 +52,7 @@ customers_router = APIRouter(prefix="/customers")
 grn_router = APIRouter(prefix="/grn")
 purchase_invoices_router = APIRouter(prefix="/purchase-invoices")
 jobwork_router = APIRouter(prefix="/job-work")
+crm_router = APIRouter(prefix="/crm")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -94,7 +95,8 @@ ALL_MODULES = [
     "mrp", "production", "manufacturing",
     "quality", "inventory", "suppliers", "customers",
     "purchase_orders", "purchase_invoices", "delivery_challan", "job_work",
-    "stores", "settings"
+    "stores", "settings",
+    "crm_marketing", "crm_support"
 ]
 ALL_ACTIONS = ["view", "create", "edit", "delete"]
 # Per-module allowed action set (override). If a module isn't listed here, it uses ALL_ACTIONS.
@@ -8216,6 +8218,315 @@ async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Re
     return rec_doc
 
 
+# ==================== CRM MODULE ====================
+# Two independent pipelines — Marketing (Leads) and Support (Tickets).
+# Each record tracks stage + activities[] inline for a simple audit trail.
+
+SLA_HOURS_BY_PRIORITY = {"low": 72, "medium": 24, "high": 8, "urgent": 2}
+
+class CRMActivity(BaseModel):
+    note: str
+    created_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+    author_name: Optional[str] = None
+
+class LeadCreate(BaseModel):
+    name: str  # Lead / opportunity title e.g. "Website enquiry — ABC Corp"
+    customer_name: str  # free-text customer company name
+    contact_person: Optional[str] = ""
+    email: Optional[str] = ""
+    phone: Optional[str] = ""
+    source: Optional[str] = "website"  # website / referral / trade_show / cold_call / other
+    estimated_value: Optional[float] = 0
+    assignee_id: Optional[str] = ""
+    next_followup: Optional[datetime] = None
+    notes: Optional[str] = ""
+    stage: Optional[str] = "new"  # new | contacted | qualified | proposal | negotiation | won | lost
+
+class LeadUpdate(BaseModel):
+    name: Optional[str] = None
+    customer_name: Optional[str] = None
+    contact_person: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    source: Optional[str] = None
+    estimated_value: Optional[float] = None
+    assignee_id: Optional[str] = None
+    next_followup: Optional[datetime] = None
+    notes: Optional[str] = None
+    stage: Optional[str] = None
+    customer_id: Optional[str] = None  # set after "Convert to Customer"
+    lost_reason: Optional[str] = None
+
+class TicketCreate(BaseModel):
+    subject: str
+    customer_id: str  # tickets always require an existing customer record
+    description: Optional[str] = ""
+    priority: Optional[str] = "medium"  # low / medium / high / urgent
+    assignee_id: Optional[str] = ""
+    linked_so_id: Optional[str] = ""
+    linked_item_id: Optional[str] = ""
+    stage: Optional[str] = "new"  # new | open | in_progress | waiting_customer | resolved | closed
+
+class TicketUpdate(BaseModel):
+    subject: Optional[str] = None
+    description: Optional[str] = None
+    priority: Optional[str] = None
+    assignee_id: Optional[str] = None
+    linked_so_id: Optional[str] = None
+    linked_item_id: Optional[str] = None
+    stage: Optional[str] = None
+    resolution: Optional[str] = None
+
+def _compute_sla_due(created_at, priority):
+    """Add SLA hours to created_at based on priority. Returns tz-aware UTC datetime."""
+    if not created_at:
+        return None
+    if isinstance(created_at, str):
+        try:
+            created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    if isinstance(created_at, datetime) and created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    hours = SLA_HOURS_BY_PRIORITY.get((priority or "medium").lower(), 24)
+    return created_at + timedelta(hours=hours)
+
+async def _enrich_lead(lead):
+    lead.pop("_id", None)
+    # Hydrate assignee name
+    if lead.get("assignee_id"):
+        a = await db.users.find_one({"id": lead["assignee_id"]}, {"_id": 0, "name": 1, "email": 1})
+        lead["assignee"] = a
+    if lead.get("customer_id"):
+        c = await db.customers.find_one({"id": lead["customer_id"]}, {"_id": 0})
+        lead["customer"] = c
+    return lead
+
+async def _enrich_ticket(t):
+    t.pop("_id", None)
+    if t.get("customer_id"):
+        c = await db.customers.find_one({"id": t["customer_id"]}, {"_id": 0})
+        t["customer"] = c
+    if t.get("assignee_id"):
+        a = await db.users.find_one({"id": t["assignee_id"]}, {"_id": 0, "name": 1, "email": 1})
+        t["assignee"] = a
+    if t.get("linked_so_id"):
+        so = await db.production_orders.find_one({"id": t["linked_so_id"]}, {"_id": 0, "order_number": 1})
+        t["linked_so"] = so
+    # Compute SLA breach flag on the fly
+    sla_due = _compute_sla_due(t.get("created_at"), t.get("priority"))
+    t["sla_due"] = sla_due
+    terminal = t.get("stage") in ("resolved", "closed")
+    if sla_due and not terminal:
+        t["sla_breached"] = datetime.now(timezone.utc) > sla_due
+    else:
+        t["sla_breached"] = False
+    return t
+
+# --------- LEADS (Marketing) ---------
+@crm_router.get("/leads")
+async def list_leads(request: Request, stage: Optional[str] = None):
+    await get_current_user(request)
+    q = {}
+    if stage:
+        q["stage"] = stage
+    leads = await db.crm_leads.find(q).sort("created_at", -1).to_list(2000)
+    return [await _enrich_lead(l) for l in leads]
+
+@crm_router.post("/leads", status_code=201)
+async def create_lead(data: LeadCreate, request: Request):
+    user = await get_current_user(request)
+    count = await db.crm_leads.count_documents({})
+    lead_no = f"LEAD-{str(count + 1).zfill(6)}"
+    doc = {
+        "id": str(uuid.uuid4()),
+        "lead_no": lead_no,
+        **data.model_dump(exclude_none=True),
+        "activities": [{
+            "note": f"Lead created in stage: {data.stage or 'new'}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"],
+            "author_name": user.get("name")
+        }],
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.crm_leads.insert_one(doc)
+    return await _enrich_lead(doc)
+
+@crm_router.put("/leads/{lead_id}")
+async def update_lead(lead_id: str, data: LeadUpdate, request: Request):
+    user = await get_current_user(request)
+    existing = await db.crm_leads.find_one({"id": lead_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    update = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="No data to update")
+    # If stage changes, append an activity line
+    activity_entries = []
+    if "stage" in update and update["stage"] != existing.get("stage"):
+        activity_entries.append({
+            "note": f"Stage changed: {existing.get('stage', '-')} → {update['stage']}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"],
+            "author_name": user.get("name")
+        })
+    update["updated_at"] = datetime.now(timezone.utc)
+    mongo_update = {"$set": update}
+    if activity_entries:
+        mongo_update["$push"] = {"activities": {"$each": activity_entries}}
+    await db.crm_leads.update_one({"id": lead_id}, mongo_update)
+    return await _enrich_lead(await db.crm_leads.find_one({"id": lead_id}))
+
+@crm_router.post("/leads/{lead_id}/activity")
+async def add_lead_activity(lead_id: str, payload: dict = Body(...), request: Request = None):
+    user = await get_current_user(request)
+    note = (payload.get("note") or "").strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="Activity note required")
+    await db.crm_leads.update_one(
+        {"id": lead_id},
+        {"$push": {"activities": {"note": note, "created_at": datetime.now(timezone.utc), "created_by": user["id"], "author_name": user.get("name")}}}
+    )
+    return await _enrich_lead(await db.crm_leads.find_one({"id": lead_id}))
+
+@crm_router.post("/leads/{lead_id}/convert-to-customer")
+async def convert_lead_to_customer(lead_id: str, payload: dict = Body(default={}), request: Request = None):
+    """Convert a qualified lead's free-text customer_name into a real Customer record."""
+    user = await get_current_user(request)
+    lead = await db.crm_leads.find_one({"id": lead_id})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if lead.get("customer_id"):
+        raise HTTPException(status_code=400, detail="Lead already linked to a customer")
+    # Build a minimal customer record from the lead
+    customers_count = await db.customers.count_documents({})
+    cust_code = payload.get("customer_code") or f"CUST-{str(customers_count + 1).zfill(6)}"
+    cust_doc = {
+        "id": str(uuid.uuid4()),
+        "customer_code": cust_code,
+        "name": payload.get("name") or lead.get("customer_name"),
+        "contact_person": payload.get("contact_person") or lead.get("contact_person", ""),
+        "email": payload.get("email") or lead.get("email", ""),
+        "phone": payload.get("phone") or lead.get("phone", ""),
+        "address": payload.get("address", ""),
+        "gstin": payload.get("gstin", ""),
+        "status": "active",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.customers.insert_one(cust_doc)
+    await db.crm_leads.update_one(
+        {"id": lead_id},
+        {
+            "$set": {"customer_id": cust_doc["id"], "updated_at": datetime.now(timezone.utc)},
+            "$push": {"activities": {
+                "note": f"Converted to Customer: {cust_doc['customer_code']} — {cust_doc['name']}",
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"],
+                "author_name": user.get("name")
+            }}
+        }
+    )
+    cust_doc.pop("_id", None)
+    return {"lead": await _enrich_lead(await db.crm_leads.find_one({"id": lead_id})), "customer": cust_doc}
+
+@crm_router.delete("/leads/{lead_id}")
+async def delete_lead(lead_id: str, request: Request):
+    await get_current_user(request)
+    res = await db.crm_leads.delete_one({"id": lead_id})
+    if not res.deleted_count:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return {"message": "Lead deleted"}
+
+# --------- TICKETS (Support) ---------
+@crm_router.get("/tickets")
+async def list_tickets(request: Request, stage: Optional[str] = None):
+    await get_current_user(request)
+    q = {}
+    if stage:
+        q["stage"] = stage
+    tickets = await db.crm_tickets.find(q).sort("created_at", -1).to_list(2000)
+    return [await _enrich_ticket(t) for t in tickets]
+
+@crm_router.post("/tickets", status_code=201)
+async def create_ticket(data: TicketCreate, request: Request):
+    user = await get_current_user(request)
+    customer = await db.customers.find_one({"id": data.customer_id})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    count = await db.crm_tickets.count_documents({})
+    ticket_no = f"TKT-{str(count + 1).zfill(6)}"
+    doc = {
+        "id": str(uuid.uuid4()),
+        "ticket_no": ticket_no,
+        **data.model_dump(exclude_none=True),
+        "activities": [{
+            "note": f"Ticket created — priority: {data.priority or 'medium'}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"],
+            "author_name": user.get("name")
+        }],
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.crm_tickets.insert_one(doc)
+    return await _enrich_ticket(doc)
+
+@crm_router.put("/tickets/{ticket_id}")
+async def update_ticket(ticket_id: str, data: TicketUpdate, request: Request):
+    user = await get_current_user(request)
+    existing = await db.crm_tickets.find_one({"id": ticket_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    update = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not update:
+        raise HTTPException(status_code=400, detail="No data to update")
+    activity_entries = []
+    if "stage" in update and update["stage"] != existing.get("stage"):
+        activity_entries.append({
+            "note": f"Stage changed: {existing.get('stage', '-')} → {update['stage']}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"],
+            "author_name": user.get("name")
+        })
+    if "priority" in update and update["priority"] != existing.get("priority"):
+        activity_entries.append({
+            "note": f"Priority changed: {existing.get('priority', '-')} → {update['priority']}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"],
+            "author_name": user.get("name")
+        })
+    update["updated_at"] = datetime.now(timezone.utc)
+    mongo_update = {"$set": update}
+    if activity_entries:
+        mongo_update["$push"] = {"activities": {"$each": activity_entries}}
+    await db.crm_tickets.update_one({"id": ticket_id}, mongo_update)
+    return await _enrich_ticket(await db.crm_tickets.find_one({"id": ticket_id}))
+
+@crm_router.post("/tickets/{ticket_id}/activity")
+async def add_ticket_activity(ticket_id: str, payload: dict = Body(...), request: Request = None):
+    user = await get_current_user(request)
+    note = (payload.get("note") or "").strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="Activity note required")
+    await db.crm_tickets.update_one(
+        {"id": ticket_id},
+        {"$push": {"activities": {"note": note, "created_at": datetime.now(timezone.utc), "created_by": user["id"], "author_name": user.get("name")}}}
+    )
+    return await _enrich_ticket(await db.crm_tickets.find_one({"id": ticket_id}))
+
+@crm_router.delete("/tickets/{ticket_id}")
+async def delete_ticket(ticket_id: str, request: Request):
+    await get_current_user(request)
+    res = await db.crm_tickets.delete_one({"id": ticket_id})
+    if not res.deleted_count:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return {"message": "Ticket deleted"}
+
+
 # Include routers
 api_router.include_router(auth_router)
 api_router.include_router(items_router)
@@ -8237,6 +8548,7 @@ api_router.include_router(customers_router)
 api_router.include_router(grn_router)
 api_router.include_router(purchase_invoices_router)
 api_router.include_router(jobwork_router)
+api_router.include_router(crm_router)
 
 @api_router.get("/health")
 async def health_check():

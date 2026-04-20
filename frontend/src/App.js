@@ -20,6 +20,7 @@ import ManufacturingPage from "./pages/ManufacturingPage";
 import SettingsPage from "./pages/SettingsPage";
 import CustomersPage from "./pages/CustomersPage";
 import UserManagementPage from "./pages/UserManagementPage";
+import CRMPage from "./pages/CRMPage";
 import JobWorkPage from "./pages/JobWorkPage";
 import { Toaster } from "./components/ui/sonner";
 
@@ -59,6 +60,7 @@ function App() {
             <Route path="settings" element={<SettingsPage />} />
             <Route path="users" element={<UserManagementPage />} />
             <Route path="job-work" element={<JobWorkPage />} />
+            <Route path="crm" element={<CRMPage />} />
           </Route>
 
           {/* Catch all */}

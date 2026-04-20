@@ -4,7 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { 
   Factory, LayoutDashboard, Package, FileStack, Calculator, ClipboardCheck,
   Warehouse, LogOut, Menu, X, User, ChevronDown, ChevronRight,
-  Truck, ShoppingCart, Settings2, Users, Building2, Shield, FileText, Wrench, Cog
+  Truck, ShoppingCart, Settings2, Users, Building2, Shield, FileText, Wrench, Cog,
+  Headphones, Megaphone
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -43,6 +44,11 @@ const jobWorkGroupItems = [
   { name: 'Receipts', href: '/job-work?tab=receipts', icon: Package, module: 'manufacturing' },
 ];
 
+const crmGroupItems = [
+  { name: 'Marketing', href: '/crm?tab=marketing', icon: Megaphone, module: 'crm_marketing' },
+  { name: 'Support', href: '/crm?tab=support', icon: Headphones, module: 'crm_support' },
+];
+
 const afterGroupNavItems = [
   { name: 'Quality', href: '/quality', icon: ClipboardCheck, module: 'quality' },
 ];
@@ -68,6 +74,7 @@ export default function Layout() {
   const [jobWorkOpen, setJobWorkOpen] = useState(() => {
     return location.pathname === '/job-work';
   });
+  const [crmOpen, setCrmOpen] = useState(() => location.pathname === '/crm');
 
   const canView = (module) => user?.role === 'admin' || hasPermission(module, 'view');
 
@@ -77,11 +84,13 @@ export default function Layout() {
   const filteredAfterGroup = afterGroupNavItems.filter(item => canView(item.module));
   const filteredStores = storesGroupItems.filter(item => canView(item.module));
   const filteredJobWork = jobWorkGroupItems.filter(item => canView(item.module));
+  const filteredCRM = crmGroupItems.filter(item => canView(item.module));
   const filteredBottom = bottomNavItems.filter(item => canView(item.module));
   const showInventoryGroup = filteredInventory.length > 0;
   const showProductionGroup = filteredProduction.length > 0;
   const showStoresGroup = filteredStores.length > 0;
   const showJobWorkGroup = filteredJobWork.length > 0;
+  const showCRMGroup = filteredCRM.length > 0;
 
   const allNavItems = user?.role === 'admin'
     ? [...filteredBottom, { name: 'User Management', href: '/users', icon: Shield, module: 'users' }]
@@ -277,6 +286,40 @@ export default function Layout() {
                               `flex items-center space-x-2 px-3 py-1.5 text-sm rounded-sm transition-colors ${location.pathname + location.search === item.href ? 'text-white bg-[#1D3557]' : 'text-[#9CA3AF] hover:text-white hover:bg-[#1F2937]'}`
                             }
                             data-testid={`nav-jw-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
+                          >
+                            <item.icon className="w-4 h-4" />
+                            <span>{item.name}</span>
+                          </NavLink>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              )}
+
+              {/* CRM Group */}
+              {showCRMGroup && (
+                <li>
+                  <button
+                    onClick={() => setCrmOpen(!crmOpen)}
+                    className={`sidebar-link w-full justify-between ${location.pathname === '/crm' ? 'text-white bg-[#1F2937]' : ''}`}
+                    data-testid="nav-crm-group"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Users className="w-5 h-5" />
+                      <span>CRM</span>
+                    </div>
+                    {crmOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+                  {crmOpen && (
+                    <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
+                      {filteredCRM.map(item => (
+                        <li key={item.name}>
+                          <NavLink
+                            to={item.href}
+                            onClick={() => setSidebarOpen(false)}
+                            className={`flex items-center space-x-2 px-3 py-1.5 text-sm rounded-sm transition-colors ${location.pathname + location.search === item.href ? 'text-white bg-[#1D3557]' : 'text-[#9CA3AF] hover:text-white hover:bg-[#1F2937]'}`}
+                            data-testid={`nav-crm-${item.name.toLowerCase()}`}
                           >
                             <item.icon className="w-4 h-4" />
                             <span>{item.name}</span>
