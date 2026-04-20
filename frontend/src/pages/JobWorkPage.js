@@ -20,6 +20,14 @@ export default function JobWorkPage() {
   const [activeTab, setActiveTab] = useState('orders');
   // Collapsible section state — Subcontract Orders open by default; others closed.
   const [sectionsOpen, setSectionsOpen] = useState({ orders: true, challans: false, receipts: false });
+  // Honour the `?tab=` URL param coming from the sidebar dropdown (orders/challans/receipts).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    if (tab === 'orders' || tab === 'challans' || tab === 'receipts') {
+      setSectionsOpen({ orders: tab === 'orders', challans: tab === 'challans', receipts: tab === 'receipts' });
+    }
+  }, []);
 
   // Order dialog
   const [orderDialog, setOrderDialog] = useState(false);
@@ -558,7 +566,7 @@ export default function JobWorkPage() {
           expanded/collapsed independently; default = orders open, others closed. */}
       <div className="space-y-3">
         {/* Subcontract Orders */}
-        <details className="card-flat" open={activeTab === 'orders' || sectionsOpen.orders} onToggle={(e) => setSectionsOpen(s => ({ ...s, orders: e.target.open }))}>
+        <details className="card-flat" open={sectionsOpen.orders} onToggle={(e) => setSectionsOpen(s => ({ ...s, orders: e.target.open }))}>
           <summary className="cursor-pointer px-4 py-3 flex items-center justify-between hover:bg-[#F9FAFB] select-none font-semibold text-[#111827] rounded-sm">
             <span className="flex items-center gap-2"><Truck className="w-4 h-4 text-[#1D3557]" /> Subcontract Orders <span className="text-xs text-[#6B7280] font-normal">({orders.length})</span></span>
             <ChevronDown className="w-4 h-4 text-[#6B7280] details-chevron" />

@@ -37,9 +37,14 @@ const storesGroupItems = [
   { name: 'GRN', href: '/warehouses?tab=grn', icon: FileText, module: 'stores' },
 ];
 
+const jobWorkGroupItems = [
+  { name: 'Subcontract Orders', href: '/job-work?tab=orders', icon: Truck, module: 'manufacturing' },
+  { name: 'Delivery Challans', href: '/job-work?tab=challans', icon: FileText, module: 'manufacturing' },
+  { name: 'Receipts', href: '/job-work?tab=receipts', icon: Package, module: 'manufacturing' },
+];
+
 const afterGroupNavItems = [
   { name: 'Quality', href: '/quality', icon: ClipboardCheck, module: 'quality' },
-  { name: 'Job Work', href: '/job-work', icon: Wrench, module: 'manufacturing' },
 ];
 
 const bottomNavItems = [
@@ -60,6 +65,9 @@ export default function Layout() {
   const [storesOpen, setStoresOpen] = useState(() => {
     return location.pathname === '/warehouses';
   });
+  const [jobWorkOpen, setJobWorkOpen] = useState(() => {
+    return location.pathname === '/job-work';
+  });
 
   const canView = (module) => user?.role === 'admin' || hasPermission(module, 'view');
 
@@ -68,10 +76,12 @@ export default function Layout() {
   const filteredProduction = productionGroupItems.filter(item => canView(item.module));
   const filteredAfterGroup = afterGroupNavItems.filter(item => canView(item.module));
   const filteredStores = storesGroupItems.filter(item => canView(item.module));
+  const filteredJobWork = jobWorkGroupItems.filter(item => canView(item.module));
   const filteredBottom = bottomNavItems.filter(item => canView(item.module));
   const showInventoryGroup = filteredInventory.length > 0;
   const showProductionGroup = filteredProduction.length > 0;
   const showStoresGroup = filteredStores.length > 0;
+  const showJobWorkGroup = filteredJobWork.length > 0;
 
   const allNavItems = user?.role === 'admin'
     ? [...filteredBottom, { name: 'User Management', href: '/users', icon: Shield, module: 'users' }]
@@ -241,6 +251,42 @@ export default function Layout() {
               )}
 
               {filteredAfterGroup.map(renderNavItem)}
+
+              {/* Job Work Group */}
+              {showJobWorkGroup && (
+                <li>
+                  <button
+                    onClick={() => setJobWorkOpen(!jobWorkOpen)}
+                    className={`sidebar-link w-full justify-between ${location.pathname === '/job-work' ? 'text-white bg-[#1F2937]' : ''}`}
+                    data-testid="nav-jobwork-group"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Wrench className="w-5 h-5" />
+                      <span>Job Work</span>
+                    </div>
+                    {jobWorkOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+                  {jobWorkOpen && (
+                    <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
+                      {filteredJobWork.map(item => (
+                        <li key={item.name}>
+                          <NavLink
+                            to={item.href}
+                            onClick={() => setSidebarOpen(false)}
+                            className={({ isActive }) =>
+                              `flex items-center space-x-2 px-3 py-1.5 text-sm rounded-sm transition-colors ${location.pathname + location.search === item.href ? 'text-white bg-[#1D3557]' : 'text-[#9CA3AF] hover:text-white hover:bg-[#1F2937]'}`
+                            }
+                            data-testid={`nav-jw-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
+                          >
+                            <item.icon className="w-4 h-4" />
+                            <span>{item.name}</span>
+                          </NavLink>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              )}
 
               {allNavItems.map(renderNavItem)}
             </ul>

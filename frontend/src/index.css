@@ -105,10 +105,11 @@ code, .mono {
   @apply bg-[#F3F4F6] text-[#4B5563] text-xs font-semibold uppercase tracking-wider py-2 px-3 border-b border-[#E5E7EB];
 }
 
-/* Sticky-header wrapper: use on the overflow container that wraps the table */
+/* Sticky-header wrapper: use on the overflow container that wraps the table.
+   Using max-height instead of a hard height lets small tables shrink naturally. */
 .sticky-header-scroll {
   @apply overflow-auto;
-  max-height: calc(100vh - 280px);
+  max-height: calc(100vh - 220px);
 }
 
 .sticky-header-scroll table thead th,

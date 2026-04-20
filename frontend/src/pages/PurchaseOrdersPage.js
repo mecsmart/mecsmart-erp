@@ -273,7 +273,7 @@ export default function PurchaseOrdersPage() {
             <FileText className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No purchase orders found</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto sticky-header-scroll">
             <table className="w-full data-table" data-testid="po-table">
               <thead>
                 <tr>

@@ -333,7 +333,7 @@ export default function InventoryPage() {
                 <p>No inventory items found</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="inventory-table">
                   <thead>
                     <tr>
@@ -414,7 +414,7 @@ export default function InventoryPage() {
                 <p>No transactions recorded yet</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="transactions-table">
                   <thead>
                     <tr>

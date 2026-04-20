@@ -580,6 +580,11 @@ export default function WarehousesPage() {
           >
             Warehouses
           </TabsTrigger>
+          {/* Hidden triggers — Transfer History & GRN are accessed via the sidebar
+              dropdown (?tab=transfers / ?tab=grn). Triggers stay registered (not
+              visually rendered) so Radix Tabs can switch value from the URL. */}
+          <TabsTrigger value="transfers" className="hidden" data-testid="tab-transfers" />
+          <TabsTrigger value="grn" className="hidden" data-testid="tab-grn" />
         </TabsList>
 
         {/* Stock Tab - Inventory Overview */}

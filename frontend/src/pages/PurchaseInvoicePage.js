@@ -192,7 +192,7 @@ export default function PurchaseInvoicePage() {
             {pendingGRNs.length > 0 && <p className="text-xs text-[#6B7280] mt-1">Click "New Invoice" to create from a received GRN</p>}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto sticky-header-scroll">
             <table className="w-full data-table" data-testid="invoice-table">
               <thead><tr><th>Invoice #</th><th>Supplier Inv.</th><th>Supplier</th><th>PO Ref</th><th>GRN Ref</th><th>Date</th><th>Due Date</th><th className="text-right">Amount</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>

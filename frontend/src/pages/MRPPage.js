@@ -181,7 +181,7 @@ export default function MRPPage() {
                 <TrendingUp className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No material demand from active sales orders</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="demand-table">
                   <thead>
                     <tr>
@@ -247,7 +247,7 @@ export default function MRPPage() {
                 <p className="text-sm text-[#9CA3AF]">All items are above reorder points</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="suggestions-table">
                   <thead>
                     <tr>
