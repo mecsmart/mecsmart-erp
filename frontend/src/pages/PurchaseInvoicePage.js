@@ -132,20 +132,56 @@ export default function PurchaseInvoicePage() {
   };
 
   // ========== Tally XML Export ==========
+  // Pattern: fetch XML → render a small viewer page in a new tab with a visible Download
+  // button. This is more reliable than programmatic `<a download>` clicks which Emergent
+  // preview iframes occasionally block.
+  const showTallyViewer = (xmlString, filename) => {
+    const escaped = xmlString.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${filename}</title>
+    <style>
+      body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; background: #F3F4F6; }
+      .topbar { position: sticky; top: 0; background: #1D3557; color: white; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+      .topbar h1 { font-size: 15px; font-weight: 600; margin: 0; }
+      .topbar .meta { font-size: 11px; opacity: 0.85; }
+      .topbar button, .topbar a { background: #DEF7EC; color: #03543F; border: none; padding: 6px 14px; border-radius: 3px; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+      .topbar a:hover { background: #BCF0DA; }
+      pre { background: white; padding: 16px; margin: 0; overflow: auto; font-size: 11px; color: #111; white-space: pre-wrap; word-break: break-word; font-family: 'Consolas','Courier New',monospace; min-height: calc(100vh - 50px); }
+      .instructions { background: #FEF3C7; color: #723B13; padding: 10px 16px; font-size: 12px; border-bottom: 1px solid #F59E0B; }
+      .instructions code { background: rgba(0,0,0,0.08); padding: 1px 6px; border-radius: 2px; }
+    </style></head><body>
+    <div class="topbar">
+      <div>
+        <h1>${filename}</h1>
+        <div class="meta">Tally-compatible XML · ${xmlString.length.toLocaleString()} chars</div>
+      </div>
+      <a id="dl-btn" download="${filename}">⬇ Download XML</a>
+    </div>
+    <div class="instructions">
+      <strong>Import into Tally:</strong> Open Tally → Gateway of Tally → <code>F12 Configure</code> → set voucher type to Purchase → Import Data → Vouchers → select this downloaded XML.
+    </div>
+    <pre id="content"></pre>
+    <script>
+      const raw = document.getElementById('content');
+      raw.textContent = ${JSON.stringify(xmlString)};
+      const blob = new Blob([${JSON.stringify(xmlString)}], { type: 'application/xml' });
+      const url = URL.createObjectURL(blob);
+      const btn = document.getElementById('dl-btn');
+      btn.href = url;
+      // Auto-trigger download once on open
+      setTimeout(() => { try { btn.click(); } catch(e) {} }, 400);
+    <\/script></body></html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const pageUrl = URL.createObjectURL(blob);
+    window.open(pageUrl, '_blank', 'width=1100,height=800');
+  };
+
   const downloadTallyXML = async (inv) => {
     try {
-      const res = await api.get(`/api/purchase-invoices/${inv.id}/tally-xml`, { responseType: 'blob' });
-      const blob = new Blob([res.data], { type: 'application/xml' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `tally_${inv.invoice_number || inv.id}.xml`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      const res = await api.get(`/api/purchase-invoices/${inv.id}/tally-xml`, { responseType: 'text' });
+      const xml = typeof res.data === 'string' ? res.data : await (res.data.text ? res.data.text() : Promise.resolve(String(res.data)));
+      showTallyViewer(xml, `tally_${inv.invoice_number || inv.id}.xml`);
     } catch (e) {
-      alert(e.response?.data?.detail || 'Failed to generate Tally XML');
+      alert(e.response?.data?.detail || e.message || 'Failed to generate Tally XML');
     }
   };
 
@@ -155,18 +191,11 @@ export default function PurchaseInvoicePage() {
       .map(inv => inv.id);
     if (ids.length === 0) { alert('No invoices to export'); return; }
     try {
-      const res = await api.post('/api/purchase-invoices/tally-xml-bulk', { invoice_ids: ids }, { responseType: 'blob' });
-      const blob = new Blob([res.data], { type: 'application/xml' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `tally_purchase_invoices_${new Date().toISOString().slice(0, 10)}.xml`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      const res = await api.post('/api/purchase-invoices/tally-xml-bulk', { invoice_ids: ids }, { responseType: 'text' });
+      const xml = typeof res.data === 'string' ? res.data : await (res.data.text ? res.data.text() : Promise.resolve(String(res.data)));
+      showTallyViewer(xml, `tally_purchase_invoices_${new Date().toISOString().slice(0, 10)}.xml`);
     } catch (e) {
-      alert(e.response?.data?.detail || 'Failed to generate bulk Tally XML');
+      alert(e.response?.data?.detail || e.message || 'Failed to generate bulk Tally XML');
     }
   };
 

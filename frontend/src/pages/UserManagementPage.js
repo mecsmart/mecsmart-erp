@@ -25,11 +25,15 @@ const ACTION_LABELS = { view: 'Read', create: 'Create', edit: 'Write', delete: '
 
 // Main-module → Sub-module hierarchy for Access Rights UI.
 // Each sub-module key matches the backend module key in DEFAULT_PERMISSIONS.
+// Some modules have restricted action sets — handled at render time via `module_actions`.
 const MODULE_GROUPS = [
   { main: 'Dashboard', subs: [{ key: 'dashboard', label: 'Dashboard' }] },
   { main: 'Master Data', subs: [
     { key: 'items', label: 'Items & Parts' },
     { key: 'bom', label: 'Bill of Materials' },
+    { key: 'routings', label: 'Routings' },
+    { key: 'bom_process_cost', label: 'BOM Process Cost' },
+    { key: 'bom_rollup_cost', label: 'BOM Rollup Cost' },
     { key: 'suppliers', label: 'Suppliers' },
     { key: 'customers', label: 'Customers' },
   ] },
@@ -37,13 +41,18 @@ const MODULE_GROUPS = [
     { key: 'inventory', label: 'Stock' },
     { key: 'mrp', label: 'MRP' },
     { key: 'purchase_orders', label: 'Purchase Orders' },
+    { key: 'purchase_invoices', label: 'Purchase Invoice' },
   ] },
   { main: 'Stores', subs: [
     { key: 'stores', label: 'Warehouses / Stock / Transfer History / GRN' },
+    { key: 'delivery_challan', label: 'Delivery Challan' },
   ] },
   { main: 'Production', subs: [
     { key: 'production', label: 'Sales Orders' },
     { key: 'manufacturing', label: 'Manufacturing Orders' },
+  ] },
+  { main: 'Job Work', subs: [
+    { key: 'job_work', label: 'Job Work / Subcontracting' },
   ] },
   { main: 'Quality', subs: [{ key: 'quality', label: 'Quality Inspection' }] },
   { main: 'Settings', subs: [{ key: 'settings', label: 'Settings & User Management' }] },
@@ -352,24 +361,29 @@ export default function UserManagementPage() {
                           </tr>
                           {grp.subs.map(sub => {
                             const modulePerms = formData.permissions?.[sub.key] || [];
-                            const hasAll = ['view','create','edit','delete'].every(a => modulePerms.includes(a));
+                            const moduleActions = (modulesData?.module_actions || {})[sub.key] || ['view','create','edit','delete'];
+                            const hasAll = moduleActions.every(a => modulePerms.includes(a));
                             return (
                               <tr key={sub.key} className="border-t hover:bg-[#F9FAFB]">
                                 <td className="py-1.5 px-3 pl-6 text-[13px] text-[#111827]">{sub.label}</td>
                                 {['view','create','edit','delete'].map(a => (
                                   <td key={a} className="text-center py-1.5 px-2">
-                                    <input
-                                      type="checkbox"
-                                      checked={modulePerms.includes(a)}
-                                      onChange={e => {
-                                        const current = [...(formData.permissions?.[sub.key] || [])];
-                                        const next = e.target.checked ? [...new Set([...current, a])] : current.filter(x => x !== a);
-                                        setFormData({ ...formData, permissions: { ...formData.permissions, [sub.key]: next } });
-                                        setPermsTouched(true);
-                                      }}
-                                      data-testid={`perm-${sub.key}-${a}`}
-                                      className="w-4 h-4 accent-[#1D3557] cursor-pointer"
-                                    />
+                                    {moduleActions.includes(a) ? (
+                                      <input
+                                        type="checkbox"
+                                        checked={modulePerms.includes(a)}
+                                        onChange={e => {
+                                          const current = [...(formData.permissions?.[sub.key] || [])];
+                                          const next = e.target.checked ? [...new Set([...current, a])] : current.filter(x => x !== a);
+                                          setFormData({ ...formData, permissions: { ...formData.permissions, [sub.key]: next } });
+                                          setPermsTouched(true);
+                                        }}
+                                        data-testid={`perm-${sub.key}-${a}`}
+                                        className="w-4 h-4 accent-[#1D3557] cursor-pointer"
+                                      />
+                                    ) : (
+                                      <span className="text-[#D1D5DB]">—</span>
+                                    )}
                                   </td>
                                 ))}
                                 <td className="text-center py-1.5 px-2">
@@ -377,7 +391,7 @@ export default function UserManagementPage() {
                                     type="checkbox"
                                     checked={hasAll}
                                     onChange={e => {
-                                      const next = e.target.checked ? ['view','create','edit','delete'] : [];
+                                      const next = e.target.checked ? [...moduleActions] : [];
                                       setFormData({ ...formData, permissions: { ...formData.permissions, [sub.key]: next } });
                                       setPermsTouched(true);
                                     }}
@@ -562,17 +576,24 @@ export default function UserManagementPage() {
                         </tr>
                         {grp.subs.map(sub => {
                           const perms = groupForm.permissions?.[sub.key] || [];
-                          const hasAll = ['view','create','edit','delete'].every(a => perms.includes(a));
+                          const moduleActions = (modulesData?.module_actions || {})[sub.key] || ['view','create','edit','delete'];
+                          const hasAll = moduleActions.every(a => perms.includes(a));
                           return (
                             <tr key={sub.key} className="border-t hover:bg-[#F9FAFB]">
                               <td className="py-1.5 px-3 pl-6 text-[13px] text-[#111827]">{sub.label}</td>
                               {['view','create','edit','delete'].map(a => (
                                 <td key={a} className="text-center py-1.5 px-2">
-                                  <input type="checkbox" checked={perms.includes(a)} onChange={() => toggleGroupPerm(sub.key, a)} data-testid={`group-perm-${sub.key}-${a}`} className="w-4 h-4 accent-[#1D3557] cursor-pointer" />
+                                  {moduleActions.includes(a) ? (
+                                    <input type="checkbox" checked={perms.includes(a)} onChange={() => toggleGroupPerm(sub.key, a)} data-testid={`group-perm-${sub.key}-${a}`} className="w-4 h-4 accent-[#1D3557] cursor-pointer" />
+                                  ) : (
+                                    <span className="text-[#D1D5DB]">—</span>
+                                  )}
                                 </td>
                               ))}
                               <td className="text-center py-1.5 px-2">
-                                <input type="checkbox" checked={hasAll} onChange={() => toggleGroupAll(sub.key)} data-testid={`group-perm-${sub.key}-all`} className="w-4 h-4 accent-[#1D3557] cursor-pointer" />
+                                <input type="checkbox" checked={hasAll} onChange={() => {
+                                  setGroupForm(prev => ({ ...prev, permissions: { ...prev.permissions, [sub.key]: hasAll ? [] : [...moduleActions] } }));
+                                }} data-testid={`group-perm-${sub.key}-all`} className="w-4 h-4 accent-[#1D3557] cursor-pointer" />
                               </td>
                             </tr>
                           );

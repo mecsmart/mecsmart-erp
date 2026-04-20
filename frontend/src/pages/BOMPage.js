@@ -34,8 +34,9 @@ const statusOptions = [
 export default function BOMPage() {
   const { user } = useAuth();
   const { formatCurrency, currencySymbol, companySettings } = useCompanySettings();
-  // Cost visibility: admins + explicit "admin group" members see rollup/material/process/extended/total cost columns.
-  const canSeeCosts = user?.role === 'admin' || user?.is_admin_group === true;
+  // Cost visibility: governed by the `bom_rollup_cost.view` permission OR admin/admin-group.
+  const rollupPerms = user?.permissions?.bom_rollup_cost || [];
+  const canSeeCosts = user?.role === 'admin' || user?.is_admin_group === true || rollupPerms.includes('view');
   const [boms, setBoms] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);

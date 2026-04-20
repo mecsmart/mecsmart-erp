@@ -46,6 +46,13 @@ export default function JobWorkPage() {
   const [dcLines, setDcLines] = useState([]);
   const [dcWarehouse, setDcWarehouse] = useState('');
 
+  // Manual DC dialog (standalone DC not tied to a Subcontract Order)
+  const [manualDcDialog, setManualDcDialog] = useState(false);
+  const [manualDcForm, setManualDcForm] = useState({
+    supplier_id: '', dc_purpose: 'subcontract', warehouse_id: '', notes: '',
+    lines: [{ item_id: '', item_search: '', quantity: 1, processing_charges: 0, notes: '' }]
+  });
+
   // DC Print T&C dialog
   const [dcPrintDialog, setDcPrintDialog] = useState(false);
   const [dcPrintTarget, setDcPrintTarget] = useState(null);
@@ -242,6 +249,58 @@ export default function JobWorkPage() {
       await api.put(`/api/job-work/orders/${order.id}`, { dc_created: true });
       fetchData();
     } catch (e) { alert(e.response?.data?.detail || 'Failed to create DC'); }
+  };
+
+  // ================== MANUAL DC (standalone — DC → GRN Receipt flow) ==================
+  const openManualDC = () => {
+    setManualDcForm({
+      supplier_id: '', dc_purpose: 'subcontract', warehouse_id: '', notes: '',
+      lines: [{ item_id: '', item_search: '', quantity: 1, processing_charges: 0, notes: '' }]
+    });
+    setManualDcDialog(true);
+  };
+
+  const addManualDcLine = () => {
+    setManualDcForm(prev => ({ ...prev, lines: [...prev.lines, { item_id: '', item_search: '', quantity: 1, processing_charges: 0, notes: '' }] }));
+  };
+
+  const removeManualDcLine = (idx) => {
+    setManualDcForm(prev => prev.lines.length > 1 ? { ...prev, lines: prev.lines.filter((_, i) => i !== idx) } : prev);
+  };
+
+  const updateManualDcLine = (idx, patch) => {
+    setManualDcForm(prev => ({ ...prev, lines: prev.lines.map((l, i) => i === idx ? { ...l, ...patch } : l) }));
+  };
+
+  const handleCreateManualDC = async () => {
+    try {
+      if (!manualDcForm.supplier_id) { alert('Select a supplier'); return; }
+      const validLines = manualDcForm.lines.filter(l => l.item_id && l.quantity > 0);
+      if (validLines.length === 0) { alert('Add at least one valid line (item + quantity)'); return; }
+      const payload = {
+        supplier_id: manualDcForm.supplier_id,
+        dc_purpose: manualDcForm.dc_purpose || 'subcontract',
+        warehouse_id: manualDcForm.warehouse_id || '',
+        notes: manualDcForm.notes || '',
+        lines: validLines.map(l => ({
+          item_id: l.item_id,
+          quantity: parseFloat(l.quantity),
+          processing_charges: parseFloat(l.processing_charges || 0),
+          notes: l.notes || ''
+        }))
+      };
+      const { data } = await api.post('/api/job-work/challans/manual', payload);
+      alert(`Manual DC ${data.dc_number} created successfully`);
+      setManualDcDialog(false);
+      fetchData();
+    } catch (e) {
+      const err = e.response?.data?.detail;
+      if (err && typeof err === 'object' && err.items) {
+        alert(`Insufficient stock:\n${err.items.map(i => `• ${i.part_number} — needed ${i.required}, available ${i.available}`).join('\n')}`);
+      } else {
+        alert(err || 'Failed to create manual DC');
+      }
+    }
   };
 
 
@@ -689,7 +748,14 @@ export default function JobWorkPage() {
         <details className="card-flat" open={sectionsOpen.challans} onToggle={(e) => setSectionsOpen(s => ({ ...s, challans: e.target.open }))}>
           <summary className="cursor-pointer px-4 py-3 flex items-center justify-between hover:bg-[#F9FAFB] select-none font-semibold text-[#111827] rounded-sm">
             <span className="flex items-center gap-2"><FileText className="w-4 h-4 text-[#1D3557]" /> Delivery Challans <span className="text-xs text-[#6B7280] font-normal">({challans.length})</span></span>
-            <ChevronDown className="w-4 h-4 text-[#6B7280] details-chevron" />
+            <span className="flex items-center gap-2">
+              {canEdit && (
+                <span role="button" tabIndex={0} onClick={(e) => { e.preventDefault(); e.stopPropagation(); openManualDC(); }} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1" data-testid="create-manual-dc-btn">
+                  <Plus className="w-3 h-3" /> Create DC
+                </span>
+              )}
+              <ChevronDown className="w-4 h-4 text-[#6B7280] details-chevron" />
+            </span>
           </summary>
           <div className="px-4 pb-4">
           <div className="card-flat overflow-hidden">
@@ -702,14 +768,23 @@ export default function JobWorkPage() {
                   <tbody>
                     {challans.map(dc => (
                       <tr key={dc.id} data-testid={`dc-row-${dc.id}`}>
-                        <td className="mono font-medium">{dc.dc_number}</td>
-                        <td className="mono">{dc.order?.order_number || '-'}</td>
+                        <td className="mono font-medium">
+                          {dc.dc_number}
+                          {dc.is_manual && <span className="ml-2 text-[10px] bg-[#FEF3C7] text-[#723B13] px-1.5 py-0.5 rounded">MANUAL</span>}
+                        </td>
+                        <td className="mono">{dc.order?.order_number || (dc.is_manual ? <span className="text-[10px] text-[#6B7280]">—</span> : '-')}</td>
                         <td className="text-sm font-medium">
-                          {(dc.order?.job_work_parts || []).map((p, pi) => {
-                            const pit = p.item || items.find(i => i.id === p.item_id);
-                            return <div key={pi}>{pit?.part_number || '-'} - {pit?.name || ''} <span className="text-[#6B7280] font-normal">({p.quantity})</span></div>;
-                          })}
-                          {!(dc.order?.job_work_parts?.length) && (dc.fg_item_name || '-')}
+                          {dc.is_manual ? (
+                            <span className="text-[10px] text-[#6B7280] capitalize">{dc.dc_purpose || 'subcontract'}</span>
+                          ) : (
+                            <>
+                              {(dc.order?.job_work_parts || []).map((p, pi) => {
+                                const pit = p.item || items.find(i => i.id === p.item_id);
+                                return <div key={pi}>{pit?.part_number || '-'} - {pit?.name || ''} <span className="text-[#6B7280] font-normal">({p.quantity})</span></div>;
+                              })}
+                              {!(dc.order?.job_work_parts?.length) && (dc.fg_item_name || '-')}
+                            </>
+                          )}
                         </td>
                         <td>{dc.supplier?.name || '-'}</td>
                         <td className="text-sm">
@@ -888,6 +963,120 @@ export default function JobWorkPage() {
             )}
             <div><label className="block text-sm font-semibold mb-1">Notes</label><textarea value={orderForm.notes} onChange={e => setOrderForm({...orderForm, notes: e.target.value})} className="input-field" rows={2} /></div>
             <div className="flex justify-end space-x-3 pt-3 border-t"><button onClick={() => { setOrderDialog(false); setEditingOrder(null); }} className="btn-secondary">Cancel</button><button onClick={handleCreateOrder} className="btn-primary" data-testid="jw-save-order">{editingOrder ? 'Update Order' : 'Create Order'}</button></div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manual DC Dialog — standalone DC (no parent SC) */}
+      <Dialog open={manualDcDialog} onOpenChange={setManualDcDialog}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="manual-dc-dialog">
+          <DialogHeader><DialogTitle className="font-[Chivo]">Create Manual Delivery Challan</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-3">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <label className="block text-sm font-semibold mb-1">Supplier *</label>
+                <Select value={manualDcForm.supplier_id} onValueChange={(v) => setManualDcForm({ ...manualDcForm, supplier_id: v })}>
+                  <SelectTrigger data-testid="manual-dc-supplier"><SelectValue placeholder="Select supplier..." /></SelectTrigger>
+                  <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}{s.gstin ? ` (${s.gstin})` : ''}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-1">Purpose</label>
+                <Select value={manualDcForm.dc_purpose} onValueChange={(v) => setManualDcForm({ ...manualDcForm, dc_purpose: v })}>
+                  <SelectTrigger data-testid="manual-dc-purpose"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="subcontract">Subcontract</SelectItem>
+                    <SelectItem value="rework">Rework</SelectItem>
+                    <SelectItem value="repair">Repair</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-1">From Warehouse (optional)</label>
+              <Select value={manualDcForm.warehouse_id} onValueChange={(v) => setManualDcForm({ ...manualDcForm, warehouse_id: v })}>
+                <SelectTrigger data-testid="manual-dc-warehouse"><SelectValue placeholder="(Main stock)" /></SelectTrigger>
+                <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="border rounded-sm overflow-hidden">
+              <div className="bg-[#F3F4F6] px-3 py-2 flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase text-[#4B5563]">Items to Ship ({manualDcForm.lines.length})</span>
+                <button type="button" onClick={addManualDcLine} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1" data-testid="manual-dc-add-line"><Plus className="w-3 h-3" />Add Line</button>
+              </div>
+              <div className="p-3 space-y-3">
+                {manualDcForm.lines.map((line, idx) => {
+                  const q = (line.item_search || '').trim().toLowerCase();
+                  const filtered = items.filter(i => {
+                    if (!q) return true;
+                    return (i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q);
+                  });
+                  const selected = items.find(i => i.id === line.item_id);
+                  return (
+                    <div key={idx} className="border border-[#E5E7EB] rounded-sm p-2 bg-[#F9FAFB]" data-testid={`manual-dc-line-${idx}`}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-semibold text-[#374151]">Line {idx + 1}</span>
+                        {manualDcForm.lines.length > 1 && (
+                          <button type="button" onClick={() => removeManualDcLine(idx)} className="text-xs text-[#9B1C1C] hover:underline flex items-center gap-1" data-testid={`manual-dc-remove-line-${idx}`}><X className="w-3 h-3" />Remove</button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-12 gap-2">
+                        <div className="col-span-6">
+                          <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Item *</label>
+                          {selected ? (
+                            <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-2 py-1" data-testid={`manual-dc-selected-${idx}`}>
+                              <div className="text-xs truncate">
+                                <span className="mono font-semibold">{selected.part_number}</span>
+                                <span className="mx-1">—</span>
+                                <span>{selected.name}</span>
+                                <span className="ml-2 text-[#6B7280]">Stock: {selected.current_stock || 0}</span>
+                              </div>
+                              <button type="button" className="text-[10px] text-[#9B1C1C] hover:underline ml-2" onClick={() => updateManualDcLine(idx, { item_id: '', item_search: '' })} data-testid={`manual-dc-clear-${idx}`}>Clear</button>
+                            </div>
+                          ) : (
+                            <>
+                              <input type="text" placeholder="Search item by part number / name..." value={line.item_search || ''} onChange={(e) => updateManualDcLine(idx, { item_search: e.target.value })} className="input-field text-xs" data-testid={`manual-dc-search-${idx}`} />
+                              <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-32 overflow-auto bg-white">
+                                {filtered.length === 0 && <div className="px-2 py-2 text-[10px] text-center text-[#6B7280]">No matching items</div>}
+                                {filtered.slice(0, 50).map(it => (
+                                  <button key={it.id} type="button" onClick={() => updateManualDcLine(idx, { item_id: it.id, item_search: '' })} data-testid={`manual-dc-option-${idx}-${it.id}`} className="w-full text-left px-2 py-1 text-[11px] border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]">
+                                    <span className="mono font-semibold">{it.part_number}</span>
+                                    <span className="mx-1">—</span>
+                                    <span>{it.name}</span>
+                                    <span className="ml-2 text-[#6B7280]">Stock: {it.current_stock || 0}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Qty *</label>
+                          <input type="number" min="1" step="0.01" value={line.quantity} onChange={(e) => updateManualDcLine(idx, { quantity: parseFloat(e.target.value) || 0 })} className="input-field text-xs mono" data-testid={`manual-dc-qty-${idx}`} />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Charges/Unit</label>
+                          <input type="number" min="0" step="0.01" value={line.processing_charges} onChange={(e) => updateManualDcLine(idx, { processing_charges: parseFloat(e.target.value) || 0 })} className="input-field text-xs mono" data-testid={`manual-dc-charges-${idx}`} />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Notes</label>
+                          <input type="text" value={line.notes} onChange={(e) => updateManualDcLine(idx, { notes: e.target.value })} className="input-field text-xs" data-testid={`manual-dc-notes-${idx}`} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-1">DC Notes (optional)</label>
+              <textarea value={manualDcForm.notes} onChange={e => setManualDcForm({ ...manualDcForm, notes: e.target.value })} className="input-field" rows={2} data-testid="manual-dc-doc-notes" />
+            </div>
+            <div className="flex justify-end space-x-3 pt-3 border-t">
+              <button type="button" onClick={() => setManualDcDialog(false)} className="btn-secondary">Cancel</button>
+              <button type="button" onClick={handleCreateManualDC} className="btn-primary" data-testid="manual-dc-submit">Create DC &amp; Deduct Stock</button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

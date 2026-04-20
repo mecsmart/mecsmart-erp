@@ -87,37 +87,63 @@ class UserResponse(BaseModel):
     created_at: datetime
 
 # Module permission definitions
+# NOTE: `bom_process_cost` supports only [view, edit]; `bom_rollup_cost` supports only [view].
+# Every other module supports the full CRUD set (`ALL_ACTIONS`).
 ALL_MODULES = [
-    "dashboard", "items", "bom", "mrp", "production", "manufacturing",
-    "quality", "inventory", "suppliers", "customers", "purchase_orders", "stores", "settings"
+    "dashboard", "items", "bom", "routings", "bom_process_cost", "bom_rollup_cost",
+    "mrp", "production", "manufacturing",
+    "quality", "inventory", "suppliers", "customers",
+    "purchase_orders", "purchase_invoices", "delivery_challan", "job_work",
+    "stores", "settings"
 ]
 ALL_ACTIONS = ["view", "create", "edit", "delete"]
+# Per-module allowed action set (override). If a module isn't listed here, it uses ALL_ACTIONS.
+MODULE_ACTIONS = {
+    "bom_process_cost": ["view", "edit"],
+    "bom_rollup_cost": ["view"],
+}
+
+def allowed_actions_for(module: str) -> list:
+    return MODULE_ACTIONS.get(module, ALL_ACTIONS)
 
 # Default permissions by role
 DEFAULT_PERMISSIONS = {
-    "admin": {m: ALL_ACTIONS.copy() for m in ALL_MODULES},
+    "admin": {m: allowed_actions_for(m).copy() for m in ALL_MODULES},
     "production_manager": {
         "dashboard": ["view"], "items": ["view", "create", "edit"], "bom": ["view", "create", "edit"],
+        "routings": ["view", "create", "edit"],
+        "bom_process_cost": ["view", "edit"], "bom_rollup_cost": [],
         "mrp": ["view"], "production": ["view", "create", "edit", "delete"],
         "manufacturing": ["view", "create", "edit", "delete"], "quality": ["view"],
         "inventory": ["view"], "suppliers": ["view", "create", "edit"],
-        "customers": ["view", "create", "edit"], "purchase_orders": ["view", "create", "edit"],
+        "customers": ["view", "create", "edit"],
+        "purchase_orders": ["view", "create", "edit"],
+        "purchase_invoices": ["view", "create", "edit"],
+        "delivery_challan": ["view", "create", "edit", "delete"],
+        "job_work": ["view", "create", "edit", "delete"],
         "stores": ["view"], "settings": ["view"]
     },
     "quality_inspector": {
-        "dashboard": ["view"], "items": ["view"], "bom": ["view"],
+        "dashboard": ["view"], "items": ["view"], "bom": ["view"], "routings": ["view"],
+        "bom_process_cost": [], "bom_rollup_cost": [],
         "mrp": [], "production": ["view"],
         "manufacturing": ["view"], "quality": ["view", "create", "edit"],
         "inventory": ["view"], "suppliers": [],
-        "customers": [], "purchase_orders": [],
+        "customers": [], "purchase_orders": [], "purchase_invoices": [],
+        "delivery_challan": ["view"], "job_work": ["view"],
         "stores": ["view"], "settings": ["view"]
     },
     "inventory_manager": {
-        "dashboard": ["view"], "items": ["view", "create", "edit"], "bom": ["view"],
+        "dashboard": ["view"], "items": ["view", "create", "edit"], "bom": ["view"], "routings": ["view"],
+        "bom_process_cost": [], "bom_rollup_cost": [],
         "mrp": ["view"], "production": ["view"],
         "manufacturing": ["view"], "quality": ["view"],
         "inventory": ["view", "create", "edit", "delete"], "suppliers": ["view"],
-        "customers": ["view"], "purchase_orders": ["view", "create", "edit"],
+        "customers": ["view"],
+        "purchase_orders": ["view", "create", "edit"],
+        "purchase_invoices": ["view", "create", "edit"],
+        "delivery_challan": ["view", "create", "edit"],
+        "job_work": ["view"],
         "stores": ["view", "create", "edit", "delete"], "settings": ["view"]
     }
 }
@@ -570,6 +596,23 @@ class DCCreate(BaseModel):
     warehouse_id: Optional[str] = ""
     notes: Optional[str] = ""
     skip_stock_deduct: Optional[bool] = False  # For Job Card outsource — parts go for processing, not consumed
+
+class ManualDCLineItem(BaseModel):
+    item_id: str
+    quantity: float
+    unit: Optional[str] = "pcs"
+    processing_charges: Optional[float] = 0
+    notes: Optional[str] = ""
+
+class ManualDCCreate(BaseModel):
+    """Standalone DC not tied to any Subcontract Order. Used for direct
+    shipments where goods go out and a GRN will come back later (DC-GRN flow)."""
+    supplier_id: str
+    lines: List[ManualDCLineItem]
+    warehouse_id: Optional[str] = ""
+    dc_purpose: Optional[str] = "subcontract"  # subcontract | rework | repair | other
+    notes: Optional[str] = ""
+    skip_stock_deduct: Optional[bool] = False
 
 class SubcontractReceiptLineItem(BaseModel):
     item_id: str
@@ -2241,6 +2284,7 @@ async def get_modules(request: Request):
     return {
         "modules": ALL_MODULES,
         "actions": ALL_ACTIONS,
+        "module_actions": MODULE_ACTIONS,
         "default_permissions": DEFAULT_PERMISSIONS
     }
 
@@ -7521,7 +7565,9 @@ async def get_delivery_challans(request: Request):
     if sc_ids:
         async for sc in db.subcontract_orders.find({"id": {"$in": list(sc_ids)}}, {"_id": 0}):
             scs_map[sc["id"]] = sc
+    # Collect all supplier ids from both SCs and manual DCs
     supplier_ids = {sc.get("supplier_id") for sc in scs_map.values() if sc.get("supplier_id")}
+    supplier_ids |= {dc.get("supplier_id") for dc in challans if dc.get("supplier_id")}
     suppliers_map = {}
     if supplier_ids:
         async for s in db.suppliers.find({"id": {"$in": list(supplier_ids)}}, {"_id": 0}):
@@ -7537,18 +7583,112 @@ async def get_delivery_challans(request: Request):
     if item_ids:
         async for it in db.items.find({"id": {"$in": list(item_ids)}}, {"_id": 0}):
             items_map[it["id"]] = it
-    
+
     for dc in challans:
         order = scs_map.get(dc.get("subcontract_order_id"))
         dc["order"] = order
         dc["fg_item_name"] = order.get("fg_item_name", "") if order else ""
-        dc["supplier"] = suppliers_map.get(order.get("supplier_id")) if order else None
+        # Manual DCs carry supplier_id directly; parent-SC DCs inherit from the SC.
+        dc_supplier_id = dc.get("supplier_id") or (order.get("supplier_id") if order else None)
+        dc["supplier"] = suppliers_map.get(dc_supplier_id) if dc_supplier_id else None
+        dc["is_manual"] = bool(dc.get("is_manual"))
         for line in dc.get("lines", []):
             line["item"] = items_map.get(line.get("item_id"))
         if order:
             for part in order.get("job_work_parts", []):
                 part["item"] = items_map.get(part.get("item_id"))
     return challans
+
+@jobwork_router.post("/challans/manual", status_code=201)
+async def create_manual_delivery_challan(data: ManualDCCreate, request: Request):
+    """Create a standalone (manual) DC — not linked to any Subcontract Order.
+    Used when goods are shipped outward and a GRN is expected back later (DC→GRN flow).
+    Deducts stock (unless skip_stock_deduct is true).
+    """
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    supplier = await db.suppliers.find_one({"id": data.supplier_id})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+
+    if not data.lines:
+        raise HTTPException(status_code=400, detail="At least one line item is required")
+
+    # First pass: stock availability
+    if not data.skip_stock_deduct:
+        insufficient = []
+        for line in data.lines:
+            item = await db.items.find_one({"id": line.item_id})
+            if not item:
+                raise HTTPException(status_code=404, detail=f"Item {line.item_id} not found")
+            if float(item.get("current_stock", 0) or 0) < float(line.quantity):
+                insufficient.append({
+                    "part_number": item.get("part_number"),
+                    "name": item.get("name"),
+                    "required": line.quantity,
+                    "available": item.get("current_stock", 0)
+                })
+        if insufficient:
+            raise HTTPException(
+                status_code=400,
+                detail={"message": "Insufficient stock for one or more items", "items": insufficient}
+            )
+
+    count = await db.delivery_challans.count_documents({})
+    dc_number = f"DC-{str(count + 1).zfill(6)}"
+
+    dc_lines = []
+    for line in data.lines:
+        item = await db.items.find_one({"id": line.item_id})
+        line_doc = {
+            "item_id": line.item_id,
+            "quantity": float(line.quantity),
+            "unit": line.unit or (item.get("unit_of_measure") if item else "pcs"),
+            "processing_charges": float(line.processing_charges or 0),
+            "notes": line.notes or ""
+        }
+        dc_lines.append(line_doc)
+        # Deduct stock
+        if not data.skip_stock_deduct and item:
+            current_stock = float(item.get("current_stock", 0) or 0)
+            new_stock = current_stock - float(line.quantity)
+            await db.items.update_one(
+                {"id": line.item_id},
+                {"$set": {"current_stock": new_stock, "updated_at": datetime.now(timezone.utc)}}
+            )
+            await db.inventory_transactions.insert_one({
+                "id": str(uuid.uuid4()),
+                "item_id": line.item_id,
+                "transaction_type": "issue",
+                "quantity": float(line.quantity),
+                "reference_type": "manual_dc",
+                "reference_id": dc_number,
+                "previous_stock": current_stock,
+                "new_stock": new_stock,
+                "notes": f"Manual DC {dc_number} to {supplier.get('name', '')}",
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"]
+            })
+
+    dc_doc = {
+        "id": str(uuid.uuid4()),
+        "dc_number": dc_number,
+        "subcontract_order_id": None,  # manual DCs are not tied to an SC
+        "is_manual": True,
+        "supplier_id": data.supplier_id,
+        "dc_purpose": data.dc_purpose or "subcontract",
+        "warehouse_id": data.warehouse_id or "",
+        "lines": dc_lines,
+        "notes": data.notes or "",
+        "status": "draft",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"]
+    }
+    await db.delivery_challans.insert_one(dc_doc)
+    dc_doc.pop("_id", None)
+    return dc_doc
 
 @jobwork_router.post("/challans", status_code=201)
 async def create_delivery_challan(data: DCCreate, request: Request):
