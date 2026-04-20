@@ -20,7 +20,33 @@ const MODULE_LABELS = {
   settings: 'Settings',
 };
 
-const ACTION_LABELS = { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete' };
+const ACTION_LABELS = { view: 'Read', create: 'Create', edit: 'Write', delete: 'Delete' };
+
+// Main-module → Sub-module hierarchy for Access Rights UI.
+// Each sub-module key matches the backend module key in DEFAULT_PERMISSIONS.
+const MODULE_GROUPS = [
+  { main: 'Dashboard', subs: [{ key: 'dashboard', label: 'Dashboard' }] },
+  { main: 'Master Data', subs: [
+    { key: 'items', label: 'Items & Parts' },
+    { key: 'bom', label: 'Bill of Materials' },
+    { key: 'suppliers', label: 'Suppliers' },
+    { key: 'customers', label: 'Customers' },
+  ] },
+  { main: 'Inventory', subs: [
+    { key: 'inventory', label: 'Stock' },
+    { key: 'mrp', label: 'MRP' },
+    { key: 'purchase_orders', label: 'Purchase Orders' },
+  ] },
+  { main: 'Stores', subs: [
+    { key: 'stores', label: 'Warehouses / Stock / Transfer History / GRN' },
+  ] },
+  { main: 'Production', subs: [
+    { key: 'production', label: 'Sales Orders' },
+    { key: 'manufacturing', label: 'Manufacturing Orders' },
+  ] },
+  { main: 'Quality', subs: [{ key: 'quality', label: 'Quality Inspection' }] },
+  { main: 'Settings', subs: [{ key: 'settings', label: 'Settings & User Management' }] },
+];
 
 export default function UserManagementPage() {
   const { user: currentUser } = useAuth();
@@ -32,7 +58,10 @@ export default function UserManagementPage() {
   const [editingUser, setEditingUser] = useState(null);
   const [permUser, setPermUser] = useState(null);
   const [permData, setPermData] = useState({});
-  const [formData, setFormData] = useState({ email: '', password: '', name: '', role: 'inventory_manager' });
+  const [formData, setFormData] = useState({ email: '', password: '', name: '', role: 'inventory_manager', permissions: {} });
+  // Track if the admin has manually edited the permissions grid — so we don't auto-reset
+  // their selections when switching roles after editing.
+  const [permsTouched, setPermsTouched] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -53,7 +82,8 @@ export default function UserManagementPage() {
     try {
       await api.post('/api/users', formData);
       setIsCreateOpen(false);
-      setFormData({ email: '', password: '', name: '', role: 'inventory_manager' });
+      setFormData({ email: '', password: '', name: '', role: 'inventory_manager', permissions: {} });
+      setPermsTouched(false);
       fetchData();
     } catch (error) {
       alert(error.response?.data?.detail || 'Failed to create user');
@@ -62,18 +92,20 @@ export default function UserManagementPage() {
 
   const handleEdit = (u) => {
     setEditingUser(u);
-    setFormData({ email: u.email, password: '', name: u.name, role: u.role });
+    setFormData({ email: u.email, password: '', name: u.name, role: u.role, permissions: u.permissions || {} });
+    setPermsTouched(true);  // preserve existing user's permissions when dialog opens
     setIsCreateOpen(true);
   };
 
   const handleUpdate = async () => {
     try {
-      const payload = { name: formData.name, role: formData.role };
+      const payload = { name: formData.name, role: formData.role, permissions: formData.permissions };
       if (formData.password) payload.password = formData.password;
       await api.put(`/api/users/${editingUser.id}`, payload);
       setIsCreateOpen(false);
       setEditingUser(null);
-      setFormData({ email: '', password: '', name: '', role: 'inventory_manager' });
+      setFormData({ email: '', password: '', name: '', role: 'inventory_manager', permissions: {} });
+      setPermsTouched(false);
       fetchData();
     } catch (error) {
       alert(error.response?.data?.detail || 'Failed to update user');
@@ -146,39 +178,134 @@ export default function UserManagementPage() {
           <h1 className="text-2xl font-bold font-[Chivo] text-[#1D3557]">User Management</h1>
           <p className="text-sm text-[#4B5563]">Manage users and module-wise access permissions</p>
         </div>
-        <Dialog open={isCreateOpen} onOpenChange={(open) => { setIsCreateOpen(open); if (!open) { setEditingUser(null); setFormData({ email: '', password: '', name: '', role: 'inventory_manager' }); } }}>
+        <Dialog open={isCreateOpen} onOpenChange={(open) => { setIsCreateOpen(open); if (!open) { setEditingUser(null); setFormData({ email: '', password: '', name: '', role: 'inventory_manager', permissions: {} }); setPermsTouched(false); } }}>
           <DialogTrigger asChild>
-            <button className="btn-primary flex items-center space-x-2" data-testid="add-user-btn">
+            <button className="btn-primary flex items-center space-x-2" data-testid="add-user-btn" onClick={() => {
+              // Pre-seed permissions with the default for the default role so the admin
+              // sees pre-ticked checkboxes matching the role they'll likely keep.
+              const defaults = modulesData?.default_permissions?.['inventory_manager'] || {};
+              setFormData({ email: '', password: '', name: '', role: 'inventory_manager', permissions: JSON.parse(JSON.stringify(defaults)) });
+              setPermsTouched(false);
+            }}>
               <UserPlus className="w-4 h-4" /><span>Add User</span>
             </button>
           </DialogTrigger>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="font-[Chivo]">{editingUser ? 'Edit User' : 'Create New User'}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 mt-4">
-              <div>
-                <label className="text-sm font-medium text-[#374151]">Full Name *</label>
-                <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} data-testid="user-name-input" />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-[#374151]">Full Name *</label>
+                  <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} data-testid="user-name-input" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-[#374151]">Email *</label>
+                  <input type="email" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} disabled={!!editingUser} data-testid="user-email-input" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-[#374151]">{editingUser ? 'New Password (leave blank to keep)' : 'Password *'}</label>
+                  <input type="password" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder={editingUser ? 'Leave blank to keep current' : ''} data-testid="user-password-input" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-[#374151]">Role *</label>
+                  <Select value={formData.role} onValueChange={v => {
+                    const newPerms = permsTouched ? formData.permissions : (modulesData?.default_permissions?.[v] || {});
+                    setFormData({ ...formData, role: v, permissions: newPerms });
+                  }}>
+                    <SelectTrigger data-testid="user-role-select"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {ROLES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div>
-                <label className="text-sm font-medium text-[#374151]">Email *</label>
-                <input type="email" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} disabled={!!editingUser} data-testid="user-email-input" />
+
+              {/* Access Rights — per-module granular permissions */}
+              <div className="pt-3 border-t border-[#E5E7EB]">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-[#1D3557]">Access Rights</h3>
+                    <p className="text-xs text-[#6B7280]">Tick each action per sub-module. Read = View, Write = Edit existing record.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs"
+                    onClick={() => {
+                      const defaults = modulesData?.default_permissions?.[formData.role] || {};
+                      setFormData({ ...formData, permissions: JSON.parse(JSON.stringify(defaults)) });
+                      setPermsTouched(false);
+                    }}
+                    data-testid="perms-reset-defaults-btn"
+                  >
+                    <Key className="w-3 h-3 inline mr-1" />Reset to Role Defaults
+                  </button>
+                </div>
+
+                <div className="border rounded-sm overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-[#F3F4F6] text-[#4B5563]">
+                        <th className="text-left py-2 px-3 text-xs font-semibold uppercase">Main Module / Sub-module</th>
+                        {['view','create','edit','delete'].map(a => (
+                          <th key={a} className="text-center py-2 px-2 text-xs font-semibold uppercase w-20">{ACTION_LABELS[a]}</th>
+                        ))}
+                        <th className="text-center py-2 px-2 text-xs font-semibold uppercase w-16">All</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {MODULE_GROUPS.map(grp => (
+                        <React.Fragment key={grp.main}>
+                          <tr className="bg-[#F9FAFB]">
+                            <td colSpan={6} className="py-1.5 px-3 text-[11px] font-semibold text-[#374151] uppercase tracking-wide">{grp.main}</td>
+                          </tr>
+                          {grp.subs.map(sub => {
+                            const modulePerms = formData.permissions?.[sub.key] || [];
+                            const hasAll = ['view','create','edit','delete'].every(a => modulePerms.includes(a));
+                            return (
+                              <tr key={sub.key} className="border-t hover:bg-[#F9FAFB]">
+                                <td className="py-1.5 px-3 pl-6 text-[13px] text-[#111827]">{sub.label}</td>
+                                {['view','create','edit','delete'].map(a => (
+                                  <td key={a} className="text-center py-1.5 px-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={modulePerms.includes(a)}
+                                      onChange={e => {
+                                        const current = [...(formData.permissions?.[sub.key] || [])];
+                                        const next = e.target.checked ? [...new Set([...current, a])] : current.filter(x => x !== a);
+                                        setFormData({ ...formData, permissions: { ...formData.permissions, [sub.key]: next } });
+                                        setPermsTouched(true);
+                                      }}
+                                      data-testid={`perm-${sub.key}-${a}`}
+                                      className="w-4 h-4 accent-[#1D3557] cursor-pointer"
+                                    />
+                                  </td>
+                                ))}
+                                <td className="text-center py-1.5 px-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={hasAll}
+                                    onChange={e => {
+                                      const next = e.target.checked ? ['view','create','edit','delete'] : [];
+                                      setFormData({ ...formData, permissions: { ...formData.permissions, [sub.key]: next } });
+                                      setPermsTouched(true);
+                                    }}
+                                    data-testid={`perm-${sub.key}-all`}
+                                    className="w-4 h-4 accent-[#1D3557] cursor-pointer"
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <div>
-                <label className="text-sm font-medium text-[#374151]">{editingUser ? 'New Password (leave blank to keep)' : 'Password *'}</label>
-                <input type="password" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder={editingUser ? 'Leave blank to keep current' : ''} data-testid="user-password-input" />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-[#374151]">Role *</label>
-                <Select value={formData.role} onValueChange={v => setFormData({...formData, role: v})}>
-                  <SelectTrigger data-testid="user-role-select"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {ROLES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex justify-end space-x-2 pt-2">
+
+              <div className="flex justify-end space-x-2 pt-2 border-t border-[#E5E7EB]">
                 <button className="btn-secondary" onClick={() => { setIsCreateOpen(false); setEditingUser(null); }}>Cancel</button>
                 <button className="btn-primary" onClick={editingUser ? handleUpdate : handleCreate} data-testid="save-user-btn">
                   {editingUser ? 'Update' : 'Create'} User
