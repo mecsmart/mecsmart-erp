@@ -45,10 +45,8 @@ export default function ProductionPage() {
   const [editingOrder, setEditingOrder] = useState(null);
   const [cancelConfirm, setCancelConfirm] = useState({ open: false, order: null });
   const [formData, setFormData] = useState({
-    bom_id: '',
-    bom_search: '',
-    quantity: 1,
-    due_date: '',
+    // Multi-line SO: lines[] with { bom_id, bom_search, quantity, due_date, order_type, notes }
+    lines: [{ bom_id: '', bom_search: '', quantity: 1, due_date: '', order_type: 'auto', notes: '' }],
     priority: 'medium',
     notes: '',
   });
@@ -79,20 +77,42 @@ export default function ProductionPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const payload = {
-        ...formData,
-        due_date: new Date(formData.due_date).toISOString(),
-      };
-      
+      // Validate lines
+      const validLines = (formData.lines || []).filter(l => l.bom_id && l.quantity > 0);
+      if (validLines.length === 0) {
+        alert('Please add at least one valid line (BOM + quantity required).');
+        return;
+      }
+      for (const ln of validLines) {
+        if (!ln.due_date) {
+          alert('Each line must have a due date.');
+          return;
+        }
+      }
+
       if (editingOrder) {
+        // Edit mode — keep legacy single-line compatibility: update only first line's fields + top-level.
+        const ln = validLines[0];
         await api.put(`/api/production/${editingOrder.id}`, {
-          quantity: formData.quantity,
-          due_date: payload.due_date,
+          quantity: ln.quantity,
+          due_date: new Date(ln.due_date).toISOString(),
           priority: formData.priority,
           status: formData.status,
           notes: formData.notes,
         });
       } else {
+        // Create multi-line SO
+        const payload = {
+          lines: validLines.map(l => ({
+            bom_id: l.bom_id,
+            quantity: parseInt(l.quantity, 10),
+            due_date: new Date(l.due_date).toISOString(),
+            order_type: l.order_type || 'auto',
+            notes: l.notes || ''
+          })),
+          priority: formData.priority,
+          notes: formData.notes,
+        };
         await api.post('/api/production', payload);
       }
       setIsDialogOpen(false);
@@ -105,13 +125,40 @@ export default function ProductionPage() {
     }
   };
 
+  const addLine = () => {
+    setFormData(prev => ({
+      ...prev,
+      lines: [...prev.lines, { bom_id: '', bom_search: '', quantity: 1, due_date: '', order_type: 'auto', notes: '' }]
+    }));
+  };
+
+  const removeLine = (idx) => {
+    setFormData(prev => {
+      if (prev.lines.length <= 1) return prev;
+      return { ...prev, lines: prev.lines.filter((_, i) => i !== idx) };
+    });
+  };
+
+  const updateLine = (idx, patch) => {
+    setFormData(prev => ({
+      ...prev,
+      lines: prev.lines.map((l, i) => i === idx ? { ...l, ...patch } : l)
+    }));
+  };
+
   const handleEdit = (order) => {
     setEditingOrder(order);
+    // Edit keeps a single line (first line) for simplicity; multi-line edit not yet supported.
+    const firstLine = (order.lines && order.lines[0]) || { bom_id: order.bom_id, quantity: order.quantity, due_date: order.due_date, order_type: 'auto', notes: '' };
     setFormData({
-      bom_id: order.bom_id,
-      bom_search: '',
-      quantity: order.quantity,
-      due_date: order.due_date ? order.due_date.split('T')[0] : '',
+      lines: [{
+        bom_id: firstLine.bom_id,
+        bom_search: '',
+        quantity: firstLine.quantity,
+        due_date: firstLine.due_date ? String(firstLine.due_date).split('T')[0] : '',
+        order_type: firstLine.order_type || 'auto',
+        notes: firstLine.notes || '',
+      }],
       priority: order.priority,
       status: order.status,
       notes: order.notes || '',
@@ -119,10 +166,29 @@ export default function ProductionPage() {
     setIsDialogOpen(true);
   };
 
+  const resetForm = () => {
+    setFormData({
+      lines: [{ bom_id: '', bom_search: '', quantity: 1, due_date: '', order_type: 'auto', notes: '' }],
+      priority: 'medium',
+      notes: '',
+    });
+  };
+
   const handleConfirm = async (order) => {
     try {
-      await api.post(`/api/production/${order.id}/confirm`);
-      toast.success(`Sales Order ${order.order_number} confirmed`);
+      const { data } = await api.post(`/api/production/${order.id}/confirm`);
+      let msg = `Sales Order ${order.order_number} confirmed`;
+      const summary = data?.confirm_summary || [];
+      if (summary.length > 0) {
+        const bits = summary.map(s => {
+          const parts = [];
+          if (s.reserved_qty) parts.push(`${s.reserved_qty} reserved`);
+          if (s.mo_qty) parts.push(`${s.mo_qty} to MO`);
+          return `L${s.line_no} ${(s.order_type || '').toUpperCase()}: ${parts.join(' + ') || 'no action'}`;
+        });
+        msg += ` — ${bits.join(' | ')}`;
+      }
+      toast.success(msg, { duration: 6000 });
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to confirm order');
@@ -149,17 +215,6 @@ export default function ProductionPage() {
       toast.error(error.response?.data?.detail || 'Failed to cancel order');
       setCancelConfirm({ open: false, order: null });
     }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      bom_id: '',
-      bom_search: '',
-      quantity: 1,
-      due_date: '',
-      priority: 'medium',
-      notes: '',
-    });
   };
 
   const getStatusColor = (status) => {
@@ -206,15 +261,23 @@ export default function ProductionPage() {
                 <span>New Sales Order</span>
               </button>
             </DialogTrigger>
-            <DialogContent className="max-w-lg">
+            <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="font-[Chivo]">{editingOrder ? 'Edit Sales Order' : 'Create Sales Order'}</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-                <div>
-                  <label className="block text-sm font-semibold text-[#111827] mb-1">BOM *</label>
-                  {(() => {
-                    const q = (formData.bom_search || '').trim().toLowerCase();
+                {/* ========== SO LINES ========== */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-[#1D3557]">Order Lines {!editingOrder && <span className="text-xs font-normal text-[#6B7280]">({(formData.lines || []).length})</span>}</h3>
+                    {!editingOrder && (
+                      <button type="button" className="text-xs text-[#1D3557] hover:underline flex items-center gap-1" onClick={addLine} data-testid="so-add-line-btn">
+                        <Plus className="w-3 h-3" /> Add Line
+                      </button>
+                    )}
+                  </div>
+                  {(formData.lines || []).map((line, idx) => {
+                    const q = (line.bom_search || '').trim().toLowerCase();
                     const filtered = boms.filter(b => {
                       if (!q) return true;
                       const code = (b.parent_item?.part_number || '').toLowerCase();
@@ -222,82 +285,91 @@ export default function ProductionPage() {
                       const itemName = (b.parent_item?.name || '').toLowerCase();
                       return code.includes(q) || name.includes(q) || itemName.includes(q);
                     });
-                    const selected = boms.find(b => b.id === formData.bom_id);
-                    if (selected) {
-                      return (
-                        <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-3 py-2" data-testid="so-bom-selected">
-                          <div className="text-xs">
-                            <span className="mono font-semibold">{selected.parent_item?.part_number}</span>
-                            <span className="mx-2">—</span>
-                            <span>{selected.parent_item?.name || selected.name}</span>
-                            <span className="ml-2 text-[#6B7280]">(Rev {selected.revision})</span>
-                          </div>
-                          {!editingOrder && (
-                            <button type="button" className="text-xs text-[#9B1C1C] hover:underline" onClick={() => setFormData({ ...formData, bom_id: '', bom_search: '' })} data-testid="so-bom-clear">Clear</button>
-                          )}
-                        </div>
-                      );
-                    }
+                    const selected = boms.find(b => b.id === line.bom_id);
                     return (
-                      <>
-                        <input
-                          type="text"
-                          placeholder="Search by part number, BOM name or item..."
-                          value={formData.bom_search || ''}
-                          onChange={(e) => setFormData({ ...formData, bom_search: e.target.value })}
-                          className="input-field"
-                          data-testid="so-bom-search"
-                          autoFocus
-                          disabled={!!editingOrder}
-                        />
-                        <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-56 overflow-auto bg-white" data-testid="so-bom-list">
-                          {filtered.length === 0 && (
-                            <div className="px-3 py-4 text-center text-xs text-[#6B7280]">No matching BOMs. Try a different search.</div>
-                          )}
-                          {filtered.slice(0, 200).map(bom => (
-                            <button
-                              key={bom.id}
-                              type="button"
-                              onClick={() => setFormData({ ...formData, bom_id: bom.id, bom_search: '' })}
-                              data-testid={`so-bom-option-${bom.id}`}
-                              className="w-full text-left px-3 py-2 text-xs border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]"
-                            >
-                              <span className="mono font-semibold">{bom.parent_item?.part_number || '-'}</span>
-                              <span className="mx-2">—</span>
-                              <span>{bom.parent_item?.name || bom.name}</span>
-                              <span className="ml-2 text-[#6B7280]">Rev {bom.revision}</span>
+                      <div key={idx} className="border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB] space-y-2" data-testid={`so-line-${idx}`}>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-[#374151]">Line {idx + 1}</span>
+                          {!editingOrder && (formData.lines.length > 1) && (
+                            <button type="button" className="text-xs text-[#9B1C1C] hover:underline flex items-center gap-1" onClick={() => removeLine(idx)} data-testid={`so-remove-line-${idx}`}>
+                              <XCircle className="w-3 h-3" /> Remove
                             </button>
-                          ))}
+                          )}
                         </div>
-                      </>
+                        {/* BOM picker */}
+                        <div>
+                          <label className="block text-xs font-semibold text-[#374151] mb-1">BOM *</label>
+                          {selected ? (
+                            <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-2 py-1.5" data-testid={`so-bom-selected-${idx}`}>
+                              <div className="text-xs">
+                                <span className="mono font-semibold">{selected.parent_item?.part_number}</span>
+                                <span className="mx-2">—</span>
+                                <span>{selected.parent_item?.name || selected.name}</span>
+                                <span className="ml-2 text-[#6B7280]">(Rev {selected.revision})</span>
+                              </div>
+                              {!editingOrder && (
+                                <button type="button" className="text-[10px] text-[#9B1C1C] hover:underline" onClick={() => updateLine(idx, { bom_id: '', bom_search: '' })} data-testid={`so-bom-clear-${idx}`}>Clear</button>
+                              )}
+                            </div>
+                          ) : (
+                            <>
+                              <input
+                                type="text"
+                                placeholder="Search by part number, BOM name or item..."
+                                value={line.bom_search || ''}
+                                onChange={(e) => updateLine(idx, { bom_search: e.target.value })}
+                                className="input-field text-xs"
+                                data-testid={`so-bom-search-${idx}`}
+                                disabled={!!editingOrder}
+                              />
+                              <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-40 overflow-auto bg-white" data-testid={`so-bom-list-${idx}`}>
+                                {filtered.length === 0 && (
+                                  <div className="px-3 py-3 text-center text-[11px] text-[#6B7280]">No matching BOMs.</div>
+                                )}
+                                {filtered.slice(0, 200).map(bom => (
+                                  <button
+                                    key={bom.id}
+                                    type="button"
+                                    onClick={() => updateLine(idx, { bom_id: bom.id, bom_search: '' })}
+                                    data-testid={`so-bom-option-${idx}-${bom.id}`}
+                                    className="w-full text-left px-2 py-1.5 text-[11px] border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]"
+                                  >
+                                    <span className="mono font-semibold">{bom.parent_item?.part_number || '-'}</span>
+                                    <span className="mx-2">—</span>
+                                    <span>{bom.parent_item?.name || bom.name}</span>
+                                    <span className="ml-2 text-[#6B7280]">Rev {bom.revision}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-xs font-semibold text-[#374151] mb-1">Qty *</label>
+                            <input type="number" min="1" value={line.quantity} onChange={(e) => updateLine(idx, { quantity: parseInt(e.target.value) || 1 })} className="input-field mono text-xs" required data-testid={`so-line-qty-${idx}`} />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-[#374151] mb-1">Due Date *</label>
+                            <input type="date" value={line.due_date} onChange={(e) => updateLine(idx, { due_date: e.target.value })} className="input-field text-xs" required data-testid={`so-line-due-${idx}`} />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-[#374151] mb-1" title="Auto = smart split; MTS = from stock only; MTO = manufacture only">
+                              Order Type *
+                            </label>
+                            <Select value={line.order_type || 'auto'} onValueChange={(v) => updateLine(idx, { order_type: v })}>
+                              <SelectTrigger className="text-xs" data-testid={`so-line-type-${idx}`}><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="auto">Auto (smart split)</SelectItem>
+                                <SelectItem value="mts">MTS (from stock)</SelectItem>
+                                <SelectItem value="mto">MTO (make to order)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </div>
                     );
-                  })()}
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity *</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={formData.quantity}
-                      onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) || 1 })}
-                      className="input-field mono"
-                      required
-                      data-testid="production-quantity-input"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">Due Date *</label>
-                    <input
-                      type="date"
-                      value={formData.due_date}
-                      onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                      className="input-field"
-                      required
-                      data-testid="production-due-date-input"
-                    />
-                  </div>
+                  })}
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -332,13 +404,13 @@ export default function ProductionPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-[#111827] mb-1">Notes</label>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Order Notes</label>
                   <textarea
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     className="input-field"
                     rows={2}
-                    placeholder="Order notes..."
+                    placeholder="Overall order notes..."
                     data-testid="production-notes-input"
                   />
                 </div>
@@ -433,12 +505,33 @@ export default function ProductionPage() {
                   <tr key={order.id} className={order.status === 'cancelled' ? 'opacity-50' : ''} data-testid={`production-row-${order.id}`}>
                     <td className="mono font-medium">{order.order_number}</td>
                     <td>
-                      <span className="mono text-sm">{order.item?.part_number || '-'}</span>
-                      <p className="text-xs text-[#4B5563]">{order.item?.name || '-'}</p>
+                      {(order.lines && order.lines.length > 1) ? (
+                        <div>
+                          <span className="status-badge bg-[#E1EFFE] text-[#1E429F]">{order.lines.length} lines</span>
+                          <p className="text-xs text-[#4B5563] mt-1">First: <span className="mono">{order.lines[0]?.item?.part_number || order.item?.part_number || '-'}</span></p>
+                          {order.lines[0]?.item?.name && <p className="text-[10px] text-[#6B7280]">{order.lines[0].item.name}</p>}
+                        </div>
+                      ) : (
+                        <>
+                          <span className="mono text-sm">{order.item?.part_number || '-'}</span>
+                          <p className="text-xs text-[#4B5563]">{order.item?.name || '-'}</p>
+                        </>
+                      )}
                     </td>
                     <td>
-                      <span className="text-sm">{order.bom?.name || '-'}</span>
-                      <p className="text-xs text-[#4B5563] mono">Rev {order.bom?.revision || '-'}</p>
+                      {(order.lines && order.lines.length > 1) ? (
+                        <div className="text-[10px] text-[#6B7280]">
+                          {order.lines.slice(0, 3).map((ln, i) => (
+                            <div key={i}>L{ln.line_no}: <span className={`inline-block text-[9px] px-1 ml-1 rounded ${ln.order_type === 'mts' ? 'bg-[#DEF7EC] text-[#03543F]' : ln.order_type === 'mto' ? 'bg-[#FDE8E8] text-[#9B1C1C]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>{(ln.order_type || 'auto').toUpperCase()}</span></div>
+                          ))}
+                          {order.lines.length > 3 && <div className="text-[#9CA3AF]">+{order.lines.length - 3} more</div>}
+                        </div>
+                      ) : (
+                        <>
+                          <span className="text-sm">{order.bom?.name || '-'}</span>
+                          <p className="text-xs text-[#4B5563] mono">Rev {order.bom?.revision || '-'}</p>
+                        </>
+                      )}
                     </td>
                     <td className="text-right mono font-medium">{order.quantity}</td>
                     <td className="text-right">

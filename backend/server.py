@@ -343,10 +343,27 @@ async def find_routing_cost(item_id: str, process_name: str) -> float:
         return routing_cost_for_process(parent_bom, item_id, process_name)
     return 0.0
 
-class ProductionOrderCreate(BaseModel):
+class ProductionOrderLine(BaseModel):
+    line_id: Optional[str] = None  # UUID per line (populated on create)
+    line_no: Optional[int] = None  # 1-based sequence
     bom_id: str
     quantity: int
-    due_date: datetime
+    due_date: Optional[datetime] = None
+    order_type: str = "auto"  # auto | mts | mto
+    notes: Optional[str] = ""
+    # Populated on confirm — how the qty was split:
+    reserved_qty: Optional[int] = 0   # to be fulfilled from FG stock
+    mo_qty: Optional[int] = 0         # to be manufactured via MO
+    status: Optional[str] = "draft"   # draft | confirmed | in_progress | completed | cancelled
+
+class ProductionOrderCreate(BaseModel):
+    # New multi-line mode
+    lines: Optional[List[ProductionOrderLine]] = None
+    customer_id: Optional[str] = None
+    # Legacy single-line fields — used when `lines` is not provided
+    bom_id: Optional[str] = None
+    quantity: Optional[int] = None
+    due_date: Optional[datetime] = None
     priority: str = "medium"  # low, medium, high, urgent
     notes: Optional[str] = ""
 
@@ -356,6 +373,8 @@ class ProductionOrderUpdate(BaseModel):
     priority: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+    lines: Optional[List[ProductionOrderLine]] = None
+    customer_id: Optional[str] = None
 
 class InspectionTemplateCreate(BaseModel):
     name: str
@@ -1291,6 +1310,12 @@ async def get_production_orders(request: Request, status: Optional[str] = None):
             order["bom"] = bom
             item = await db.items.find_one({"id": bom.get("parent_item_id")}, {"_id": 0})
             order["item"] = item
+        # Hydrate each line with its BOM + parent_item for the multi-line display
+        for ln in (order.get("lines") or []):
+            ln_bom = await db.boms.find_one({"id": ln.get("bom_id")}, {"_id": 0})
+            if ln_bom:
+                ln["bom"] = ln_bom
+                ln["item"] = await db.items.find_one({"id": ln_bom.get("parent_item_id")}, {"_id": 0})
         # Calculate total MO quantity already created for this SO
         mos = await db.work_orders.find(
             {"production_order_id": order["id"], "parent_wo_id": None, "status": {"$ne": "cancelled"}},
@@ -1318,24 +1343,65 @@ async def create_production_order(order_data: ProductionOrderCreate, request: Re
     user = await get_current_user(request)
     if user["role"] not in ["admin", "production_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
-    bom = await db.boms.find_one({"id": order_data.bom_id})
-    if not bom:
-        raise HTTPException(status_code=404, detail="BOM not found")
-    
+
+    # Resolve lines — either provided directly (multi-line) or built from legacy fields (single-line).
+    raw_lines = order_data.lines or []
+    if not raw_lines:
+        # Legacy single-line SO — synthesize one line from the top-level fields.
+        if not order_data.bom_id or not order_data.quantity or not order_data.due_date:
+            raise HTTPException(status_code=400, detail="Provide either `lines[]` or bom_id + quantity + due_date")
+        raw_lines = [ProductionOrderLine(
+            bom_id=order_data.bom_id,
+            quantity=order_data.quantity,
+            due_date=order_data.due_date,
+            order_type="auto",
+            notes=order_data.notes or ""
+        )]
+
+    # Validate + enrich each line (BOM exists, assign line_id + line_no).
+    enriched_lines = []
+    for idx, ln in enumerate(raw_lines, start=1):
+        if ln.quantity is None or ln.quantity <= 0:
+            raise HTTPException(status_code=400, detail=f"Line {idx}: quantity must be > 0")
+        bom = await db.boms.find_one({"id": ln.bom_id})
+        if not bom:
+            raise HTTPException(status_code=404, detail=f"Line {idx}: BOM {ln.bom_id} not found")
+        if ln.order_type not in ("auto", "mts", "mto"):
+            raise HTTPException(status_code=400, detail=f"Line {idx}: order_type must be auto | mts | mto")
+        enriched_lines.append({
+            "line_id": str(uuid.uuid4()),
+            "line_no": idx,
+            "bom_id": ln.bom_id,
+            "quantity": ln.quantity,
+            "due_date": ln.due_date,
+            "order_type": ln.order_type or "auto",
+            "notes": ln.notes or "",
+            "reserved_qty": 0,
+            "mo_qty": 0,
+            "status": "draft"
+        })
+
     # Generate order number
     count = await db.production_orders.count_documents({})
     order_number = f"SO-{str(count + 1).zfill(6)}"
-    
+
+    # Top-level legacy fields mirror the first line (keeps MO create flow backward-compatible).
+    first_line = enriched_lines[0]
+    total_qty = sum(l["quantity"] for l in enriched_lines)
+    latest_due = max((l["due_date"] for l in enriched_lines if l.get("due_date")), default=None)
+
     order_doc = {
         "id": str(uuid.uuid4()),
         "order_number": order_number,
-        "bom_id": order_data.bom_id,
-        "quantity": order_data.quantity,
-        "due_date": order_data.due_date,
+        "customer_id": order_data.customer_id,
+        "lines": enriched_lines,
+        # Legacy mirror fields — kept for existing MO / MRP flows that still read them.
+        "bom_id": first_line["bom_id"],
+        "quantity": first_line["quantity"] if len(enriched_lines) == 1 else total_qty,
+        "due_date": first_line.get("due_date") or latest_due,
         "priority": order_data.priority,
-        "status": "draft",  # draft, confirmed, released, in_progress, completed, cancelled
-        "notes": order_data.notes,
+        "status": "draft",
+        "notes": order_data.notes or "",
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -1374,24 +1440,99 @@ async def update_production_order(order_id: str, order_data: ProductionOrderUpda
 
 @production_router.post("/{order_id}/confirm")
 async def confirm_production_order(order_id: str, request: Request):
-    """Confirm a draft sales order - makes it available for MRP and manufacturing"""
+    """Confirm a draft SO. For each line, apply the MTO/MTS/auto split:
+      • mts  → reserve up to qty from FG stock (no MO)
+      • mto  → create MO for full qty (no reservation)
+      • auto → reserve available FG stock + create MO for any shortfall (smart split)
+    The actual MO is still created via the Manufacturing page (using `mo_qty` per line as
+    the authoritative to-manufacture amount). This endpoint only computes + stores the
+    split so the floor team knows what to do per line.
+    """
     user = await get_current_user(request)
     if user["role"] not in ["admin", "production_manager"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+
     order = await db.production_orders.find_one({"id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Sales order not found")
-    
     if order.get("status") != "draft":
         raise HTTPException(status_code=400, detail=f"Only draft orders can be confirmed. Current status: {order.get('status')}")
-    
+
+    # Ensure lines exist — older SOs may have only legacy fields.
+    lines = order.get("lines") or []
+    if not lines and order.get("bom_id"):
+        lines = [{
+            "line_id": str(uuid.uuid4()),
+            "line_no": 1,
+            "bom_id": order["bom_id"],
+            "quantity": order.get("quantity", 0),
+            "due_date": order.get("due_date"),
+            "order_type": "auto",
+            "notes": "",
+            "reserved_qty": 0,
+            "mo_qty": 0,
+            "status": "draft"
+        }]
+
+    summary_lines = []
+    for ln in lines:
+        qty = int(ln.get("quantity", 0) or 0)
+        order_type = ln.get("order_type", "auto")
+        # FG parent item from the BOM
+        bom = await db.boms.find_one({"id": ln.get("bom_id")}, {"_id": 0})
+        fg_item_id = bom.get("parent_item_id") if bom else None
+        fg_item = await db.items.find_one({"id": fg_item_id}, {"_id": 0}) if fg_item_id else None
+        available_stock = int(fg_item.get("current_stock", 0) or 0) if fg_item else 0
+        already_reserved = int(fg_item.get("reserved_stock", 0) or 0) if fg_item else 0
+        effective_stock = max(0, available_stock - already_reserved)
+
+        reserved_qty = 0
+        mo_qty = 0
+        if order_type == "mts":
+            reserved_qty = min(qty, effective_stock)
+            # Warn but don't block if insufficient — MTS should be honoured only from stock.
+        elif order_type == "mto":
+            mo_qty = qty
+        else:  # auto (smart split)
+            reserved_qty = min(qty, effective_stock)
+            mo_qty = max(0, qty - reserved_qty)
+
+        # Increment reserved_stock on the FG item for the reserved portion (so subsequent
+        # SO confirmations see the lower effective_stock).
+        if reserved_qty > 0 and fg_item_id:
+            await db.items.update_one(
+                {"id": fg_item_id},
+                {"$inc": {"reserved_stock": reserved_qty}}
+            )
+
+        ln["reserved_qty"] = reserved_qty
+        ln["mo_qty"] = mo_qty
+        ln["status"] = "confirmed"
+        summary_lines.append({
+            "line_no": ln.get("line_no"),
+            "bom_id": ln.get("bom_id"),
+            "fg_part_number": fg_item.get("part_number") if fg_item else None,
+            "fg_name": fg_item.get("name") if fg_item else None,
+            "quantity": qty,
+            "order_type": order_type,
+            "reserved_qty": reserved_qty,
+            "mo_qty": mo_qty,
+            "available_stock_before": effective_stock
+        })
+
     await db.production_orders.update_one(
         {"id": order_id},
-        {"$set": {"status": "confirmed", "confirmed_at": datetime.now(timezone.utc), "confirmed_by": user["id"], "updated_at": datetime.now(timezone.utc)}}
+        {"$set": {
+            "status": "confirmed",
+            "lines": lines,
+            "confirmed_at": datetime.now(timezone.utc),
+            "confirmed_by": user["id"],
+            "updated_at": datetime.now(timezone.utc)
+        }}
     )
-    
-    return await db.production_orders.find_one({"id": order_id}, {"_id": 0})
+    updated = await db.production_orders.find_one({"id": order_id}, {"_id": 0})
+    updated["confirm_summary"] = summary_lines
+    return updated
 
 @production_router.post("/{order_id}/cancel")
 async def cancel_production_order(order_id: str, request: Request):
@@ -1412,6 +1553,21 @@ async def cancel_production_order(order_id: str, request: Request):
     cancelled_mos = []
     skipped_completed_mos = []
     reversed_materials = []
+    released_reservations = []
+    
+    # Release any reserved_stock bookings for SO lines that were in MTS/auto-reserved state.
+    for ln in (order.get("lines") or []):
+        reserved = int(ln.get("reserved_qty", 0) or 0)
+        if reserved <= 0:
+            continue
+        bom = await db.boms.find_one({"id": ln.get("bom_id")}, {"_id": 0})
+        fg_item_id = bom.get("parent_item_id") if bom else None
+        if fg_item_id:
+            await db.items.update_one(
+                {"id": fg_item_id},
+                {"$inc": {"reserved_stock": -reserved}}
+            )
+            released_reservations.append({"line_no": ln.get("line_no"), "fg_item_id": fg_item_id, "qty_released": reserved})
     
     # Find all manufacturing orders linked to this sales order
     mos = await db.work_orders.find({"production_order_id": order_id}).to_list(1000)
@@ -1495,7 +1651,8 @@ async def cancel_production_order(order_id: str, request: Request):
         "message": " ".join(msg_parts),
         "cancelled_mos": cancelled_mos,
         "preserved_completed_mos": skipped_completed_mos,
-        "reversed_materials": reversed_materials
+        "reversed_materials": reversed_materials,
+        "released_reservations": released_reservations
     }
 
 # ================== MRP ROUTES ==================
@@ -6778,6 +6935,187 @@ async def mark_invoice_paid(invoice_id: str, request: Request):
         raise HTTPException(status_code=400, detail="Only approved invoices can be marked as paid")
     await db.purchase_invoices.update_one({"id": invoice_id}, {"$set": {"status": "paid", "paid_at": datetime.now(timezone.utc), "paid_by": user["id"]}})
     return await db.purchase_invoices.find_one({"id": invoice_id}, {"_id": 0})
+
+# ================== TALLY XML EXPORT ==================
+# Generates Tally-compatible XML for Purchase Invoice import. The file can be imported
+# via Tally Gateway → Import Data → Vouchers. No Tally HTTP daemon required.
+# Reference voucher structure: https://tallyhelp.tallysolutions.com/docs/te9rel64/index.htm
+
+def _xml_escape(v):
+    if v is None:
+        return ""
+    s = str(v)
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+             .replace('"', "&quot;").replace("'", "&apos;"))
+
+def _tally_date(dt):
+    """Tally wants YYYYMMDD format."""
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        except Exception:
+            return ""
+    if isinstance(dt, datetime):
+        return dt.strftime("%Y%m%d")
+    return ""
+
+def _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inter_state):
+    """Build a single <TALLYMESSAGE> block for a purchase voucher."""
+    inv_no = _xml_escape(invoice.get("invoice_no") or invoice.get("invoice_number") or "")
+    inv_date = _tally_date(invoice.get("invoice_date"))
+    party_name = _xml_escape(supplier.get("name", ""))
+    narration = _xml_escape(invoice.get("notes", "") or f"Purchase against invoice {inv_no}")
+
+    subtotal = float(invoice.get("subtotal", 0) or 0)
+    total_cgst = float(invoice.get("total_cgst", 0) or 0)
+    total_sgst = float(invoice.get("total_sgst", 0) or 0)
+    total_igst = float(invoice.get("total_igst", 0) or 0)
+    total_amount = float(invoice.get("total_amount", 0) or 0)
+
+    # Inventory entries per line (ALLINVENTORYENTRIES.LIST)
+    inv_entries = []
+    for ln in lines:
+        it = ln.get("item") or {}
+        name = _xml_escape(f"{it.get('part_number','')} - {it.get('name','')}".strip(" -"))
+        qty = float(ln.get("quantity", 0) or 0)
+        rate = float(ln.get("unit_price", 0) or 0)
+        amt = qty * rate
+        uom = _xml_escape(it.get("unit_of_measure", "Nos"))
+        inv_entries.append(f"""
+          <ALLINVENTORYENTRIES.LIST>
+            <STOCKITEMNAME>{name}</STOCKITEMNAME>
+            <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+            <RATE>{rate:.2f}/{uom}</RATE>
+            <AMOUNT>-{amt:.2f}</AMOUNT>
+            <ACTUALQTY>{qty} {uom}</ACTUALQTY>
+            <BILLEDQTY>{qty} {uom}</BILLEDQTY>
+          </ALLINVENTORYENTRIES.LIST>""")
+    inventory_block = "".join(inv_entries)
+
+    # Ledger entries: Party (credit), Purchase Account (debit), Tax ledgers (debit)
+    ledger_entries = [f"""
+        <LEDGERENTRIES.LIST>
+          <LEDGERNAME>{party_name}</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+          <AMOUNT>{total_amount:.2f}</AMOUNT>
+        </LEDGERENTRIES.LIST>""",
+        f"""
+        <LEDGERENTRIES.LIST>
+          <LEDGERNAME>Purchase Account</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+          <AMOUNT>-{subtotal:.2f}</AMOUNT>
+        </LEDGERENTRIES.LIST>"""]
+    if is_inter_state:
+        if total_igst > 0:
+            ledger_entries.append(f"""
+        <LEDGERENTRIES.LIST>
+          <LEDGERNAME>IGST Input</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+          <AMOUNT>-{total_igst:.2f}</AMOUNT>
+        </LEDGERENTRIES.LIST>""")
+    else:
+        if total_cgst > 0:
+            ledger_entries.append(f"""
+        <LEDGERENTRIES.LIST>
+          <LEDGERNAME>CGST Input</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+          <AMOUNT>-{total_cgst:.2f}</AMOUNT>
+        </LEDGERENTRIES.LIST>""")
+        if total_sgst > 0:
+            ledger_entries.append(f"""
+        <LEDGERENTRIES.LIST>
+          <LEDGERNAME>SGST Input</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+          <AMOUNT>-{total_sgst:.2f}</AMOUNT>
+        </LEDGERENTRIES.LIST>""")
+    ledger_block = "".join(ledger_entries)
+
+    return f"""
+    <TALLYMESSAGE xmlns:UDF="TallyUDF">
+      <VOUCHER VCHTYPE="Purchase" ACTION="Create" OBJVIEW="Invoice Voucher View">
+        <DATE>{inv_date}</DATE>
+        <NARRATION>{narration}</NARRATION>
+        <VOUCHERTYPENAME>Purchase</VOUCHERTYPENAME>
+        <VOUCHERNUMBER>{inv_no}</VOUCHERNUMBER>
+        <REFERENCE>{inv_no}</REFERENCE>
+        <PARTYLEDGERNAME>{party_name}</PARTYLEDGERNAME>
+        <BASICBUYERNAME>{party_name}</BASICBUYERNAME>
+        <ISINVOICE>Yes</ISINVOICE>
+        <EFFECTIVEDATE>{inv_date}</EFFECTIVEDATE>
+        {ledger_block}
+        {inventory_block}
+      </VOUCHER>
+    </TALLYMESSAGE>"""
+
+def _wrap_tally_envelope(messages_xml, report_desc="Vouchers"):
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<ENVELOPE>
+  <HEADER>
+    <TALLYREQUEST>Import Data</TALLYREQUEST>
+  </HEADER>
+  <BODY>
+    <IMPORTDATA>
+      <REQUESTDESC>
+        <REPORTNAME>{report_desc}</REPORTNAME>
+        <STATICVARIABLES>
+          <SVCURRENTCOMPANY>##SVCurrentCompany</SVCURRENTCOMPANY>
+        </STATICVARIABLES>
+      </REQUESTDESC>
+      <REQUESTDATA>{messages_xml}
+      </REQUESTDATA>
+    </IMPORTDATA>
+  </BODY>
+</ENVELOPE>"""
+
+@purchase_invoices_router.get("/{invoice_id}/tally-xml")
+async def export_purchase_invoice_to_tally(invoice_id: str, request: Request):
+    """Return Tally-compatible XML for a single purchase invoice as a downloadable file."""
+    user = await get_current_user(request)
+    invoice = await db.purchase_invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    supplier = await db.suppliers.find_one({"id": invoice.get("supplier_id")}, {"_id": 0}) or {}
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
+    is_inter_state = supplier.get("state_code", "") != company.get("state_code", "")
+    # Hydrate line items with their item docs
+    lines = invoice.get("lines", []) or []
+    for ln in lines:
+        ln["item"] = await db.items.find_one({"id": ln.get("item_id")}, {"_id": 0}) or {}
+    msg = _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inter_state)
+    xml = _wrap_tally_envelope(msg)
+    fname = f"tally_{invoice.get('invoice_number', invoice_id)}.xml"
+    return Response(
+        content=xml,
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'}
+    )
+
+@purchase_invoices_router.post("/tally-xml-bulk")
+async def export_purchase_invoices_bulk_tally(request: Request, payload: dict = Body(...)):
+    """Bulk export — send {"invoice_ids": [...]} to download one XML file with all vouchers."""
+    await get_current_user(request)
+    ids = payload.get("invoice_ids") or []
+    if not ids:
+        raise HTTPException(status_code=400, detail="invoice_ids required")
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
+    messages = []
+    for inv_id in ids:
+        invoice = await db.purchase_invoices.find_one({"id": inv_id}, {"_id": 0})
+        if not invoice:
+            continue
+        supplier = await db.suppliers.find_one({"id": invoice.get("supplier_id")}, {"_id": 0}) or {}
+        is_inter_state = supplier.get("state_code", "") != company.get("state_code", "")
+        lines = invoice.get("lines", []) or []
+        for ln in lines:
+            ln["item"] = await db.items.find_one({"id": ln.get("item_id")}, {"_id": 0}) or {}
+        messages.append(_build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inter_state))
+    xml = _wrap_tally_envelope("".join(messages))
+    return Response(
+        content=xml,
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="tally_purchase_invoices_bulk.xml"'}
+    )
+
 
 # ================== JOB WORK / SUBCONTRACTING ROUTES ==================
 

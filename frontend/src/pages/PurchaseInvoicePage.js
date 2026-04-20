@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
-import { Plus, FileText, CheckCircle2, DollarSign, X, Search } from 'lucide-react';
+import { Plus, FileText, CheckCircle2, DollarSign, X, Search, Download } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 
@@ -131,6 +131,45 @@ export default function PurchaseInvoicePage() {
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
+  // ========== Tally XML Export ==========
+  const downloadTallyXML = async (inv) => {
+    try {
+      const res = await api.get(`/api/purchase-invoices/${inv.id}/tally-xml`, { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/xml' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tally_${inv.invoice_number || inv.id}.xml`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(e.response?.data?.detail || 'Failed to generate Tally XML');
+    }
+  };
+
+  const downloadTallyXMLBulk = async () => {
+    const ids = invoices
+      .filter(inv => !invoiceSearch.trim() || [inv.invoice_number, inv.invoice_no, inv.supplier?.name].some(v => (v || '').toLowerCase().includes(invoiceSearch.toLowerCase())))
+      .map(inv => inv.id);
+    if (ids.length === 0) { alert('No invoices to export'); return; }
+    try {
+      const res = await api.post('/api/purchase-invoices/tally-xml-bulk', { invoice_ids: ids }, { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/xml' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tally_purchase_invoices_${new Date().toISOString().slice(0, 10)}.xml`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(e.response?.data?.detail || 'Failed to generate bulk Tally XML');
+    }
+  };
+
   const getStatusColor = (s) => {
     switch (s) {
       case 'draft': return 'bg-[#F3F4F6] text-[#4B5563]';
@@ -150,9 +189,14 @@ export default function PurchaseInvoicePage() {
           <p className="text-sm text-[#4B5563]">Record supplier invoices against received GRNs</p>
         </div>
         {canEdit && (
-          <button onClick={() => { resetForm(); setDialogOpen(true); }} className="btn-primary flex items-center space-x-2" data-testid="create-invoice-btn" disabled={pendingGRNs.length === 0} title={pendingGRNs.length === 0 ? 'No pending GRNs to invoice' : ''}>
-            <Plus className="w-4 h-4" /><span>New Invoice</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={downloadTallyXMLBulk} className="btn-secondary flex items-center space-x-2" data-testid="tally-bulk-export-btn" title="Download all filtered invoices as Tally-compatible XML">
+              <Download className="w-4 h-4" /><span>Tally XML (Bulk)</span>
+            </button>
+            <button onClick={() => { resetForm(); setDialogOpen(true); }} className="btn-primary flex items-center space-x-2" data-testid="create-invoice-btn" disabled={pendingGRNs.length === 0} title={pendingGRNs.length === 0 ? 'No pending GRNs to invoice' : ''}>
+              <Plus className="w-4 h-4" /><span>New Invoice</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -224,6 +268,10 @@ export default function PurchaseInvoicePage() {
                           </button>
                         )}
                         {inv.status === 'paid' && <span className="text-xs text-[#03543F]">Paid</span>}
+                        {/* Tally XML download — always visible for any invoice */}
+                        <button onClick={() => downloadTallyXML(inv)} className="p-1.5 text-[#1D3557] hover:bg-[#E1EFFE] rounded" data-testid={`tally-inv-${inv.id}`} title="Download Tally XML (for Tally import)">
+                          <Download className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>
