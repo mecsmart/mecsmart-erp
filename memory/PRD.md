@@ -171,16 +171,21 @@ Unified BOM process-cost source of truth. Previous design stored a component's p
 ## Backlog
 - [x] Purchase Invoice from GRN with process cost (iter 63)
 - [x] V1 CRM — Leads + Tickets + Quotations with Enquiry → Quotation → SO flow (iter 98)
+- [x] CRM Restructure — Sidebar nested Marketing/Support, Contacts, Pipeline Config, Products multi-picker on tickets (iter 99)
 - [ ] P1: GST Phase 2 (GST-compliant invoice generation + tax breakup reports), P2: Backend refactoring (split server.py into routers/models)
 - [ ] P3: GSTR-1/3B report formats + ITC tracking
 - [ ] P4: Barcode/QR scanning for inventory transactions
 - [ ] P5: Gantt chart for work order scheduling
 - [ ] Future: Windows-native desktop wrapper (Electron/Tauri)
 
-## CRM (iter 98)
-- **Marketing stages**: Enquiry → Quotation → Negotiation → Won / Lost (aligned to customer diagram)
-- **Support stages**: Complaint → Open/Assigned → In Progress → Closed / Pending
-- **Quotations tab** (embedded in CRM): Create multi-line quotations with item picker, auto GST computation, Convert-to-SO action. Creating a quotation linked to a Lead auto-bumps the lead to `quotation` stage. Converting a quotation marks it `converted`, creates a multi-line Sales Order (each line resolves its BOM via item_id), and moves the linked lead to `won`.
-- Endpoints: `GET/POST/PUT/DELETE /api/crm/quotations`, `POST /api/crm/quotations/{id}/convert-to-so`.
-- Fixed convert_lead_to_customer DB field mismatch (was using `customer_code`, DB index is on `code`).
+## CRM Restructure (iter 99)
+- **Sidebar**: CRM group now sits right after Dashboard, expanded by default. Nested Marketing (pipeline + Contacts / Quotations / Products / Configuration) and Support (pipeline + SLA Due / Activity Logs / Configuration) dropdowns. Clicking the parent (Marketing/Support) navigates to its pipeline; chevron toggles children.
+- **Marketing → Contacts**: Customers master inside CRM (full CRUD, same `/api/customers` collection).
+- **Marketing → Products**: Links to existing Items master (`/items`).
+- **Lead creation**: Customer picker is now mandatory (dropdown of existing customers) with a `+ New Customer` option that opens an inline create dialog (name + address required). No more free-text customer_name; backend validates `customer_id` exists and auto-populates customer_name/contact/email/phone from the master.
+- **Ticket creation**: `Linked SO` text field removed; replaced with a multi-select Products picker (chip-based) that saves `product_ids[]`. Backend hydrates `products` array on read.
+- **Support header**: Open / In Progress / Closed / SLA Breached count cards.
+- **Configuration**: Per-pipeline-type custom stage editor (add/rename/reorder/delete/color). Backend: `GET/PUT/POST:reset /api/crm/pipeline-config/{marketing|support}` with `crm_pipeline_configs` collection. Frontend reads + applies custom stages across MarketingPanel/SupportPanel/SLAPanel.
+- **Activity Logs panel**: `GET /api/crm/activities?type=support` aggregates all ticket activity entries with customer/author/stage context.
+
 
