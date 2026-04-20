@@ -3276,7 +3276,11 @@ async def get_grn_print_data(grn_id: str, request: Request):
                 for dl in (dc.get("lines") or []):
                     if dl.get("item_id") == line.get("item_id"):
                         _sent_qty = dl.get("quantity") or dl.get("sent_quantity") or 0
-                        _rate = dl.get("rate") or 0
+                        # Prefer processing_charges (per-unit vendor charge) over rate.
+                        # rate on Job OS DC lines = RM cost per unit (BOM rollup) which is
+                        # our internal accounting, not what we pay the vendor. GRN "Rate/Unit"
+                        # should be the processing charges.
+                        _rate = dl.get("processing_charges") or dl.get("rate") or 0
                         break
             if (_sent_qty == 0 or _rate == 0) and jw_order:
                 for sl in (jw_order.get("lines") or []):

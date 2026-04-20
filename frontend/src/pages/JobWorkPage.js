@@ -356,7 +356,7 @@ export default function JobWorkPage() {
       dcTitle = 'Job Work Order Cum Delivery Challan';
     }
     
-    const html = `<!DOCTYPE html><html><head><title>${dcTitle} - ${dc.dc_number}</title>
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${dcTitle} - ${dc.dc_number}</title>
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
       body { font-family:'Segoe UI',Arial,sans-serif; font-size:11px; color:#111; padding:20px; }
@@ -501,7 +501,7 @@ export default function JobWorkPage() {
     // a real URL. This avoids Chrome's behavior where a direct document.write() page
     // sometimes fails to trigger window.print() reliably.
     try {
-      const blob = new Blob([html], { type: 'text/html' });
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const w = window.open(url, '_blank');
       if (!w) {
