@@ -81,6 +81,15 @@ export default function WarehousesPage() {
     fetchData();
   }, []);
 
+  // Sync activeTab with URL `?tab=` whenever it changes (sidebar dropdown navigation).
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab && tab !== activeTab) {
+      setActiveTab(tab);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const fetchData = async () => {
     setLoading(true);
     try {

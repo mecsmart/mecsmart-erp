@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
@@ -10,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 export default function JobWorkPage() {
   const { user } = useAuth();
   const { formatCurrency, companySettings, currencySymbol } = useCompanySettings();
+  const location = useLocation();
   const [orders, setOrders] = useState([]);
   const [challans, setChallans] = useState([]);
   const [receipts, setReceipts] = useState([]);
@@ -21,13 +23,16 @@ export default function JobWorkPage() {
   // Collapsible section state — Subcontract Orders open by default; others closed.
   const [sectionsOpen, setSectionsOpen] = useState({ orders: true, challans: false, receipts: false });
   // Honour the `?tab=` URL param coming from the sidebar dropdown (orders/challans/receipts).
+  // Re-runs whenever `location.search` changes so switching dropdown items while already
+  // on /job-work correctly updates the visible section.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
     if (tab === 'orders' || tab === 'challans' || tab === 'receipts') {
       setSectionsOpen({ orders: tab === 'orders', challans: tab === 'challans', receipts: tab === 'receipts' });
+      setActiveTab(tab);
     }
-  }, []);
+  }, [location.search]);
 
   // Order dialog
   const [orderDialog, setOrderDialog] = useState(false);
