@@ -8232,7 +8232,8 @@ class CRMActivity(BaseModel):
 
 class LeadCreate(BaseModel):
     name: str  # Lead / opportunity title e.g. "Website enquiry — ABC Corp"
-    customer_name: str  # free-text customer company name
+    customer_id: str  # REQUIRED — lead must link to a real Customer record
+    customer_name: Optional[str] = ""  # auto-populated from customer master when omitted
     contact_person: Optional[str] = ""
     email: Optional[str] = ""
     phone: Optional[str] = ""
@@ -8264,8 +8265,9 @@ class TicketCreate(BaseModel):
     description: Optional[str] = ""
     priority: Optional[str] = "medium"  # low / medium / high / urgent
     assignee_id: Optional[str] = ""
-    linked_so_id: Optional[str] = ""
-    linked_item_id: Optional[str] = ""
+    linked_so_id: Optional[str] = ""  # deprecated — kept for back-compat
+    linked_item_id: Optional[str] = ""  # deprecated — kept for back-compat
+    product_ids: Optional[List[str]] = []  # items associated with this ticket
     stage: Optional[str] = "complaint"  # complaint | open | in_progress | pending | closed
 
 class TicketUpdate(BaseModel):
@@ -8275,6 +8277,7 @@ class TicketUpdate(BaseModel):
     assignee_id: Optional[str] = None
     linked_so_id: Optional[str] = None
     linked_item_id: Optional[str] = None
+    product_ids: Optional[List[str]] = None
     stage: Optional[str] = None
     resolution: Optional[str] = None
 
@@ -8314,6 +8317,13 @@ async def _enrich_ticket(t):
     if t.get("linked_so_id"):
         so = await db.production_orders.find_one({"id": t["linked_so_id"]}, {"_id": 0, "order_number": 1})
         t["linked_so"] = so
+    # Hydrate products
+    pids = t.get("product_ids") or []
+    if pids:
+        prods = await db.items.find({"id": {"$in": pids}}, {"_id": 0, "id": 1, "part_number": 1, "name": 1, "uom": 1}).to_list(200)
+        t["products"] = prods
+    else:
+        t["products"] = []
     # Compute SLA breach flag on the fly
     sla_due = _compute_sla_due(t.get("created_at"), t.get("priority"))
     t["sla_due"] = sla_due
@@ -8337,14 +8347,28 @@ async def list_leads(request: Request, stage: Optional[str] = None):
 @crm_router.post("/leads", status_code=201)
 async def create_lead(data: LeadCreate, request: Request):
     user = await get_current_user(request)
+    # Validate customer exists and auto-populate enrichment
+    cust = await db.customers.find_one({"id": data.customer_id}, {"_id": 0})
+    if not cust:
+        raise HTTPException(status_code=404, detail="Customer not found — create the customer first")
+    payload = data.model_dump(exclude_none=True)
+    # Auto-fill derived contact fields from customer if blank
+    if not payload.get("customer_name"):
+        payload["customer_name"] = cust.get("name") or ""
+    if not payload.get("contact_person"):
+        payload["contact_person"] = cust.get("contact_person") or ""
+    if not payload.get("email"):
+        payload["email"] = cust.get("email") or ""
+    if not payload.get("phone"):
+        payload["phone"] = cust.get("phone") or ""
     count = await db.crm_leads.count_documents({})
     lead_no = f"LEAD-{str(count + 1).zfill(6)}"
     doc = {
         "id": str(uuid.uuid4()),
         "lead_no": lead_no,
-        **data.model_dump(exclude_none=True),
+        **payload,
         "activities": [{
-            "note": f"Lead created in stage: {data.stage or 'new'}",
+            "note": f"Lead created in stage: {data.stage or 'enquiry'}",
             "created_at": datetime.now(timezone.utc),
             "created_by": user["id"],
             "author_name": user.get("name")
@@ -8525,6 +8549,127 @@ async def delete_ticket(ticket_id: str, request: Request):
     if not res.deleted_count:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return {"message": "Ticket deleted"}
+
+
+# --------- PIPELINE CONFIGURATION (customizable stages) ---------
+DEFAULT_PIPELINE_STAGES = {
+    "marketing": [
+        {"key": "enquiry", "label": "Enquiry", "color": "bg-[#E1EFFE] text-[#1E429F]", "order": 1},
+        {"key": "quotation", "label": "Quotation", "color": "bg-[#FEF3C7] text-[#92400E]", "order": 2},
+        {"key": "negotiation", "label": "Negotiation", "color": "bg-[#FCE7F3] text-[#9D174D]", "order": 3},
+        {"key": "won", "label": "Won", "color": "bg-[#DEF7EC] text-[#03543F]", "order": 4},
+        {"key": "lost", "label": "Lost", "color": "bg-[#FDE8E8] text-[#9B1C1C]", "order": 5},
+    ],
+    "support": [
+        {"key": "complaint", "label": "Complaint", "color": "bg-[#E1EFFE] text-[#1E429F]", "order": 1},
+        {"key": "open", "label": "Open / Assigned", "color": "bg-[#FDF6B2] text-[#723B13]", "order": 2},
+        {"key": "in_progress", "label": "In Progress", "color": "bg-[#FEF3C7] text-[#92400E]", "order": 3},
+        {"key": "pending", "label": "Pending", "color": "bg-[#FCE7F3] text-[#9D174D]", "order": 4},
+        {"key": "closed", "label": "Closed", "color": "bg-[#DEF7EC] text-[#03543F]", "order": 5},
+    ],
+}
+
+class CRMPipelineStage(BaseModel):
+    key: str
+    label: str
+    color: Optional[str] = "bg-[#F3F4F6] text-[#4B5563]"
+    order: Optional[int] = 0
+
+class CRMPipelineConfigUpdate(BaseModel):
+    stages: List[CRMPipelineStage]
+
+@crm_router.get("/pipeline-config/{pipeline_type}")
+async def get_pipeline_config(pipeline_type: str, request: Request):
+    await get_current_user(request)
+    if pipeline_type not in ("marketing", "support"):
+        raise HTTPException(status_code=400, detail="Invalid pipeline type")
+    doc = await db.crm_pipeline_configs.find_one({"pipeline_type": pipeline_type}, {"_id": 0})
+    if not doc:
+        return {"pipeline_type": pipeline_type, "stages": DEFAULT_PIPELINE_STAGES[pipeline_type]}
+    # Sort stages by order
+    stages = sorted(doc.get("stages") or [], key=lambda s: s.get("order", 0))
+    return {"pipeline_type": pipeline_type, "stages": stages}
+
+@crm_router.put("/pipeline-config/{pipeline_type}")
+async def update_pipeline_config(pipeline_type: str, data: CRMPipelineConfigUpdate, request: Request):
+    await get_current_user(request)
+    if pipeline_type not in ("marketing", "support"):
+        raise HTTPException(status_code=400, detail="Invalid pipeline type")
+    # Validate non-empty + unique keys
+    keys = [s.key for s in data.stages]
+    if not keys:
+        raise HTTPException(status_code=400, detail="At least one stage is required")
+    if len(keys) != len(set(keys)):
+        raise HTTPException(status_code=400, detail="Stage keys must be unique")
+    stages = [s.model_dump() for s in data.stages]
+    await db.crm_pipeline_configs.update_one(
+        {"pipeline_type": pipeline_type},
+        {"$set": {"pipeline_type": pipeline_type, "stages": stages, "updated_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    return {"pipeline_type": pipeline_type, "stages": stages}
+
+@crm_router.post("/pipeline-config/{pipeline_type}/reset")
+async def reset_pipeline_config(pipeline_type: str, request: Request):
+    await get_current_user(request)
+    if pipeline_type not in ("marketing", "support"):
+        raise HTTPException(status_code=400, detail="Invalid pipeline type")
+    await db.crm_pipeline_configs.delete_one({"pipeline_type": pipeline_type})
+    return {"pipeline_type": pipeline_type, "stages": DEFAULT_PIPELINE_STAGES[pipeline_type]}
+
+
+# --------- ACTIVITY LOG AGGREGATION ---------
+@crm_router.get("/activities")
+async def list_activities(request: Request, type: Optional[str] = None, limit: int = 500):
+    """Aggregate activity log across all leads (type=marketing) or all tickets (type=support).
+    If type is not provided, returns both streams combined & sorted desc by created_at.
+    """
+    await get_current_user(request)
+    out = []
+    if type in (None, "marketing"):
+        leads = await db.crm_leads.find({}, {"_id": 0, "id": 1, "lead_no": 1, "name": 1, "customer_name": 1, "stage": 1, "activities": 1}).to_list(2000)
+        for l in leads:
+            for a in (l.get("activities") or []):
+                out.append({
+                    "source_type": "lead",
+                    "entity_id": l["id"],
+                    "entity_no": l.get("lead_no"),
+                    "entity_title": l.get("name"),
+                    "customer_name": l.get("customer_name"),
+                    "stage": l.get("stage"),
+                    "note": a.get("note"),
+                    "author_name": a.get("author_name"),
+                    "created_at": a.get("created_at"),
+                })
+    if type in (None, "support"):
+        tickets = await db.crm_tickets.find({}, {"_id": 0, "id": 1, "ticket_no": 1, "subject": 1, "customer_id": 1, "stage": 1, "priority": 1, "activities": 1}).to_list(2000)
+        cust_ids = [t.get("customer_id") for t in tickets if t.get("customer_id")]
+        cust_map = {}
+        if cust_ids:
+            cs = await db.customers.find({"id": {"$in": cust_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
+            cust_map = {c["id"]: c["name"] for c in cs}
+        for t in tickets:
+            for a in (t.get("activities") or []):
+                out.append({
+                    "source_type": "ticket",
+                    "entity_id": t["id"],
+                    "entity_no": t.get("ticket_no"),
+                    "entity_title": t.get("subject"),
+                    "customer_name": cust_map.get(t.get("customer_id"), ""),
+                    "stage": t.get("stage"),
+                    "priority": t.get("priority"),
+                    "note": a.get("note"),
+                    "author_name": a.get("author_name"),
+                    "created_at": a.get("created_at"),
+                })
+    # Sort newest first
+    def _k(x):
+        v = x.get("created_at")
+        if isinstance(v, datetime):
+            return v.replace(tzinfo=timezone.utc) if v.tzinfo is None else v
+        return datetime.min.replace(tzinfo=timezone.utc)
+    out.sort(key=_k, reverse=True)
+    return out[:limit]
 
 
 # --------- QUOTATIONS (CRM — Enquiry → Quotation → SO) ---------

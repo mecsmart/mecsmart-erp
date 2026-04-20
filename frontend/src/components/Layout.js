@@ -5,15 +5,16 @@ import {
   Factory, LayoutDashboard, Package, FileStack, Calculator, ClipboardCheck,
   Warehouse, LogOut, Menu, X, User, ChevronDown, ChevronRight,
   Truck, ShoppingCart, Settings2, Users, Building2, Shield, FileText, Wrench, Cog,
-  Headphones, Megaphone
+  Headphones, Megaphone, AlertTriangle
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu';
 
+const dashboardNavItem = { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, module: 'dashboard' };
+
 const topNavItems = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, module: 'dashboard' },
   { name: 'Customers', href: '/customers', icon: Users, module: 'customers' },
   { name: 'Sales Orders', href: '/production', icon: Factory, module: 'production' },
 ];
@@ -44,9 +45,17 @@ const jobWorkGroupItems = [
   { name: 'Receipts', href: '/job-work?tab=receipts', icon: Package, module: 'manufacturing' },
 ];
 
-const crmGroupItems = [
-  { name: 'Marketing', href: '/crm?tab=marketing', icon: Megaphone, module: 'crm_marketing' },
-  { name: 'Support', href: '/crm?tab=support', icon: Headphones, module: 'crm_support' },
+const crmMarketingItems = [
+  { name: 'Contacts', href: '/crm?tab=marketing&sub=contacts', icon: Users, module: 'crm_marketing' },
+  { name: 'Quotations', href: '/crm?tab=marketing&sub=quotations', icon: FileText, module: 'crm_marketing' },
+  { name: 'Products', href: '/items', icon: Package, module: 'items' },
+  { name: 'Configuration', href: '/crm?tab=marketing&sub=configuration', icon: Cog, module: 'crm_marketing' },
+];
+
+const crmSupportItems = [
+  { name: 'SLA Due', href: '/crm?tab=support&sub=sla', icon: AlertTriangle, module: 'crm_support' },
+  { name: 'Activity Logs', href: '/crm?tab=support&sub=activity', icon: ClipboardCheck, module: 'crm_support' },
+  { name: 'Configuration', href: '/crm?tab=support&sub=configuration', icon: Cog, module: 'crm_support' },
 ];
 
 const afterGroupNavItems = [
@@ -75,6 +84,14 @@ export default function Layout() {
     return location.pathname === '/job-work';
   });
   const [crmOpen, setCrmOpen] = useState(() => location.pathname === '/crm');
+  const [crmMarketingOpen, setCrmMarketingOpen] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    return location.pathname === '/crm' && params.get('tab') === 'marketing';
+  });
+  const [crmSupportOpen, setCrmSupportOpen] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    return location.pathname === '/crm' && params.get('tab') === 'support';
+  });
 
   const canView = (module) => user?.role === 'admin' || hasPermission(module, 'view');
 
@@ -84,13 +101,14 @@ export default function Layout() {
   const filteredAfterGroup = afterGroupNavItems.filter(item => canView(item.module));
   const filteredStores = storesGroupItems.filter(item => canView(item.module));
   const filteredJobWork = jobWorkGroupItems.filter(item => canView(item.module));
-  const filteredCRM = crmGroupItems.filter(item => canView(item.module));
+  const filteredCRMMarketing = crmMarketingItems.filter(item => canView(item.module));
+  const filteredCRMSupport = crmSupportItems.filter(item => canView(item.module));
   const filteredBottom = bottomNavItems.filter(item => canView(item.module));
   const showInventoryGroup = filteredInventory.length > 0;
   const showProductionGroup = filteredProduction.length > 0;
   const showStoresGroup = filteredStores.length > 0;
   const showJobWorkGroup = filteredJobWork.length > 0;
-  const showCRMGroup = filteredCRM.length > 0;
+  const showCRMGroup = canView('crm_marketing') || canView('crm_support') || filteredCRMMarketing.length > 0 || filteredCRMSupport.length > 0;
 
   const allNavItems = user?.role === 'admin'
     ? [...filteredBottom, { name: 'User Management', href: '/users', icon: Shield, module: 'users' }]
@@ -149,6 +167,102 @@ export default function Layout() {
 
           <nav className="flex-1 py-4 overflow-y-auto">
             <ul className="space-y-1">
+              {canView(dashboardNavItem.module) && renderNavItem(dashboardNavItem)}
+
+              {/* CRM Group */}
+              {showCRMGroup && (
+                <li>
+                  <button
+                    onClick={() => setCrmOpen(!crmOpen)}
+                    className={`sidebar-link w-full justify-between ${location.pathname === '/crm' ? 'text-white bg-[#1F2937]' : ''}`}
+                    data-testid="nav-crm-group"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Users className="w-5 h-5" />
+                      <span>CRM</span>
+                    </div>
+                    {crmOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+                  {crmOpen && (
+                    <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
+                      {/* Marketing — parent navigates to pipeline, chevron toggles children */}
+                      {canView('crm_marketing') && (
+                        <li>
+                          <div className={`flex items-center w-full rounded-sm ${location.search.includes('tab=marketing') && location.pathname === '/crm' ? 'bg-[#1D3557]' : ''}`}>
+                            <NavLink
+                              to="/crm?tab=marketing"
+                              onClick={() => { setSidebarOpen(false); setCrmMarketingOpen(true); }}
+                              className={({ isActive }) => `flex-1 flex items-center space-x-2 px-3 py-1.5 text-sm rounded-sm ${isActive && location.search.includes('tab=marketing') && !location.search.includes('sub=') ? 'text-white' : 'text-[#9CA3AF] hover:text-white'}`}
+                              data-testid="nav-crm-marketing"
+                            >
+                              <Megaphone className="w-4 h-4" />
+                              <span>Marketing</span>
+                            </NavLink>
+                            <button onClick={() => setCrmMarketingOpen(!crmMarketingOpen)} className="px-2 text-[#9CA3AF] hover:text-white" data-testid="nav-crm-marketing-toggle">
+                              {crmMarketingOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                            </button>
+                          </div>
+                          {crmMarketingOpen && (
+                            <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
+                              {filteredCRMMarketing.map(item => (
+                                <li key={item.name}>
+                                  <NavLink
+                                    to={item.href}
+                                    onClick={() => setSidebarOpen(false)}
+                                    className={`flex items-center space-x-2 px-3 py-1 text-xs rounded-sm transition-colors ${location.pathname + location.search === item.href ? 'text-white bg-[#1D3557]' : 'text-[#9CA3AF] hover:text-white hover:bg-[#1F2937]'}`}
+                                    data-testid={`nav-crm-marketing-${item.name.toLowerCase()}`}
+                                  >
+                                    <item.icon className="w-3.5 h-3.5" />
+                                    <span>{item.name}</span>
+                                  </NavLink>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </li>
+                      )}
+                      {/* Support — parent navigates to pipeline, chevron toggles children */}
+                      {canView('crm_support') && (
+                        <li>
+                          <div className={`flex items-center w-full rounded-sm ${location.search.includes('tab=support') && location.pathname === '/crm' ? 'bg-[#1D3557]' : ''}`}>
+                            <NavLink
+                              to="/crm?tab=support"
+                              onClick={() => { setSidebarOpen(false); setCrmSupportOpen(true); }}
+                              className={({ isActive }) => `flex-1 flex items-center space-x-2 px-3 py-1.5 text-sm rounded-sm ${isActive && location.search.includes('tab=support') && !location.search.includes('sub=') ? 'text-white' : 'text-[#9CA3AF] hover:text-white'}`}
+                              data-testid="nav-crm-support"
+                            >
+                              <Headphones className="w-4 h-4" />
+                              <span>Support</span>
+                            </NavLink>
+                            <button onClick={() => setCrmSupportOpen(!crmSupportOpen)} className="px-2 text-[#9CA3AF] hover:text-white" data-testid="nav-crm-support-toggle">
+                              {crmSupportOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                            </button>
+                          </div>
+                          {crmSupportOpen && (
+                            <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
+                              {filteredCRMSupport.map(item => (
+                                <li key={item.name}>
+                                  <NavLink
+                                    to={item.href}
+                                    onClick={() => setSidebarOpen(false)}
+                                    className={`flex items-center space-x-2 px-3 py-1 text-xs rounded-sm transition-colors ${location.pathname + location.search === item.href ? 'text-white bg-[#1D3557]' : 'text-[#9CA3AF] hover:text-white hover:bg-[#1F2937]'}`}
+                                    data-testid={`nav-crm-support-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
+                                  >
+                                    <item.icon className="w-3.5 h-3.5" />
+                                    <span>{item.name}</span>
+                                  </NavLink>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </li>
+                      )}
+                    </ul>
+                  )}
+                </li>
+              )}
+
+              {/* Core nav items (Customers, Sales Orders) */}
               {filteredTop.map(renderNavItem)}
 
               {/* Inventory Group */}
@@ -297,39 +411,7 @@ export default function Layout() {
                 </li>
               )}
 
-              {/* CRM Group */}
-              {showCRMGroup && (
-                <li>
-                  <button
-                    onClick={() => setCrmOpen(!crmOpen)}
-                    className={`sidebar-link w-full justify-between ${location.pathname === '/crm' ? 'text-white bg-[#1F2937]' : ''}`}
-                    data-testid="nav-crm-group"
-                  >
-                    <div className="flex items-center space-x-3">
-                      <Users className="w-5 h-5" />
-                      <span>CRM</span>
-                    </div>
-                    {crmOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  </button>
-                  {crmOpen && (
-                    <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
-                      {filteredCRM.map(item => (
-                        <li key={item.name}>
-                          <NavLink
-                            to={item.href}
-                            onClick={() => setSidebarOpen(false)}
-                            className={`flex items-center space-x-2 px-3 py-1.5 text-sm rounded-sm transition-colors ${location.pathname + location.search === item.href ? 'text-white bg-[#1D3557]' : 'text-[#9CA3AF] hover:text-white hover:bg-[#1F2937]'}`}
-                            data-testid={`nav-crm-${item.name.toLowerCase()}`}
-                          >
-                            <item.icon className="w-4 h-4" />
-                            <span>{item.name}</span>
-                          </NavLink>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              )}
+              {/* CRM Group (moved to top — above Inventory) */}
 
               {allNavItems.map(renderNavItem)}
             </ul>

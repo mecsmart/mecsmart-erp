@@ -1,0 +1,76 @@
+{
+  "summary": "CRM Restructure testing complete. All 17 backend API tests passed. Frontend UI tests verified: (1) Sidebar CRM group with Marketing/Support sub-groups and nested items, (2) Lead creation requiring customer_id with + New Customer inline dialog, (3) Ticket creation with Products multi-picker (Linked SO removed), (4) Pipeline Configuration panels for marketing/support with add/edit/remove/reorder stages, (5) Support panel header counts (Open/In Progress/Closed), (6) SLA Due and Activity Logs panels, (7) Contacts panel (same as Customers master), (8) Tab strip visibility logic (hidden on sub-panels, visible on pipeline views).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/crm/tickets products hydration", "issue": "uom field not returned in hydrated products array when item doesn't have uom set - minor data inconsistency"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Lead/Ticket/Quotation Dialogs", "issues": ["Console warning: Missing Description or aria-describedby for DialogContent - accessibility improvement needed"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_67.py",
+    "/app/test_reports/pytest/pytest_iteration_67.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "All CRM restructure features implemented correctly",
+    "Lead creation now requires customer_id - validation working",
+    "Ticket products multi-picker working with chip-based UI",
+    "Pipeline config CRUD working with add/edit/remove/reorder/reset",
+    "Sidebar navigation structure matches requirements"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_67.py"
+  ],
+  "success_rate": {
+    "backend": "100% (17 passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created test customers, leads, tickets during testing",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "CRM restructure fully tested. Key features verified: (1) Sidebar: CRM group after Dashboard with Marketing (Contacts, Quotations, Products, Configuration) and Support (SLA Due, Activity Logs, Configuration) sub-items, (2) Lead form requires customer_id with + New Customer inline dialog (address required), (3) Ticket form has Products multi-picker (chip-based) instead of Linked SO, (4) Pipeline config customizable per type (marketing/support) with add/edit/remove/reorder/reset, (5) Support panel shows Open/In Progress/Closed counts, (6) Tab strip hidden on sub-panels, visible on pipeline views. All data-testid attributes present and working.",
+  "features_tested": {
+    "sidebar_structure": {
+      "status": "PASSED",
+      "tests": ["CRM group after Dashboard", "Marketing sub-items (Contacts, Quotations, Products, Configuration)", "Support sub-items (SLA Due, Activity Logs, Configuration)", "Chevron toggle for sub-items", "NavLink navigation"]
+    },
+    "lead_creation_customer_id": {
+      "status": "PASSED",
+      "tests": ["Lead without customer_id rejected (422)", "Lead with invalid customer_id rejected (404)", "Lead with valid customer_id succeeds", "customer_name auto-populated from customer record", "+ New Customer inline dialog opens", "Address required for new customer", "Customer auto-selected after inline create"]
+    },
+    "ticket_products_picker": {
+      "status": "PASSED",
+      "tests": ["Products multi-picker present", "Linked SO field removed", "Products displayed as chips", "Search and add products", "Products hydrated in GET response"]
+    },
+    "pipeline_config": {
+      "status": "PASSED",
+      "tests": ["GET marketing config returns default stages", "PUT marketing config saves custom stages", "POST reset restores defaults", "GET support config returns default stages", "PUT support config saves custom stages", "POST reset restores defaults", "Invalid pipeline type rejected (400)", "Empty stages rejected (400)", "Duplicate keys rejected (400)"]
+    },
+    "support_panel_counts": {
+      "status": "PASSED",
+      "tests": ["Open count displayed", "In Progress count displayed", "Closed count displayed", "SLA Breached count displayed"]
+    },
+    "sla_activity_panels": {
+      "status": "PASSED",
+      "tests": ["SLA panel with table", "Activity Logs panel with table", "Filter by type=support returns ticket activities only"]
+    },
+    "tab_strip_visibility": {
+      "status": "PASSED",
+      "tests": ["Tab strip visible on pipeline views", "Tab strip hidden on sub-panels (contacts, configuration, etc.)"]
+    }
+  },
+  "backend_tests_summary": {
+    "total": 17,
+    "passed": 17,
+    "skipped": 0,
+    "failed": 0
+  }
+}

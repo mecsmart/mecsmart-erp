@@ -54,31 +54,38 @@ export default function CRMPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('marketing');
+  const [activeSub, setActiveSub] = useState('');
   const [leads, setLeads] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [quotations, setQuotations] = useState([]);
   const [items, setItems] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [users, setUsers] = useState([]);
+  const [marketingStages, setMarketingStages] = useState(LEAD_STAGES);
+  const [supportStages, setSupportStages] = useState(TICKET_STAGES);
   const [search, setSearch] = useState('');
   const [quotationFromLead, setQuotationFromLead] = useState(null);
 
-  // Sync tab with URL
+  // Sync tab + sub with URL
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const t = params.get('tab');
+    const s = params.get('sub') || '';
     if (t === 'support' || t === 'marketing' || t === 'quotations') setActiveTab(t);
+    setActiveSub(s);
   }, [location.search]);
 
   const fetchData = useCallback(async () => {
     try {
-      const [lRes, tRes, qRes, iRes, cRes, uRes] = await Promise.all([
+      const [lRes, tRes, qRes, iRes, cRes, uRes, mCfg, sCfg] = await Promise.all([
         api.get('/api/crm/leads'),
         api.get('/api/crm/tickets'),
         api.get('/api/crm/quotations'),
         api.get('/api/items').catch(() => ({ data: [] })),
         api.get('/api/customers'),
         api.get('/api/users').catch(() => ({ data: [] })),
+        api.get('/api/crm/pipeline-config/marketing').catch(() => ({ data: null })),
+        api.get('/api/crm/pipeline-config/support').catch(() => ({ data: null })),
       ]);
       setLeads(lRes.data || []);
       setTickets(tRes.data || []);
@@ -86,17 +93,29 @@ export default function CRMPage() {
       setItems(iRes.data || []);
       setCustomers(cRes.data || []);
       setUsers(uRes.data || []);
+      if (mCfg.data?.stages?.length) setMarketingStages(mCfg.data.stages);
+      if (sCfg.data?.stages?.length) setSupportStages(sCfg.data.stages);
     } catch (e) { console.error(e); }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const canMarketingEdit = user?.role === 'admin' || user?.permissions?.crm_marketing?.includes('create');
+  const canSupportEdit = user?.role === 'admin' || user?.permissions?.crm_support?.includes('create');
+
+  // Breadcrumb label
+  const crumbMain = activeTab === 'quotations' ? 'Quotations' : activeTab === 'support' ? 'Support' : 'Marketing';
+  const crumbSub = {
+    contacts: 'Contacts', quotations: 'Quotations', configuration: 'Configuration',
+    sla: 'SLA Due', activity: 'Activity Logs',
+  }[activeSub];
+
   return (
     <div className="space-y-4" data-testid="crm-page">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold font-[Chivo] text-[#1D3557]">CRM</h1>
-          <p className="text-sm text-[#4B5563]">Marketing leads & customer support tickets</p>
+          <div className="text-xs text-[#6B7280]">CRM · {crumbMain}{crumbSub ? ` · ${crumbSub}` : ''}</div>
+          <h1 className="text-2xl font-bold font-[Chivo] text-[#1D3557]">{crumbSub || `${crumbMain} ${activeTab === 'support' ? 'Pipeline' : activeTab === 'marketing' ? 'Pipeline' : ''}`}</h1>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -106,7 +125,8 @@ export default function CRMPage() {
         </div>
       </div>
 
-      {/* Tab strip */}
+      {/* Top tab strip — only shown on pipeline views (no sub) */}
+      {!activeSub && (
       <div className="flex gap-2 border-b border-[#E5E7EB]">
         <button
           className={`px-4 py-2 text-sm font-medium flex items-center gap-2 ${activeTab === 'marketing' ? 'text-[#1D3557] border-b-2 border-[#1D3557]' : 'text-[#6B7280] hover:text-[#111827]'}`}
@@ -130,18 +150,25 @@ export default function CRMPage() {
           <Headphones className="w-4 h-4" /> Support ({tickets.length})
         </button>
       </div>
+      )}
 
-      {activeTab === 'marketing' && (
+      {/* -------- Main content based on tab + sub -------- */}
+      {activeTab === 'marketing' && !activeSub && (
         <MarketingPanel
           leads={leads}
           users={users}
+          customers={customers}
+          stages={marketingStages}
           search={search}
           onRefresh={fetchData}
-          canEdit={user?.role === 'admin' || user?.permissions?.crm_marketing?.includes('create')}
+          canEdit={canMarketingEdit}
           onCreateQuotation={(lead) => { setQuotationFromLead(lead); setActiveTab('quotations'); navigate('/crm?tab=quotations'); }}
         />
       )}
-      {activeTab === 'quotations' && (
+      {activeTab === 'marketing' && activeSub === 'contacts' && (
+        <ContactsPanel customers={customers} search={search} onRefresh={fetchData} canEdit={canMarketingEdit} />
+      )}
+      {activeTab === 'marketing' && activeSub === 'quotations' && (
         <QuotationsPanel
           quotations={quotations}
           leads={leads}
@@ -149,13 +176,40 @@ export default function CRMPage() {
           items={items}
           search={search}
           onRefresh={fetchData}
-          canEdit={user?.role === 'admin' || user?.permissions?.crm_marketing?.includes('create')}
+          canEdit={canMarketingEdit}
           prefillFromLead={quotationFromLead}
           onPrefillConsumed={() => setQuotationFromLead(null)}
         />
       )}
-      {activeTab === 'support' && (
-        <SupportPanel tickets={tickets} customers={customers} users={users} search={search} onRefresh={fetchData} canEdit={user?.role === 'admin' || user?.permissions?.crm_support?.includes('create')} />
+      {activeTab === 'marketing' && activeSub === 'configuration' && (
+        <PipelineConfigPanel pipelineType="marketing" onRefresh={fetchData} canEdit={canMarketingEdit} />
+      )}
+
+      {activeTab === 'quotations' && !activeSub && (
+        <QuotationsPanel
+          quotations={quotations}
+          leads={leads}
+          customers={customers}
+          items={items}
+          search={search}
+          onRefresh={fetchData}
+          canEdit={canMarketingEdit}
+          prefillFromLead={quotationFromLead}
+          onPrefillConsumed={() => setQuotationFromLead(null)}
+        />
+      )}
+
+      {activeTab === 'support' && !activeSub && (
+        <SupportPanel tickets={tickets} customers={customers} users={users} items={items} stages={supportStages} search={search} onRefresh={fetchData} canEdit={canSupportEdit} />
+      )}
+      {activeTab === 'support' && activeSub === 'sla' && (
+        <SLAPanel tickets={tickets} search={search} stages={supportStages} />
+      )}
+      {activeTab === 'support' && activeSub === 'activity' && (
+        <ActivityLogPanel search={search} />
+      )}
+      {activeTab === 'support' && activeSub === 'configuration' && (
+        <PipelineConfigPanel pipelineType="support" onRefresh={fetchData} canEdit={canSupportEdit} />
       )}
     </div>
   );
@@ -164,19 +218,21 @@ export default function CRMPage() {
 /* ============================================================================
  *  MARKETING PANEL — Leads
  * ========================================================================= */
-function MarketingPanel({ leads, users, search, onRefresh, canEdit, onCreateQuotation }) {
+function MarketingPanel({ leads, users, customers, stages, search, onRefresh, canEdit, onCreateQuotation }) {
+  const LEAD_ST = (stages && stages.length) ? stages : LEAD_STAGES;
   const [dialog, setDialog] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: '', customer_name: '', contact_person: '', email: '', phone: '', source: 'website', estimated_value: 0, assignee_id: '', next_followup: '', notes: '', stage: 'enquiry' });
+  const [form, setForm] = useState({ name: '', customer_id: '', contact_person: '', email: '', phone: '', source: 'website', estimated_value: 0, assignee_id: '', next_followup: '', notes: '', stage: 'enquiry' });
   const [activityDialog, setActivityDialog] = useState({ open: false, lead: null, note: '' });
   const [convertDialog, setConvertDialog] = useState({ open: false, lead: null, code: '', gstin: '', address: '' });
+  const [newCustomerDialog, setNewCustomerDialog] = useState(false);
 
   const openDialog = (lead) => {
     if (lead) {
       setEditing(lead);
       setForm({
         name: lead.name || '',
-        customer_name: lead.customer_name || '',
+        customer_id: lead.customer_id || '',
         contact_person: lead.contact_person || '',
         email: lead.email || '',
         phone: lead.phone || '',
@@ -185,18 +241,19 @@ function MarketingPanel({ leads, users, search, onRefresh, canEdit, onCreateQuot
         assignee_id: lead.assignee_id || '',
         next_followup: lead.next_followup ? String(lead.next_followup).slice(0, 10) : '',
         notes: lead.notes || '',
-        stage: lead.stage || 'new',
+        stage: lead.stage || 'enquiry',
       });
     } else {
       setEditing(null);
-      setForm({ name: '', customer_name: '', contact_person: '', email: '', phone: '', source: 'website', estimated_value: 0, assignee_id: '', next_followup: '', notes: '', stage: 'enquiry' });
+      setForm({ name: '', customer_id: '', contact_person: '', email: '', phone: '', source: 'website', estimated_value: 0, assignee_id: '', next_followup: '', notes: '', stage: 'enquiry' });
     }
     setDialog(true);
   };
 
   const save = async () => {
     try {
-      if (!form.name.trim() || !form.customer_name.trim()) { alert('Lead title + customer name are required'); return; }
+      if (!form.name.trim()) { alert('Lead title is required'); return; }
+      if (!form.customer_id) { alert('Please select a Customer (or click + New Customer to create one)'); return; }
       const payload = {
         ...form,
         estimated_value: parseFloat(form.estimated_value || 0),
@@ -249,7 +306,7 @@ function MarketingPanel({ leads, users, search, onRefresh, canEdit, onCreateQuot
   });
 
   // Pipeline totals
-  const totals = LEAD_STAGES.map(s => {
+  const totals = LEAD_ST.map(s => {
     const inStage = filtered.filter(l => l.stage === s.key);
     return { ...s, count: inStage.length, value: inStage.reduce((a, l) => a + (parseFloat(l.estimated_value) || 0), 0) };
   });
@@ -300,11 +357,11 @@ function MarketingPanel({ leads, users, search, onRefresh, canEdit, onCreateQuot
                     <Select value={l.stage || 'enquiry'} onValueChange={(v) => quickStageChange(l, v)}>
                       <SelectTrigger className="h-7 text-xs" data-testid={`lead-stage-${l.id}`}><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {LEAD_STAGES.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}
+                        {LEAD_ST.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   ) : (
-                    <span className={`status-badge ${LEAD_STAGES.find(s => s.key === l.stage)?.color || ''}`}>{LEAD_STAGES.find(s => s.key === l.stage)?.label || l.stage}</span>
+                    <span className={`status-badge ${LEAD_ST.find(s => s.key === l.stage)?.color || ''}`}>{LEAD_ST.find(s => s.key === l.stage)?.label || l.stage}</span>
                   )}
                 </td>
                 <td className="text-xs">{l.assignee?.name || <span className="text-[#9CA3AF]">—</span>}</td>
@@ -338,9 +395,38 @@ function MarketingPanel({ leads, users, search, onRefresh, canEdit, onCreateQuot
                 <label className="block text-xs font-semibold mb-1">Lead Title *</label>
                 <input type="text" className="input-field" placeholder='e.g. "Website enquiry — ABC Pumps"' value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} data-testid="lead-name" />
               </div>
-              <div>
+              <div className="col-span-2">
                 <label className="block text-xs font-semibold mb-1">Customer / Company *</label>
-                <input type="text" className="input-field" placeholder="Free-text company name" value={form.customer_name} onChange={e => setForm({ ...form, customer_name: e.target.value })} data-testid="lead-customer" />
+                <div className="flex gap-2">
+                  <Select value={form.customer_id || '__none__'} onValueChange={v => {
+                    if (v === '__new__') { setNewCustomerDialog(true); return; }
+                    if (v === '__none__') { setForm(f => ({ ...f, customer_id: '', contact_person: '', email: '', phone: '' })); return; }
+                    const c = customers.find(x => x.id === v);
+                    setForm(f => ({
+                      ...f,
+                      customer_id: v,
+                      contact_person: c?.contact_person || f.contact_person,
+                      email: c?.email || f.email,
+                      phone: c?.phone || f.phone,
+                    }));
+                  }}>
+                    <SelectTrigger className="flex-1" data-testid="lead-customer"><SelectValue placeholder="Select a customer..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— None —</SelectItem>
+                      <SelectItem value="__new__" data-testid="lead-new-customer-opt"><span className="text-[#1E429F] font-semibold">+ New Customer</span></SelectItem>
+                      {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ''}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {form.customer_id && (
+                  <div className="mt-1 text-[11px] text-[#4B5563]">
+                    {(() => {
+                      const c = customers.find(x => x.id === form.customer_id);
+                      if (!c) return null;
+                      return <span>Selected: <strong>{c.name}</strong>{c.address ? ` · ${c.address}` : ' · '}{!c.address && <span className="text-[#9B1C1C]">No address on file</span>}{c.gstin ? ` · GSTIN ${c.gstin}` : ''}</span>;
+                    })()}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1">Contact Person</label>
@@ -365,7 +451,7 @@ function MarketingPanel({ leads, users, search, onRefresh, canEdit, onCreateQuot
                 <label className="block text-xs font-semibold mb-1">Stage</label>
                 <Select value={form.stage} onValueChange={v => setForm({ ...form, stage: v })}>
                   <SelectTrigger data-testid="lead-stage-form"><SelectValue /></SelectTrigger>
-                  <SelectContent>{LEAD_STAGES.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
+                  <SelectContent>{LEAD_ST.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div>
@@ -452,6 +538,23 @@ function MarketingPanel({ leads, users, search, onRefresh, canEdit, onCreateQuot
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* New Customer inline dialog (opens from lead form) */}
+      <NewCustomerInlineDialog
+        open={newCustomerDialog}
+        onClose={() => setNewCustomerDialog(false)}
+        onCreated={(c) => {
+          setNewCustomerDialog(false);
+          setForm(f => ({
+            ...f,
+            customer_id: c.id,
+            contact_person: c.contact_person || f.contact_person,
+            email: c.email || f.email,
+            phone: c.phone || f.phone,
+          }));
+          onRefresh();
+        }}
+      />
     </div>
   );
 }
@@ -459,10 +562,11 @@ function MarketingPanel({ leads, users, search, onRefresh, canEdit, onCreateQuot
 /* ============================================================================
  *  SUPPORT PANEL — Tickets
  * ========================================================================= */
-function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit }) {
+function SupportPanel({ tickets, customers, users, items, stages, search, onRefresh, canEdit }) {
+  const TICKET_ST = (stages && stages.length) ? stages : TICKET_STAGES;
   const [dialog, setDialog] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ subject: '', customer_id: '', description: '', priority: 'medium', assignee_id: '', linked_so_id: '', stage: 'complaint' });
+  const [form, setForm] = useState({ subject: '', customer_id: '', description: '', priority: 'medium', assignee_id: '', product_ids: [], stage: 'complaint' });
   const [activityDialog, setActivityDialog] = useState({ open: false, ticket: null, note: '' });
 
   const openDialog = (t) => {
@@ -474,12 +578,12 @@ function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit })
         description: t.description || '',
         priority: t.priority || 'medium',
         assignee_id: t.assignee_id || '',
-        linked_so_id: t.linked_so_id || '',
-        stage: t.stage || 'new',
+        product_ids: t.product_ids || [],
+        stage: t.stage || 'complaint',
       });
     } else {
       setEditing(null);
-      setForm({ subject: '', customer_id: '', description: '', priority: 'medium', assignee_id: '', linked_so_id: '', stage: 'complaint' });
+      setForm({ subject: '', customer_id: '', description: '', priority: 'medium', assignee_id: '', product_ids: [], stage: 'complaint' });
     }
     setDialog(true);
   };
@@ -526,19 +630,29 @@ function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit })
     return [t.ticket_no, t.subject, t.customer?.name].some(v => (v || '').toLowerCase().includes(q));
   });
 
-  // Breach summary
+  // Per-stage counts (Open, In Progress, Closed)
+  const openCount = filtered.filter(t => !['closed', 'pending'].includes(t.stage)).length;
+  const inProgressCount = filtered.filter(t => t.stage === 'in_progress').length;
+  const closedCount = filtered.filter(t => t.stage === 'closed').length;
   const breachedCount = filtered.filter(t => t.sla_breached).length;
-  const openCount = filtered.filter(t => !['closed'].includes(t.stage)).length;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div className="flex gap-3">
-          <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[120px]">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">Open Tickets</div>
-            <div className="text-lg font-semibold mono text-[#1D3557]">{openCount}</div>
+        <div className="flex gap-3 flex-wrap">
+          <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[110px]">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">Open</div>
+            <div className="text-lg font-semibold mono text-[#1D3557]" data-testid="support-count-open">{openCount}</div>
           </div>
-          <div className={`border rounded-sm px-3 py-2 min-w-[120px] ${breachedCount > 0 ? 'border-[#9B1C1C] bg-[#FDE8E8]' : 'border-[#E5E7EB] bg-white'}`}>
+          <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[110px]">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-[#92400E]">In Progress</div>
+            <div className="text-lg font-semibold mono text-[#92400E]" data-testid="support-count-progress">{inProgressCount}</div>
+          </div>
+          <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[110px]">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-[#03543F]">Closed</div>
+            <div className="text-lg font-semibold mono text-[#03543F]" data-testid="support-count-closed">{closedCount}</div>
+          </div>
+          <div className={`border rounded-sm px-3 py-2 min-w-[110px] ${breachedCount > 0 ? 'border-[#9B1C1C] bg-[#FDE8E8]' : 'border-[#E5E7EB] bg-white'}`}>
             <div className={`text-[10px] font-semibold uppercase tracking-wide ${breachedCount > 0 ? 'text-[#9B1C1C]' : 'text-[#6B7280]'}`}>SLA Breached</div>
             <div className={`text-lg font-semibold mono ${breachedCount > 0 ? 'text-[#9B1C1C]' : 'text-[#1D3557]'}`}>{breachedCount}</div>
           </div>
@@ -564,14 +678,14 @@ function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit })
           <tbody>
             {filtered.length === 0 && <tr><td colSpan={8} className="text-center py-6 text-sm text-[#6B7280]">No tickets yet. Click "New Ticket" to create one.</td></tr>}
             {filtered.map(t => {
-              const stageData = TICKET_STAGES.find(s => s.key === t.stage);
+              const stageData = TICKET_ST.find(s => s.key === t.stage);
               const priorityData = PRIORITY_OPTIONS.find(p => p.key === t.priority);
               return (
                 <tr key={t.id} data-testid={`ticket-row-${t.id}`} className={t.sla_breached ? 'bg-[#FEF2F2]' : ''}>
                   <td className="mono font-medium">{t.ticket_no}</td>
                   <td>
                     <div className="font-medium text-[#1D3557]">{t.subject}</div>
-                    <div className="text-xs text-[#4B5563]">{t.customer?.name || '—'}{t.linked_so?.order_number && <span className="ml-2 text-[10px] text-[#1E429F]">SO: {t.linked_so.order_number}</span>}</div>
+                    <div className="text-xs text-[#4B5563]">{t.customer?.name || '—'}{(t.products && t.products.length > 0) && <span className="ml-2 text-[10px] text-[#1E429F]" title={t.products.map(p => p.part_number).join(', ')}>Products: {t.products.length}</span>}</div>
                   </td>
                   <td>
                     {canEdit ? (
@@ -587,7 +701,7 @@ function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit })
                     {canEdit ? (
                       <Select value={t.stage || 'complaint'} onValueChange={(v) => quickStageChange(t, v)}>
                         <SelectTrigger className="h-7 text-xs" data-testid={`ticket-stage-${t.id}`}><SelectValue /></SelectTrigger>
-                        <SelectContent>{TICKET_STAGES.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
+                        <SelectContent>{TICKET_ST.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
                       </Select>
                     ) : (
                       <span className={`status-badge ${stageData?.color || ''}`}>{stageData?.label || t.stage}</span>
@@ -646,7 +760,7 @@ function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit })
                 <label className="block text-xs font-semibold mb-1">Stage</label>
                 <Select value={form.stage} onValueChange={v => setForm({ ...form, stage: v })}>
                   <SelectTrigger data-testid="ticket-stage-form"><SelectValue /></SelectTrigger>
-                  <SelectContent>{TICKET_STAGES.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
+                  <SelectContent>{TICKET_ST.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div>
@@ -659,9 +773,15 @@ function SupportPanel({ tickets, customers, users, search, onRefresh, canEdit })
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <label className="block text-xs font-semibold mb-1">Linked SO (optional)</label>
-                <input type="text" className="input-field mono" placeholder="Paste SO ID" value={form.linked_so_id} onChange={e => setForm({ ...form, linked_so_id: e.target.value })} data-testid="ticket-so" />
+              <div className="col-span-2">
+                <label className="block text-xs font-semibold mb-1">Products (optional)</label>
+                <MultiItemPicker
+                  items={items || []}
+                  selectedIds={form.product_ids || []}
+                  onChange={(ids) => setForm({ ...form, product_ids: ids })}
+                  testid="ticket-products"
+                />
+                <div className="text-[10px] text-[#6B7280] mt-1">Products / items related to this complaint (e.g. faulty parts).</div>
               </div>
               <div className="col-span-2">
                 <label className="block text-xs font-semibold mb-1">Description</label>
@@ -1144,3 +1264,484 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     </div>
   );
 }
+
+/* ============================================================================
+ *  SHARED — New Customer inline dialog
+ * ========================================================================= */
+function NewCustomerInlineDialog({ open, onClose, onCreated }) {
+  const [form, setForm] = useState({ code: '', name: '', gstin: '', contact_person: '', email: '', phone: '', address: '' });
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (open) setForm({ code: '', name: '', gstin: '', contact_person: '', email: '', phone: '', address: '' });
+  }, [open]);
+  const save = async () => {
+    if (!form.name.trim()) { alert('Customer name is required'); return; }
+    if (!form.address.trim()) { alert('Address is required for new customers'); return; }
+    setSaving(true);
+    try {
+      const res = await api.post('/api/customers', form);
+      onCreated(res.data);
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to create customer'); }
+    finally { setSaving(false); }
+  };
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" data-testid="new-customer-inline-dialog">
+        <DialogHeader><DialogTitle className="font-[Chivo]">Quick Add Customer</DialogTitle></DialogHeader>
+        <div className="space-y-3 mt-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="block text-xs font-semibold mb-1">Name *</label>
+              <input className="input-field" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} data-testid="nc-name" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Code (auto if blank)</label>
+              <input className="input-field mono" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value }))} data-testid="nc-code" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">GSTIN</label>
+              <input className="input-field mono" value={form.gstin} onChange={e => setForm(f => ({ ...f, gstin: e.target.value }))} data-testid="nc-gstin" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Contact Person</label>
+              <input className="input-field" value={form.contact_person} onChange={e => setForm(f => ({ ...f, contact_person: e.target.value }))} data-testid="nc-contact" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Email</label>
+              <input className="input-field" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} data-testid="nc-email" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Phone</label>
+              <input className="input-field mono" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} data-testid="nc-phone" />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-semibold mb-1">Address *</label>
+              <textarea rows={2} className="input-field" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} data-testid="nc-address" />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t">
+            <button className="btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+            <button className="btn-primary" onClick={save} disabled={saving} data-testid="nc-save-btn">{saving ? 'Saving...' : 'Create & Use'}</button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ============================================================================
+ *  SHARED — Multi Item Picker (chip selector)
+ * ========================================================================= */
+function MultiItemPicker({ items, selectedIds, onChange, testid }) {
+  const [query, setQuery] = useState('');
+  const selectedItems = items.filter(i => selectedIds.includes(i.id));
+  const matches = query.trim() ? items.filter(i => {
+    const q = query.toLowerCase();
+    return !selectedIds.includes(i.id) && ((i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q));
+  }).slice(0, 50) : [];
+  const add = (id) => { onChange([...selectedIds, id]); setQuery(''); };
+  const remove = (id) => onChange(selectedIds.filter(x => x !== id));
+  return (
+    <div className="border border-[#E5E7EB] rounded-sm p-2 bg-white" data-testid={testid}>
+      <div className="flex flex-wrap gap-1 mb-2">
+        {selectedItems.length === 0 && <span className="text-[11px] text-[#9CA3AF]">No products selected</span>}
+        {selectedItems.map(it => (
+          <span key={it.id} className="bg-[#E1EFFE] text-[#1E429F] text-[11px] px-2 py-0.5 rounded-sm flex items-center gap-1" data-testid={`${testid}-chip-${it.id}`}>
+            {it.part_number} · {it.name}
+            <button onClick={() => remove(it.id)} className="text-[#1E429F] hover:text-[#9B1C1C]"><X className="w-3 h-3" /></button>
+          </span>
+        ))}
+      </div>
+      <input
+        className="input-field text-sm"
+        type="text"
+        placeholder="Search items to add..."
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        data-testid={`${testid}-search`}
+      />
+      {matches.length > 0 && (
+        <div className="border border-[#E5E7EB] mt-1 max-h-40 overflow-y-auto bg-white text-xs">
+          {matches.map(i => (
+            <button key={i.id} onClick={() => add(i.id)} className="block w-full text-left px-2 py-1 hover:bg-[#F3F4F6]" data-testid={`${testid}-opt-${i.id}`}>
+              <span className="mono font-medium">{i.part_number}</span> · {i.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+ *  CONTACTS PANEL (Customers within CRM)
+ * ========================================================================= */
+function ContactsPanel({ customers, search, onRefresh, canEdit }) {
+  const [dialog, setDialog] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const empty = { code: '', name: '', gstin: '', contact_person: '', email: '', phone: '', address: '', status: 'active' };
+  const [form, setForm] = useState(empty);
+
+  const openDialog = (c) => {
+    if (c) { setEditing(c); setForm({ ...empty, ...c }); }
+    else { setEditing(null); setForm(empty); }
+    setDialog(true);
+  };
+  const save = async () => {
+    if (!form.name.trim()) { alert('Name is required'); return; }
+    try {
+      if (editing) await api.put(`/api/customers/${editing.id}`, form);
+      else await api.post('/api/customers', form);
+      setDialog(false); setEditing(null); onRefresh();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+  const del = async (c) => {
+    if (!window.confirm(`Delete contact "${c.name}"?`)) return;
+    try { await api.delete(`/api/customers/${c.id}`); onRefresh(); }
+    catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const filtered = customers.filter(c => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return [c.name, c.code, c.email, c.phone, c.gstin].some(v => (v || '').toLowerCase().includes(q));
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <div className="text-sm text-[#4B5563]">{filtered.length} contact{filtered.length !== 1 ? 's' : ''} in master</div>
+        {canEdit && <button className="btn-primary flex items-center gap-1" onClick={() => openDialog(null)} data-testid="add-contact-btn"><Plus className="w-4 h-4" /> New Contact</button>}
+      </div>
+      <div className="card-flat overflow-hidden">
+        <table className="w-full data-table" data-testid="contacts-table">
+          <thead>
+            <tr><th>Code</th><th>Name</th><th>GSTIN</th><th>Contact Person</th><th>Email / Phone</th><th>Address</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && <tr><td colSpan={8} className="text-center py-6 text-sm text-[#6B7280]">No contacts found. Click "New Contact" to add.</td></tr>}
+            {filtered.map(c => (
+              <tr key={c.id} data-testid={`contact-row-${c.id}`}>
+                <td className="mono font-medium">{c.code}</td>
+                <td className="font-medium text-[#1D3557]">{c.name}</td>
+                <td className="mono text-xs">{c.gstin || '—'}</td>
+                <td className="text-xs">{c.contact_person || '—'}</td>
+                <td className="text-xs">
+                  {c.email && <div>{c.email}</div>}
+                  {c.phone && <div className="mono text-[#4B5563]">{c.phone}</div>}
+                </td>
+                <td className="text-xs text-[#4B5563] max-w-xs truncate" title={c.address}>{c.address || '—'}</td>
+                <td><span className={`status-badge ${c.status === 'active' ? 'bg-[#DEF7EC] text-[#03543F]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>{c.status}</span></td>
+                <td>
+                  <div className="flex gap-0.5">
+                    {canEdit && <button onClick={() => openDialog(c)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" data-testid={`contact-edit-${c.id}`}><Edit2 className="w-4 h-4" /></button>}
+                    {canEdit && <button onClick={() => del(c)} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" data-testid={`contact-delete-${c.id}`}><Trash2 className="w-4 h-4" /></button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <Dialog open={dialog} onOpenChange={(o) => { setDialog(o); if (!o) setEditing(null); }}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" data-testid="contact-dialog">
+          <DialogHeader><DialogTitle className="font-[Chivo]">{editing ? 'Edit Contact' : 'New Contact'}</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="block text-xs font-semibold mb-1">Name *</label>
+                <input className="input-field" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} data-testid="contact-name" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Code (auto if blank)</label>
+                <input className="input-field mono" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value }))} disabled={!!editing} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">GSTIN</label>
+                <input className="input-field mono" value={form.gstin} onChange={e => setForm(f => ({ ...f, gstin: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Contact Person</label>
+                <input className="input-field" value={form.contact_person} onChange={e => setForm(f => ({ ...f, contact_person: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Email</label>
+                <input className="input-field" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Phone</label>
+                <input className="input-field mono" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Status</label>
+                <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Inactive</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-semibold mb-1">Address</label>
+                <textarea rows={2} className="input-field" value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t">
+              <button className="btn-secondary" onClick={() => setDialog(false)}>Cancel</button>
+              <button className="btn-primary" onClick={save} data-testid="contact-save-btn">{editing ? 'Update' : 'Create'}</button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/* ============================================================================
+ *  PIPELINE CONFIGURATION PANEL (customizable stages)
+ * ========================================================================= */
+const PIPELINE_COLOR_OPTIONS = [
+  'bg-[#E1EFFE] text-[#1E429F]',
+  'bg-[#FEF3C7] text-[#92400E]',
+  'bg-[#FCE7F3] text-[#9D174D]',
+  'bg-[#DEF7EC] text-[#03543F]',
+  'bg-[#FDE8E8] text-[#9B1C1C]',
+  'bg-[#FDF6B2] text-[#723B13]',
+  'bg-[#F3F4F6] text-[#4B5563]',
+];
+
+function PipelineConfigPanel({ pipelineType, onRefresh, canEdit }) {
+  const [stages, setStages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get(`/api/crm/pipeline-config/${pipelineType}`);
+      setStages(res.data?.stages || []);
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }, [pipelineType]);
+  useEffect(() => { load(); }, [load]);
+
+  const addStage = () => setStages(s => [...s, { key: `stage_${s.length + 1}`, label: `Stage ${s.length + 1}`, color: PIPELINE_COLOR_OPTIONS[s.length % PIPELINE_COLOR_OPTIONS.length], order: s.length + 1 }]);
+  const updateStage = (idx, patch) => setStages(s => s.map((st, i) => i === idx ? { ...st, ...patch } : st));
+  const removeStage = (idx) => setStages(s => s.length > 1 ? s.filter((_, i) => i !== idx) : s);
+  const moveStage = (idx, dir) => setStages(s => {
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= s.length) return s;
+    const copy = [...s];
+    [copy[idx], copy[newIdx]] = [copy[newIdx], copy[idx]];
+    return copy.map((st, i) => ({ ...st, order: i + 1 }));
+  });
+
+  const save = async () => {
+    const trimmed = stages.map(s => ({ ...s, key: (s.key || '').trim().toLowerCase().replace(/\s+/g, '_'), label: (s.label || '').trim() }));
+    if (trimmed.some(s => !s.key || !s.label)) { alert('Every stage needs a key + label'); return; }
+    const keys = trimmed.map(s => s.key);
+    if (new Set(keys).size !== keys.length) { alert('Stage keys must be unique'); return; }
+    setSaving(true);
+    try {
+      const payload = { stages: trimmed.map((s, i) => ({ key: s.key, label: s.label, color: s.color, order: i + 1 })) };
+      await api.put(`/api/crm/pipeline-config/${pipelineType}`, payload);
+      await load();
+      onRefresh && onRefresh();
+      alert('Pipeline configuration saved');
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to save'); }
+    finally { setSaving(false); }
+  };
+
+  const reset = async () => {
+    if (!window.confirm('Reset to default stages? Custom stages will be lost.')) return;
+    setSaving(true);
+    try {
+      await api.post(`/api/crm/pipeline-config/${pipelineType}/reset`);
+      await load();
+      onRefresh && onRefresh();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+    finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="text-center py-10 text-sm text-[#6B7280]">Loading pipeline configuration...</div>;
+
+  return (
+    <div className="space-y-4" data-testid={`pipeline-config-${pipelineType}`}>
+      <div className="bg-[#FEF3C7] border border-[#92400E] rounded-sm p-3 text-xs">
+        <div className="font-semibold mb-1">Customize {pipelineType === 'marketing' ? 'Marketing' : 'Support'} Pipeline Stages</div>
+        Add, rename, reorder or remove the stages that appear everywhere ({pipelineType === 'marketing' ? 'leads' : 'tickets'}) in this pipeline. Existing records keep their current stage even if you remove it — they&apos;ll just display raw.
+      </div>
+
+      <div className="card-flat overflow-hidden">
+        <table className="w-full data-table">
+          <thead>
+            <tr><th className="w-10">#</th><th>Key (lowercase)</th><th>Label</th><th>Preview</th><th>Color</th><th className="w-32">Actions</th></tr>
+          </thead>
+          <tbody>
+            {stages.map((s, idx) => (
+              <tr key={idx} data-testid={`stage-row-${idx}`}>
+                <td className="mono">{idx + 1}</td>
+                <td><input className="input-field h-7 text-xs mono" value={s.key} onChange={e => updateStage(idx, { key: e.target.value })} disabled={!canEdit} data-testid={`stage-key-${idx}`} /></td>
+                <td><input className="input-field h-7 text-xs" value={s.label} onChange={e => updateStage(idx, { label: e.target.value })} disabled={!canEdit} data-testid={`stage-label-${idx}`} /></td>
+                <td><span className={`status-badge ${s.color || 'bg-[#F3F4F6] text-[#4B5563]'}`}>{s.label}</span></td>
+                <td>
+                  <Select value={s.color} onValueChange={v => updateStage(idx, { color: v })} disabled={!canEdit}>
+                    <SelectTrigger className="h-7 text-xs" data-testid={`stage-color-${idx}`}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {PIPELINE_COLOR_OPTIONS.map((c, ci) => (
+                        <SelectItem key={ci} value={c}><span className={`px-2 py-0.5 rounded ${c}`}>Sample</span></SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </td>
+                <td>
+                  <div className="flex gap-0.5">
+                    <button onClick={() => moveStage(idx, -1)} disabled={!canEdit || idx === 0} className="p-1 text-[#4B5563] hover:text-[#1D3557] disabled:opacity-30">↑</button>
+                    <button onClick={() => moveStage(idx, 1)} disabled={!canEdit || idx === stages.length - 1} className="p-1 text-[#4B5563] hover:text-[#1D3557] disabled:opacity-30">↓</button>
+                    {canEdit && stages.length > 1 && <button onClick={() => removeStage(idx)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" data-testid={`stage-delete-${idx}`}><X className="w-4 h-4" /></button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {canEdit && (
+        <div className="flex gap-2">
+          <button className="btn-secondary flex items-center gap-1" onClick={addStage} data-testid="stage-add-btn"><Plus className="w-4 h-4" /> Add Stage</button>
+          <div className="flex-1" />
+          <button className="btn-secondary flex items-center gap-1" onClick={reset} disabled={saving} data-testid="stage-reset-btn"><RefreshCw className="w-4 h-4" /> Reset to Defaults</button>
+          <button className="btn-primary" onClick={save} disabled={saving} data-testid="stage-save-btn">{saving ? 'Saving...' : 'Save Configuration'}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+ *  SLA DUE PANEL (Support)
+ * ========================================================================= */
+function SLAPanel({ tickets, search, stages }) {
+  const TICKET_ST = (stages && stages.length) ? stages : TICKET_STAGES;
+  const nonClosed = tickets.filter(t => t.stage !== 'closed');
+  const filtered = nonClosed.filter(t => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return [t.ticket_no, t.subject, t.customer?.name].some(v => (v || '').toLowerCase().includes(q));
+  });
+  const breached = filtered.filter(t => t.sla_breached);
+  const dueSoon = filtered.filter(t => {
+    if (t.sla_breached || !t.sla_due) return false;
+    const dueMs = new Date(t.sla_due).getTime();
+    return (dueMs - Date.now()) < 4 * 3600 * 1000;
+  });
+
+  const rows = filtered
+    .slice()
+    .sort((a, b) => {
+      const av = a.sla_due ? new Date(a.sla_due).getTime() : Infinity;
+      const bv = b.sla_due ? new Date(b.sla_due).getTime() : Infinity;
+      return av - bv;
+    });
+
+  return (
+    <div className="space-y-4" data-testid="sla-panel">
+      <div className="flex gap-3 flex-wrap">
+        <div className={`border rounded-sm px-3 py-2 min-w-[120px] ${breached.length > 0 ? 'border-[#9B1C1C] bg-[#FDE8E8]' : 'border-[#E5E7EB] bg-white'}`}>
+          <div className={`text-[10px] font-semibold uppercase tracking-wide ${breached.length > 0 ? 'text-[#9B1C1C]' : 'text-[#6B7280]'}`}>Breached</div>
+          <div className={`text-lg font-semibold mono ${breached.length > 0 ? 'text-[#9B1C1C]' : 'text-[#1D3557]'}`}>{breached.length}</div>
+        </div>
+        <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[120px]">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[#92400E]">Due within 4h</div>
+          <div className="text-lg font-semibold mono text-[#92400E]">{dueSoon.length}</div>
+        </div>
+        <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[120px]">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[#1E429F]">Total Open</div>
+          <div className="text-lg font-semibold mono text-[#1E429F]">{filtered.length}</div>
+        </div>
+      </div>
+      <div className="card-flat overflow-hidden">
+        <table className="w-full data-table" data-testid="sla-table">
+          <thead><tr><th>Ticket #</th><th>Subject</th><th>Customer</th><th>Priority</th><th>Stage</th><th>SLA Due</th><th>Time Left</th></tr></thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={7} className="text-center py-6 text-sm text-[#6B7280]">No open tickets with SLA.</td></tr>}
+            {rows.map(t => {
+              const stageData = TICKET_ST.find(s => s.key === t.stage);
+              const priorityData = PRIORITY_OPTIONS.find(p => p.key === t.priority);
+              const dueMs = t.sla_due ? new Date(t.sla_due).getTime() : null;
+              const deltaMs = dueMs ? dueMs - Date.now() : 0;
+              const hours = Math.floor(Math.abs(deltaMs) / 3600000);
+              const mins = Math.floor((Math.abs(deltaMs) % 3600000) / 60000);
+              const timeLabel = dueMs ? (t.sla_breached ? `Overdue ${hours}h ${mins}m` : `${hours}h ${mins}m remaining`) : '—';
+              return (
+                <tr key={t.id} className={t.sla_breached ? 'bg-[#FEF2F2]' : ''} data-testid={`sla-row-${t.id}`}>
+                  <td className="mono font-medium">{t.ticket_no}</td>
+                  <td className="text-sm">{t.subject}</td>
+                  <td className="text-xs">{t.customer?.name || '—'}</td>
+                  <td><span className={`status-badge ${priorityData?.color || ''}`}>{priorityData?.label || t.priority}</span></td>
+                  <td><span className={`status-badge ${stageData?.color || ''}`}>{stageData?.label || t.stage}</span></td>
+                  <td className="text-xs">{t.sla_due ? formatDateTime(t.sla_due) : '—'}</td>
+                  <td className={`text-xs font-semibold ${t.sla_breached ? 'text-[#9B1C1C]' : 'text-[#374151]'}`}>{timeLabel}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+ *  ACTIVITY LOG PANEL (Support)
+ * ========================================================================= */
+function ActivityLogPanel({ search }) {
+  const [activities, setActivities] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/api/crm/activities?type=support');
+      setActivities(res.data || []);
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = activities.filter(a => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return [a.entity_no, a.entity_title, a.customer_name, a.note, a.author_name].some(v => (v || '').toLowerCase().includes(q));
+  });
+
+  return (
+    <div className="space-y-4" data-testid="activity-panel">
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-[#4B5563]">{filtered.length} activity entries across all Support tickets</div>
+        <button className="btn-secondary flex items-center gap-1" onClick={load}><RefreshCw className="w-4 h-4" /> Refresh</button>
+      </div>
+      <div className="card-flat overflow-hidden">
+        {loading ? (
+          <div className="text-center py-10 text-sm text-[#6B7280]">Loading activity logs...</div>
+        ) : (
+          <table className="w-full data-table" data-testid="activity-table">
+            <thead><tr><th>When</th><th>Ticket</th><th>Customer</th><th>Note</th><th>Author</th></tr></thead>
+            <tbody>
+              {filtered.length === 0 && <tr><td colSpan={5} className="text-center py-6 text-sm text-[#6B7280]">No activity yet.</td></tr>}
+              {filtered.map((a, idx) => (
+                <tr key={idx} data-testid={`activity-row-${idx}`}>
+                  <td className="text-xs whitespace-nowrap">{formatDateTime(a.created_at)}</td>
+                  <td className="mono text-xs">{a.entity_no}<div className="text-[10px] text-[#6B7280] truncate max-w-[180px]">{a.entity_title}</div></td>
+                  <td className="text-xs">{a.customer_name || '—'}</td>
+                  <td className="text-xs">{a.note}</td>
+                  <td className="text-xs">{a.author_name || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
