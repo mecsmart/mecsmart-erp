@@ -17,8 +17,8 @@ export default function SettingsPage() {
   const { refreshSettings } = useCompanySettings();
   const [settings, setSettings] = useState({
     company_name: '', gstin: '', state_code: '',
-    address: '', address_line2: '', city: '', state: '', pin_code: '',
-    pan: '', cin: '', phone: '', email: '',
+    address: '', address_line2: '', city: '', state: '', pin_code: '', country: 'India',
+    pan: '', cin: '', phone: '', email: '', website: '',
     logo_data: '', tagline: '', primary_currency: 'INR', secondary_currency: 'USD'
   });
   const [states, setStates] = useState([]);
@@ -195,6 +195,16 @@ export default function SettingsPage() {
                   <div>
                     <label className="text-sm font-medium text-[#374151]">Email</label>
                     <input type="email" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={settings.email || ''} onChange={e => setSettings({...settings, email: e.target.value})} disabled={!isAdmin} data-testid="company-email-input" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-[#374151]">Website</label>
+                    <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" placeholder="www.company.com" value={settings.website || ''} onChange={e => setSettings({...settings, website: e.target.value})} disabled={!isAdmin} data-testid="company-website-input" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-[#374151]">Country</label>
+                    <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" placeholder="India" value={settings.country || ''} onChange={e => setSettings({...settings, country: e.target.value})} disabled={!isAdmin} data-testid="company-country-input" />
                   </div>
                 </div>
               </div>

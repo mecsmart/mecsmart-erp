@@ -4,6 +4,7 @@ import { useCompanySettings } from '../context/CompanySettingsContext';
 import { Printer, Eye, Settings2, FileText, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 
 const TEMPLATES = [
   { id: 'standard', name: 'Standard', desc: 'Clean layout with item table and totals' },
@@ -138,14 +139,9 @@ export function POPrintDialog({ po, open, onClose }) {
       @page { size: ${paper.w} ${paper.h}; margin: 12mm; }
       * { margin:0; padding:0; box-sizing:border-box; }
       body { font-family:'Segoe UI',Arial,sans-serif; font-size:10.5px; color:#222; line-height:1.5; }
-      .page { max-width:${paper.w}; margin:0 auto; padding:${isModern ? '0' : '15px'}; }
+      .page { max-width:${paper.w}; margin:0 auto; padding:${isModern ? '15px' : '15px'}; }
       ${isModern ? `.page { border:2px solid ${accent}; }` : ''}
-      .letterhead { text-align:center; padding:15px 20px; ${isModern ? `background:${accent}; color:white;` : `border-bottom:2px solid ${accent};`} margin-bottom:15px; }
-      .letterhead .logo-row { display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom:4px; }
-      .letterhead .logo-row img { max-height:48px; max-width:120px; object-fit:contain; }
-      .letterhead h1 { font-size:18px; font-weight:700; ${isModern ? 'color:white;' : `color:${accent};`} letter-spacing:0.5px; margin:0; }
-      .letterhead .tagline { font-size:9px; ${isModern ? 'color:#ccd6e0;' : 'color:#888;'} font-style:italic; margin-top:1px; letter-spacing:0.3px; }
-      .letterhead .sub { font-size:9.5px; ${isModern ? 'color:#ccd6e0;' : 'color:#666;'} margin-top:2px; }
+      ${letterheadCSS(accent)}
       .doc-title { font-size:14px; font-weight:700; color:${accent}; text-transform:uppercase; padding:8px 15px; ${isModern ? `background:${accentLight};` : `border-bottom:1px solid ${accent};`} margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
       .doc-title .rev { font-size:10px; color:#666; font-weight:normal; }
       .info-section { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:0 15px; margin-bottom:14px; }
@@ -179,20 +175,12 @@ export function POPrintDialog({ po, open, onClose }) {
       @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
     `;
 
-    // Build letterhead
+    // Build letterhead (new 2-col spec: logo+tagline left, company info right).
     let letterhead = '';
     const companyAddr = formatFullAddress(company);
     const sym = getCurrencySymbol(company);
     if (opts.showLetterhead) {
-      const logoHTML = (opts.showLogo && company.logo_data) ? `<img src="${company.logo_data}" alt="Logo" />` : '';
-      letterhead = `<div class="letterhead">
-        <div class="logo-row">${logoHTML}<h1>${company.company_name || 'Company Name'}</h1></div>
-        ${company.tagline ? `<div class="tagline">${company.tagline}</div>` : ''}
-        <div class="sub">${[companyAddr, company.phone ? `Ph: ${company.phone}` : '', company.email].filter(Boolean).join(' | ')}</div>
-        ${company.gstin ? `<div class="sub">GSTIN: ${company.gstin}${company.pan ? ` | PAN: ${company.pan}` : ''}</div>` : ''}
-      </div>`;
-    } else {
-      // Even without letterhead, we need the currency symbol
+      letterhead = buildLetterheadHTML(opts.showLogo === false ? { ...company, logo_data: '' } : company);
     }
 
     // Info blocks
@@ -485,12 +473,7 @@ export function GRNPrintDialog({ grn, open, onClose }) {
       * { margin:0; padding:0; box-sizing:border-box; }
       body { font-family:'Segoe UI',Arial,sans-serif; font-size:10.5px; color:#222; line-height:1.5; }
       .page { max-width:${paper.w}; margin:0 auto; padding:15px; }
-      .letterhead { text-align:center; padding:15px 20px; border-bottom:2px solid ${accent}; margin-bottom:15px; }
-      .letterhead .logo-row { display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom:4px; }
-      .letterhead .logo-row img { max-height:48px; max-width:120px; object-fit:contain; }
-      .letterhead h1 { font-size:18px; font-weight:700; color:${accent}; margin:0; }
-      .letterhead .tagline { font-size:9px; color:#888; font-style:italic; margin-top:1px; }
-      .letterhead .sub { font-size:9.5px; color:#666; margin-top:2px; }
+      ${letterheadCSS(accent)}
       .doc-title { font-size:14px; font-weight:700; color:#03543F; text-transform:uppercase; padding:8px 15px; background:#DEF7EC; margin-bottom:12px; }
       .info-section { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:0 15px; margin-bottom:14px; }
       .info-block { border:1px solid #ddd; padding:8px 10px; border-radius:2px; }
@@ -514,12 +497,7 @@ export function GRNPrintDialog({ grn, open, onClose }) {
 
     let letterhead = '';
     if (opts.showLetterhead) {
-      const companyAddr = formatFullAddress(company);
-      const logoHTML = company.logo_data ? `<img src="${company.logo_data}" alt="Logo" />` : '';
-      letterhead = `<div class="letterhead"><div class="logo-row">${logoHTML}<h1>${company.company_name || ''}</h1></div>
-        ${company.tagline ? `<div class="tagline">${company.tagline}</div>` : ''}
-        <div class="sub">${[companyAddr, company.phone ? `Ph: ${company.phone}` : '', company.email].filter(Boolean).join(' | ')}</div>
-        ${company.gstin ? `<div class="sub">GSTIN: ${company.gstin}</div>` : ''}</div>`;
+      letterhead = buildLetterheadHTML(company);
     }
 
     const isJW = !!d.is_jw;

@@ -7,6 +7,7 @@ import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, FileText,
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 
 export default function JobWorkPage() {
   const { user } = useAuth();
@@ -375,14 +376,11 @@ export default function JobWorkPage() {
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
       body { font-family:'Segoe UI',Arial,sans-serif; font-size:11px; color:#111; padding:20px; }
-      .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #1D3557; padding-bottom:12px; margin-bottom:15px; }
-      .header-left h1 { font-size:18px; color:#1D3557; font-weight:700; margin-bottom:2px; }
-      .header-left .tagline { font-size:9px; color:#888; margin-bottom:4px; }
-      .header-left .company-details { font-size:10px; color:#444; line-height:1.5; }
-      .header-right { text-align:right; }
-      .header-right .dc-title { font-size:14px; font-weight:700; color:#1D3557; text-transform:uppercase; }
-      .header-right .dc-number { font-size:12px; font-family:'Courier New',monospace; color:#333; }
-      .header-right .dc-date { font-size:10px; color:#666; margin-top:4px; }
+      ${letterheadCSS('#1D3557')}
+      .dc-meta { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; margin-bottom:15px; }
+      .dc-meta .dc-title { font-size:16px; font-weight:700; color:#1D3557; text-transform:uppercase; letter-spacing:0.5px; }
+      .dc-meta .dc-number { font-size:12px; font-family:'Courier New',monospace; color:#333; }
+      .dc-meta .dc-date { font-size:10px; color:#666; margin-top:2px; }
       .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:15px; }
       .info-box { border:1px solid #ddd; padding:8px 10px; border-radius:2px; }
       .info-box label { font-size:9px; color:#888; text-transform:uppercase; display:block; margin-bottom:2px; }
@@ -402,18 +400,10 @@ export default function JobWorkPage() {
       .sign-box { border-top:1px solid #333; padding-top:4px; text-align:center; margin-top:40px; }
       @media print { body { padding:10px; } }
     </style></head><body>
-    <div class="header">
-      <div class="header-left">
-        <h1>${cs.company_name || 'My Manufacturing Company'}</h1>
-        ${cs.tagline ? `<div class="tagline">${cs.tagline}</div>` : ''}
-        <div class="company-details">
-          ${companyAddr ? `${companyAddr}<br/>` : ''}
-          ${cs.phone ? `Phone: ${cs.phone}` : ''}${cs.phone && cs.email ? ' | ' : ''}${cs.email ? `Email: ${cs.email}` : ''}
-          ${cs.gstin ? `<br/>GSTIN: <strong>${cs.gstin}</strong>` : ''}
-        </div>
-      </div>
-      <div class="header-right">
-        <div class="dc-title">${dcTitle}</div>
+    ${buildLetterheadHTML(cs)}
+    <div class="dc-meta">
+      <div class="dc-title">${dcTitle}</div>
+      <div style="text-align:right;">
         <div class="dc-number">${dc.dc_number}</div>
         <div class="dc-date">${dc.created_at ? new Date(dc.created_at).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-'}</div>
       </div>

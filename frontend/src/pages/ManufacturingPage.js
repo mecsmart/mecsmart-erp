@@ -25,6 +25,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 
 export default function ManufacturingPage() {
   const { user } = useAuth();
@@ -591,12 +592,7 @@ export default function ManufacturingPage() {
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #111; padding: 20px; }
-        .header { text-align: center; border-bottom: 2px solid #1D3557; padding-bottom: 10px; margin-bottom: 15px; }
-        .header .logo-row { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:3px; }
-        .header .logo-row img { max-height:40px; max-width:100px; object-fit:contain; }
-        .header h1 { font-size: 16px; color: #1D3557; margin:0; }
-        .header .tagline { font-size:9px; color:#888; font-style:italic; }
-        .header p { font-size: 10px; color: #555; }
+        ${letterheadCSS('#1D3557')}
         .title { font-size: 14px; font-weight: bold; color: #1D3557; margin: 10px 0 5px; text-transform: uppercase; }
         .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; }
         .info-box { border: 1px solid #ddd; padding: 6px 8px; }
@@ -614,12 +610,7 @@ export default function ManufacturingPage() {
         .sign-box { border-top: 1px solid #333; padding-top: 4px; text-align: center; }
         @media print { body { padding: 10px; } }
       </style></head><body>
-      <div class="header">
-        <div class="logo-row">${company.logo_data ? `<img src="${company.logo_data}" alt="Logo" />` : ''}<h1>${company.company_name || 'Manufacturing ERP'}</h1></div>
-        ${company.tagline ? `<div class="tagline">${company.tagline}</div>` : ''}
-        ${companyAddr ? `<p>${companyAddr}</p>` : ''}
-        ${company.gstin ? `<p>GSTIN: ${company.gstin}</p>` : ''}
-      </div>
+      ${buildLetterheadHTML(company)}
       <div class="title">Manufacturing Order: ${data.wo_number}</div>
       <div class="info-grid">
         <div class="info-box"><label>Item</label><span class="mono">${item.part_number || ''}</span> - ${item.name || ''}</div>
@@ -762,9 +753,7 @@ export default function ManufacturingPage() {
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #111; padding: 20px; }
-        .header { text-align: center; border-bottom: 2px solid #1D3557; padding-bottom: 10px; margin-bottom: 10px; }
-        .header h1 { font-size: 16px; color: #1D3557; }
-        .header p { font-size: 10px; color: #555; }
+        ${letterheadCSS('#1D3557')}
         .title { font-size: 13px; font-weight: bold; text-align:center; margin: 10px 0; }
         .meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; font-size: 11px; }
         .meta-box { border: 1px solid #ccc; padding: 6px 8px; }
@@ -781,10 +770,7 @@ export default function ManufacturingPage() {
         /* Alternating zebra shading per op group is visual-only; keeping simple */
         @media print { body { padding: 10px; } }
       </style></head><body>
-      <div class="header">
-        <h1>${company.company_name || 'Manufacturing ERP'}</h1>
-        ${company.address ? `<p>${company.address}</p>` : ''}
-      </div>
+      ${buildLetterheadHTML(company)}
       <div class="title">Job Card Printing</div>
       <div class="meta-grid">
         <div class="meta-box"><label>MO Number</label><span class="mono">${data.wo_number}</span></div>

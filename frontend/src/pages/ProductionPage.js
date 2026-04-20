@@ -46,6 +46,7 @@ export default function ProductionPage() {
   const [cancelConfirm, setCancelConfirm] = useState({ open: false, order: null });
   const [formData, setFormData] = useState({
     bom_id: '',
+    bom_search: '',
     quantity: 1,
     due_date: '',
     priority: 'medium',
@@ -108,6 +109,7 @@ export default function ProductionPage() {
     setEditingOrder(order);
     setFormData({
       bom_id: order.bom_id,
+      bom_search: '',
       quantity: order.quantity,
       due_date: order.due_date ? order.due_date.split('T')[0] : '',
       priority: order.priority,
@@ -138,7 +140,8 @@ export default function ProductionPage() {
     try {
       const { data } = await api.post(`/api/production/${order.id}/cancel`);
       let msg = data.message || `Sales Order ${order.order_number} cancelled`;
-      if (data.cancelled_mos?.length > 0) msg += ` | MOs: ${data.cancelled_mos.join(', ')}`;
+      if (data.cancelled_mos?.length > 0) msg += ` | Cancelled MOs: ${data.cancelled_mos.join(', ')}`;
+      if (data.preserved_completed_mos?.length > 0) msg += ` | Preserved (completed): ${data.preserved_completed_mos.join(', ')}`;
       toast.success(msg);
       setCancelConfirm({ open: false, order: null });
       fetchData();
@@ -151,6 +154,7 @@ export default function ProductionPage() {
   const resetForm = () => {
     setFormData({
       bom_id: '',
+      bom_search: '',
       quantity: 1,
       due_date: '',
       priority: 'medium',
@@ -166,6 +170,7 @@ export default function ProductionPage() {
       case 'in_progress': return 'bg-[#E1EFFE] text-[#1E429F]';
       case 'completed': return 'bg-[#DEF7EC] text-[#03543F]';
       case 'cancelled': return 'bg-[#FDE8E8] text-[#9B1C1C]';
+      case 'partially_cancelled': return 'bg-[#FEF3C7] text-[#723B13]';
       default: return 'bg-[#F3F4F6] text-[#4B5563]';
     }
   };
@@ -208,22 +213,65 @@ export default function ProductionPage() {
               <form onSubmit={handleSubmit} className="space-y-4 mt-4">
                 <div>
                   <label className="block text-sm font-semibold text-[#111827] mb-1">BOM *</label>
-                  <Select 
-                    value={formData.bom_id} 
-                    onValueChange={(v) => setFormData({ ...formData, bom_id: v })}
-                    disabled={!!editingOrder}
-                  >
-                    <SelectTrigger data-testid="production-bom-select">
-                      <SelectValue placeholder="Select BOM" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {boms.map((bom) => (
-                        <SelectItem key={bom.id} value={bom.id}>
-                          {bom.parent_item?.part_number} - {bom.name} (Rev {bom.revision})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {(() => {
+                    const q = (formData.bom_search || '').trim().toLowerCase();
+                    const filtered = boms.filter(b => {
+                      if (!q) return true;
+                      const code = (b.parent_item?.part_number || '').toLowerCase();
+                      const name = (b.name || '').toLowerCase();
+                      const itemName = (b.parent_item?.name || '').toLowerCase();
+                      return code.includes(q) || name.includes(q) || itemName.includes(q);
+                    });
+                    const selected = boms.find(b => b.id === formData.bom_id);
+                    if (selected) {
+                      return (
+                        <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-3 py-2" data-testid="so-bom-selected">
+                          <div className="text-xs">
+                            <span className="mono font-semibold">{selected.parent_item?.part_number}</span>
+                            <span className="mx-2">—</span>
+                            <span>{selected.parent_item?.name || selected.name}</span>
+                            <span className="ml-2 text-[#6B7280]">(Rev {selected.revision})</span>
+                          </div>
+                          {!editingOrder && (
+                            <button type="button" className="text-xs text-[#9B1C1C] hover:underline" onClick={() => setFormData({ ...formData, bom_id: '', bom_search: '' })} data-testid="so-bom-clear">Clear</button>
+                          )}
+                        </div>
+                      );
+                    }
+                    return (
+                      <>
+                        <input
+                          type="text"
+                          placeholder="Search by part number, BOM name or item..."
+                          value={formData.bom_search || ''}
+                          onChange={(e) => setFormData({ ...formData, bom_search: e.target.value })}
+                          className="input-field"
+                          data-testid="so-bom-search"
+                          autoFocus
+                          disabled={!!editingOrder}
+                        />
+                        <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-56 overflow-auto bg-white" data-testid="so-bom-list">
+                          {filtered.length === 0 && (
+                            <div className="px-3 py-4 text-center text-xs text-[#6B7280]">No matching BOMs. Try a different search.</div>
+                          )}
+                          {filtered.slice(0, 200).map(bom => (
+                            <button
+                              key={bom.id}
+                              type="button"
+                              onClick={() => setFormData({ ...formData, bom_id: bom.id, bom_search: '' })}
+                              data-testid={`so-bom-option-${bom.id}`}
+                              className="w-full text-left px-3 py-2 text-xs border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]"
+                            >
+                              <span className="mono font-semibold">{bom.parent_item?.part_number || '-'}</span>
+                              <span className="mx-2">—</span>
+                              <span>{bom.parent_item?.name || bom.name}</span>
+                              <span className="ml-2 text-[#6B7280]">Rev {bom.revision}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -443,8 +491,8 @@ export default function ProductionPage() {
                             <Edit2 className="w-4 h-4" />
                           </button>
                         )}
-                        {/* Cancel button - any status except cancelled/completed */}
-                        {canEdit && !['cancelled', 'completed'].includes(order.status) && (
+                        {/* Cancel button - only for active states; not for terminal states */}
+                        {canEdit && !['cancelled', 'partially_cancelled', 'completed'].includes(order.status) && (
                           <button
                             onClick={() => handleCancel(order)}
                             className="p-1.5 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"
@@ -455,9 +503,9 @@ export default function ProductionPage() {
                           </button>
                         )}
                         {/* Cancelled indicator */}
-                        {order.status === 'cancelled' && (
+                        {['cancelled', 'partially_cancelled'].includes(order.status) && (
                           <span className="text-xs text-[#9B1C1C] flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" /> Cancelled
+                            <AlertTriangle className="w-3 h-3" /> {order.status === 'partially_cancelled' ? 'Partial' : 'Cancelled'}
                           </span>
                         )}
                       </div>
@@ -486,9 +534,9 @@ export default function ProductionPage() {
             <div className="bg-[#FDE8E8] border border-[#FDE8E8] rounded-sm p-3 text-xs text-[#9B1C1C]">
               <p className="font-semibold mb-1">This will:</p>
               <ul className="list-disc list-inside space-y-0.5">
-                <li>Cancel all linked Manufacturing Orders</li>
-                <li>Reverse any reserved/consumed stock</li>
-                <li>Close open Job Cards for this SO</li>
+                <li>Cancel pending / in-progress Manufacturing Orders</li>
+                <li>Reverse reserved / consumed stock for cancelled MOs</li>
+                <li><strong>Completed MOs are preserved</strong> (finished stock is kept)</li>
               </ul>
               <p className="mt-2 font-semibold">This action cannot be undone.</p>
             </div>

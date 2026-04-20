@@ -684,10 +684,12 @@ class CompanySettingsUpdate(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     pin_code: Optional[str] = None
+    country: Optional[str] = None
     pan: Optional[str] = None
     cin: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    website: Optional[str] = None
     logo_data: Optional[str] = None
     tagline: Optional[str] = None
     primary_currency: Optional[str] = None
@@ -1374,8 +1376,8 @@ async def cancel_production_order(order_id: str, request: Request):
         raise HTTPException(status_code=400, detail="Cannot cancel a completed order")
     
     cancelled_mos = []
+    skipped_completed_mos = []
     reversed_materials = []
-    reversed_finished_goods = []
     
     # Find all manufacturing orders linked to this sales order
     mos = await db.work_orders.find({"production_order_id": order_id}).to_list(1000)
@@ -1384,6 +1386,13 @@ async def cancel_production_order(order_id: str, request: Request):
         mo_id = mo["id"]
         mo_status = mo.get("status", "pending")
         mo_number = mo.get("wo_number", "")
+        
+        # Preserve completed MOs — their FG stock remains, MO stays in "completed" state.
+        # Only cancel MOs that are still pending/in_progress/draft/confirmed/released.
+        if mo_status in ("completed", "cancelled"):
+            if mo_status == "completed":
+                skipped_completed_mos.append(mo_number)
+            continue
         
         # 1. Reverse consumed materials (if MO was started and materials were consumed)
         if mo.get("materials_consumed") and mo.get("consumed_materials"):
@@ -1418,40 +1427,6 @@ async def cancel_production_order(order_id: str, request: Request):
                         "mo_number": mo_number
                     })
         
-        # 2. Reverse finished goods (if MO was completed and stock was added)
-        if mo_status == "completed":
-            routing = await db.routings.find_one({"id": mo.get("routing_id")})
-            if routing:
-                fg_item_id = routing.get("item_id")
-                fg_item = await db.items.find_one({"id": fg_item_id})
-                if fg_item:
-                    current_stock = fg_item.get("current_stock", 0)
-                    produced_qty = mo.get("quantity", 0)
-                    new_stock = max(0, current_stock - produced_qty)
-                    
-                    tx_doc = {
-                        "id": str(uuid.uuid4()),
-                        "item_id": fg_item_id,
-                        "transaction_type": "issue",
-                        "quantity": produced_qty,
-                        "reference_type": "cancellation",
-                        "reference_id": mo_id,
-                        "previous_stock": current_stock,
-                        "new_stock": new_stock,
-                        "notes": f"Reversal: SO {order.get('order_number')} cancelled - MO {mo_number} finished goods reversed",
-                        "created_at": datetime.now(timezone.utc),
-                        "created_by": user["id"]
-                    }
-                    await db.inventory_transactions.insert_one(tx_doc)
-                    await db.items.update_one({"id": fg_item_id}, {"$set": {"current_stock": new_stock}})
-                    
-                    reversed_finished_goods.append({
-                        "item": fg_item.get("part_number", ""),
-                        "name": fg_item.get("name", ""),
-                        "quantity": produced_qty,
-                        "mo_number": mo_number
-                    })
-        
         # 3. Cancel the manufacturing order
         await db.work_orders.update_one(
             {"id": mo_id},
@@ -1464,22 +1439,29 @@ async def cancel_production_order(order_id: str, request: Request):
         )
         cancelled_mos.append(mo_number)
     
-    # Cancel the sales order itself
+    # SO final state: if some MOs completed, mark as partially_cancelled; else cancelled.
+    final_status = "partially_cancelled" if skipped_completed_mos else "cancelled"
     await db.production_orders.update_one(
         {"id": order_id},
         {"$set": {
-            "status": "cancelled",
+            "status": final_status,
             "cancelled_at": datetime.now(timezone.utc),
             "cancelled_by": user["id"],
             "updated_at": datetime.now(timezone.utc)
         }}
     )
     
+    msg_parts = [f"Sales Order {order.get('order_number')}"]
+    if skipped_completed_mos:
+        msg_parts.append(f"partially cancelled — {len(skipped_completed_mos)} completed MO(s) preserved")
+    else:
+        msg_parts.append("cancelled successfully")
+    
     return {
-        "message": f"Sales Order {order.get('order_number')} cancelled successfully",
+        "message": " ".join(msg_parts),
         "cancelled_mos": cancelled_mos,
-        "reversed_materials": reversed_materials,
-        "reversed_finished_goods": reversed_finished_goods
+        "preserved_completed_mos": skipped_completed_mos,
+        "reversed_materials": reversed_materials
     }
 
 # ================== MRP ROUTES ==================

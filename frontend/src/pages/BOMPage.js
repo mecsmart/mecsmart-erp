@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
+import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 import { 
   Plus, 
   FileStack, 
@@ -32,7 +33,7 @@ const statusOptions = [
 
 export default function BOMPage() {
   const { user } = useAuth();
-  const { formatCurrency, currencySymbol } = useCompanySettings();
+  const { formatCurrency, currencySymbol, companySettings } = useCompanySettings();
   const [boms, setBoms] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -303,6 +304,7 @@ export default function BOMPage() {
     }).join(', ');
     const html = `<!DOCTYPE html><html><head><title>BOM - ${parentItem?.part_number || ''}</title>
     <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',sans-serif;font-size:11px;padding:20px}
+    ${letterheadCSS('#1D3557')}
     h1{font-size:16px;color:#1D3557;margin-bottom:4px}h2{font-size:12px;color:#555;margin-bottom:12px}
     table{width:100%;border-collapse:collapse;margin-top:8px}th{background:#1D3557;color:white;padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase}
     td{border-bottom:1px solid #ddd;font-size:11px}
@@ -310,6 +312,7 @@ export default function BOMPage() {
     .summary .row{display:flex;justify-content:space-between;padding:2px 0}
     .summary .row.total{font-size:13px;font-weight:700;color:#1D3557;border-top:2px solid #1D3557;padding-top:6px;margin-top:6px}
     @media print{body{padding:10px}}</style></head><body>
+    ${buildLetterheadHTML(companySettings || {})}
     <h1>${parentItem?.part_number || ''} - ${parentItem?.name || ''}</h1>
     <h2>BOM Explosion | Rev ${bomInfo?.revision || '-'} | ${bomInfo?.status || '-'}${parentRoutingsText ? ' | FG Routings: ' + parentRoutingsText : ''}</h2>
     <table><thead><tr><th>Type</th><th>Part Number</th><th>Description</th><th>Routings (cost)</th><th style="text-align:right">QTY</th><th>UOM</th><th style="text-align:right">Material Cost/Unit</th><th style="text-align:right">Process Cost/Unit</th><th style="text-align:right">Extended Cost</th></tr></thead>
