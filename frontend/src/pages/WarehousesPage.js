@@ -21,6 +21,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { GRNPrintDialog } from '../components/PrintDialogs';
+import { PackingListsPanel } from './CRMPage';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
 
@@ -34,6 +35,7 @@ export default function WarehousesPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'stock');
   const [storesStockSearch, setStoresStockSearch] = useState('');
+  const [plSearch, setPlSearch] = useState('');
   const [inventory, setInventory] = useState([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
   const [warehouseStock, setWarehouseStock] = useState([]);
@@ -594,6 +596,7 @@ export default function WarehousesPage() {
               visually rendered) so Radix Tabs can switch value from the URL. */}
           <TabsTrigger value="transfers" className="hidden" data-testid="tab-transfers" />
           <TabsTrigger value="grn" className="hidden" data-testid="tab-grn" />
+          <TabsTrigger value="packing-lists" className="hidden" data-testid="tab-packing-lists" />
         </TabsList>
 
         {/* Stock Tab - Inventory Overview */}
@@ -1123,6 +1126,16 @@ export default function WarehousesPage() {
               )}
             </DialogContent>
           </Dialog>
+        </TabsContent>
+
+        <TabsContent value="packing-lists" className="mt-4 space-y-4" data-testid="stores-packing-lists-tab">
+          <div className="card-flat p-3 mb-2">
+            <div className="relative w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+              <input type="text" value={plSearch} onChange={(e) => setPlSearch(e.target.value)} placeholder="Search by PL #, invoice, customer..." className="input-field pl-9 text-sm" data-testid="stores-pl-search" />
+            </div>
+          </div>
+          <PackingListsPanel search={plSearch} canEdit={true} />
         </TabsContent>
       </Tabs>
 

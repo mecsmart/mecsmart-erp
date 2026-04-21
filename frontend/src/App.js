@@ -21,6 +21,7 @@ import SettingsPage from "./pages/SettingsPage";
 import CustomersPage from "./pages/CustomersPage";
 import UserManagementPage from "./pages/UserManagementPage";
 import CRMPage from "./pages/CRMPage";
+import PublicPrintPage from "./pages/PublicPrintPage";
 import JobWorkPage from "./pages/JobWorkPage";
 import { Toaster } from "./components/ui/sonner";
 
@@ -36,6 +37,9 @@ function App() {
               <LoginPage />
             </PublicRoute>
           } />
+
+          {/* Public share links (no auth) — used by WhatsApp "text + link" button */}
+          <Route path="/public/:doctype/:id" element={<PublicPrintPage />} />
 
           {/* Protected routes */}
           <Route path="/" element={

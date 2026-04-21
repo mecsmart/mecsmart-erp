@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import {
   Plus, Edit2, Trash2, MessageSquare, UserCheck, AlertTriangle, Clock,
-  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload, GitBranch
+  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload, GitBranch, Share2, Package2
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -109,7 +109,7 @@ export default function CRMPage() {
   const crumbMain = activeTab === 'quotations' ? 'Quotations' : activeTab === 'support' ? 'Support' : 'Marketing';
   const crumbSub = {
     contacts: 'Contacts', quotations: 'Quotations', configuration: 'Configuration',
-    proformas: 'Proforma Invoices', 'tax-invoices': 'Tax Invoices', 'number-series': 'Number Series',
+    proformas: 'Proforma Invoices', 'tax-invoices': 'Tax Invoices', 'packing-lists': 'Packing Lists', 'number-series': 'Number Series',
     sla: 'SLA Due', activity: 'Activity Logs',
   }[activeSub];
 
@@ -167,6 +167,9 @@ export default function CRMPage() {
       )}
       {activeTab === 'marketing' && activeSub === 'tax-invoices' && (
         <TaxInvoicesPanel customers={customers} search={search} onRefresh={fetchData} canEdit={canMarketingEdit} />
+      )}
+      {activeTab === 'marketing' && activeSub === 'packing-lists' && (
+        <PackingListsPanel search={search} canEdit={canMarketingEdit} />
       )}
       {activeTab === 'marketing' && activeSub === 'number-series' && (
         <NumberSeriesPanel canEdit={user?.role === 'admin'} />
@@ -1132,6 +1135,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   <td>
                     <div className="flex items-center gap-0.5">
                       <button onClick={() => printQuotation(q)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`quotation-print-${q.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => openWhatsAppShare({ doc: q, kind: 'quotation', company: companySettings, user, includeLink: false })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="WhatsApp (text only)" data-testid={`quotation-wa-text-${q.id}`}><MessageSquare className="w-4 h-4" /></button>
+                      <button onClick={() => openWhatsAppShare({ doc: q, kind: 'quotation', company: companySettings, user, includeLink: true })} className="p-1.5 text-[#0B7C3E] hover:bg-[#DCFCE7] rounded" title="WhatsApp + shareable link" data-testid={`quotation-wa-link-${q.id}`}><Share2 className="w-4 h-4" /></button>
                       {canEdit && !isLocked && q.status === 'draft' && (
                         <button onClick={() => quickStatusChange(q, 'sent')} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Send to customer" data-testid={`quotation-send-${q.id}`}><Send className="w-4 h-4" /></button>
                       )}
@@ -2191,6 +2196,8 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
                   <td>
                     <div className="flex gap-0.5">
                       <button onClick={() => printProforma(p)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`proforma-print-${p.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => openWhatsAppShare({ doc: p, kind: 'proforma', company: companySettings, user, includeLink: false })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="WhatsApp (text only)" data-testid={`proforma-wa-text-${p.id}`}><MessageSquare className="w-4 h-4" /></button>
+                      <button onClick={() => openWhatsAppShare({ doc: p, kind: 'proforma', company: companySettings, user, includeLink: true })} className="p-1.5 text-[#0B7C3E] hover:bg-[#DCFCE7] rounded" title="WhatsApp + shareable link" data-testid={`proforma-wa-link-${p.id}`}><Share2 className="w-4 h-4" /></button>
                       {canEdit && !isLocked && (
                         <button onClick={() => setConvertConfirm({ open: true, proforma: p })} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Convert to Tax Invoice" data-testid={`proforma-to-invoice-${p.id}`}><Send className="w-4 h-4" /></button>
                       )}
@@ -2271,6 +2278,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, invoice: null });
+  const [packingDialog, setPackingDialog] = useState({ open: false, invoice: null });
 
   const load = useCallback(async () => {
     try { const r = await api.get('/api/crm/tax-invoices'); setList(r.data || []); } catch (e) { console.error(e); }
@@ -2486,6 +2494,9 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                   <td>
                     <div className="flex gap-0.5">
                       <button onClick={() => printInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`tax-invoice-print-${t.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => openWhatsAppShare({ doc: t, kind: 'tax_invoice', company: companySettings, user, includeLink: false })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="WhatsApp (text only)" data-testid={`tax-invoice-wa-text-${t.id}`}><MessageSquare className="w-4 h-4" /></button>
+                      <button onClick={() => openWhatsAppShare({ doc: t, kind: 'tax_invoice', company: companySettings, user, includeLink: true })} className="p-1.5 text-[#0B7C3E] hover:bg-[#DCFCE7] rounded" title="WhatsApp + shareable link" data-testid={`tax-invoice-wa-link-${t.id}`}><Share2 className="w-4 h-4" /></button>
+                      <button onClick={() => setPackingDialog({ open: true, invoice: t })} className="p-1.5 text-[#92400E] hover:bg-[#FEF3C7] rounded" title="Generate Packing List" data-testid={`tax-invoice-packing-${t.id}`}><Package2 className="w-4 h-4" /></button>
                       {canEdit && t.status === 'draft' && (
                         <button onClick={() => setDeleteConfirm({ open: true, invoice: t })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`tax-invoice-delete-${t.id}`}><Trash2 className="w-4 h-4" /></button>
                       )}
@@ -2671,6 +2682,13 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
         onConfirm={() => delInvoice(deleteConfirm.invoice)}
         testidPrefix="ti-delete-confirm"
       />
+
+      <PackingListDialog
+        open={packingDialog.open}
+        invoice={packingDialog.invoice}
+        onClose={() => setPackingDialog({ open: false, invoice: null })}
+        onCreated={() => { setPackingDialog({ open: false, invoice: null }); onRefresh(); }}
+      />
     </div>
   );
 }
@@ -2753,10 +2771,457 @@ function NumberSeriesPanel({ canEdit }) {
 }
 
 /* ============================================================================
+ *  PACKING LIST — Dialog to generate from a Tax Invoice + list panel.
+ * ========================================================================= */
+function PackingListDialog({ open, invoice, onClose, onCreated }) {
+  const { user } = useAuth();
+  const [lines, setLines] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [dispatchDate, setDispatchDate] = useState('');
+  const [packedBy, setPackedBy] = useState('');
+
+  // Fetch preview whenever dialog opens or expansion toggles.
+  const refreshPreview = useCallback(async (expandMap = {}) => {
+    if (!invoice?.id) return;
+    setLoading(true);
+    try {
+      const r = await api.post(`/api/crm/packing-lists/preview/${invoice.id}`, { expand: expandMap });
+      setLines(r.data || []);
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to load preview'); }
+    finally { setLoading(false); }
+  }, [invoice]);
+
+  useEffect(() => {
+    if (open && invoice) {
+      setNotes('');
+      setDispatchDate('');
+      setPackedBy(user?.name || '');
+      refreshPreview({});
+    }
+  }, [open, invoice, user, refreshPreview]);
+
+  const toggleExpand = (idx, value) => {
+    const next = lines.map(l => ({ ...l, expanded: l.source_line_index === idx ? value : l.expanded }));
+    setLines(next);
+    const expandMap = {};
+    next.forEach(l => { expandMap[String(l.source_line_index)] = l.expanded; });
+    refreshPreview(expandMap);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const payload = {
+        tax_invoice_id: invoice.id,
+        lines: lines.map(l => ({
+          source_line_index: l.source_line_index,
+          item_id: l.item_id || '',
+          item_name: l.item_name,
+          description: l.description || '',
+          uom: l.uom || 'Nos',
+          invoice_qty: l.invoice_qty,
+          expanded: l.expanded,
+          components: l.components || [],
+        })),
+        notes,
+        packed_by: packedBy,
+        packed_by_user_id: user?.id || '',
+        dispatch_date: dispatchDate ? new Date(dispatchDate).toISOString() : null,
+      };
+      await api.post('/api/crm/packing-lists', payload);
+      onCreated();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to save packing list'); }
+    finally { setSaving(false); }
+  };
+
+  if (!invoice) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" data-testid="packing-list-dialog">
+        <DialogHeader>
+          <DialogTitle className="font-[Chivo]">Generate Packing List · {invoice.invoice_no}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 mt-2">
+          <div className="text-xs text-[#4B5563]">
+            Tick the <strong>Expand to BOM</strong> box on any FG line to break it down into its <strong>first-level components</strong> with calculated quantities. Unticked lines print as-is (FG + qty).
+          </div>
+
+          <div className="border border-[#E5E7EB] rounded-sm overflow-hidden">
+            <table className="w-full text-xs" data-testid="packing-list-preview-table">
+              <thead className="bg-[#F3F4F6]"><tr>
+                <th className="px-2 py-2 text-left w-8">#</th>
+                <th className="px-2 py-2 text-left">Invoice Item</th>
+                <th className="px-2 py-2 text-right w-20">Qty</th>
+                <th className="px-2 py-2 text-left w-16">UOM</th>
+                <th className="px-2 py-2 text-center w-32">Expand to BOM</th>
+              </tr></thead>
+              <tbody>
+                {loading && <tr><td colSpan={5} className="text-center py-4 text-[#6B7280]">Loading…</td></tr>}
+                {!loading && lines.map(l => (
+                  <React.Fragment key={l.source_line_index}>
+                    <tr className="bg-white border-t border-[#E5E7EB]" data-testid={`pl-row-${l.source_line_index}`}>
+                      <td className="px-2 py-2 text-[#6B7280] align-top">{l.source_line_index + 1}</td>
+                      <td className="px-2 py-2 align-top">
+                        <div className="font-semibold text-[#0F172A]">{l.item_name || '-'}</div>
+                        {l.description && l.description !== l.item_name && <div className="text-[11px] text-[#64748B] italic">{l.description}</div>}
+                        {!l.has_bom && <div className="text-[10px] text-[#9CA3AF] mt-1">No BOM available — printed as FG</div>}
+                      </td>
+                      <td className="px-2 py-2 text-right mono align-top">{Number(l.invoice_qty).toFixed(2)}</td>
+                      <td className="px-2 py-2 text-[#4B5563] align-top">{l.uom}</td>
+                      <td className="px-2 py-2 text-center align-top">
+                        <label className={`inline-flex items-center gap-1.5 cursor-pointer ${!l.has_bom ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                          <input type="checkbox" checked={!!l.expanded} disabled={!l.has_bom} onChange={e => toggleExpand(l.source_line_index, e.target.checked)} className="w-4 h-4 accent-[#1D3557]" data-testid={`pl-expand-${l.source_line_index}`} />
+                          <span className="text-xs">{l.expanded ? 'Components' : 'FG as-is'}</span>
+                        </label>
+                      </td>
+                    </tr>
+                    {l.expanded && (l.components || []).map((c, ci) => (
+                      <tr key={`${l.source_line_index}-c-${ci}`} className="bg-[#F9FAFB]" data-testid={`pl-comp-${l.source_line_index}-${ci}`}>
+                        <td></td>
+                        <td className="px-2 py-1.5 text-[11px] text-[#334155] pl-6">
+                          <span className="text-[#64748B]">↳</span> {c.part_number ? <span className="mono">{c.part_number}</span> : null} {c.name}
+                        </td>
+                        <td className="px-2 py-1.5 text-right mono text-[11px] text-[#0F172A]">{Number(c.total_qty).toFixed(2)}</td>
+                        <td className="px-2 py-1.5 text-[11px] text-[#64748B]">{c.uom}</td>
+                        <td></td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+                {!loading && lines.length === 0 && <tr><td colSpan={5} className="text-center py-6 text-[#9CA3AF] italic">No line items in this invoice.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs text-[#4B5563]">Dispatch Date</label>
+              <input type="date" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" value={dispatchDate} onChange={e => setDispatchDate(e.target.value)} data-testid="pl-dispatch-date" />
+            </div>
+            <div className="col-span-2">
+              <label className="text-xs text-[#4B5563]">Packed By <span className="text-[10px] text-[#9CA3AF]">(defaults to you — signature from your profile will print)</span></label>
+              <input type="text" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" value={packedBy} onChange={e => setPackedBy(e.target.value)} data-testid="pl-packed-by" />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-[#4B5563]">Notes / Special Instructions</label>
+            <textarea rows={2} className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs" value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Handle with care, Do not stack" data-testid="pl-notes" />
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-[#E5E7EB] pt-3">
+            <button className="btn-secondary" onClick={onClose}>Cancel</button>
+            <button className="btn-primary" onClick={save} disabled={saving || loading || lines.length === 0} data-testid="pl-save-btn">
+              {saving ? 'Generating…' : 'Generate Packing List'}
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const PACKING_LIST_STATUSES = [
+  { key: 'draft', label: 'Draft', color: 'bg-[#F3F4F6] text-[#4B5563]' },
+  { key: 'packed', label: 'Packed', color: 'bg-[#E1EFFE] text-[#1E429F]' },
+  { key: 'dispatched', label: 'Dispatched', color: 'bg-[#DEF7EC] text-[#03543F]' },
+  { key: 'received', label: 'Received', color: 'bg-[#FCE7F3] text-[#9D174D]' },
+];
+
+export function PackingListsPanel({ search = '', canEdit = true }) {
+  const { user } = useAuth();
+  const { companySettings } = useCompanySettings();
+  const [list, setList] = useState([]);
+  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, pl: null });
+
+  const load = useCallback(async () => {
+    try { const r = await api.get('/api/crm/packing-lists'); setList(r.data || []); } catch (e) { console.error(e); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const statusChange = async (pl, status) => {
+    try { await api.put(`/api/crm/packing-lists/${pl.id}`, { status }); load(); }
+    catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const del = async (pl) => {
+    try { await api.delete(`/api/crm/packing-lists/${pl.id}`); setDeleteConfirm({ open: false, pl: null }); load(); }
+    catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const printPL = (pl) => printPackingListDoc(pl, companySettings);
+
+  const filtered = list.filter(pl => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return [pl.packing_list_no, pl.customer_name, pl.tax_invoice_no].some(v => (v || '').toLowerCase().includes(q));
+  });
+
+  return (
+    <div className="space-y-4" data-testid="packing-lists-panel">
+      <div className="card-flat overflow-hidden">
+        <table className="w-full data-table" data-testid="packing-lists-table">
+          <thead><tr>
+            <th>PL #</th><th>Tax Invoice</th><th>Customer</th><th>Dispatch Date</th><th>Lines</th><th>Packed By</th><th>Status</th><th>Actions</th>
+          </tr></thead>
+          <tbody>
+            {filtered.length === 0 && <tr><td colSpan={8} className="text-center py-6 text-sm text-[#6B7280]">No Packing Lists yet. Open a Tax Invoice and click the Packing List icon to generate one.</td></tr>}
+            {filtered.map(pl => {
+              const statusData = PACKING_LIST_STATUSES.find(s => s.key === pl.status);
+              return (
+                <tr key={pl.id} data-testid={`pl-row-${pl.id}`}>
+                  <td className="mono font-medium">{pl.packing_list_no}</td>
+                  <td className="mono text-xs">{pl.tax_invoice_no || '-'}</td>
+                  <td><div className="font-medium text-[#1D3557]">{pl.customer_name || '-'}</div></td>
+                  <td className="text-xs">{pl.dispatch_date ? new Date(pl.dispatch_date).toLocaleDateString('en-IN') : '-'}</td>
+                  <td className="text-xs">{(pl.lines || []).length}</td>
+                  <td className="text-xs">{pl.packed_by_user?.name || pl.packed_by || '-'}</td>
+                  <td>
+                    {canEdit ? (
+                      <Select value={pl.status || 'draft'} onValueChange={(v) => statusChange(pl, v)}>
+                        <SelectTrigger className="h-7 text-xs" data-testid={`pl-status-${pl.id}`}><SelectValue /></SelectTrigger>
+                        <SelectContent>{PACKING_LIST_STATUSES.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
+                      </Select>
+                    ) : (
+                      <span className={`status-badge ${statusData?.color || ''}`}>{statusData?.label || pl.status}</span>
+                    )}
+                  </td>
+                  <td>
+                    <div className="flex gap-0.5">
+                      <button onClick={() => printPL(pl)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`pl-print-${pl.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => openWhatsAppShare({ doc: pl, kind: 'packing_list', company: companySettings, user, includeLink: false })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="WhatsApp" data-testid={`pl-wa-${pl.id}`}><MessageSquare className="w-4 h-4" /></button>
+                      <button onClick={() => openWhatsAppShare({ doc: pl, kind: 'packing_list', company: companySettings, user, includeLink: true })} className="p-1.5 text-[#0B7C3E] hover:bg-[#DCFCE7] rounded" title="WhatsApp + link" data-testid={`pl-wa-link-${pl.id}`}><Share2 className="w-4 h-4" /></button>
+                      {canEdit && pl.status === 'draft' && <button onClick={() => setDeleteConfirm({ open: true, pl })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`pl-delete-${pl.id}`}><Trash2 className="w-4 h-4" /></button>}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(o) => !o && setDeleteConfirm({ open: false, pl: null })}
+        title="Delete Packing List?"
+        message={<>This will permanently delete <strong>{deleteConfirm.pl?.packing_list_no}</strong>.</>}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => del(deleteConfirm.pl)}
+        testidPrefix="pl-delete-confirm"
+      />
+    </div>
+  );
+}
+
+/* Packing list print — lightweight A4 renderer. */
+function printPackingListDoc(pl, company) {
+  const esc = (s) => String(s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const cfg = {
+    name: company?.company_name || 'Company Name',
+    tagline: company?.tagline || '',
+    logo_data: company?.logo_data || '',
+    address: company?.address || '',
+    address_line2: [company?.city, company?.state, company?.pin_code].filter(Boolean).join(', '),
+    phone: company?.phone || '',
+    email: company?.email || '',
+    gstin: company?.gstin || '',
+  };
+  const accent = '#334155';
+  let slNo = 0;
+  const rowsHtml = (pl.lines || []).map((l) => {
+    slNo += 1;
+    const head = `<tr>
+      <td class="sn">${slNo}</td>
+      <td><div class="name">${esc(l.item_name || '-')}</div>${l.description && l.description !== l.item_name ? `<div class="desc">${esc(l.description)}</div>` : ''}${l.expanded ? '<div class="tag">↓ Expanded to BOM first-level</div>' : ''}</td>
+      <td class="right mono">${Number(l.invoice_qty || 0).toFixed(2)}</td>
+      <td class="center">${esc(l.uom || '')}</td>
+      <td class="check"><div class="chk-box"></div></td>
+    </tr>`;
+    const compHtml = l.expanded ? (l.components || []).map((c) => `<tr class="comp">
+      <td></td>
+      <td class="comp-name">${c.part_number ? `<span class="mono">${esc(c.part_number)}</span> — ` : ''}${esc(c.name || '')}</td>
+      <td class="right mono">${Number(c.total_qty || 0).toFixed(2)}</td>
+      <td class="center">${esc(c.uom || '')}</td>
+      <td class="check"><div class="chk-box sm"></div></td>
+    </tr>`).join('') : '';
+    return head + compHtml;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${esc(pl.packing_list_no || 'Packing List')}</title>
+<style>
+  body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:#111;margin:0;padding:0}
+  .page{max-width:780px;margin:0 auto;padding:28px 24px}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+  .brand{display:flex;gap:12px;align-items:flex-start}
+  .logo-img{max-height:72px;max-width:180px;object-fit:contain}
+  .logo-fb{width:60px;height:60px;border-radius:50%;background:${accent};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px}
+  .cn{font-size:17px;font-weight:800;color:#0f172a;margin:0}
+  .tg{font-size:10px;color:${accent};font-style:italic}
+  .addr{font-size:10px;color:#475569;line-height:1.5}
+  .title{font-size:22px;font-weight:800;color:${accent};letter-spacing:2px;text-align:right;margin:0}
+  .docno{font-size:12px;color:#334155;font-family:'Courier New',monospace;text-align:right;margin-top:4px}
+  .meta{font-size:10px;color:#475569;text-align:right;margin-top:2px}
+  .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr;background:${accent};color:#fff;margin:14px 0;border-radius:2px;overflow:hidden}
+  .info-bar .col{padding:8px 12px;border-right:1px solid rgba(255,255,255,0.15)}
+  .info-bar .col:last-child{border-right:none}
+  .info-bar .lab{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.75);margin-bottom:2px}
+  .info-bar .val{font-size:12px;font-weight:700}
+  .addr-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:12px 0}
+  .box h4{font-size:10px;text-transform:uppercase;letter-spacing:1px;margin:0 0 4px;color:#0f172a;border-bottom:2px solid ${accent};padding-bottom:3px;display:inline-block}
+  .box .name{font-size:13px;font-weight:700;color:#0f172a}
+  .box .line{font-size:10px;color:#475569;line-height:1.5;white-space:pre-line}
+  table.items{width:100%;border-collapse:collapse;margin-top:6px}
+  table.items thead th{background:${accent};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding:8px 6px;font-weight:600}
+  table.items tbody td{border-bottom:1px solid #e2e8f0;padding:8px 6px;font-size:11px;vertical-align:top}
+  tr.comp td{background:#f8fafc;font-size:10px;padding:4px 6px}
+  .comp-name{padding-left:24px;color:#334155}
+  .sn{width:30px;text-align:center;color:#64748b;font-weight:600}
+  .center{text-align:center}
+  .right{text-align:right}
+  .mono{font-family:'Courier New',monospace}
+  .name{font-weight:700;color:#0f172a}
+  .desc{font-size:10px;color:#64748b;font-style:italic;margin-top:2px}
+  .tag{font-size:9px;color:${accent};text-transform:uppercase;letter-spacing:0.5px;margin-top:2px}
+  .check{width:40px;text-align:center}
+  .chk-box{width:14px;height:14px;border:1.5px solid #334155;border-radius:2px;display:inline-block}
+  .chk-box.sm{width:10px;height:10px;border-width:1px}
+  .signatures{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:40px;padding-top:10px}
+  .sig-box{border-top:1px solid #94a3b8;padding-top:4px;text-align:center}
+  .sig-img{max-height:64px;max-width:180px;object-fit:contain;margin:0 auto 2px;display:block}
+  .sig-name{font-size:12px;font-weight:700;color:#0f172a}
+  .sig-title{font-size:10px;color:#64748b}
+  .notes{margin-top:16px;padding:8px 12px;background:#f8fafc;border-left:3px solid ${accent};font-size:10px;color:#334155}
+  .notes strong{color:#0f172a}
+  .footer{text-align:center;margin-top:24px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:9px;color:#94a3b8}
+  @media print {@page {size:A4;margin:10mm} body{padding:0}}
+</style></head><body>
+<div class="page">
+  <div class="header">
+    <div class="brand">
+      ${cfg.logo_data ? `<img src="${esc(cfg.logo_data)}" class="logo-img"/>` : `<div class="logo-fb">${esc((cfg.name || 'C').charAt(0).toUpperCase())}</div>`}
+      <div>
+        <div class="cn">${esc(cfg.name)}</div>
+        ${cfg.tagline ? `<div class="tg">${esc(cfg.tagline)}</div>` : ''}
+        ${cfg.address ? `<div class="addr">${esc(cfg.address)}</div>` : ''}
+        ${cfg.address_line2 ? `<div class="addr">${esc(cfg.address_line2)}</div>` : ''}
+        ${cfg.phone ? `<div class="addr">Phone: ${esc(cfg.phone)}${cfg.email ? ' | ' + esc(cfg.email) : ''}</div>` : ''}
+        ${cfg.gstin ? `<div class="addr"><strong>GSTIN: ${esc(cfg.gstin)}</strong></div>` : ''}
+      </div>
+    </div>
+    <div>
+      <div class="title">PACKING LIST</div>
+      <div class="docno">${esc(pl.packing_list_no || '')}</div>
+      ${pl.tax_invoice_no ? `<div class="meta">Ref Invoice: <strong>${esc(pl.tax_invoice_no)}</strong></div>` : ''}
+    </div>
+  </div>
+
+  <div class="info-bar">
+    <div class="col"><div class="lab">PL No</div><div class="val">${esc(pl.packing_list_no || '-')}</div></div>
+    <div class="col"><div class="lab">Dispatch Date</div><div class="val">${pl.dispatch_date ? new Date(pl.dispatch_date).toLocaleDateString('en-IN') : 'Pending'}</div></div>
+    <div class="col"><div class="lab">Status</div><div class="val">${esc((pl.status || 'draft').toUpperCase())}</div></div>
+  </div>
+
+  <div class="addr-row">
+    <div class="box">
+      <h4>Customer</h4>
+      <div class="name">${esc(pl.customer_name || '-')}</div>
+      ${(() => {
+        const c = pl.customer || {};
+        const csp = [c.city, c.state, c.pin_code].filter(Boolean).join(', ');
+        const lns = [pl.billing_address || c.address || '', csp].filter(Boolean);
+        return lns.map(ln => `<div class="line">${esc(ln)}</div>`).join('');
+      })()}
+      ${pl.customer?.state_code ? `<div class="line"><strong>State Code:</strong> <span class="mono">${esc(pl.customer.state_code)}</span></div>` : ''}
+      ${pl.customer?.gstin ? `<div class="line"><strong>GSTIN:</strong> <span class="mono">${esc(pl.customer.gstin)}</span></div>` : ''}
+    </div>
+    <div class="box">
+      <h4>Ship To</h4>
+      ${(() => {
+        const c = pl.customer || {};
+        const csp = [c.city, c.state, c.pin_code].filter(Boolean).join(', ');
+        const lns = [pl.shipping_address || pl.billing_address || c.address || '', csp].filter(Boolean);
+        return lns.length ? lns.map(ln => `<div class="line">${esc(ln)}</div>`).join('') : '<div class="line">-</div>';
+      })()}
+    </div>
+  </div>
+
+  <table class="items">
+    <thead><tr>
+      <th class="sn">Sl</th>
+      <th>Item / Description</th>
+      <th class="right">Qty</th>
+      <th class="center">UOM</th>
+      <th class="check">Packed</th>
+    </tr></thead>
+    <tbody>${rowsHtml || '<tr><td colspan="5" style="text-align:center;padding:20px">No items</td></tr>'}</tbody>
+  </table>
+
+  ${pl.notes ? `<div class="notes"><strong>Notes:</strong> ${esc(pl.notes)}</div>` : ''}
+
+  <div class="signatures">
+    <div class="sig-box">
+      ${pl.packed_by_user?.signature_url ? `<img src="${esc(pl.packed_by_user.signature_url)}" class="sig-img"/>` : ''}
+      <div class="sig-name">${esc(pl.packed_by_user?.name || pl.packed_by || 'Store Person')}</div>
+      <div class="sig-title">Packed By (Store)</div>
+    </div>
+    <div class="sig-box">
+      <div style="height:48px"></div>
+      <div class="sig-name">&nbsp;</div>
+      <div class="sig-title">Received By (Customer) — Signature &amp; Date</div>
+    </div>
+  </div>
+
+  <div class="footer">This is a computer-generated document. ${esc(cfg.name)}</div>
+</div>
+<script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
+</body></html>`;
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = window.URL.createObjectURL(blob);
+  window.open(url, '_blank');
+}
+
+/* ============================================================================
  *  Shared printable invoice renderer (Proforma + Tax Invoice)
  * ========================================================================= */
 
-// Convert a number to Indian-format words ("Rupees X Only")
+// Open WhatsApp with a pre-drafted message. If `includeLink=true`, appends
+// a public read-only URL that the recipient can tap from their phone.
+function openWhatsAppShare({ doc, kind, company, user, includeLink }) {
+  const phoneRaw = (doc.phone || doc.customer?.phone || '').replace(/[^0-9]/g, '');
+  // Accept a bare 10-digit Indian number → prefix 91 automatically.
+  const phone = phoneRaw.length === 10 ? '91' + phoneRaw : phoneRaw;
+  const names = {
+    quotation: ['Quotation', doc.quotation_no],
+    proforma: ['Proforma Invoice', doc.proforma_no],
+    tax_invoice: ['Tax Invoice', doc.invoice_no],
+    packing_list: ['Packing List', doc.packing_list_no],
+  };
+  const [label, number] = names[kind] || ['Document', doc.id];
+  const slug = kind === 'tax_invoice' ? 'tax-invoice' : (kind === 'packing_list' ? 'packing-list' : kind);
+  const senderName = user?.name || 'our Sales Team';
+  const orgName = company?.company_name || 'our company';
+  const grandTotal = doc.grand_total ? ` (Amount: ₹${Number(doc.grand_total).toLocaleString('en-IN')})` : '';
+
+  let msg = `Dear ${doc.customer_name || 'Customer'},\n\nPlease find our ${label} ${number}${grandTotal}.\n`;
+  if (includeLink) {
+    // Public link uses the frontend app URL (not the API) — served by PublicPrintPage route.
+    const origin = window.location.origin;
+    const link = `${origin}/public/${slug}/${doc.id}`;
+    msg += `\nView / print: ${link}\n`;
+  }
+  msg += `\nBest regards,\n${senderName}\n${orgName}`;
+
+  const waUrl = phone
+    ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
+    : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+  window.open(waUrl, '_blank', 'noopener,noreferrer');
+}
+
 function numberToIndianWords(num) {
   const n = Math.round(parseFloat(num) || 0);
   if (n === 0) return 'Rupees Zero Only';
@@ -3125,6 +3590,13 @@ ${(isQuotation && opts.includeCover) ? `
 </body></html>`;
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const url = window.URL.createObjectURL(blob);
-  window.open(url, '_blank');
+  if (opts.openInSameTab) {
+    // Public share route: write into current window so the iframe/tab shows the print preview inline.
+    window.location.replace(url);
+  } else {
+    window.open(url, '_blank');
+  }
 }
+
+export { printInvoiceDoc };
 

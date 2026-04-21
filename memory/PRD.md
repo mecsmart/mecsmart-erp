@@ -17,6 +17,25 @@
 - DC print: "Delivery Challan" with 6-col Part Details + RM Issued sections (NOT 9-col Job OS format)
 
 ## Changelog
+- 2026-02-21 (iter 107): **WhatsApp share + Packing List from Tax Invoice with BOM expansion + public share links.**
+  (a) **WhatsApp share (two buttons per row)** on Quotation, Proforma and Tax Invoice rows:
+    - Green chat icon → `wa.me/<phone>?text=...` with pre-drafted message ("Dear <customer>, please find our <Quotation/PI/TI> <number> (Amount: ₹X). Best regards, <user>, <company>"). Phone auto-prefixed to `91` if 10-digit Indian number.
+    - Dark-green share icon → same message + appended **public read-only URL** (`<app>/public/<doctype>/<id>`) that customers can open in any browser without login.
+  (b) **Public share endpoints** (no auth): `GET /api/public/{quotation|proforma|tax-invoice|packing-list}/{id}` + `GET /api/public/company` for the print template. New **PublicPrintPage** component (`/public/:doctype/:id`) fetches the doc + company, renders using the same `printInvoiceDoc` helper, opens the print preview inline.
+  (c) **Packing List from Tax Invoice**:
+    - **Packing List icon** (amber) on every TI row → opens a dialog titled "Generate Packing List · <INV_NO>"
+    - Dialog shows each invoice line with **"Expand to BOM" checkbox** (auto-ticked when the item has an active BOM). Expanding replaces the FG line with its **first-level BOM components** and multiplies qty-per × invoice qty. Lines without a BOM show "No BOM available — printed as FG" and are locked.
+    - Fields: Dispatch Date, Packed By (defaults to logged-in user name), Notes/Special Instructions.
+    - On save → `POST /api/crm/packing-lists` with status=`draft`. Backend model `PackingListCreate` with nested `PackingListLineComponent`. New `PL-NNNNNN` series added to Settings → Number Series under new "Stores — Dispatch" group.
+  (d) **Packing List panel** (list + print + status workflow) exposed in **two places**:
+    - CRM → Marketing → **Packing Lists** (`/crm?tab=marketing&sub=packing-lists`)
+    - Stores → **Packing Lists** (`/warehouses?tab=packing-lists`)
+    Both use the shared `<PackingListsPanel>` component (exported from CRMPage.js for cross-module reuse).
+    Status dropdown: Draft / Packed / Dispatched / Received. Delete allowed only on Draft (admin can delete dispatched).
+  (e) **Packing List print** (`printPackingListDoc`): A4 layout with company header + tagline + logo, ref to source Tax Invoice, customer + ship-to blocks with full address + state code + GSTIN, nested items (FG rows + indented component rows when expanded), "Packed" tick-box column for physical verification, notes block, and **two signature blocks at bottom** — (1) logged-in packer's profile signature image + name + "Packed By (Store)", (2) blank "Received By (Customer)" block for customer hand-signoff.
+  (f) **BOM components resolution** uses `/api/crm/packing-lists/preview/{ti_id}` — returns per-line `{has_bom, expanded, components: [{part_number, name, uom, qty_per_unit, total_qty}]}`. Re-fetches on every checkbox toggle to show updated qty math live.
+  Verified: POST `/api/crm/packing-lists/preview/<TI_ID>` resolved 2 SO lines → 50 units of RM-001 + 3 units of SA-001; POST `/api/crm/packing-lists` created `PL-000001` linked to `INV-FY26-27/000017`; public `GET /api/public/quotation/<id>` returned `QUO-000023-R1` without auth; dialog screenshot shows correct BOM expansion math (5 × 10 = 50).
+
 - 2026-02-21 (iter 106): **Print 2-page fix + Description-in-Item-cell + PI→TI restore + full customer address.**
   (a) **Fixed 3-page print bug**: cover page was rendering inside `.page` wrapper whose 32px top/bottom padding pushed the A4 overflow into a blank page 2. Cover page is now a **standalone top-level element** (outside `.page`) sized to exactly A4 via `width:210mm; min-height:297mm; max-height:297mm; page-break-after:always; overflow:hidden`. Removed the redundant `<div style="page-break-after:always">` spacer. Verified: cover = 1123px (exact A4), main body = 727px (fits in A4), total 2 pages (1 cover + 1 main) — **no blank page**.
   (b) **Cover page compacted**: top padding reduced from 18mm → 14mm, title from 26px → 24px, vertical gap between logo/title and intro paragraph tightened.

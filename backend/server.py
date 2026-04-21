@@ -6070,6 +6070,7 @@ CRM_DEFAULT_NUMBER_SERIES = {
     "tax_invoice":     {"prefix": "INV-",  "padding": 6, "next_number": 1, "label": "Tax Invoice",     "reset_yearly": True,  "group": "crm"},
     "sales_order":     {"prefix": "SO-",   "padding": 6, "next_number": 1, "label": "Sales Order",     "reset_yearly": False, "group": "sales"},
     "purchase_invoice":{"prefix": "PUR-",  "padding": 6, "next_number": 1, "label": "Purchase Invoice","reset_yearly": False, "group": "procurement"},
+    "packing_list":    {"prefix": "PL-",   "padding": 6, "next_number": 1, "label": "Packing List",    "reset_yearly": False, "group": "stores"},
 }
 
 async def get_next_series_number(key: str) -> str:
@@ -9885,6 +9886,221 @@ async def create_tax_invoice_from_sales_order(so_id: str, request: Request):
     return await _enrich_tax_invoice(doc)
 
 
+# ============================================================================
+#  PACKING LIST
+#  Created from a Tax Invoice. Each TI line can be EXPANDED to its BOM first-level
+#  components (with qty × invoice_qty) or left as-is (FG). Saved + printable.
+# ============================================================================
+class PackingListLineComponent(BaseModel):
+    item_id: str = ""
+    part_number: str = ""
+    name: str = ""
+    uom: str = "Nos"
+    qty_per_unit: float = 0
+    total_qty: float = 0
+
+class PackingListLine(BaseModel):
+    source_line_index: int  # index into the source tax_invoice.lines
+    item_id: Optional[str] = ""
+    item_name: str
+    description: Optional[str] = ""
+    uom: str = "Nos"
+    invoice_qty: float
+    expanded: bool = False
+    components: List[PackingListLineComponent] = []
+
+class PackingListCreate(BaseModel):
+    tax_invoice_id: str
+    lines: List[PackingListLine]
+    notes: Optional[str] = ""
+    packed_by: Optional[str] = ""
+    packed_by_user_id: Optional[str] = ""
+    dispatch_date: Optional[datetime] = None
+
+class PackingListUpdate(BaseModel):
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    packed_by: Optional[str] = None
+    packed_by_user_id: Optional[str] = None
+    dispatch_date: Optional[datetime] = None
+
+async def _enrich_packing_list(pl):
+    pl.pop("_id", None)
+    if pl.get("tax_invoice_id"):
+        ti = await db.tax_invoices.find_one({"id": pl["tax_invoice_id"]}, {"_id": 0, "invoice_no": 1, "customer_name": 1, "customer_id": 1, "billing_address": 1, "shipping_address": 1, "sales_order_id": 1})
+        if ti:
+            pl["tax_invoice"] = ti
+            if ti.get("customer_id"):
+                c = await db.customers.find_one({"id": ti["customer_id"]}, {"_id": 0})
+                if c:
+                    pl["customer"] = c
+    if pl.get("packed_by_user_id"):
+        u = await db.users.find_one({"id": pl["packed_by_user_id"]}, {"_id": 0, "name": 1, "email": 1, "signature_url": 1})
+        if u:
+            pl["packed_by_user"] = u
+    return pl
+
+@crm_router.get("/packing-lists")
+async def list_packing_lists(request: Request):
+    await get_current_user(request)
+    docs = await db.packing_lists.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return [await _enrich_packing_list(d) for d in docs]
+
+@crm_router.get("/packing-lists/{pl_id}")
+async def get_packing_list(pl_id: str, request: Request):
+    await get_current_user(request)
+    doc = await db.packing_lists.find_one({"id": pl_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Packing List not found")
+    return await _enrich_packing_list(doc)
+
+@crm_router.post("/packing-lists", status_code=201)
+async def create_packing_list(data: PackingListCreate, request: Request):
+    user = await get_current_user(request)
+    ti = await db.tax_invoices.find_one({"id": data.tax_invoice_id})
+    if not ti:
+        raise HTTPException(status_code=404, detail="Tax Invoice not found")
+    pl_no = await _get_next_number("packing_list")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "packing_list_no": pl_no,
+        "tax_invoice_id": data.tax_invoice_id,
+        "tax_invoice_no": ti.get("invoice_no", ""),
+        "customer_id": ti.get("customer_id", ""),
+        "customer_name": ti.get("customer_name", ""),
+        "billing_address": ti.get("billing_address", ""),
+        "shipping_address": ti.get("shipping_address", ""),
+        "lines": [ln.model_dump() for ln in data.lines],
+        "notes": data.notes or "",
+        "packed_by": data.packed_by or "",
+        "packed_by_user_id": data.packed_by_user_id or user["id"],
+        "dispatch_date": data.dispatch_date,
+        "status": "draft",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"],
+    }
+    await db.packing_lists.insert_one(doc)
+    return await _enrich_packing_list(doc)
+
+@crm_router.put("/packing-lists/{pl_id}")
+async def update_packing_list(pl_id: str, data: PackingListUpdate, request: Request):
+    await get_current_user(request)
+    existing = await db.packing_lists.find_one({"id": pl_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Packing List not found")
+    update = {k: v for k, v in data.model_dump().items() if v is not None}
+    if update:
+        update["updated_at"] = datetime.now(timezone.utc)
+        await db.packing_lists.update_one({"id": pl_id}, {"$set": update})
+    return await _enrich_packing_list(await db.packing_lists.find_one({"id": pl_id}, {"_id": 0}))
+
+@crm_router.delete("/packing-lists/{pl_id}")
+async def delete_packing_list(pl_id: str, request: Request):
+    user = await get_current_user(request)
+    existing = await db.packing_lists.find_one({"id": pl_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Packing List not found")
+    if existing.get("status") in ("dispatched", "received") and user.get("role") != "admin":
+        raise HTTPException(status_code=400, detail="Only admins can delete dispatched/received packing lists")
+    await db.packing_lists.delete_one({"id": pl_id})
+    return {"message": "Packing List deleted"}
+
+@crm_router.post("/packing-lists/preview/{ti_id}")
+async def preview_packing_list_lines(ti_id: str, payload: dict = Body(default={}), request: Request = None):
+    """Resolve BOM first-level components for the requested lines.
+
+    payload = { "expand": {"<source_line_index>": true/false, ...} }
+    Returns: [{source_line_index, item_name, invoice_qty, has_bom, expanded, components: [...]}]
+    If `expand[idx]` is omitted, default = True when the item has an active BOM.
+    """
+    await get_current_user(request)
+    ti = await db.tax_invoices.find_one({"id": ti_id}, {"_id": 0})
+    if not ti:
+        raise HTTPException(status_code=404, detail="Tax Invoice not found")
+    expand_map = (payload or {}).get("expand") or {}
+    out = []
+    for idx, ln in enumerate(ti.get("lines", [])):
+        item_id = ln.get("item_id") or ""
+        item_name = ln.get("description") or ""
+        uom = ln.get("uom") or "Nos"
+        invoice_qty = float(ln.get("quantity") or 0)
+        bom = None
+        has_bom = False
+        if item_id:
+            item = await db.items.find_one({"id": item_id}, {"_id": 0, "name": 1, "part_number": 1})
+            if item and not item_name:
+                item_name = item.get("name", "")
+            bom = await db.boms.find_one({"parent_item_id": item_id, "status": {"$in": ["active", "approved"]}}, {"_id": 0}, sort=[("created_at", -1)])
+            has_bom = bool(bom)
+        explicit = expand_map.get(str(idx))
+        expand = (has_bom if explicit is None else bool(explicit) and has_bom)
+        components = []
+        if expand and bom:
+            for comp in (bom.get("components") or []):
+                comp_item = await db.items.find_one({"id": comp.get("item_id")}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1})
+                qty_per = float(comp.get("quantity") or 0)
+                components.append({
+                    "item_id": comp.get("item_id", ""),
+                    "part_number": (comp_item or {}).get("part_number", ""),
+                    "name": (comp_item or {}).get("name", comp.get("name", "")),
+                    "uom": (comp_item or {}).get("uom", "Nos"),
+                    "qty_per_unit": qty_per,
+                    "total_qty": round(qty_per * invoice_qty, 4),
+                })
+        out.append({
+            "source_line_index": idx,
+            "item_id": item_id,
+            "item_name": item_name,
+            "description": ln.get("description") or "",
+            "uom": uom,
+            "invoice_qty": invoice_qty,
+            "has_bom": has_bom,
+            "expanded": expand,
+            "components": components,
+        })
+    return out
+
+
+# ============================================================================
+#  PUBLIC SHARE ENDPOINTS (no auth) — used for WhatsApp shareable links.
+# ============================================================================
+public_router = APIRouter(prefix="/public")
+
+@public_router.get("/quotation/{qid}")
+async def public_quotation(qid: str):
+    doc = await db.crm_quotations.find_one({"id": qid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    return await _enrich_quotation(doc)
+
+@public_router.get("/proforma/{pid}")
+async def public_proforma(pid: str):
+    doc = await db.proforma_invoices.find_one({"id": pid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    return await _enrich_proforma(doc)
+
+@public_router.get("/tax-invoice/{tid}")
+async def public_tax_invoice(tid: str):
+    doc = await db.tax_invoices.find_one({"id": tid}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    return await _enrich_tax_invoice(doc)
+
+@public_router.get("/packing-list/{pl_id}")
+async def public_packing_list(pl_id: str):
+    doc = await db.packing_lists.find_one({"id": pl_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    return await _enrich_packing_list(doc)
+
+@public_router.get("/company")
+async def public_company():
+    doc = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
+    return doc
+
+
+
 # Include routers
 api_router.include_router(auth_router)
 api_router.include_router(items_router)
@@ -9907,6 +10123,7 @@ api_router.include_router(grn_router)
 api_router.include_router(purchase_invoices_router)
 api_router.include_router(jobwork_router)
 api_router.include_router(crm_router)
+api_router.include_router(public_router)
 
 @api_router.get("/health")
 async def health_check():

@@ -506,6 +506,7 @@ export default function SettingsPage() {
                 { key: 'crm', label: 'CRM — Sales Cycle', desc: 'Quotation → Proforma → Tax Invoice issued to customers' },
                 { key: 'sales', label: 'Sales Orders', desc: 'Internal SO numbering for confirmed orders' },
                 { key: 'procurement', label: 'Procurement', desc: 'Purchase Orders and Purchase Invoices' },
+                { key: 'stores', label: 'Stores — Dispatch', desc: 'Packing Lists generated from Tax Invoices' },
                 { key: 'masters', label: 'Master Codes', desc: 'Vendor and Customer code generation' },
               ];
               return groups.map(g => {

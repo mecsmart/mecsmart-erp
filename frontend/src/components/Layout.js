@@ -37,6 +37,7 @@ const storesGroupItems = [
   { name: 'Stock', href: '/warehouses?tab=stock', icon: Package, module: 'stores' },
   { name: 'Transfer History', href: '/warehouses?tab=transfers', icon: Truck, module: 'stores' },
   { name: 'GRN', href: '/warehouses?tab=grn', icon: FileText, module: 'stores' },
+  { name: 'Packing Lists', href: '/warehouses?tab=packing-lists', icon: Package, module: 'stores' },
 ];
 
 const jobWorkGroupItems = [
@@ -50,6 +51,7 @@ const crmMarketingItems = [
   { name: 'Quotations', href: '/crm?tab=marketing&sub=quotations', icon: FileText, module: 'crm_marketing' },
   { name: 'Proforma Invoices', href: '/crm?tab=marketing&sub=proformas', icon: FileStack, module: 'crm_marketing' },
   { name: 'Tax Invoices', href: '/crm?tab=marketing&sub=tax-invoices', icon: Calculator, module: 'crm_marketing' },
+  { name: 'Packing Lists', href: '/crm?tab=marketing&sub=packing-lists', icon: Package, module: 'crm_marketing' },
   { name: 'Products', href: '/items', icon: Package, module: 'items' },
   { name: 'Configuration', href: '/crm?tab=marketing&sub=configuration', icon: Cog, module: 'crm_marketing' },
 ];
