@@ -8919,8 +8919,7 @@ async def create_quotation(data: QuotationCreate, request: Request):
     user = await get_current_user(request)
     if not data.lines:
         raise HTTPException(status_code=400, detail="At least one line item is required")
-    count = await db.crm_quotations.count_documents({})
-    q_no = f"QUO-{str(count + 1).zfill(6)}"
+    q_no = await _get_next_number("quotation")
     lines = [l.model_dump() for l in data.lines]
     totals = _compute_quotation_totals(lines)
     doc = {
@@ -9123,6 +9122,561 @@ async def convert_quotation_to_so(qid: str, payload: dict = Body(default={}), re
             },
         )
     return {"quotation": await _enrich_quotation(await db.crm_quotations.find_one({"id": qid})), "sales_order": so_doc}
+
+
+# --------- NUMBER SERIES CONFIGURATION ---------
+DEFAULT_NUMBER_SERIES = {
+    "quotation":       {"prefix": "QUO-",  "padding": 6, "next_number": 1, "reset_yearly": False},
+    "proforma":        {"prefix": "PI-",   "padding": 6, "next_number": 1, "reset_yearly": False},
+    "tax_invoice":     {"prefix": "INV-",  "padding": 6, "next_number": 1, "reset_yearly": True},
+    "sales_order":     {"prefix": "SO-",   "padding": 6, "next_number": 1, "reset_yearly": False},
+    "purchase_invoice":{"prefix": "PUR-",  "padding": 6, "next_number": 1, "reset_yearly": False},
+}
+NUMBER_SERIES_TYPES = list(DEFAULT_NUMBER_SERIES.keys())
+
+class NumberSeriesUpdate(BaseModel):
+    prefix: Optional[str] = None
+    padding: Optional[int] = None
+    next_number: Optional[int] = None
+    reset_yearly: Optional[bool] = None
+
+async def _get_next_number(doc_type: str) -> str:
+    """Atomic-ish next-number generation. Returns formatted number e.g. 'PI-000001'."""
+    doc = await db.number_series.find_one({"doc_type": doc_type}, {"_id": 0})
+    if not doc:
+        doc = {"doc_type": doc_type, **DEFAULT_NUMBER_SERIES.get(doc_type, {"prefix": f"{doc_type.upper()}-", "padding": 6, "next_number": 1, "reset_yearly": False})}
+        await db.number_series.insert_one(doc)
+    prefix = doc.get("prefix") or f"{doc_type.upper()}-"
+    padding = int(doc.get("padding") or 6)
+    next_num = int(doc.get("next_number") or 1)
+    year_part = ""
+    if doc.get("reset_yearly"):
+        # Indian FY (Apr-Mar). Format as FY26-27
+        today = datetime.now(timezone.utc)
+        fy_start = today.year if today.month >= 4 else today.year - 1
+        fy_str = f"FY{str(fy_start)[-2:]}-{str(fy_start + 1)[-2:]}"
+        if doc.get("current_fy") != fy_str:
+            next_num = 1
+            await db.number_series.update_one({"doc_type": doc_type}, {"$set": {"current_fy": fy_str, "next_number": 1}})
+        year_part = f"{fy_str}/"
+    await db.number_series.update_one({"doc_type": doc_type}, {"$set": {"next_number": next_num + 1}})
+    return f"{prefix}{year_part}{str(next_num).zfill(padding)}"
+
+@crm_router.get("/number-series")
+async def list_number_series(request: Request):
+    await get_current_user(request)
+    out = []
+    for t in NUMBER_SERIES_TYPES:
+        doc = await db.number_series.find_one({"doc_type": t}, {"_id": 0})
+        if not doc:
+            doc = {"doc_type": t, **DEFAULT_NUMBER_SERIES[t]}
+        out.append(doc)
+    return out
+
+@crm_router.put("/number-series/{doc_type}")
+async def update_number_series(doc_type: str, data: NumberSeriesUpdate, request: Request):
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    if doc_type not in NUMBER_SERIES_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unknown doc_type. Allowed: {NUMBER_SERIES_TYPES}")
+    update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    update["doc_type"] = doc_type
+    await db.number_series.update_one({"doc_type": doc_type}, {"$set": update}, upsert=True)
+    return await db.number_series.find_one({"doc_type": doc_type}, {"_id": 0})
+
+
+# --------- GST SPLIT HELPER ---------
+async def _compute_gst_split(customer_id: Optional[str], lines: List[dict]) -> dict:
+    """Compute CGST/SGST/IGST split based on company-state vs customer-state.
+    Returns: {is_inter_state, cgst, sgst, igst, total_gst, hsn_summary[]}
+    """
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
+    company_state = (company.get("state_code") or "").strip()
+    customer_state = ""
+    if customer_id:
+        c = await db.customers.find_one({"id": customer_id}, {"_id": 0, "state_code": 1, "state": 1}) or {}
+        customer_state = (c.get("state_code") or "").strip()
+    is_inter_state = bool(company_state and customer_state and company_state != customer_state)
+    cgst = 0.0
+    sgst = 0.0
+    igst = 0.0
+    # Aggregate HSN-wise for tax breakup
+    hsn_bucket = {}  # key: (hsn, rate) -> {taxable, cgst, sgst, igst}
+    for ln in lines:
+        taxable = float(ln.get("amount") or 0)  # already net after discount
+        rate = float(ln.get("gst_rate") or 0)
+        tax_amt = taxable * rate / 100.0
+        ln["taxable_value"] = round(taxable, 2)
+        if is_inter_state:
+            ln["igst_rate"] = rate
+            ln["igst_amt"] = round(tax_amt, 2)
+            ln["cgst_rate"] = 0
+            ln["cgst_amt"] = 0
+            ln["sgst_rate"] = 0
+            ln["sgst_amt"] = 0
+            igst += tax_amt
+        else:
+            half = round(tax_amt / 2.0, 2)
+            ln["igst_rate"] = 0
+            ln["igst_amt"] = 0
+            ln["cgst_rate"] = rate / 2.0
+            ln["cgst_amt"] = half
+            ln["sgst_rate"] = rate / 2.0
+            ln["sgst_amt"] = half
+            cgst += half
+            sgst += half
+        hsn = (ln.get("hsn_code") or "").strip() or "-"
+        key = (hsn, rate)
+        if key not in hsn_bucket:
+            hsn_bucket[key] = {"hsn": hsn, "rate": rate, "taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0}
+        hsn_bucket[key]["taxable"] += taxable
+        if is_inter_state:
+            hsn_bucket[key]["igst"] += tax_amt
+        else:
+            hsn_bucket[key]["cgst"] += tax_amt / 2.0
+            hsn_bucket[key]["sgst"] += tax_amt / 2.0
+    hsn_summary = [{
+        "hsn": v["hsn"], "rate": v["rate"],
+        "taxable": round(v["taxable"], 2),
+        "cgst": round(v["cgst"], 2),
+        "sgst": round(v["sgst"], 2),
+        "igst": round(v["igst"], 2),
+    } for v in hsn_bucket.values()]
+    return {
+        "is_inter_state": is_inter_state,
+        "company_state": company_state,
+        "customer_state": customer_state,
+        "cgst": round(cgst, 2),
+        "sgst": round(sgst, 2),
+        "igst": round(igst, 2),
+        "total_gst": round(cgst + sgst + igst, 2),
+        "hsn_summary": hsn_summary,
+    }
+
+
+# --------- PROFORMA INVOICE ---------
+class ProformaLine(BaseModel):
+    line_no: Optional[int] = None
+    item_id: Optional[str] = ""
+    description: Optional[str] = ""
+    hsn_code: Optional[str] = ""
+    quantity: float
+    uom: Optional[str] = "Nos"
+    rate: float
+    discount_pct: Optional[float] = 0.0
+    gst_rate: Optional[float] = 18.0
+    amount: Optional[float] = 0.0
+
+class ProformaCreate(BaseModel):
+    quotation_id: Optional[str] = ""
+    customer_id: Optional[str] = ""
+    customer_name: str
+    contact_person: Optional[str] = ""
+    email: Optional[str] = ""
+    phone: Optional[str] = ""
+    billing_address: Optional[str] = ""
+    shipping_address: Optional[str] = ""
+    proforma_date: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
+    advance_percentage: Optional[float] = 0.0
+    lines: List[ProformaLine]
+    notes: Optional[str] = ""
+    terms: Optional[str] = ""
+    status: Optional[str] = "draft"  # draft / sent / paid / cancelled / converted
+
+class ProformaUpdate(BaseModel):
+    status: Optional[str] = None
+    lines: Optional[List[ProformaLine]] = None
+    notes: Optional[str] = None
+    terms: Optional[str] = None
+    advance_percentage: Optional[float] = None
+    valid_until: Optional[datetime] = None
+    billing_address: Optional[str] = None
+    shipping_address: Optional[str] = None
+    customer_name: Optional[str] = None
+    contact_person: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+async def _finalize_invoice_lines(lines: List[dict]) -> dict:
+    """Recompute per-line amount (net after discount) and aggregate totals.
+    Returns dict with subtotal, total_discount, grand_total (pre-GST).
+    """
+    subtotal = 0.0
+    total_discount = 0.0
+    for idx, l in enumerate(lines, start=1):
+        qty = float(l.get("quantity") or 0)
+        rate = float(l.get("rate") or 0)
+        disc_pct = float(l.get("discount_pct") or 0)
+        gross = qty * rate
+        disc = gross * disc_pct / 100.0
+        net = gross - disc
+        l["line_no"] = idx
+        l["amount"] = round(net, 2)
+        subtotal += net
+        total_discount += disc
+    return {"subtotal": round(subtotal, 2), "total_discount": round(total_discount, 2)}
+
+async def _enrich_proforma(p):
+    p.pop("_id", None)
+    if p.get("customer_id"):
+        c = await db.customers.find_one({"id": p["customer_id"]}, {"_id": 0})
+        p["customer"] = c
+    if p.get("quotation_id"):
+        q = await db.crm_quotations.find_one({"id": p["quotation_id"]}, {"_id": 0, "quotation_no": 1})
+        p["quotation"] = q
+    if p.get("converted_tax_invoice_id"):
+        ti = await db.tax_invoices.find_one({"id": p["converted_tax_invoice_id"]}, {"_id": 0, "invoice_no": 1, "status": 1})
+        p["tax_invoice"] = ti
+    for ln in (p.get("lines") or []):
+        if ln.get("item_id"):
+            it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1, "hsn_code": 1})
+            if it:
+                ln["item"] = it
+    return p
+
+@crm_router.get("/proformas")
+async def list_proformas(request: Request, status: Optional[str] = None):
+    await get_current_user(request)
+    q = {}
+    if status:
+        q["status"] = status
+    docs = await db.proforma_invoices.find(q).sort("created_at", -1).to_list(2000)
+    return [await _enrich_proforma(d) for d in docs]
+
+@crm_router.post("/proformas", status_code=201)
+async def create_proforma(data: ProformaCreate, request: Request):
+    user = await get_current_user(request)
+    if not data.lines:
+        raise HTTPException(status_code=400, detail="At least one line is required")
+    proforma_no = await _get_next_number("proforma")
+    lines = [l.model_dump() for l in data.lines]
+    base = await _finalize_invoice_lines(lines)
+    gst = await _compute_gst_split(data.customer_id, lines)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "proforma_no": proforma_no,
+        **data.model_dump(exclude={"lines"}, exclude_none=False),
+        "lines": lines,
+        **base,
+        "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
+        "total_gst": gst["total_gst"],
+        "is_inter_state": gst["is_inter_state"],
+        "hsn_summary": gst["hsn_summary"],
+        "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"],
+    }
+    if not doc.get("proforma_date"):
+        doc["proforma_date"] = datetime.now(timezone.utc)
+    await db.proforma_invoices.insert_one(doc)
+    return await _enrich_proforma(doc)
+
+@crm_router.put("/proformas/{pid}")
+async def update_proforma(pid: str, data: ProformaUpdate, request: Request):
+    await get_current_user(request)
+    existing = await db.proforma_invoices.find_one({"id": pid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Proforma not found")
+    if existing.get("status") == "converted":
+        raise HTTPException(status_code=400, detail="Cannot edit a Proforma that has been converted to Tax Invoice")
+    update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
+    if "lines" in update:
+        lines = [l if isinstance(l, dict) else l.model_dump() for l in update["lines"]]
+        base = await _finalize_invoice_lines(lines)
+        gst = await _compute_gst_split(existing.get("customer_id"), lines)
+        update["lines"] = lines
+        update.update(base)
+        update.update({
+            "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
+            "total_gst": gst["total_gst"], "is_inter_state": gst["is_inter_state"],
+            "hsn_summary": gst["hsn_summary"],
+            "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
+        })
+    update["updated_at"] = datetime.now(timezone.utc)
+    await db.proforma_invoices.update_one({"id": pid}, {"$set": update})
+    return await _enrich_proforma(await db.proforma_invoices.find_one({"id": pid}))
+
+@crm_router.delete("/proformas/{pid}")
+async def delete_proforma(pid: str, request: Request):
+    await get_current_user(request)
+    existing = await db.proforma_invoices.find_one({"id": pid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Proforma not found")
+    if existing.get("status") == "converted":
+        raise HTTPException(status_code=400, detail="Cannot delete a Proforma that has been converted to Tax Invoice")
+    await db.proforma_invoices.delete_one({"id": pid})
+    return {"message": "Proforma deleted"}
+
+@crm_router.post("/quotations/{qid}/convert-to-proforma")
+async def convert_quotation_to_proforma(qid: str, payload: dict = Body(default={}), request: Request = None):
+    user = await get_current_user(request)
+    q = await db.crm_quotations.find_one({"id": qid})
+    if not q:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    if not q.get("lines"):
+        raise HTTPException(status_code=400, detail="Quotation has no line items")
+    # Build proforma payload from quotation
+    pf_lines = []
+    for ln in q["lines"]:
+        pf_lines.append({
+            "item_id": ln.get("item_id", ""),
+            "description": ln.get("description", ""),
+            "hsn_code": "",  # carried by item lookup later if needed
+            "quantity": ln.get("quantity", 0),
+            "uom": ln.get("uom", "Nos"),
+            "rate": ln.get("rate", 0),
+            "discount_pct": ln.get("discount_pct", 0),
+            "gst_rate": ln.get("gst_rate", 18),
+        })
+    # hydrate hsn_code from items master
+    for ln in pf_lines:
+        if ln["item_id"]:
+            it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "hsn_code": 1})
+            if it and it.get("hsn_code"):
+                ln["hsn_code"] = it["hsn_code"]
+    proforma_no = await _get_next_number("proforma")
+    base = await _finalize_invoice_lines(pf_lines)
+    gst = await _compute_gst_split(q.get("customer_id"), pf_lines)
+    # Pull billing/shipping address from customer
+    billing = shipping = ""
+    if q.get("customer_id"):
+        c = await db.customers.find_one({"id": q["customer_id"]}, {"_id": 0})
+        if c:
+            billing = c.get("address", "") or ""
+            shipping = c.get("address", "") or ""
+    doc = {
+        "id": str(uuid.uuid4()),
+        "proforma_no": proforma_no,
+        "quotation_id": qid,
+        "customer_id": q.get("customer_id", ""),
+        "customer_name": q.get("customer_name", ""),
+        "contact_person": q.get("contact_person", ""),
+        "email": q.get("email", ""),
+        "phone": q.get("phone", ""),
+        "billing_address": billing,
+        "shipping_address": shipping,
+        "proforma_date": datetime.now(timezone.utc),
+        "valid_until": q.get("valid_until"),
+        "advance_percentage": float(payload.get("advance_percentage") or 0),
+        "lines": pf_lines,
+        "notes": q.get("notes", ""),
+        "terms": q.get("terms", ""),
+        **base,
+        "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
+        "total_gst": gst["total_gst"],
+        "is_inter_state": gst["is_inter_state"],
+        "hsn_summary": gst["hsn_summary"],
+        "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
+        "status": "draft",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"],
+    }
+    await db.proforma_invoices.insert_one(doc)
+    # Flag the quotation so it shows the link
+    await db.crm_quotations.update_one(
+        {"id": qid},
+        {"$set": {"proforma_id": doc["id"], "proforma_no": proforma_no, "updated_at": datetime.now(timezone.utc)}}
+    )
+    return await _enrich_proforma(doc)
+
+
+# --------- TAX INVOICE ---------
+class TaxInvoiceLine(BaseModel):
+    line_no: Optional[int] = None
+    item_id: Optional[str] = ""
+    description: Optional[str] = ""
+    hsn_code: Optional[str] = ""
+    quantity: float
+    uom: Optional[str] = "Nos"
+    rate: float
+    discount_pct: Optional[float] = 0.0
+    gst_rate: Optional[float] = 18.0
+    amount: Optional[float] = 0.0
+
+class TaxInvoiceCreate(BaseModel):
+    proforma_id: Optional[str] = ""
+    sales_order_id: Optional[str] = ""
+    customer_id: Optional[str] = ""
+    customer_name: str
+    contact_person: Optional[str] = ""
+    email: Optional[str] = ""
+    phone: Optional[str] = ""
+    billing_address: Optional[str] = ""
+    shipping_address: Optional[str] = ""
+    invoice_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    place_of_supply: Optional[str] = ""  # state code
+    lines: List[TaxInvoiceLine]
+    notes: Optional[str] = ""
+    terms: Optional[str] = ""
+    status: Optional[str] = "draft"  # draft / issued / paid / cancelled
+
+class TaxInvoiceUpdate(BaseModel):
+    status: Optional[str] = None
+    lines: Optional[List[TaxInvoiceLine]] = None
+    notes: Optional[str] = None
+    terms: Optional[str] = None
+    due_date: Optional[datetime] = None
+    place_of_supply: Optional[str] = None
+    billing_address: Optional[str] = None
+    shipping_address: Optional[str] = None
+
+async def _enrich_tax_invoice(t):
+    t.pop("_id", None)
+    if t.get("customer_id"):
+        c = await db.customers.find_one({"id": t["customer_id"]}, {"_id": 0})
+        t["customer"] = c
+    if t.get("proforma_id"):
+        p = await db.proforma_invoices.find_one({"id": t["proforma_id"]}, {"_id": 0, "proforma_no": 1})
+        t["proforma"] = p
+    for ln in (t.get("lines") or []):
+        if ln.get("item_id"):
+            it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1, "hsn_code": 1})
+            if it:
+                ln["item"] = it
+    return t
+
+@crm_router.get("/tax-invoices")
+async def list_tax_invoices(request: Request, status: Optional[str] = None):
+    await get_current_user(request)
+    q = {}
+    if status:
+        q["status"] = status
+    docs = await db.tax_invoices.find(q).sort("created_at", -1).to_list(2000)
+    return [await _enrich_tax_invoice(d) for d in docs]
+
+@crm_router.post("/tax-invoices", status_code=201)
+async def create_tax_invoice(data: TaxInvoiceCreate, request: Request):
+    user = await get_current_user(request)
+    if not data.lines:
+        raise HTTPException(status_code=400, detail="At least one line is required")
+    invoice_no = await _get_next_number("tax_invoice")
+    lines = [l.model_dump() for l in data.lines]
+    base = await _finalize_invoice_lines(lines)
+    gst = await _compute_gst_split(data.customer_id, lines)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "invoice_no": invoice_no,
+        **data.model_dump(exclude={"lines"}, exclude_none=False),
+        "lines": lines,
+        **base,
+        "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
+        "total_gst": gst["total_gst"],
+        "is_inter_state": gst["is_inter_state"],
+        "hsn_summary": gst["hsn_summary"],
+        "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
+        "qr_code": f"UPI://pay?pa=machineworks@upi&pn=MachineWorksERP&am={round(base['subtotal'] + gst['total_gst'], 2)}&tn={invoice_no}",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"],
+    }
+    if not doc.get("invoice_date"):
+        doc["invoice_date"] = datetime.now(timezone.utc)
+    await db.tax_invoices.insert_one(doc)
+    return await _enrich_tax_invoice(doc)
+
+@crm_router.put("/tax-invoices/{tid}")
+async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request):
+    await get_current_user(request)
+    existing = await db.tax_invoices.find_one({"id": tid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Tax Invoice not found")
+    if existing.get("status") in ("paid", "issued"):
+        # Only status updates allowed post-issue
+        if data.status is None and (data.lines is not None or data.billing_address is not None):
+            raise HTTPException(status_code=400, detail="Cannot edit lines of an issued invoice — cancel it instead")
+    update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
+    if "lines" in update:
+        lines = [l if isinstance(l, dict) else l.model_dump() for l in update["lines"]]
+        base = await _finalize_invoice_lines(lines)
+        gst = await _compute_gst_split(existing.get("customer_id"), lines)
+        update["lines"] = lines
+        update.update(base)
+        update.update({
+            "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
+            "total_gst": gst["total_gst"], "is_inter_state": gst["is_inter_state"],
+            "hsn_summary": gst["hsn_summary"],
+            "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
+        })
+    update["updated_at"] = datetime.now(timezone.utc)
+    await db.tax_invoices.update_one({"id": tid}, {"$set": update})
+    return await _enrich_tax_invoice(await db.tax_invoices.find_one({"id": tid}))
+
+@crm_router.delete("/tax-invoices/{tid}")
+async def delete_tax_invoice(tid: str, request: Request):
+    await get_current_user(request)
+    existing = await db.tax_invoices.find_one({"id": tid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Tax Invoice not found")
+    if existing.get("status") in ("paid", "issued"):
+        raise HTTPException(status_code=400, detail="Cannot delete an issued/paid invoice — cancel it first")
+    await db.tax_invoices.delete_one({"id": tid})
+    return {"message": "Tax Invoice deleted"}
+
+@crm_router.post("/proformas/{pid}/convert-to-tax-invoice")
+async def convert_proforma_to_tax_invoice(pid: str, payload: dict = Body(default={}), request: Request = None):
+    user = await get_current_user(request)
+    p = await db.proforma_invoices.find_one({"id": pid})
+    if not p:
+        raise HTTPException(status_code=404, detail="Proforma not found")
+    if p.get("status") == "converted":
+        raise HTTPException(status_code=400, detail="Proforma already converted to a Tax Invoice")
+    lines = []
+    for ln in p.get("lines", []):
+        lines.append({
+            "item_id": ln.get("item_id", ""),
+            "description": ln.get("description", ""),
+            "hsn_code": ln.get("hsn_code", ""),
+            "quantity": ln.get("quantity", 0),
+            "uom": ln.get("uom", "Nos"),
+            "rate": ln.get("rate", 0),
+            "discount_pct": ln.get("discount_pct", 0),
+            "gst_rate": ln.get("gst_rate", 18),
+        })
+    invoice_no = await _get_next_number("tax_invoice")
+    base = await _finalize_invoice_lines(lines)
+    gst = await _compute_gst_split(p.get("customer_id"), lines)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "invoice_no": invoice_no,
+        "proforma_id": pid,
+        "customer_id": p.get("customer_id", ""),
+        "customer_name": p.get("customer_name", ""),
+        "contact_person": p.get("contact_person", ""),
+        "email": p.get("email", ""),
+        "phone": p.get("phone", ""),
+        "billing_address": p.get("billing_address", ""),
+        "shipping_address": p.get("shipping_address", ""),
+        "invoice_date": datetime.now(timezone.utc),
+        "place_of_supply": gst.get("customer_state", ""),
+        "lines": lines,
+        "notes": p.get("notes", ""),
+        "terms": p.get("terms", ""),
+        **base,
+        "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
+        "total_gst": gst["total_gst"],
+        "is_inter_state": gst["is_inter_state"],
+        "hsn_summary": gst["hsn_summary"],
+        "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
+        "qr_code": f"UPI://pay?pa=machineworks@upi&pn=MachineWorksERP&am={round(base['subtotal'] + gst['total_gst'], 2)}&tn={invoice_no}",
+        "status": "issued",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"],
+    }
+    await db.tax_invoices.insert_one(doc)
+    await db.proforma_invoices.update_one(
+        {"id": pid},
+        {"$set": {
+            "status": "converted",
+            "converted_tax_invoice_id": doc["id"],
+            "converted_tax_invoice_no": invoice_no,
+            "updated_at": datetime.now(timezone.utc),
+        }}
+    )
+    return await _enrich_tax_invoice(doc)
 
 
 # Include routers

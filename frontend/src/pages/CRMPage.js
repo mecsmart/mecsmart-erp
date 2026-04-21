@@ -108,6 +108,7 @@ export default function CRMPage() {
   const crumbMain = activeTab === 'quotations' ? 'Quotations' : activeTab === 'support' ? 'Support' : 'Marketing';
   const crumbSub = {
     contacts: 'Contacts', quotations: 'Quotations', configuration: 'Configuration',
+    proformas: 'Proforma Invoices', 'tax-invoices': 'Tax Invoices', 'number-series': 'Number Series',
     sla: 'SLA Due', activity: 'Activity Logs',
   }[activeSub];
 
@@ -159,6 +160,15 @@ export default function CRMPage() {
       )}
       {activeTab === 'marketing' && activeSub === 'configuration' && (
         <PipelineConfigPanel pipelineType="marketing" onRefresh={fetchData} canEdit={canMarketingEdit} />
+      )}
+      {activeTab === 'marketing' && activeSub === 'proformas' && (
+        <ProformasPanel customers={customers} search={search} onRefresh={fetchData} canEdit={canMarketingEdit} />
+      )}
+      {activeTab === 'marketing' && activeSub === 'tax-invoices' && (
+        <TaxInvoicesPanel customers={customers} search={search} onRefresh={fetchData} canEdit={canMarketingEdit} />
+      )}
+      {activeTab === 'marketing' && activeSub === 'number-series' && (
+        <NumberSeriesPanel canEdit={user?.role === 'admin'} />
       )}
 
       {activeTab === 'quotations' && !activeSub && (
@@ -872,6 +882,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
   const [convertDialog, setConvertDialog] = useState({ open: false, quotation: null });
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, quotation: null });
   const [acceptConfirm, setAcceptConfirm] = useState({ open: false, quotation: null });
+  const [proformaConfirm, setProformaConfirm] = useState({ open: false, quotation: null, advance: 30 });
 
   const openDialog = useCallback((q, fromLead) => {
     if (q) {
@@ -993,6 +1004,17 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
       onRefresh();
       if (res.data?.converted_so_no) alert(`Quotation accepted & converted to Sales Order ${res.data.converted_so_no}.`);
     } catch (e) { alert(e.response?.data?.detail || 'Failed to accept'); }
+  };
+
+  const convertToProforma = async () => {
+    const q = proformaConfirm.quotation;
+    if (!q) return;
+    try {
+      const res = await api.post(`/api/crm/quotations/${q.id}/convert-to-proforma`, { advance_percentage: proformaConfirm.advance });
+      setProformaConfirm({ open: false, quotation: null, advance: 30 });
+      onRefresh();
+      alert(`Proforma Invoice ${res.data.proforma_no} generated. Review it in the Proforma Invoices tab.`);
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to convert'); }
   };
 
   const quickStatusChange = async (q, status) => {
@@ -1198,6 +1220,9 @@ ${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions</strong>${esc(q.t
                       <button onClick={() => printQuotation(q)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`quotation-print-${q.id}`}><Printer className="w-4 h-4" /></button>
                       {canEdit && !isLocked && q.status === 'draft' && (
                         <button onClick={() => quickStatusChange(q, 'sent')} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Send to customer" data-testid={`quotation-send-${q.id}`}><Send className="w-4 h-4" /></button>
+                      )}
+                      {canEdit && !q.proforma_id && q.status !== 'rejected' && (
+                        <button onClick={() => setProformaConfirm({ open: true, quotation: q })} className="p-1.5 text-[#1E429F] hover:bg-[#E1EFFE] rounded" title="Convert to Proforma Invoice" data-testid={`quotation-to-proforma-${q.id}`}><FileText className="w-4 h-4" /></button>
                       )}
                       {canEdit && !isLocked && <button onClick={() => openDialog(q, null)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`quotation-edit-${q.id}`}><Edit2 className="w-4 h-4" /></button>}
                       {canEdit && !isLocked && <button onClick={() => setDeleteConfirm({ open: true, quotation: q })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`quotation-delete-${q.id}`}><Trash2 className="w-4 h-4" /></button>}
@@ -1446,6 +1471,30 @@ ${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions</strong>${esc(q.t
         onConfirm={acceptQuotation}
         testidPrefix="quotation-accept-confirm"
       />
+
+      {/* Convert-to-Proforma Dialog */}
+      <Dialog open={proformaConfirm.open} onOpenChange={(o) => !o && setProformaConfirm({ open: false, quotation: null, advance: 30 })}>
+        <DialogContent className="max-w-md" data-testid="quotation-proforma-dialog">
+          <DialogHeader><DialogTitle className="font-[Chivo]">Generate Proforma Invoice</DialogTitle></DialogHeader>
+          <div className="mt-3 space-y-3 text-sm">
+            <div className="bg-[#E1EFFE] border border-[#1E429F] rounded-sm p-3 text-xs">
+              From quotation <strong>{proformaConfirm.quotation?.quotation_no}</strong> for <strong>{proformaConfirm.quotation?.customer_name}</strong>
+              <div className="mt-1">Total: <strong>{formatCurrency(proformaConfirm.quotation?.grand_total || 0)}</strong></div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Advance Percentage</label>
+              <div className="flex gap-2 items-center">
+                <input type="number" step="1" min="0" max="100" className="input-field mono w-24" value={proformaConfirm.advance} onChange={e => setProformaConfirm(s => ({ ...s, advance: parseFloat(e.target.value) || 0 }))} data-testid="proforma-advance-pct" />
+                <span className="text-xs text-[#4B5563]">% (used only for the header; total stays full)</span>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t">
+              <button className="btn-secondary" onClick={() => setProformaConfirm({ open: false, quotation: null, advance: 30 })}>Cancel</button>
+              <button className="btn-primary" onClick={convertToProforma} data-testid="proforma-generate-btn">Generate Proforma</button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -2077,5 +2126,452 @@ function LeadImportButton({ onImported }) {
 function ContactImportButton({ onImported }) {
   const sample = 'code,name,gstin,contact_person,email,phone,address,city,state,pin_code,payment_terms,status\nCUST-001,ABC Pumps Ltd,27AABCD1234E1Z5,John Doe,john@abc.com,9876543210,123 MIDC Road,Pune,Maharashtra,411001,Net 30,active';
   return <CSVImportButton endpoint="/api/customers/import" sample={sample} testid="contact-import-btn" label="Import Contacts" onImported={onImported} />;
+}
+
+
+/* ============================================================================
+ *  PROFORMA INVOICES PANEL
+ * ========================================================================= */
+const PROFORMA_STATUSES = [
+  { key: 'draft', label: 'Draft', color: 'bg-[#F3F4F6] text-[#4B5563]' },
+  { key: 'sent', label: 'Sent', color: 'bg-[#E1EFFE] text-[#1E429F]' },
+  { key: 'paid', label: 'Advance Paid', color: 'bg-[#DEF7EC] text-[#03543F]' },
+  { key: 'cancelled', label: 'Cancelled', color: 'bg-[#FDE8E8] text-[#9B1C1C]' },
+  { key: 'converted', label: 'Converted → Invoice', color: 'bg-[#FCE7F3] text-[#9D174D]' },
+];
+
+function ProformasPanel({ customers, search, onRefresh, canEdit }) {
+  const [list, setList] = useState([]);
+  const [convertConfirm, setConvertConfirm] = useState({ open: false, proforma: null });
+  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, proforma: null });
+
+  const load = useCallback(async () => {
+    try { const r = await api.get('/api/crm/proformas'); setList(r.data || []); } catch (e) { console.error(e); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const statusChange = async (p, status) => {
+    try { await api.put(`/api/crm/proformas/${p.id}`, { status }); load(); onRefresh(); }
+    catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const del = async (p) => {
+    try { await api.delete(`/api/crm/proformas/${p.id}`); setDeleteConfirm({ open: false, proforma: null }); load(); onRefresh(); }
+    catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const convertToTaxInvoice = async () => {
+    const p = convertConfirm.proforma;
+    if (!p) return;
+    try {
+      const res = await api.post(`/api/crm/proformas/${p.id}/convert-to-tax-invoice`, {});
+      setConvertConfirm({ open: false, proforma: null });
+      load(); onRefresh();
+      alert(`Tax Invoice ${res.data.invoice_no} issued. Review it in the Tax Invoices tab.`);
+    } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const filtered = list.filter(p => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return [p.proforma_no, p.customer_name, p.quotation?.quotation_no].some(v => (v || '').toLowerCase().includes(q));
+  });
+
+  const printProforma = (p) => printInvoiceDoc(p, { kind: 'proforma', title: 'PROFORMA INVOICE', numberKey: 'proforma_no' });
+
+  return (
+    <div className="space-y-4" data-testid="proformas-panel">
+      <div className="card-flat overflow-hidden">
+        <table className="w-full data-table" data-testid="proformas-table">
+          <thead><tr><th>PI #</th><th>Customer</th><th>From Quotation</th><th>Date</th><th>Valid Until</th><th>Subtotal</th><th>GST (CGST+SGST / IGST)</th><th>Grand Total</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>
+            {filtered.length === 0 && <tr><td colSpan={10} className="text-center py-6 text-sm text-[#6B7280]">No Proforma Invoices yet. Generate one from a Quotation.</td></tr>}
+            {filtered.map(p => {
+              const statusData = PROFORMA_STATUSES.find(s => s.key === p.status);
+              const isLocked = p.status === 'converted';
+              return (
+                <tr key={p.id} data-testid={`proforma-row-${p.id}`}>
+                  <td className="mono font-medium">{p.proforma_no}</td>
+                  <td><div className="font-medium text-[#1D3557]">{p.customer_name}</div>{p.contact_person && <div className="text-xs text-[#4B5563]">{p.contact_person}</div>}</td>
+                  <td className="text-xs mono">{p.quotation?.quotation_no || <span className="text-[#9CA3AF]">manual</span>}</td>
+                  <td className="text-xs">{p.proforma_date ? new Date(p.proforma_date).toLocaleDateString('en-IN') : '-'}</td>
+                  <td className="text-xs">{p.valid_until ? new Date(p.valid_until).toLocaleDateString('en-IN') : '-'}</td>
+                  <td className="mono text-sm">{formatCurrency(p.subtotal)}</td>
+                  <td className="text-xs mono">{p.is_inter_state ? `IGST ${formatCurrency(p.igst)}` : `CGST ${formatCurrency(p.cgst)} + SGST ${formatCurrency(p.sgst)}`}</td>
+                  <td className="mono font-semibold text-sm">{formatCurrency(p.grand_total)}</td>
+                  <td>
+                    {canEdit && !isLocked ? (
+                      <Select value={p.status || 'draft'} onValueChange={(v) => statusChange(p, v)}>
+                        <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>{PROFORMA_STATUSES.filter(s => s.key !== 'converted').map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
+                      </Select>
+                    ) : (
+                      <span className={`status-badge ${statusData?.color || ''}`}>{statusData?.label || p.status}
+                        {p.converted_tax_invoice_no && <span className="ml-1 text-[10px]">({p.converted_tax_invoice_no})</span>}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <div className="flex gap-0.5">
+                      <button onClick={() => printProforma(p)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`proforma-print-${p.id}`}><Printer className="w-4 h-4" /></button>
+                      {canEdit && !isLocked && (
+                        <button onClick={() => setConvertConfirm({ open: true, proforma: p })} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Convert to Tax Invoice" data-testid={`proforma-to-invoice-${p.id}`}><Send className="w-4 h-4" /></button>
+                      )}
+                      {canEdit && !isLocked && <button onClick={() => setDeleteConfirm({ open: true, proforma: p })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`proforma-delete-${p.id}`}><Trash2 className="w-4 h-4" /></button>}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <ConfirmDialog
+        open={convertConfirm.open}
+        onOpenChange={(o) => !o && setConvertConfirm({ open: false, proforma: null })}
+        title="Generate Tax Invoice?"
+        message={<>This will issue a GST Tax Invoice for <strong>{convertConfirm.proforma?.proforma_no}</strong>. Once issued, this Proforma becomes read-only.</>}
+        confirmLabel="Issue Tax Invoice"
+        variant="primary"
+        onConfirm={convertToTaxInvoice}
+        testidPrefix="proforma-convert-confirm"
+      />
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(o) => !o && setDeleteConfirm({ open: false, proforma: null })}
+        title="Delete Proforma?"
+        message={<>This will permanently delete <strong>{deleteConfirm.proforma?.proforma_no}</strong>.</>}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => del(deleteConfirm.proforma)}
+        testidPrefix="proforma-delete-confirm"
+      />
+    </div>
+  );
+}
+
+/* ============================================================================
+ *  TAX INVOICES PANEL
+ * ========================================================================= */
+const TAX_INVOICE_STATUSES = [
+  { key: 'draft', label: 'Draft', color: 'bg-[#F3F4F6] text-[#4B5563]' },
+  { key: 'issued', label: 'Issued', color: 'bg-[#E1EFFE] text-[#1E429F]' },
+  { key: 'paid', label: 'Paid', color: 'bg-[#DEF7EC] text-[#03543F]' },
+  { key: 'cancelled', label: 'Cancelled', color: 'bg-[#FDE8E8] text-[#9B1C1C]' },
+];
+
+function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
+  const [list, setList] = useState([]);
+  const load = useCallback(async () => {
+    try { const r = await api.get('/api/crm/tax-invoices'); setList(r.data || []); } catch (e) { console.error(e); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const statusChange = async (t, status) => {
+    try { await api.put(`/api/crm/tax-invoices/${t.id}`, { status }); load(); onRefresh(); }
+    catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const filtered = list.filter(t => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return [t.invoice_no, t.customer_name, t.proforma?.proforma_no].some(v => (v || '').toLowerCase().includes(q));
+  });
+
+  const totalIssued = filtered.filter(t => t.status === 'issued').reduce((a, t) => a + (t.grand_total || 0), 0);
+  const totalPaid = filtered.filter(t => t.status === 'paid').reduce((a, t) => a + (t.grand_total || 0), 0);
+
+  const printInvoice = (t) => printInvoiceDoc(t, { kind: 'tax_invoice', title: 'TAX INVOICE', numberKey: 'invoice_no' });
+
+  return (
+    <div className="space-y-4" data-testid="tax-invoices-panel">
+      <div className="flex gap-3 flex-wrap">
+        <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[150px]">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[#1E429F]">Issued</div>
+          <div className="text-lg font-semibold mono">{filtered.filter(t => t.status === 'issued').length} · {formatCurrency(totalIssued)}</div>
+        </div>
+        <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[150px]">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-[#03543F]">Paid</div>
+          <div className="text-lg font-semibold mono">{filtered.filter(t => t.status === 'paid').length} · {formatCurrency(totalPaid)}</div>
+        </div>
+      </div>
+      <div className="card-flat overflow-hidden">
+        <table className="w-full data-table" data-testid="tax-invoices-table">
+          <thead><tr><th>Invoice #</th><th>Customer</th><th>From PI</th><th>Date</th><th>Place of Supply</th><th>Subtotal</th><th>GST</th><th>Grand Total</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>
+            {filtered.length === 0 && <tr><td colSpan={10} className="text-center py-6 text-sm text-[#6B7280]">No Tax Invoices yet. Convert a Proforma Invoice to generate one.</td></tr>}
+            {filtered.map(t => {
+              const statusData = TAX_INVOICE_STATUSES.find(s => s.key === t.status);
+              const locked = ['issued', 'paid', 'cancelled'].includes(t.status);
+              return (
+                <tr key={t.id} data-testid={`tax-invoice-row-${t.id}`}>
+                  <td className="mono font-medium">{t.invoice_no}</td>
+                  <td><div className="font-medium text-[#1D3557]">{t.customer_name}</div></td>
+                  <td className="text-xs mono">{t.proforma?.proforma_no || <span className="text-[#9CA3AF]">—</span>}</td>
+                  <td className="text-xs">{t.invoice_date ? new Date(t.invoice_date).toLocaleDateString('en-IN') : '-'}</td>
+                  <td className="text-xs mono">{t.place_of_supply || '—'}{t.is_inter_state && <span className="ml-1 text-[10px] text-[#9B1C1C]">(IGST)</span>}</td>
+                  <td className="mono text-sm">{formatCurrency(t.subtotal)}</td>
+                  <td className="text-xs mono">{t.is_inter_state ? `IGST ${formatCurrency(t.igst)}` : `${formatCurrency(t.cgst)}+${formatCurrency(t.sgst)}`}</td>
+                  <td className="mono font-semibold text-sm">{formatCurrency(t.grand_total)}</td>
+                  <td>
+                    {canEdit ? (
+                      <Select value={t.status || 'draft'} onValueChange={(v) => statusChange(t, v)}>
+                        <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>{TAX_INVOICE_STATUSES.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
+                      </Select>
+                    ) : (
+                      <span className={`status-badge ${statusData?.color || ''}`}>{statusData?.label || t.status}</span>
+                    )}
+                  </td>
+                  <td>
+                    <div className="flex gap-0.5">
+                      <button onClick={() => printInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`tax-invoice-print-${t.id}`}><Printer className="w-4 h-4" /></button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+ *  NUMBER SERIES PANEL (Admin settings)
+ * ========================================================================= */
+const DOC_TYPE_LABELS = {
+  quotation: 'Quotation',
+  proforma: 'Proforma Invoice',
+  tax_invoice: 'Tax Invoice',
+  sales_order: 'Sales Order',
+  purchase_invoice: 'Purchase Invoice',
+};
+
+function NumberSeriesPanel({ canEdit }) {
+  const [list, setList] = useState([]);
+  const [saving, setSaving] = useState(null);
+  const load = useCallback(async () => {
+    try { const r = await api.get('/api/crm/number-series'); setList(r.data || []); } catch (e) { console.error(e); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const update = (idx, patch) => setList(arr => arr.map((s, i) => i === idx ? { ...s, ...patch } : s));
+
+  const save = async (row) => {
+    setSaving(row.doc_type);
+    try {
+      await api.put(`/api/crm/number-series/${row.doc_type}`, {
+        prefix: row.prefix, padding: parseInt(row.padding) || 6, next_number: parseInt(row.next_number) || 1, reset_yearly: !!row.reset_yearly,
+      });
+      await load();
+    } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+    finally { setSaving(null); }
+  };
+
+  if (!canEdit) return <div className="text-sm text-[#9B1C1C]">Admin privilege required to manage number series.</div>;
+
+  return (
+    <div className="space-y-4" data-testid="number-series-panel">
+      <div className="bg-[#FEF3C7] border border-[#92400E] rounded-sm p-3 text-xs">
+        <div className="font-semibold mb-1">Document Number Series</div>
+        Configure the prefix, padding and next counter for each document type. Enable <strong>Reset Yearly</strong> to append the Indian Fiscal Year (FY26-27) and restart the counter every April.
+      </div>
+      <div className="card-flat overflow-hidden">
+        <table className="w-full data-table" data-testid="number-series-table">
+          <thead><tr><th>Document</th><th>Prefix</th><th>Padding</th><th>Next #</th><th>Reset Yearly</th><th>Preview</th><th>Action</th></tr></thead>
+          <tbody>
+            {list.map((s, idx) => {
+              const fy = (() => {
+                const d = new Date();
+                const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+                return `FY${String(y).slice(-2)}-${String(y + 1).slice(-2)}`;
+              })();
+              const preview = `${s.prefix || ''}${s.reset_yearly ? fy + '/' : ''}${String(s.next_number || 1).padStart(parseInt(s.padding) || 6, '0')}`;
+              return (
+                <tr key={s.doc_type} data-testid={`number-series-row-${s.doc_type}`}>
+                  <td className="font-medium">{DOC_TYPE_LABELS[s.doc_type] || s.doc_type}</td>
+                  <td><input className="input-field mono h-7 text-xs w-24" value={s.prefix || ''} onChange={e => update(idx, { prefix: e.target.value })} data-testid={`number-series-prefix-${s.doc_type}`} /></td>
+                  <td><input type="number" min="1" max="10" className="input-field mono h-7 text-xs w-16" value={s.padding || 6} onChange={e => update(idx, { padding: e.target.value })} /></td>
+                  <td><input type="number" min="1" className="input-field mono h-7 text-xs w-24" value={s.next_number || 1} onChange={e => update(idx, { next_number: e.target.value })} data-testid={`number-series-next-${s.doc_type}`} /></td>
+                  <td>
+                    <label className="inline-flex items-center gap-1 text-xs cursor-pointer">
+                      <input type="checkbox" checked={!!s.reset_yearly} onChange={e => update(idx, { reset_yearly: e.target.checked })} data-testid={`number-series-yearly-${s.doc_type}`} />
+                      {s.reset_yearly ? 'Yes' : 'No'}
+                    </label>
+                  </td>
+                  <td className="mono text-xs text-[#1E429F]">{preview}</td>
+                  <td>
+                    <button className="btn-primary text-xs py-1 px-2" onClick={() => save(s)} disabled={saving === s.doc_type} data-testid={`number-series-save-${s.doc_type}`}>{saving === s.doc_type ? 'Saving...' : 'Save'}</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+ *  Shared printable invoice renderer (Proforma + Tax Invoice)
+ * ========================================================================= */
+function printInvoiceDoc(doc, opts) {
+  const esc = (s) => String(s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const company = {
+    name: 'Machinery Manufacturing ERP',
+    address: 'Industrial Estate, Plot No. 123, Pune, Maharashtra 411019',
+    phone: '+91 20 1234 5678',
+    email: 'sales@machineworks-erp.com',
+    gstin: '27AAACM1234E1Z5',
+  };
+  const isInter = !!doc.is_inter_state;
+  const rows = (doc.lines || []).map((l, i) => {
+    const taxable = l.taxable_value ?? l.amount ?? 0;
+    const cgstAmt = l.cgst_amt || 0;
+    const sgstAmt = l.sgst_amt || 0;
+    const igstAmt = l.igst_amt || 0;
+    const total = taxable + cgstAmt + sgstAmt + igstAmt;
+    const itemLabel = l.item?.part_number ? `${l.item.part_number} · ${l.item.name || ''}` : '';
+    return `<tr>
+      <td style="text-align:center">${i + 1}</td>
+      <td>${esc(itemLabel || l.description || '-')}${l.description && itemLabel ? `<div style="font-size:10px;color:#555">${esc(l.description)}</div>` : ''}</td>
+      <td style="text-align:center" class="mono">${esc(l.hsn_code || l.item?.hsn_code || '-')}</td>
+      <td style="text-align:right">${(l.quantity || 0).toFixed(2)} ${esc(l.uom || '')}</td>
+      <td style="text-align:right">₹${(l.rate || 0).toFixed(2)}</td>
+      <td style="text-align:right">${(l.discount_pct || 0).toFixed(1)}%</td>
+      <td style="text-align:right">₹${taxable.toFixed(2)}</td>
+      ${isInter
+        ? `<td style="text-align:right">${(l.igst_rate || 0).toFixed(1)}% / ₹${igstAmt.toFixed(2)}</td>`
+        : `<td style="text-align:right">${(l.cgst_rate || 0).toFixed(1)}% / ₹${cgstAmt.toFixed(2)}</td><td style="text-align:right">${(l.sgst_rate || 0).toFixed(1)}% / ₹${sgstAmt.toFixed(2)}</td>`
+      }
+      <td style="text-align:right">₹${total.toFixed(2)}</td>
+    </tr>`;
+  }).join('');
+
+  const hsnRows = (doc.hsn_summary || []).map(h => `<tr>
+    <td class="mono">${esc(h.hsn)}</td>
+    <td style="text-align:right">${(h.rate || 0).toFixed(1)}%</td>
+    <td style="text-align:right">₹${(h.taxable || 0).toFixed(2)}</td>
+    ${isInter ? `<td style="text-align:right">₹${(h.igst || 0).toFixed(2)}</td>` : `<td style="text-align:right">₹${(h.cgst || 0).toFixed(2)}</td><td style="text-align:right">₹${(h.sgst || 0).toFixed(2)}</td>`}
+    <td style="text-align:right">₹${((h.igst || 0) + (h.cgst || 0) + (h.sgst || 0)).toFixed(2)}</td>
+  </tr>`).join('');
+
+  const docNo = doc[opts.numberKey] || '';
+  const docDate = opts.kind === 'tax_invoice' ? doc.invoice_date : doc.proforma_date;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(docNo)}</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:20px}
+  .company-block{border-bottom:2px solid #1D3557;padding-bottom:8px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-start}
+  .company-block .company-name{font-size:22px;color:#1D3557;font-weight:bold;margin:0 0 4px}
+  .company-block .company-addr{font-size:11px;color:#4B5563;line-height:1.4}
+  .doc-title{font-size:20px;color:#1D3557;font-weight:bold;text-align:right}
+  .doc-title .sub{font-size:11px;color:#6B7280;font-weight:normal;text-transform:uppercase;letter-spacing:1px}
+  .meta{display:flex;justify-content:space-between;gap:16px;margin:16px 0}
+  .meta > div{flex:1}
+  .meta h3{font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:1px;margin:0 0 4px;font-weight:normal}
+  table.items, table.hsn{width:100%;border-collapse:collapse;margin:16px 0}
+  table.items th, table.items td, table.hsn th, table.hsn td{border:1px solid #ccc;padding:6px 8px;font-size:10px}
+  table.items th, table.hsn th{background:#F3F4F6;text-align:left}
+  .totals{margin-left:auto;width:340px;border-collapse:collapse}
+  .totals td{padding:4px 8px;font-size:11px}
+  .totals tr.grand td{border-top:2px solid #111;font-weight:bold;font-size:14px;padding-top:6px}
+  .notes{margin-top:16px;padding:10px;background:#F9FAFB;border:1px solid #E5E7EB;font-size:11px;white-space:pre-line;line-height:1.5}
+  .notes strong{display:block;margin-bottom:4px;color:#1D3557}
+  .qr-block{margin-top:16px;display:flex;gap:12px;align-items:center;font-size:10px;color:#555}
+  .qr-box{border:1px dashed #9CA3AF;width:80px;height:80px;display:flex;align-items:center;justify-content:center;font-size:9px;text-align:center;color:#6B7280}
+  @media print {@page {size:A4; margin:12mm;}}
+  .mono{font-family:'Courier New',monospace}
+</style></head><body>
+<div class="company-block">
+  <div>
+    <div class="company-name">${esc(company.name)}</div>
+    <div class="company-addr">${esc(company.address)}</div>
+    <div class="company-addr">Phone: ${esc(company.phone)} &nbsp; | &nbsp; Email: ${esc(company.email)}</div>
+    <div class="company-addr"><strong>GSTIN: ${esc(company.gstin)}</strong></div>
+  </div>
+  <div class="doc-title">
+    <div class="sub">${esc(opts.title)}</div>
+    <div>${esc(docNo)}</div>
+    <div style="font-size:10px;color:#6B7280;font-weight:normal;margin-top:4px">Date: ${docDate ? new Date(docDate).toLocaleDateString('en-IN') : '-'}</div>
+  </div>
+</div>
+
+<div class="meta">
+  <div>
+    <h3>Bill To</h3>
+    <div style="font-size:13px;font-weight:bold">${esc(doc.customer_name || '')}</div>
+    ${doc.contact_person ? `<div>Attn: ${esc(doc.contact_person)}</div>` : ''}
+    ${doc.billing_address ? `<div style="max-width:260px;white-space:pre-line">${esc(doc.billing_address)}</div>` : (doc.customer?.address ? `<div style="max-width:260px;white-space:pre-line">${esc(doc.customer.address)}</div>` : '')}
+    ${doc.email ? `<div>${esc(doc.email)}</div>` : ''}
+    ${doc.phone ? `<div>${esc(doc.phone)}</div>` : ''}
+    ${doc.customer?.gstin ? `<div><strong>GSTIN:</strong> ${esc(doc.customer.gstin)}</div>` : ''}
+  </div>
+  <div>
+    <h3>Ship To</h3>
+    <div style="max-width:260px;white-space:pre-line">${esc(doc.shipping_address || doc.billing_address || doc.customer?.address || '-')}</div>
+  </div>
+  <div style="text-align:right">
+    <h3>Details</h3>
+    ${doc.valid_until ? `<div><strong>Valid Until:</strong> ${new Date(doc.valid_until).toLocaleDateString('en-IN')}</div>` : ''}
+    ${doc.due_date ? `<div><strong>Due Date:</strong> ${new Date(doc.due_date).toLocaleDateString('en-IN')}</div>` : ''}
+    ${doc.place_of_supply ? `<div><strong>Place of Supply:</strong> ${esc(doc.place_of_supply)}</div>` : ''}
+    ${doc.proforma?.proforma_no ? `<div><strong>Ref PI:</strong> ${esc(doc.proforma.proforma_no)}</div>` : ''}
+    ${doc.quotation?.quotation_no ? `<div><strong>Ref Quotation:</strong> ${esc(doc.quotation.quotation_no)}</div>` : ''}
+    <div><strong>Tax Type:</strong> ${isInter ? 'IGST (Inter-state)' : 'CGST+SGST (Intra-state)'}</div>
+  </div>
+</div>
+
+<table class="items">
+  <thead><tr>
+    <th>#</th><th>Item Name</th><th>HSN</th><th>Qty</th><th>Rate</th><th>Disc</th><th>Taxable</th>
+    ${isInter ? '<th>IGST</th>' : '<th>CGST</th><th>SGST</th>'}
+    <th>Total</th>
+  </tr></thead>
+  <tbody>${rows || '<tr><td colspan="9" style="text-align:center">No lines</td></tr>'}</tbody>
+</table>
+
+<h4 style="font-size:11px;margin:16px 0 4px;color:#1D3557;text-transform:uppercase;letter-spacing:1px">HSN-wise Tax Summary</h4>
+<table class="hsn">
+  <thead><tr>
+    <th>HSN</th><th>Rate</th><th>Taxable</th>
+    ${isInter ? '<th>IGST</th>' : '<th>CGST</th><th>SGST</th>'}
+    <th>Total Tax</th>
+  </tr></thead>
+  <tbody>${hsnRows || `<tr><td colspan="${isInter ? 5 : 6}" style="text-align:center">-</td></tr>`}</tbody>
+</table>
+
+<table class="totals">
+  <tr><td>Subtotal (after discount):</td><td style="text-align:right">₹${(doc.subtotal || 0).toFixed(2)}</td></tr>
+  ${doc.total_discount ? `<tr><td>Total Discount:</td><td style="text-align:right">₹${doc.total_discount.toFixed(2)}</td></tr>` : ''}
+  ${isInter
+    ? `<tr><td>IGST:</td><td style="text-align:right">₹${(doc.igst || 0).toFixed(2)}</td></tr>`
+    : `<tr><td>CGST:</td><td style="text-align:right">₹${(doc.cgst || 0).toFixed(2)}</td></tr><tr><td>SGST:</td><td style="text-align:right">₹${(doc.sgst || 0).toFixed(2)}</td></tr>`
+  }
+  <tr class="grand"><td>Grand Total:</td><td style="text-align:right">₹${(doc.grand_total || 0).toFixed(2)}</td></tr>
+</table>
+
+${doc.qr_code ? `<div class="qr-block">
+  <div class="qr-box">QR<br/>Placeholder</div>
+  <div><strong>Payment QR</strong><br/>${esc(doc.qr_code)}</div>
+</div>` : ''}
+
+${doc.notes ? `<div class="notes"><strong>Notes</strong>${esc(doc.notes)}</div>` : ''}
+${doc.terms ? `<div class="notes"><strong>Terms &amp; Conditions</strong>${esc(doc.terms)}</div>` : ''}
+
+<div style="margin-top:40px;display:flex;justify-content:space-between;font-size:11px;color:#4B5563">
+  <div style="text-align:center;width:45%"><div style="border-top:1px solid #111;margin-top:40px;padding-top:4px">Customer Acceptance</div></div>
+  <div style="text-align:center;width:45%"><div style="border-top:1px solid #111;margin-top:40px;padding-top:4px">For ${esc(company.name)}</div></div>
+</div>
+
+<script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
+</body></html>`;
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = window.URL.createObjectURL(blob);
+  window.open(url, '_blank');
 }
 

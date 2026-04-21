@@ -1,0 +1,107 @@
+{
+  "summary": "Quote-to-Cash Chain (Quotation → Proforma Invoice → Tax Invoice) testing complete. All 18 backend API tests passed. Frontend UI tests verified: (1) Proformas Panel renders with data-testid proformas-panel and proformas-table, (2) Tax Invoices Panel renders with data-testid tax-invoices-panel and tax-invoices-table, (3) Number Series Panel renders with 5 doc types, editable fields, and live preview, (4) Sidebar Marketing dropdown has all 7 items (Contacts, Quotations, Proforma Invoices, Tax Invoices, Products, Number Series, Configuration), (5) Quotation to Proforma conversion dialog works with advance % input, (6) Proforma to Tax Invoice conversion dialog works with confirm button, (7) GST split shows CGST+SGST for intra-state and IGST for inter-state, (8) Tax Invoice FY format (INV-FY26-27/000001) working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dialog components", "issues": ["Console warning: Missing Description or aria-describedby for DialogContent - accessibility improvement needed"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_quote_to_cash.py",
+    "/app/test_reports/pytest/pytest_iteration_70.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Number Series configuration correctly supports 5 doc types with prefix, padding, next_number, and reset_yearly options",
+    "GST split logic correctly computes CGST+SGST for intra-state (same state_code) and IGST for inter-state (different state_code)",
+    "Tax Invoice FY format correctly uses Indian fiscal year (Apr-Mar) with format FY26-27",
+    "Proforma to Tax Invoice conversion correctly sets status='issued' and marks proforma as 'converted'",
+    "HSN-wise tax summary correctly aggregates by (hsn_code, gst_rate) combination",
+    "UPI QR placeholder correctly generated with format UPI://pay?pa=...&am=...&tn=..."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_quote_to_cash.py"
+  ],
+  "success_rate": {
+    "backend": "100% (18 passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created test customers (TEST_SameState_Customer, TEST_DiffState_Customer) for GST testing - cleaned up after tests",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Quote-to-Cash chain fully tested. Key features verified: (1) Number Series: GET /api/crm/number-series returns 5 doc types, PUT updates prefix/padding/next_number/reset_yearly (admin-only), (2) Proforma: POST /api/crm/proformas creates PI with GST split based on company vs customer state_code, (3) Tax Invoice: POST /api/crm/tax-invoices creates TI with UPI QR, (4) Conversions: POST /api/crm/quotations/{qid}/convert-to-proforma and POST /api/crm/proformas/{pid}/convert-to-tax-invoice work correctly, (5) Frontend panels: proformas-panel, tax-invoices-panel, number-series-panel all render correctly with proper data-testids, (6) Company state_code is '27' (Maharashtra) - use numeric state codes for GST testing.",
+  "features_tested": {
+    "number_series_crud": {
+      "status": "PASSED",
+      "tests": ["GET returns 5 doc types", "PUT updates all fields", "Admin-only access verified"]
+    },
+    "proforma_invoice_crud": {
+      "status": "PASSED",
+      "tests": ["Create with intra-state GST (CGST+SGST)", "Create with inter-state GST (IGST)", "List proformas", "Update allowed when not converted", "Delete blocked when converted"]
+    },
+    "tax_invoice_crud": {
+      "status": "PASSED",
+      "tests": ["List tax invoices", "Create direct", "Status update works", "Delete blocked when issued/paid"]
+    },
+    "quotation_to_proforma_conversion": {
+      "status": "PASSED",
+      "tests": ["Convert creates PI with correct data", "Quotation gets proforma_id/proforma_no link"]
+    },
+    "proforma_to_tax_invoice_conversion": {
+      "status": "PASSED",
+      "tests": ["Convert creates TI with status=issued", "Proforma status changes to converted", "Double convert returns 400"]
+    },
+    "tax_invoice_fy_format": {
+      "status": "PASSED",
+      "tests": ["Invoice number contains FY format (INV-FY26-27/000001)"]
+    },
+    "hsn_summary": {
+      "status": "PASSED",
+      "tests": ["HSN summary aggregates by (hsn, rate)", "Contains taxable, cgst, sgst, igst fields"]
+    },
+    "frontend_panels": {
+      "status": "PASSED",
+      "tests": ["Proformas panel visible", "Tax Invoices panel visible", "Number Series panel visible with 5 rows", "Sidebar has all 7 Marketing items"]
+    },
+    "frontend_dialogs": {
+      "status": "PASSED",
+      "tests": ["Quotation to Proforma dialog opens", "Advance % input visible", "Proforma to Tax Invoice confirm dialog opens"]
+    }
+  },
+  "backend_tests_summary": {
+    "total": 18,
+    "passed": 18,
+    "skipped": 0,
+    "failed": 0
+  },
+  "data_testid_patterns": {
+    "proformas_panel": "proformas-panel",
+    "proformas_table": "proformas-table",
+    "proforma_row": "proforma-row-{id}",
+    "proforma_print": "proforma-print-{id}",
+    "proforma_to_invoice": "proforma-to-invoice-{id}",
+    "proforma_delete": "proforma-delete-{id}",
+    "proforma_convert_confirm": ["proforma-convert-confirm-dialog", "proforma-convert-confirm-confirm-btn", "proforma-convert-confirm-cancel-btn"],
+    "tax_invoices_panel": "tax-invoices-panel",
+    "tax_invoices_table": "tax-invoices-table",
+    "tax_invoice_row": "tax-invoice-row-{id}",
+    "tax_invoice_print": "tax-invoice-print-{id}",
+    "number_series_panel": "number-series-panel",
+    "number_series_table": "number-series-table",
+    "number_series_row": "number-series-row-{doc_type}",
+    "number_series_prefix": "number-series-prefix-{doc_type}",
+    "number_series_next": "number-series-next-{doc_type}",
+    "number_series_yearly": "number-series-yearly-{doc_type}",
+    "number_series_save": "number-series-save-{doc_type}",
+    "quotation_to_proforma": "quotation-to-proforma-{id}",
+    "quotation_proforma_dialog": "quotation-proforma-dialog",
+    "proforma_advance_pct": "proforma-advance-pct",
+    "proforma_generate_btn": "proforma-generate-btn"
+  }
+}
