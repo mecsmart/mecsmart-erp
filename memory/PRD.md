@@ -173,8 +173,10 @@ Unified BOM process-cost source of truth. Previous design stored a component's p
 - [x] V1 CRM — Leads + Tickets + Quotations with Enquiry → Quotation → SO flow (iter 98)
 - [x] CRM Restructure — Sidebar nested Marketing/Support, Contacts, Pipeline Config, Products multi-picker on tickets (iter 99)
 - [x] CRM Batch Fixes — discount column, print, auto-convert on Accept, edit/delete when SO cancelled, CSV import, part delete referential integrity (iter 100)
+- [x] CRM UX Polish — ConfirmDialog everywhere, Quotation Send/Accept flow with popup, company header in print, multi-line T&C, Item Name column + item description below dropdown (iter 101)
+- [ ] Tax Invoice (GST-compliant invoice + tax breakup) — **next priority**
+- [ ] Packing List from BOM (first level) — **next priority**
 - [ ] Per-user CRM contact ownership (created_by filter)
-- [ ] Quotation → PDF generation (library-based vs. current HTML print)
 - [ ] P1: GST Phase 2 (GST-compliant invoice generation + tax breakup reports), P2: Backend refactoring (split server.py into routers/models)
 - [ ] P3: GSTR-1/3B report formats + ITC tracking
 - [ ] P4: Barcode/QR scanning for inventory transactions
