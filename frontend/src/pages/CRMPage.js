@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import {
   Plus, Edit2, Trash2, MessageSquare, UserCheck, AlertTriangle, Clock,
-  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload
+  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload, GitBranch
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -846,6 +846,7 @@ const QUOTATION_STATUSES = [
   { key: 'sent', label: 'Sent', color: 'bg-[#E1EFFE] text-[#1E429F]' },
   { key: 'accepted', label: 'Accepted', color: 'bg-[#DEF7EC] text-[#03543F]' },
   { key: 'rejected', label: 'Rejected', color: 'bg-[#FDE8E8] text-[#9B1C1C]' },
+  { key: 'superseded', label: 'Superseded (Revised)', color: 'bg-[#FEF3C7] text-[#92400E]' },
   { key: 'converted', label: 'Converted → SO', color: 'bg-[#FCE7F3] text-[#9D174D]' },
 ];
 
@@ -1033,7 +1034,15 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
-  const printQuotation = (q) => printInvoiceDoc(q, { kind: 'quotation', title: 'QUOTATION', numberKey: 'quotation_no', company: companySettings, user });
+  const printQuotation = (q) => printInvoiceDoc(q, { kind: 'quotation', title: 'QUOTATION', numberKey: 'quotation_no', company: companySettings, user, includeCover: !!(companySettings?.quotation_cover_intro || '').trim() });
+
+  const reviseQuotation = async (q) => {
+    try {
+      const res = await api.post(`/api/crm/quotations/${q.id}/revise`);
+      onRefresh();
+      alert(`New revision ${res.data.quotation_no} created as draft. Edit the new revision and send it to the customer.`);
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to create revision'); }
+  };
 
   const convertToSO = async () => {
     try {
@@ -1126,6 +1135,9 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                       {canEdit && q.status !== 'rejected' && (
                         <button onClick={() => setProformaConfirm({ open: true, quotation: q })} className="p-1.5 text-[#1E429F] hover:bg-[#E1EFFE] rounded" title={q.proforma_id ? 'Create another Proforma Invoice' : 'Convert to Proforma Invoice'} data-testid={`quotation-to-proforma-${q.id}`}><FileText className="w-4 h-4" /></button>
                       )}
+                      {canEdit && ['sent', 'rejected', 'superseded'].includes(q.status) && (
+                        <button onClick={() => reviseQuotation(q)} className="p-1.5 text-[#92400E] hover:bg-[#FEF3C7] rounded" title="Create Revision (clones this quotation as a new editable draft)" data-testid={`quotation-revise-${q.id}`}><GitBranch className="w-4 h-4" /></button>
+                      )}
                       {canEdit && !isLocked && <button onClick={() => openDialog(q, null)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`quotation-edit-${q.id}`}><Edit2 className="w-4 h-4" /></button>}
                       {canEdit && !isLocked && <button onClick={() => setDeleteConfirm({ open: true, quotation: q })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`quotation-delete-${q.id}`}><Trash2 className="w-4 h-4" /></button>}
                     </div>
@@ -1170,7 +1182,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                 <Select value={form.customer_id || '__none__'} onValueChange={v => {
                   if (v === '__none__') { setForm(f => ({ ...f, customer_id: '' })); return; }
                   const c = customers.find(x => x.id === v);
-                  setForm(f => ({ ...f, customer_id: v, customer_name: c?.name || f.customer_name, contact_person: c?.contact_person || f.contact_person, email: c?.email || f.email, phone: c?.phone || f.phone }));
+                  // When a customer is picked, the Customer Name field becomes a mirror of the master record (locked).
+                  setForm(f => ({ ...f, customer_id: v, customer_name: c?.name || '', contact_person: c?.contact_person || '', email: c?.email || '', phone: c?.phone || '' }));
                 }}>
                   <SelectTrigger data-testid="quotation-customer-select"><SelectValue placeholder="— Free text only —" /></SelectTrigger>
                   <SelectContent>
@@ -1180,8 +1193,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                 </Select>
               </div>
               <div>
-                <label className="block text-xs font-semibold mb-1">Customer Name *</label>
-                <input type="text" className="input-field" value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} data-testid="quotation-customer-name" />
+                <label className="block text-xs font-semibold mb-1">Customer Name *{form.customer_id && <span className="ml-1 text-[10px] text-[#6B7280]">(auto-synced from master)</span>}</label>
+                <input type="text" className={`input-field ${form.customer_id ? 'bg-[#F9FAFB] cursor-not-allowed' : ''}`} value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} readOnly={!!form.customer_id} data-testid="quotation-customer-name" />
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1">Contact Person</label>
@@ -1230,7 +1243,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                       <th className="text-left p-2 w-24">Rate (₹)</th>
                       <th className="text-left p-2 w-20">Disc %</th>
                       <th className="text-left p-2 w-20">GST %</th>
-                      <th className="text-right p-2 w-28">Amount</th>
+                      <th className="text-right p-2 w-36">Amount</th>
                       <th className="w-10"></th>
                     </tr>
                   </thead>
@@ -1250,15 +1263,9 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                                 {items.slice(0, 500).map(it => <SelectItem key={it.id} value={it.id}>{it.part_number} · {it.name}</SelectItem>)}
                               </SelectContent>
                             </Select>
-                            {(() => {
-                              const it = items.find(x => x.id === l.item_id);
-                              const desc = it?.description || '';
-                              if (!desc) return null;
-                              return <div className="text-[10px] text-[#6B7280] mt-1 leading-tight" data-testid={`quotation-line-itemdesc-${idx}`}>{desc}</div>;
-                            })()}
                           </td>
                           <td className="p-2">
-                            <input type="text" className="input-field h-7 text-xs" value={l.description} onChange={e => updateLine(idx, { description: e.target.value })} />
+                            <textarea rows={2} className="input-field text-xs resize-y min-h-[28px]" value={l.description} onChange={e => updateLine(idx, { description: e.target.value })} placeholder="Free text description (editable)" data-testid={`quotation-line-desc-${idx}`} />
                           </td>
                           <td className="p-2">
                             <input type="number" step="0.01" className="input-field mono h-7 text-xs" value={l.quantity} onChange={e => updateLine(idx, { quantity: e.target.value })} data-testid={`quotation-line-qty-${idx}`} />
@@ -1764,6 +1771,53 @@ function PipelineConfigPanel({ pipelineType, onRefresh, canEdit }) {
           <div className="flex-1" />
           <button className="btn-secondary flex items-center gap-1" onClick={reset} disabled={saving} data-testid="stage-reset-btn"><RefreshCw className="w-4 h-4" /> Reset to Defaults</button>
           <button className="btn-primary" onClick={save} disabled={saving} data-testid="stage-save-btn">{saving ? 'Saving...' : 'Save Configuration'}</button>
+        </div>
+      )}
+
+      {pipelineType === 'marketing' && <QuotationCoverPageConfig canEdit={canEdit} />}
+    </div>
+  );
+}
+
+function QuotationCoverPageConfig({ canEdit }) {
+  const { companySettings, refreshSettings } = useCompanySettings();
+  const [intro, setIntro] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setIntro(companySettings?.quotation_cover_intro || '');
+  }, [companySettings]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.put('/api/settings/company', { quotation_cover_intro: intro });
+      await refreshSettings();
+      alert('Quotation Cover Page saved. It will be prepended as the first page of every Quotation printout going forward.');
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to save'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="card-flat p-4 space-y-3" data-testid="quotation-cover-config">
+      <div>
+        <h3 className="text-sm font-semibold text-[#1D3557]">Quotation Cover Page</h3>
+        <p className="text-xs text-[#6B7280] mt-1">When you print any quotation, this intro paragraph is prepended as a **dedicated cover page** alongside the company logo, title, customer name, date, and the logged-in user&apos;s signature. Leave blank to skip the cover page.</p>
+      </div>
+      <textarea
+        className="w-full px-3 py-2 border border-[#D1D5DB] rounded-sm text-sm"
+        rows={6}
+        placeholder={"Example:\n\nDear Sir/Madam,\n\nThank you for the opportunity to quote. Please find attached our proposal for your kind consideration. We look forward to your esteemed order.\n\nWarm regards,"}
+        value={intro}
+        onChange={e => setIntro(e.target.value)}
+        disabled={!canEdit}
+        data-testid="quotation-cover-intro-textarea"
+      />
+      {canEdit && (
+        <div className="flex justify-end">
+          <button className="btn-primary" onClick={save} disabled={saving} data-testid="quotation-cover-save-btn">
+            {saving ? 'Saving...' : 'Save Cover Page'}
+          </button>
         </div>
       )}
     </div>
@@ -2675,16 +2729,41 @@ function NumberSeriesPanel({ canEdit }) {
 /* ============================================================================
  *  Shared printable invoice renderer (Proforma + Tax Invoice)
  * ========================================================================= */
+
+// Convert a number to Indian-format words ("Rupees X Only")
+function numberToIndianWords(num) {
+  const n = Math.round(parseFloat(num) || 0);
+  if (n === 0) return 'Rupees Zero Only';
+  const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+    'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const twoDigit = (x) => x < 20 ? a[x] : b[Math.floor(x / 10)] + (x % 10 ? ' ' + a[x % 10] : '');
+  const threeDigit = (x) => (x > 99 ? a[Math.floor(x / 100)] + ' Hundred' + (x % 100 ? ' ' + twoDigit(x % 100) : '') : twoDigit(x));
+  let x = n, parts = [];
+  const crore = Math.floor(x / 10000000); x %= 10000000;
+  const lakh = Math.floor(x / 100000); x %= 100000;
+  const thousand = Math.floor(x / 1000); x %= 1000;
+  const rest = x;
+  if (crore) parts.push(threeDigit(crore) + ' Crore');
+  if (lakh) parts.push(threeDigit(lakh) + ' Lakh');
+  if (thousand) parts.push(threeDigit(thousand) + ' Thousand');
+  if (rest) parts.push(threeDigit(rest));
+  return 'Rupees ' + parts.join(' ') + ' Only';
+}
+
 function printInvoiceDoc(doc, opts) {
   const esc = (s) => String(s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const company = opts.company || {};
   const user = opts.user || {};
   const cfg = {
     name: company.company_name || 'Company Name',
+    tagline: company.tagline || '',
+    logo_data: company.logo_data || '',
     address_line1: company.address || 'Company Address Line 1',
     address_line2: [company.city, company.state, company.pin_code].filter(Boolean).join(', ') || company.address_line2 || '',
     phone: company.phone || '',
     email: company.email || '',
+    website: company.website || '',
     gstin: company.gstin || '',
     bank_name: company.bank_name || '',
     bank_branch: company.bank_branch || '',
@@ -2695,8 +2774,12 @@ function printInvoiceDoc(doc, opts) {
   const isInter = !!doc.is_inter_state;
   const isTaxInvoice = opts.kind === 'tax_invoice';
   const isProforma = opts.kind === 'proforma';
-  const titleColor = isProforma ? '#0f766e' : (isTaxInvoice ? '#7f1d1d' : '#1e3a8a');  // PI teal, TI maroon, Quotation navy
+  const isQuotation = opts.kind === 'quotation';
+  // Accent colors — user-approved: Quotation #444853 (slate), PI #E0C09A (tan/beige), TI maroon.
+  const titleColor = isProforma ? '#E0C09A' : (isTaxInvoice ? '#7f1d1d' : '#444853');
   const accentColor = titleColor;
+  // For beige (PI), use dark foreground on header; otherwise white.
+  const headerFg = isProforma ? '#3d3222' : '#ffffff';
 
   const rows = (doc.lines || []).map((l, i) => {
     const qty = parseFloat(l.quantity || 0);
@@ -2710,14 +2793,12 @@ function printInvoiceDoc(doc, opts) {
     const total = basic + gstAmt;
     const partNum = l.item?.part_number || '';
     const itemName = l.item?.name || '';
-    const headTitle = partNum ? `${partNum} — ${itemName}` : (l.description ? l.description.split('\n')[0] : '-');
-    const subDesc = l.description && (l.description !== itemName) ? l.description : '';
+    const headTitle = partNum ? `${partNum} — ${itemName}` : (itemName || '-');
+    const desc = l.description || '';
     return `<tr>
       <td class="sn">${i + 1}</td>
-      <td class="itemcell">
-        <div class="item-name">${esc(headTitle)}</div>
-        ${subDesc ? `<div class="item-desc">${esc(subDesc)}</div>` : ''}
-      </td>
+      <td class="itemcell"><div class="item-name">${esc(headTitle)}</div></td>
+      <td class="desc-cell">${esc(desc) || '<span style="color:#cbd5e1">-</span>'}</td>
       <td class="center mono">${esc(l.hsn_code || l.item?.hsn_code || '-')}</td>
       <td class="right">${qty.toFixed(2)}</td>
       <td class="center">${esc(l.uom || '')}</td>
@@ -2750,18 +2831,21 @@ function printInvoiceDoc(doc, opts) {
   /* Header */
   .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
   .brand-left{flex:1;display:flex;gap:12px;align-items:flex-start}
-  .logo{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,${accentColor},#64748b);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;letter-spacing:-0.5px;flex-shrink:0}
+  .logo-wrap{flex-shrink:0;display:flex;align-items:center;justify-content:center}
+  .logo-img{max-height:72px;max-width:180px;object-fit:contain}
+  .logo-fallback{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,${accentColor},#64748b);display:flex;align-items:center;justify-content:center;color:${headerFg};font-weight:800;font-size:18px;letter-spacing:-0.5px}
   .brand-block .company-name{font-size:17px;font-weight:800;color:#0f172a;margin:0 0 2px}
+  .brand-block .tagline{font-size:10px;color:${accentColor};font-style:italic;margin-bottom:4px;letter-spacing:0.3px}
   .brand-block .company-addr{font-size:10px;color:#475569;line-height:1.5}
   .doc-right{text-align:right}
   .doc-right .title{font-size:16px;font-weight:800;color:${accentColor};letter-spacing:0.5px;margin:0;text-transform:uppercase}
   .doc-right .docno{font-size:14px;font-weight:700;color:#0f172a;margin-top:2px}
   .doc-right .quoref{font-size:10px;color:#475569;margin-top:2px}
   /* Info bar */
-  .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:${accentColor};color:#fff;margin-top:14px;border-radius:2px;overflow:hidden}
-  .info-bar .col{padding:10px 14px;border-right:1px solid rgba(255,255,255,0.15)}
+  .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:${accentColor};color:${headerFg};margin-top:14px;border-radius:2px;overflow:hidden}
+  .info-bar .col{padding:10px 14px;border-right:1px solid rgba(${isProforma ? '0,0,0' : '255,255,255'},0.15)}
   .info-bar .col:last-child{border-right:none}
-  .info-bar .label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.75);margin-bottom:2px}
+  .info-bar .label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:${isProforma ? 'rgba(61,50,34,0.75)' : 'rgba(255,255,255,0.75)'};margin-bottom:2px}
   .info-bar .value{font-size:13px;font-weight:700}
   /* Address rows */
   .address-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0}
@@ -2770,11 +2854,12 @@ function printInvoiceDoc(doc, opts) {
   .addr-box .line{font-size:10px;color:#475569;line-height:1.5;white-space:pre-line}
   /* Items table */
   table.items{width:100%;border-collapse:collapse;margin-top:6px}
-  table.items thead th{background:${accentColor};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding:8px 6px;font-weight:600;border:none}
+  table.items thead th{background:${accentColor};color:${headerFg};font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding:8px 6px;font-weight:600;border:none}
   table.items tbody td{border-bottom:1px solid #e2e8f0;padding:8px 6px;font-size:10px;vertical-align:top}
   table.items tbody tr:last-child td{border-bottom:2px solid ${accentColor}}
   .sn{width:28px;text-align:center;color:#64748b;font-weight:600}
-  .itemcell{min-width:180px}
+  .itemcell{min-width:150px}
+  .desc-cell{min-width:160px;font-size:9.5px;color:#334155;white-space:pre-line;line-height:1.45}
   .item-name{font-weight:600;color:#0f172a;font-size:11px}
   .item-desc{font-size:9px;color:#64748b;margin-top:3px;line-height:1.4;white-space:pre-line;font-style:italic}
   .center{text-align:center}
@@ -2792,8 +2877,10 @@ function printInvoiceDoc(doc, opts) {
   .totals td{padding:6px 10px;font-size:11px;border-bottom:1px solid #e2e8f0}
   .totals td.lbl{color:#64748b;text-align:left}
   .totals td.val{text-align:right;font-weight:600;color:#0f172a;font-family:'Courier New',monospace}
-  .totals tr.grand td{background:${accentColor};color:#fff;font-size:15px;font-weight:800;padding:10px;border-bottom:none}
-  .totals tr.grand td.val{color:#fff}
+  .totals tr.grand td{background:${accentColor};color:${headerFg};font-size:15px;font-weight:800;padding:10px;border-bottom:none}
+  .totals tr.grand td.val{color:${headerFg}}
+  .amt-in-words{margin-top:10px;padding:8px 12px;background:#f8fafc;border-left:3px solid ${accentColor};font-size:10px;color:#334155;font-style:italic}
+  .amt-in-words strong{color:#0f172a;font-style:normal}
   /* HSN summary */
   h4.section{font-size:10px;color:${accentColor};text-transform:uppercase;letter-spacing:1px;margin:18px 0 6px;font-weight:700}
   table.hsn{width:100%;border-collapse:collapse;font-size:10px}
@@ -2812,24 +2899,65 @@ function printInvoiceDoc(doc, opts) {
   .sign-col .line-box{border-top:1px solid #0f172a;padding-top:4px;color:#475569;font-weight:600}
   .sign-col .auth-label{font-size:9px;color:#94a3b8}
   .footer-note{text-align:center;margin-top:24px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:9px;color:#94a3b8}
+  /* Cover page */
+  .cover-page{min-height:95vh;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:50px 30px;text-align:center;border:1px solid ${accentColor};border-top:6px solid ${accentColor};border-radius:2px}
+  .cover-head{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:40px}
+  .cover-logo{max-height:110px;max-width:260px;object-fit:contain}
+  .cover-company{font-size:22px;font-weight:800;color:#0f172a;letter-spacing:0.5px}
+  .cover-tagline{font-size:12px;color:${accentColor};font-style:italic;letter-spacing:0.3px}
+  .cover-title{font-size:42px;font-weight:900;color:${accentColor};letter-spacing:4px;margin:40px 0 6px}
+  .cover-docno{font-size:14px;color:#334155;font-family:'Courier New',monospace;margin-bottom:30px}
+  .cover-meta{display:flex;flex-direction:column;gap:8px;font-size:13px;color:#334155;margin-bottom:40px}
+  .cover-meta-label{color:#64748b;text-transform:uppercase;font-size:10px;letter-spacing:1px;margin-right:6px}
+  .cover-intro{max-width:540px;font-size:12px;color:#334155;line-height:1.75;text-align:left;padding:20px 0;white-space:pre-line;margin-bottom:60px}
+  .cover-sign{margin-top:auto;text-align:center;font-size:11px;color:#475569}
+  .cover-sign-img{max-height:72px;max-width:220px;object-fit:contain;margin-bottom:6px}
+  .cover-sign-name{font-size:13px;font-weight:700;color:#0f172a}
+  .cover-sign-title{font-size:10px;color:#64748b}
   @media print {@page {size:A4;margin:10mm} body{padding:0}}
 </style></head><body>
-<div class="page">
+<div class="page">${(isQuotation && opts.includeCover) ? `
+  <!-- Cover Page -->
+  <div class="cover-page">
+    <div class="cover-head">
+      ${cfg.logo_data ? `<img src="${esc(cfg.logo_data)}" class="cover-logo" alt="logo"/>` : `<div class="logo-fallback" style="width:100px;height:100px;font-size:36px">${esc((cfg.name || 'C').charAt(0).toUpperCase())}</div>`}
+      <div class="cover-company">${esc(cfg.name)}</div>
+      ${cfg.tagline ? `<div class="cover-tagline">${esc(cfg.tagline)}</div>` : ''}
+    </div>
+    <div class="cover-title">QUOTATION</div>
+    <div class="cover-docno">${esc(docNo)}${(doc.revision && doc.revision > 0) ? ` · Rev ${doc.revision}` : ''}</div>
+    <div class="cover-meta">
+      <div><span class="cover-meta-label">To:</span> <strong>${esc(doc.customer_name || '')}</strong></div>
+      <div><span class="cover-meta-label">Date:</span> ${docDate ? new Date(docDate).toLocaleDateString('en-IN') : '-'}</div>
+    </div>
+    ${(company.quotation_cover_intro || '') ? `<div class="cover-intro">${esc(company.quotation_cover_intro)}</div>` : ''}
+    <div class="cover-sign">
+      ${user.signature_url ? `<img src="${esc(user.signature_url)}" class="cover-sign-img" alt="sign"/>` : ''}
+      <div class="cover-sign-name">${esc(user.name || 'Authorised Signatory')}</div>
+      <div class="cover-sign-title">For ${esc(cfg.name)}</div>
+    </div>
+  </div>
+  <div style="page-break-after:always"></div>
+` : ''}
   <!-- Header -->
   <div class="header">
     <div class="brand-left">
-      <div class="logo">${esc((cfg.name || 'C').charAt(0).toUpperCase())}</div>
+      <div class="logo-wrap">
+        ${cfg.logo_data ? `<img src="${esc(cfg.logo_data)}" class="logo-img" alt="logo"/>` : `<div class="logo-fallback">${esc((cfg.name || 'C').charAt(0).toUpperCase())}</div>`}
+      </div>
       <div class="brand-block">
         <div class="company-name">${esc(cfg.name)}</div>
+        ${cfg.tagline ? `<div class="tagline">${esc(cfg.tagline)}</div>` : ''}
         ${cfg.address_line1 ? `<div class="company-addr">${esc(cfg.address_line1)}</div>` : ''}
         ${cfg.address_line2 ? `<div class="company-addr">${esc(cfg.address_line2)}</div>` : ''}
         ${(cfg.phone || cfg.email) ? `<div class="company-addr">${cfg.phone ? 'Phone: ' + esc(cfg.phone) : ''}${cfg.phone && cfg.email ? ' | ' : ''}${cfg.email ? esc(cfg.email) : ''}</div>` : ''}
+        ${cfg.website ? `<div class="company-addr">Web: ${esc(cfg.website)}</div>` : ''}
         ${cfg.gstin ? `<div class="company-addr"><strong>GSTIN: ${esc(cfg.gstin)}</strong></div>` : ''}
       </div>
     </div>
     <div class="doc-right">
       <div class="title">${esc(opts.title)}</div>
-      <div class="docno">${esc(docNo)}</div>
+      <div class="docno">${esc(docNo)}${(doc.revision && doc.revision > 0) ? ` <span style="color:${accentColor};font-size:11px">· Rev ${doc.revision}</span>` : ''}</div>
       ${doc.quotation?.quotation_no ? `<div class="quoref">Ref Quotation: <strong>${esc(doc.quotation.quotation_no)}</strong></div>` : ''}
       ${doc.proforma?.proforma_no ? `<div class="quoref">Ref PI: <strong>${esc(doc.proforma.proforma_no)}</strong></div>` : ''}
       ${doc.sales_order?.order_number ? `<div class="quoref">Ref SO: <strong>${esc(doc.sales_order.order_number)}</strong></div>` : ''}
@@ -2856,11 +2984,20 @@ function printInvoiceDoc(doc, opts) {
       ${doc.phone ? `<div class="line">${esc(doc.phone)}</div>` : ''}
       ${doc.customer?.gstin ? `<div class="line"><strong>GSTIN:</strong> ${esc(doc.customer.gstin)}</div>` : ''}
     </div>
+    ${isTaxInvoice && doc.customer_po_number ? `
+    <div class="addr-box">
+      <h3>PO Reference</h3>
+      <div class="name">${esc(doc.customer_po_number)}</div>
+      ${doc.sales_order?.order_number ? `<div class="line">Linked SO: <strong>${esc(doc.sales_order.order_number)}</strong></div>` : ''}
+      ${doc.place_of_supply ? `<div class="line">Place of Supply: <strong>${esc(doc.place_of_supply)}</strong></div>` : ''}
+    </div>
+    ` : `
     <div class="addr-box">
       <h3>Ship To</h3>
       <div class="name">${esc(doc.customer_name || '')}</div>
       <div class="line">${esc(doc.shipping_address || doc.billing_address || doc.customer?.address || '-')}</div>
     </div>
+    `}
   </div>
 
   <!-- Items -->
@@ -2869,6 +3006,7 @@ function printInvoiceDoc(doc, opts) {
       <tr>
         <th class="sn">Sl</th>
         <th>Item Name</th>
+        <th>Description</th>
         <th class="center">HSN</th>
         <th class="right">Qty</th>
         <th class="center">UOM</th>
@@ -2879,8 +3017,11 @@ function printInvoiceDoc(doc, opts) {
         <th class="right">Total</th>
       </tr>
     </thead>
-    <tbody>${rows || '<tr><td colspan="10" style="text-align:center;padding:20px">No line items</td></tr>'}</tbody>
+    <tbody>${rows || '<tr><td colspan="11" style="text-align:center;padding:20px">No line items</td></tr>'}</tbody>
   </table>
+
+  <!-- Amount in words -->
+  <div class="amt-in-words"><strong>Amount in Words:</strong> ${esc(numberToIndianWords(doc.grand_total || 0))}</div>
 
   <!-- Bank + Totals -->
   <div class="bottom-row">

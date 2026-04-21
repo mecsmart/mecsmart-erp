@@ -772,6 +772,8 @@ class CompanySettingsUpdate(BaseModel):
     bank_account: Optional[str] = None
     bank_ifsc: Optional[str] = None
     bank_upi: Optional[str] = None
+    # Optional intro paragraph prepended as a cover page when printing Quotations.
+    quotation_cover_intro: Optional[str] = None
 
 class CustomerCreate(BaseModel):
     code: Optional[str] = ""  # Auto-generated from number series if blank
@@ -9046,6 +9048,51 @@ async def delete_quotation(qid: str, request: Request):
         raise HTTPException(status_code=400, detail="Cannot delete a quotation with an active linked Sales Order. Cancel the SO first.")
     await db.crm_quotations.delete_one({"id": qid})
     return {"message": "Quotation deleted"}
+
+
+@crm_router.post("/quotations/{qid}/revise", status_code=201)
+async def revise_quotation(qid: str, request: Request):
+    """Clone a quotation as a new revision.
+
+    The original becomes read-only (status=superseded). The new quotation:
+      - shares the same `root_quotation_no` (defaulting to the original's quotation_no)
+      - keeps the same base prefix and appends `-R<n>` to the number (e.g. QUO-000001 → QUO-000001-R1)
+      - starts as status=draft so the salesperson can edit it
+    """
+    user = await get_current_user(request)
+    original = await db.crm_quotations.find_one({"id": qid})
+    if not original:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+
+    root_no = original.get("root_quotation_no") or original.get("quotation_no")
+    # Count existing revisions sharing this root and bump.
+    existing_revs = await db.crm_quotations.count_documents({"root_quotation_no": root_no}) if root_no else 0
+    # If root has never been set, the original counts as rev 0 — so first revision is 1.
+    new_revision = max(int(original.get("revision") or 0) + 1, existing_revs + 1)
+    new_quotation_no = f"{root_no}-R{new_revision}"
+
+    clone = {k: v for k, v in original.items() if k != "_id"}
+    clone.update({
+        "id": str(uuid.uuid4()),
+        "quotation_no": new_quotation_no,
+        "root_quotation_no": root_no,
+        "revision": new_revision,
+        "previous_revision_id": qid,
+        "status": "draft",
+        "converted_so_id": "",
+        "converted_so_no": "",
+        "proforma_id": "",
+        "proforma_no": "",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"],
+    })
+    await db.crm_quotations.insert_one(clone)
+    # Mark original with root + link + bump parent status to 'superseded' if not accepted/converted
+    update_original = {"root_quotation_no": root_no, "superseded_by_id": clone["id"], "superseded_by_no": new_quotation_no, "updated_at": datetime.now(timezone.utc)}
+    if original.get("status") not in ("accepted", "converted"):
+        update_original["status"] = "superseded"
+    await db.crm_quotations.update_one({"id": qid}, {"$set": update_original})
+    return await _enrich_quotation(clone)
 
 @crm_router.post("/quotations/{qid}/convert-to-so")
 async def convert_quotation_to_so(qid: str, payload: dict = Body(default={}), request: Request = None):

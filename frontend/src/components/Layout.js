@@ -51,7 +51,6 @@ const crmMarketingItems = [
   { name: 'Proforma Invoices', href: '/crm?tab=marketing&sub=proformas', icon: FileStack, module: 'crm_marketing' },
   { name: 'Tax Invoices', href: '/crm?tab=marketing&sub=tax-invoices', icon: Calculator, module: 'crm_marketing' },
   { name: 'Products', href: '/items', icon: Package, module: 'items' },
-  { name: 'Number Series', href: '/crm?tab=marketing&sub=number-series', icon: Settings2, module: 'crm_marketing' },
   { name: 'Configuration', href: '/crm?tab=marketing&sub=configuration', icon: Cog, module: 'crm_marketing' },
 ];
 
