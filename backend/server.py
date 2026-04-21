@@ -1064,7 +1064,38 @@ async def delete_item(item_id: str, request: Request):
     user = await get_current_user(request)
     if user["role"] not in ["admin"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+
+    # Referential integrity — block delete if the item is referenced in transactions
+    checks = [
+        ("boms", {"$or": [{"parent_item_id": item_id}, {"components.item_id": item_id}]}, "BOM(s)"),
+        ("purchase_orders", {"line_items.item_id": item_id}, "Purchase Order(s)"),
+        ("grns", {"line_items.item_id": item_id}, "GRN(s)"),
+        ("subcontract_orders", {"$or": [{"lines.item_id": item_id}, {"job_work_parts.item_id": item_id}]}, "Subcontract Order(s)"),
+        ("delivery_challans", {"lines.item_id": item_id}, "Delivery Challan(s)"),
+        ("work_orders", {"item_id": item_id}, "Work/Manufacturing Order(s)"),
+        ("production_orders", {"$or": [{"bom_id": {"$exists": True}}, {"lines.bom_id": {"$exists": True}}]}, None),  # SOs resolved via BOM link — handled separately below
+        ("inventory_transactions", {"item_id": item_id}, "Inventory transaction(s)"),
+        ("purchase_invoices", {"line_items.item_id": item_id}, "Purchase Invoice(s)"),
+        ("crm_quotations", {"lines.item_id": item_id}, "Quotation(s)"),
+        ("crm_tickets", {"product_ids": item_id}, "Support Ticket(s)"),
+    ]
+    blockers = []
+    for coll_name, query, label in checks:
+        if label is None:
+            continue  # skip production_orders (resolved via BOM)
+        try:
+            coll = db[coll_name]
+            cnt = await coll.count_documents(query)
+            if cnt > 0:
+                blockers.append(f"{cnt} {label}")
+        except Exception:
+            pass
+    if blockers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete — this item is referenced in: {', '.join(blockers)}. Remove those records first.",
+        )
+
     result = await db.items.delete_one({"id": item_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -6261,6 +6292,52 @@ async def create_customer(data: CustomerCreate, request: Request):
     customer_doc.pop("_id", None)
     return customer_doc
 
+@customers_router.post("/import")
+async def import_customers(payload: dict = Body(...), request: Request = None):
+    """Bulk import customers/contacts from rows[]. Each row needs at least `name`."""
+    user = await get_current_user(request)
+    rows = payload.get("rows") or []
+    if not rows:
+        raise HTTPException(status_code=400, detail="No rows to import")
+    created = 0
+    skipped = []
+    for idx, r in enumerate(rows, start=1):
+        try:
+            name = (r.get("name") or "").strip()
+            if not name:
+                skipped.append({"row": idx, "reason": "missing name"}); continue
+            # Match by code or name to avoid duplicates
+            if r.get("code"):
+                existing = await db.customers.find_one({"code": r["code"]}, {"_id": 0, "id": 1})
+                if existing:
+                    skipped.append({"row": idx, "reason": f"code {r['code']} exists"}); continue
+            count = await db.customers.count_documents({})
+            code = r.get("code") or f"CUST-{str(count+1).zfill(6)}"
+            doc = {
+                "id": str(uuid.uuid4()),
+                "code": code,
+                "name": name,
+                "gstin": r.get("gstin", ""),
+                "state_code": r.get("state_code", ""),
+                "contact_person": r.get("contact_person", ""),
+                "email": r.get("email", ""),
+                "phone": r.get("phone", ""),
+                "address": r.get("address", ""),
+                "address_line2": r.get("address_line2", ""),
+                "city": r.get("city", ""),
+                "state": r.get("state", ""),
+                "pin_code": r.get("pin_code", ""),
+                "payment_terms": r.get("payment_terms", "Net 30"),
+                "status": r.get("status", "active"),
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"],
+            }
+            await db.customers.insert_one(doc)
+            created += 1
+        except Exception as e:
+            skipped.append({"row": idx, "reason": str(e)})
+    return {"created": created, "skipped": skipped, "total": len(rows)}
+
 @customers_router.put("/{customer_id}")
 async def update_customer(customer_id: str, data: CustomerUpdate, request: Request):
     user = await get_current_user(request)
@@ -8465,6 +8542,75 @@ async def delete_lead(lead_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Lead not found")
     return {"message": "Lead deleted"}
 
+@crm_router.post("/leads/import")
+async def import_leads(payload: dict = Body(...), request: Request = None):
+    """Bulk-import leads from an array of rows. Each row must have at least `name` and either
+    `customer_id` (existing) OR `customer_name` (creates a minimal customer on the fly with address if provided).
+    """
+    user = await get_current_user(request)
+    rows = payload.get("rows") or []
+    if not rows:
+        raise HTTPException(status_code=400, detail="No rows to import")
+    created = 0
+    skipped = []
+    for idx, r in enumerate(rows, start=1):
+        try:
+            name = (r.get("name") or "").strip()
+            if not name:
+                skipped.append({"row": idx, "reason": "missing lead name"}); continue
+            customer_id = r.get("customer_id")
+            if not customer_id:
+                cust_name = (r.get("customer_name") or "").strip()
+                if not cust_name:
+                    skipped.append({"row": idx, "reason": "missing customer_id and customer_name"}); continue
+                # Try match by name
+                existing = await db.customers.find_one({"name": cust_name}, {"_id": 0, "id": 1})
+                if existing:
+                    customer_id = existing["id"]
+                else:
+                    # Create minimal customer
+                    ccount = await db.customers.count_documents({})
+                    cdoc = {
+                        "id": str(uuid.uuid4()),
+                        "code": r.get("customer_code") or f"CUST-{str(ccount+1).zfill(6)}",
+                        "name": cust_name,
+                        "gstin": r.get("gstin", ""),
+                        "contact_person": r.get("contact_person", ""),
+                        "email": r.get("email", ""),
+                        "phone": r.get("phone", ""),
+                        "address": r.get("address", ""),
+                        "status": "active",
+                        "created_at": datetime.now(timezone.utc),
+                        "created_by": user["id"],
+                    }
+                    await db.customers.insert_one(cdoc)
+                    customer_id = cdoc["id"]
+            # Build lead
+            count = await db.crm_leads.count_documents({})
+            lead_no = f"LEAD-{str(count+1).zfill(6)}"
+            lead_doc = {
+                "id": str(uuid.uuid4()),
+                "lead_no": lead_no,
+                "name": name,
+                "customer_id": customer_id,
+                "customer_name": r.get("customer_name", ""),
+                "contact_person": r.get("contact_person", ""),
+                "email": r.get("email", ""),
+                "phone": r.get("phone", ""),
+                "source": r.get("source", "website"),
+                "estimated_value": float(r.get("estimated_value") or 0),
+                "notes": r.get("notes", ""),
+                "stage": r.get("stage") or "enquiry",
+                "activities": [{"note": "Lead imported via bulk import", "created_at": datetime.now(timezone.utc), "created_by": user["id"], "author_name": user.get("name")}],
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"],
+            }
+            await db.crm_leads.insert_one(lead_doc)
+            created += 1
+        except Exception as e:
+            skipped.append({"row": idx, "reason": str(e)})
+    return {"created": created, "skipped": skipped, "total": len(rows)}
+
 # --------- TICKETS (Support) ---------
 @crm_router.get("/tickets")
 async def list_tickets(request: Request, stage: Optional[str] = None):
@@ -8680,8 +8826,9 @@ class QuotationLine(BaseModel):
     quantity: float
     uom: Optional[str] = "Nos"
     rate: float
+    discount_pct: Optional[float] = 0.0   # % off line amount before GST
     gst_rate: Optional[float] = 18.0
-    amount: Optional[float] = 0.0  # qty * rate (excl. GST)
+    amount: Optional[float] = 0.0  # (qty * rate) * (1 - discount/100), excl. GST
 
 class QuotationCreate(BaseModel):
     lead_id: Optional[str] = ""
@@ -8713,18 +8860,24 @@ class QuotationUpdate(BaseModel):
 
 def _compute_quotation_totals(lines):
     subtotal = 0.0
+    total_discount = 0.0
     total_gst = 0.0
     for idx, l in enumerate(lines, start=1):
         qty = float(l.get("quantity") or 0)
         rate = float(l.get("rate") or 0)
+        discount_pct = float(l.get("discount_pct") or 0)
         gst_rate = float(l.get("gst_rate") or 0)
-        amount = qty * rate
+        gross = qty * rate
+        discount = gross * discount_pct / 100.0
+        net = gross - discount
         l["line_no"] = idx
-        l["amount"] = round(amount, 2)
-        subtotal += amount
-        total_gst += amount * gst_rate / 100.0
+        l["amount"] = round(net, 2)
+        subtotal += net
+        total_discount += discount
+        total_gst += net * gst_rate / 100.0
     return {
         "subtotal": round(subtotal, 2),
+        "total_discount": round(total_discount, 2),
         "total_gst": round(total_gst, 2),
         "grand_total": round(subtotal + total_gst, 2),
     }
@@ -8746,6 +8899,8 @@ async def _enrich_quotation(q):
             it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1})
             if it:
                 ln["item"] = it
+    # Compute lock flag
+    q["is_locked"] = await _quotation_is_locked(q)
     return q
 
 @crm_router.get("/quotations")
@@ -8796,23 +8951,65 @@ async def create_quotation(data: QuotationCreate, request: Request):
         )
     return await _enrich_quotation(doc)
 
+async def _quotation_is_locked(q):
+    """Quotation is locked for edit/delete only when its linked SO is still active.
+    If the linked SO has been cancelled, the quotation becomes unlocked again.
+    """
+    if q.get("status") != "converted":
+        return False
+    so_id = q.get("converted_so_id")
+    if not so_id:
+        return True  # marked converted but no SO reference — still lock
+    so = await db.production_orders.find_one({"id": so_id}, {"_id": 0, "status": 1})
+    if not so:
+        return False  # SO vanished — unlock
+    return so.get("status") not in ("cancelled",)
+
 @crm_router.put("/quotations/{qid}")
 async def update_quotation(qid: str, data: QuotationUpdate, request: Request):
-    await get_current_user(request)
+    user = await get_current_user(request)
     existing = await db.crm_quotations.find_one({"id": qid})
     if not existing:
         raise HTTPException(status_code=404, detail="Quotation not found")
-    if existing.get("status") == "converted":
-        raise HTTPException(status_code=400, detail="Cannot edit a converted quotation")
+    locked = await _quotation_is_locked(existing)
+    if locked:
+        raise HTTPException(status_code=400, detail="Cannot edit a quotation with an active linked Sales Order. Cancel the SO first.")
+
     update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
     if "lines" in update:
         lines = [l if isinstance(l, dict) else l.model_dump() for l in update["lines"]]
         totals = _compute_quotation_totals(lines)
         update["lines"] = lines
         update.update(totals)
+
+    new_status = update.get("status")
+    # Auto-convert to SO when status transitions to 'accepted'
+    auto_convert = (
+        new_status == "accepted"
+        and existing.get("status") != "accepted"
+        and not existing.get("converted_so_id")
+    )
+
+    # If quotation was previously converted and SO was cancelled, resetting to draft/sent allows re-use
+    if existing.get("status") == "converted" and not locked and new_status in (None, "draft", "sent"):
+        # Clear the converted link so the quotation becomes freshly editable
+        update.setdefault("converted_so_id", "")
+        update.setdefault("converted_so_no", "")
+
     update["updated_at"] = datetime.now(timezone.utc)
     await db.crm_quotations.update_one({"id": qid}, {"$set": update})
-    return await _enrich_quotation(await db.crm_quotations.find_one({"id": qid}))
+
+    if auto_convert:
+        # Fire the same convert flow used by the explicit action
+        try:
+            await convert_quotation_to_so(qid, payload={}, request=request)
+        except HTTPException as he:
+            # Roll back the status change so the user sees the failure
+            await db.crm_quotations.update_one({"id": qid}, {"$set": {"status": existing.get("status") or "draft"}})
+            raise he
+
+    refreshed = await db.crm_quotations.find_one({"id": qid})
+    return await _enrich_quotation(refreshed)
 
 @crm_router.delete("/quotations/{qid}")
 async def delete_quotation(qid: str, request: Request):
@@ -8820,8 +9017,8 @@ async def delete_quotation(qid: str, request: Request):
     existing = await db.crm_quotations.find_one({"id": qid})
     if not existing:
         raise HTTPException(status_code=404, detail="Quotation not found")
-    if existing.get("status") == "converted":
-        raise HTTPException(status_code=400, detail="Cannot delete a quotation already converted to SO")
+    if await _quotation_is_locked(existing):
+        raise HTTPException(status_code=400, detail="Cannot delete a quotation with an active linked Sales Order. Cancel the SO first.")
     await db.crm_quotations.delete_one({"id": qid})
     return {"message": "Quotation deleted"}
 

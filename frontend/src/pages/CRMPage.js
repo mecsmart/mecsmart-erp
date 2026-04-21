@@ -4,7 +4,7 @@ import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import {
   Plus, Edit2, Trash2, MessageSquare, UserCheck, AlertTriangle, Clock,
-  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw
+  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -125,32 +125,7 @@ export default function CRMPage() {
         </div>
       </div>
 
-      {/* Top tab strip — only shown on pipeline views (no sub) */}
-      {!activeSub && (
-      <div className="flex gap-2 border-b border-[#E5E7EB]">
-        <button
-          className={`px-4 py-2 text-sm font-medium flex items-center gap-2 ${activeTab === 'marketing' ? 'text-[#1D3557] border-b-2 border-[#1D3557]' : 'text-[#6B7280] hover:text-[#111827]'}`}
-          onClick={() => { setActiveTab('marketing'); navigate('/crm?tab=marketing'); }}
-          data-testid="crm-tab-marketing"
-        >
-          <Megaphone className="w-4 h-4" /> Marketing ({leads.length})
-        </button>
-        <button
-          className={`px-4 py-2 text-sm font-medium flex items-center gap-2 ${activeTab === 'quotations' ? 'text-[#1D3557] border-b-2 border-[#1D3557]' : 'text-[#6B7280] hover:text-[#111827]'}`}
-          onClick={() => { setActiveTab('quotations'); navigate('/crm?tab=quotations'); }}
-          data-testid="crm-tab-quotations"
-        >
-          <FileText className="w-4 h-4" /> Quotations ({quotations.length})
-        </button>
-        <button
-          className={`px-4 py-2 text-sm font-medium flex items-center gap-2 ${activeTab === 'support' ? 'text-[#1D3557] border-b-2 border-[#1D3557]' : 'text-[#6B7280] hover:text-[#111827]'}`}
-          onClick={() => { setActiveTab('support'); navigate('/crm?tab=support'); }}
-          data-testid="crm-tab-support"
-        >
-          <Headphones className="w-4 h-4" /> Support ({tickets.length})
-        </button>
-      </div>
-      )}
+      {/* Top tab strip removed — sidebar CRM group drives all navigation now */}
 
       {/* -------- Main content based on tab + sub -------- */}
       {activeTab === 'marketing' && !activeSub && (
@@ -271,7 +246,6 @@ function MarketingPanel({ leads, users, customers, stages, search, onRefresh, ca
   };
 
   const deleteLead = async (lead) => {
-    if (!window.confirm(`Delete lead "${lead.name}"?`)) return;
     try { await api.delete(`/api/crm/leads/${lead.id}`); onRefresh(); }
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
@@ -323,9 +297,12 @@ function MarketingPanel({ leads, users, customers, stages, search, onRefresh, ca
           ))}
         </div>
         {canEdit && (
-          <button className="btn-primary flex items-center gap-1" onClick={() => openDialog(null)} data-testid="add-lead-btn">
-            <Plus className="w-4 h-4" /> New Lead
-          </button>
+          <div className="flex gap-2">
+            <LeadImportButton onImported={onRefresh} />
+            <button className="btn-primary flex items-center gap-1" onClick={() => openDialog(null)} data-testid="add-lead-btn">
+              <Plus className="w-4 h-4" /> New Lead
+            </button>
+          </div>
         )}
       </div>
 
@@ -609,7 +586,6 @@ function SupportPanel({ tickets, customers, users, items, stages, search, onRefr
   };
 
   const deleteTicket = async (t) => {
-    if (!window.confirm(`Delete ticket "${t.ticket_no}"?`)) return;
     try { await api.delete(`/api/crm/tickets/${t.id}`); onRefresh(); }
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
@@ -838,7 +814,7 @@ const QUOTATION_STATUSES = [
 ];
 
 function emptyQuotationLine() {
-  return { item_id: '', description: '', quantity: 1, uom: 'Nos', rate: 0, gst_rate: 18 };
+  return { item_id: '', description: '', quantity: 1, uom: 'Nos', rate: 0, discount_pct: 0, gst_rate: 18 };
 }
 
 function QuotationsPanel({ quotations, leads, customers, items, search, onRefresh, canEdit, prefillFromLead, onPrefillConsumed }) {
@@ -920,13 +896,16 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
   };
 
   const totals = React.useMemo(() => {
-    let sub = 0, gst = 0;
+    let sub = 0, gst = 0, discount = 0;
     form.lines.forEach(l => {
-      const a = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
-      sub += a;
-      gst += a * ((parseFloat(l.gst_rate) || 0) / 100);
+      const gross = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
+      const dsc = gross * ((parseFloat(l.discount_pct) || 0) / 100);
+      const net = gross - dsc;
+      discount += dsc;
+      sub += net;
+      gst += net * ((parseFloat(l.gst_rate) || 0) / 100);
     });
-    return { sub, gst, total: sub + gst };
+    return { sub, gst, discount, total: sub + gst };
   }, [form.lines]);
 
   const save = async () => {
@@ -953,6 +932,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
           quantity: parseFloat(l.quantity) || 0,
           uom: l.uom || 'Nos',
           rate: parseFloat(l.rate) || 0,
+          discount_pct: parseFloat(l.discount_pct) || 0,
           gst_rate: parseFloat(l.gst_rate) || 0,
         })),
       };
@@ -963,14 +943,94 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
   };
 
   const deleteQuotation = async (q) => {
-    if (!window.confirm(`Delete quotation ${q.quotation_no}?`)) return;
     try { await api.delete(`/api/crm/quotations/${q.id}`); onRefresh(); }
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
   const quickStatusChange = async (q, status) => {
-    try { await api.put(`/api/crm/quotations/${q.id}`, { status }); onRefresh(); }
+    try {
+      const res = await api.put(`/api/crm/quotations/${q.id}`, { status });
+      onRefresh();
+      if (status === 'accepted' && res.data?.converted_so_no) {
+        alert(`Quotation accepted & converted to Sales Order ${res.data.converted_so_no}.`);
+      }
+    }
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const printQuotation = (q) => {
+    // Build a simple printable HTML + Blob URL (bypass iframe constraints per established pattern)
+    const lines = q.lines || [];
+    const rows = lines.map((l, i) => {
+      const gross = (l.quantity || 0) * (l.rate || 0);
+      const disc = gross * ((l.discount_pct || 0) / 100);
+      const net = gross - disc;
+      const gstAmt = net * ((l.gst_rate || 0) / 100);
+      return `<tr>
+        <td style="text-align:center">${i + 1}</td>
+        <td>${(l.item?.part_number ? l.item.part_number + ' · ' : '') + (l.description || l.item?.name || '')}</td>
+        <td style="text-align:right">${(l.quantity || 0).toFixed(2)}</td>
+        <td>${l.uom || ''}</td>
+        <td style="text-align:right">₹${(l.rate || 0).toFixed(2)}</td>
+        <td style="text-align:right">${(l.discount_pct || 0).toFixed(2)}%</td>
+        <td style="text-align:right">₹${net.toFixed(2)}</td>
+        <td style="text-align:right">${(l.gst_rate || 0).toFixed(1)}%</td>
+        <td style="text-align:right">₹${(net + gstAmt).toFixed(2)}</td>
+      </tr>`;
+    }).join('');
+    const totalDisc = (q.total_discount || 0);
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${q.quotation_no}</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:20px}
+  h1{font-size:20px;color:#1D3557;margin:0 0 4px}
+  .meta{display:flex;justify-content:space-between;margin:12px 0}
+  table{width:100%;border-collapse:collapse;margin:16px 0}
+  th,td{border:1px solid #ccc;padding:6px 8px;font-size:11px}
+  th{background:#F3F4F6;text-align:left}
+  .totals{margin-left:auto;width:300px}
+  .totals td{border:none;padding:3px 6px}
+  .totals tr.grand td{border-top:2px solid #111;font-weight:bold;font-size:14px}
+  .notes{margin-top:16px;padding:8px;background:#F9FAFB;border:1px solid #E5E7EB;font-size:11px}
+  @media print {@page {size:A4; margin:15mm;}}
+</style></head><body>
+<div style="border-bottom:2px solid #1D3557;padding-bottom:8px;margin-bottom:12px">
+  <h1>Quotation</h1>
+  <div style="font-size:11px;color:#4B5563">Machinery Manufacturing ERP</div>
+</div>
+<div class="meta">
+  <div>
+    <div><strong>Quotation No:</strong> ${q.quotation_no}</div>
+    <div><strong>Date:</strong> ${q.quotation_date ? new Date(q.quotation_date).toLocaleDateString('en-IN') : '-'}</div>
+    ${q.valid_until ? `<div><strong>Valid Until:</strong> ${new Date(q.valid_until).toLocaleDateString('en-IN')}</div>` : ''}
+    ${q.lead?.lead_no ? `<div><strong>Ref Lead:</strong> ${q.lead.lead_no}</div>` : ''}
+    <div><strong>Status:</strong> ${(q.status || '').toUpperCase()}${q.converted_so_no ? ` (SO: ${q.converted_so_no})` : ''}</div>
+  </div>
+  <div style="text-align:right">
+    <div style="font-size:14px;font-weight:bold">${q.customer_name || ''}</div>
+    ${q.contact_person ? `<div>Attn: ${q.contact_person}</div>` : ''}
+    ${q.email ? `<div>${q.email}</div>` : ''}
+    ${q.phone ? `<div>${q.phone}</div>` : ''}
+    ${q.customer?.address ? `<div style="max-width:260px">${q.customer.address}</div>` : ''}
+    ${q.customer?.gstin ? `<div>GSTIN: ${q.customer.gstin}</div>` : ''}
+  </div>
+</div>
+<table>
+  <thead><tr><th>#</th><th>Item / Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Discount</th><th>Amount</th><th>GST</th><th>Total</th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="9" style="text-align:center">No lines</td></tr>'}</tbody>
+</table>
+<table class="totals">
+  <tr><td>Subtotal (after discount):</td><td style="text-align:right">₹${(q.subtotal || 0).toFixed(2)}</td></tr>
+  ${totalDisc ? `<tr><td>Total Discount:</td><td style="text-align:right">₹${totalDisc.toFixed(2)}</td></tr>` : ''}
+  <tr><td>GST:</td><td style="text-align:right">₹${(q.total_gst || 0).toFixed(2)}</td></tr>
+  <tr class="grand"><td>Grand Total:</td><td style="text-align:right">₹${(q.grand_total || 0).toFixed(2)}</td></tr>
+</table>
+${q.notes ? `<div class="notes"><strong>Notes:</strong><br/>${q.notes}</div>` : ''}
+${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions:</strong><br/>${q.terms}</div>` : ''}
+<script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
+</body></html>`;
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    window.open(url, '_blank');
   };
 
   const convertToSO = async () => {
@@ -1024,7 +1084,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
             {filtered.length === 0 && <tr><td colSpan={9} className="text-center py-6 text-sm text-[#6B7280]">No quotations yet. Click "New Quotation" to create one.</td></tr>}
             {filtered.map(q => {
               const statusData = QUOTATION_STATUSES.find(s => s.key === q.status);
-              const isLocked = q.status === 'converted';
+              const isLocked = q.is_locked === true;  // from backend: true if converted & linked SO not cancelled
+              const isConverted = q.status === 'converted';
               return (
                 <tr key={q.id} data-testid={`quotation-row-${q.id}`}>
                   <td className="mono font-medium">{q.quotation_no}</td>
@@ -1049,14 +1110,15 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                       </Select>
                     ) : (
                       <span className={`status-badge ${statusData?.color || ''}`}>{statusData?.label || q.status}
-                        {q.converted_so_no && <span className="ml-1 text-[10px]">({q.converted_so_no})</span>}
+                        {q.converted_so_no && <span className="ml-1 text-[10px]">({q.converted_so_no}{q.converted_so?.status === 'cancelled' ? ' · Cancelled' : ''})</span>}
                       </span>
                     )}
                   </td>
                   <td>
                     <div className="flex items-center gap-0.5">
-                      {canEdit && !isLocked && q.status !== 'rejected' && (
-                        <button onClick={() => setConvertDialog({ open: true, quotation: q })} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Convert to Sales Order" data-testid={`quotation-convert-${q.id}`}><Send className="w-4 h-4" /></button>
+                      <button onClick={() => printQuotation(q)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`quotation-print-${q.id}`}><Printer className="w-4 h-4" /></button>
+                      {canEdit && !isLocked && !isConverted && q.status !== 'rejected' && (
+                        <button onClick={() => quickStatusChange(q, 'accepted')} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Accept & Generate SO" data-testid={`quotation-accept-${q.id}`}><CheckCircle2 className="w-4 h-4" /></button>
                       )}
                       {canEdit && !isLocked && <button onClick={() => openDialog(q, null)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`quotation-edit-${q.id}`}><Edit2 className="w-4 h-4" /></button>}
                       {canEdit && !isLocked && <button onClick={() => deleteQuotation(q)} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`quotation-delete-${q.id}`}><Trash2 className="w-4 h-4" /></button>}
@@ -1160,6 +1222,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                       <th className="text-left p-2 w-20">Qty</th>
                       <th className="text-left p-2 w-20">UOM</th>
                       <th className="text-left p-2 w-24">Rate (₹)</th>
+                      <th className="text-left p-2 w-20">Disc %</th>
                       <th className="text-left p-2 w-20">GST %</th>
                       <th className="text-right p-2 w-28">Amount</th>
                       <th className="w-10"></th>
@@ -1167,7 +1230,9 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   </thead>
                   <tbody>
                     {form.lines.map((l, idx) => {
-                      const amount = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
+                      const gross = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
+                      const disc = gross * ((parseFloat(l.discount_pct) || 0) / 100);
+                      const amount = gross - disc;
                       return (
                         <tr key={idx} className="border-t border-[#E5E7EB]" data-testid={`quotation-line-${idx}`}>
                           <td className="p-2 mono">{idx + 1}</td>
@@ -1193,6 +1258,9 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                             <input type="number" step="0.01" className="input-field mono h-7 text-xs" value={l.rate} onChange={e => updateLine(idx, { rate: e.target.value })} data-testid={`quotation-line-rate-${idx}`} />
                           </td>
                           <td className="p-2">
+                            <input type="number" step="0.01" className="input-field mono h-7 text-xs" value={l.discount_pct || 0} onChange={e => updateLine(idx, { discount_pct: e.target.value })} data-testid={`quotation-line-discount-${idx}`} />
+                          </td>
+                          <td className="p-2">
                             <input type="number" step="0.01" className="input-field mono h-7 text-xs" value={l.gst_rate} onChange={e => updateLine(idx, { gst_rate: e.target.value })} />
                           </td>
                           <td className="p-2 text-right mono">{formatCurrency(amount)}</td>
@@ -1209,7 +1277,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
               </div>
               <div className="flex justify-end mt-2 text-xs">
                 <div className="w-64 space-y-1">
-                  <div className="flex justify-between"><span>Subtotal:</span><span className="mono">{formatCurrency(totals.sub)}</span></div>
+                  <div className="flex justify-between"><span>Subtotal (after discount):</span><span className="mono">{formatCurrency(totals.sub)}</span></div>
+                  {totals.discount > 0 && <div className="flex justify-between text-[#9B1C1C]"><span>Discount:</span><span className="mono">-{formatCurrency(totals.discount)}</span></div>}
                   <div className="flex justify-between"><span>GST:</span><span className="mono">{formatCurrency(totals.gst)}</span></div>
                   <div className="flex justify-between font-semibold border-t border-[#E5E7EB] pt-1"><span>Grand Total:</span><span className="mono">{formatCurrency(totals.total)}</span></div>
                 </div>
@@ -1411,7 +1480,12 @@ function ContactsPanel({ customers, search, onRefresh, canEdit }) {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <div className="text-sm text-[#4B5563]">{filtered.length} contact{filtered.length !== 1 ? 's' : ''} in master</div>
-        {canEdit && <button className="btn-primary flex items-center gap-1" onClick={() => openDialog(null)} data-testid="add-contact-btn"><Plus className="w-4 h-4" /> New Contact</button>}
+        {canEdit && (
+          <div className="flex gap-2">
+            <ContactImportButton onImported={onRefresh} />
+            <button className="btn-primary flex items-center gap-1" onClick={() => openDialog(null)} data-testid="add-contact-btn"><Plus className="w-4 h-4" /> New Contact</button>
+          </div>
+        )}
       </div>
       <div className="card-flat overflow-hidden">
         <table className="w-full data-table" data-testid="contacts-table">
@@ -1743,5 +1817,138 @@ function ActivityLogPanel({ search }) {
       </div>
     </div>
   );
+}
+
+
+/* ============================================================================
+ *  SHARED — CSV Import Button (Leads / Contacts)
+ * ========================================================================= */
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length === 0) return [];
+  const parseLine = (line) => {
+    const out = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (ch === ',' && !inQ) { out.push(cur); cur = ''; }
+      else cur += ch;
+    }
+    out.push(cur);
+    return out.map(x => x.trim());
+  };
+  const headers = parseLine(lines[0]).map(h => h.toLowerCase().replace(/\s+/g, '_'));
+  return lines.slice(1).map(line => {
+    const cols = parseLine(line);
+    const row = {};
+    headers.forEach((h, i) => { row[h] = cols[i] || ''; });
+    return row;
+  });
+}
+
+function CSVImportButton({ endpoint, sample, testid, label = 'Import CSV', onImported }) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState([]);
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = React.useRef(null);
+
+  const onFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = parseCSV(String(ev.target.result));
+        setRows(parsed);
+        setResult(null);
+      } catch (err) { alert('Failed to parse CSV: ' + err.message); }
+    };
+    reader.readAsText(f);
+  };
+
+  const importNow = async () => {
+    if (rows.length === 0) { alert('Load a CSV first'); return; }
+    setBusy(true);
+    try {
+      const res = await api.post(endpoint, { rows });
+      setResult(res.data);
+      onImported && onImported();
+    } catch (e) { alert(e.response?.data?.detail || 'Import failed'); }
+    finally { setBusy(false); }
+  };
+
+  const downloadSample = () => {
+    const blob = new Blob([sample], { type: 'text/csv;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'sample.csv'; a.click();
+    setTimeout(() => window.URL.revokeObjectURL(url), 500);
+  };
+
+  return (
+    <>
+      <button className="btn-secondary flex items-center gap-1" onClick={() => { setOpen(true); setRows([]); setResult(null); }} data-testid={testid}>
+        <Upload className="w-4 h-4" /> {label}
+      </button>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setRows([]); setResult(null); } }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid={`${testid}-dialog`}>
+          <DialogHeader><DialogTitle className="font-[Chivo]">{label}</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-3 text-sm">
+            <div className="bg-[#FEF3C7] border border-[#92400E] rounded-sm p-2 text-xs flex items-start justify-between gap-2">
+              <div>
+                <div className="font-semibold mb-1">CSV Format</div>
+                Provide a header row with column names like: <span className="mono">{sample.split('\n')[0]}</span>
+              </div>
+              <button className="btn-secondary text-xs whitespace-nowrap" onClick={downloadSample} data-testid={`${testid}-sample`}>Download sample</button>
+            </div>
+            <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} className="input-field" data-testid={`${testid}-file`} />
+            {rows.length > 0 && (
+              <div>
+                <div className="font-semibold mb-1 text-xs">Preview ({rows.length} rows)</div>
+                <div className="border border-[#E5E7EB] rounded-sm overflow-auto max-h-60">
+                  <table className="w-full text-[11px]">
+                    <thead className="bg-[#F3F4F6]"><tr>{Object.keys(rows[0]).map(h => <th key={h} className="text-left p-1 border-r border-[#E5E7EB]">{h}</th>)}</tr></thead>
+                    <tbody>
+                      {rows.slice(0, 10).map((r, i) => (
+                        <tr key={i} className="border-t border-[#E5E7EB]">{Object.keys(rows[0]).map(h => <td key={h} className="p-1 border-r border-[#E5E7EB]">{r[h]}</td>)}</tr>
+                      ))}
+                      {rows.length > 10 && <tr><td colSpan={Object.keys(rows[0]).length} className="p-1 text-center text-[#6B7280]">... {rows.length - 10} more</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {result && (
+              <div className={`border rounded-sm p-2 text-xs ${result.skipped?.length > 0 ? 'bg-[#FEF2F2] border-[#9B1C1C]' : 'bg-[#DEF7EC] border-[#03543F]'}`}>
+                <div className="font-semibold">Import complete</div>
+                <div>Created: <strong>{result.created}</strong> · Skipped: <strong>{result.skipped?.length || 0}</strong> · Total: {result.total}</div>
+                {result.skipped?.length > 0 && (
+                  <ul className="mt-1 list-disc list-inside">{result.skipped.slice(0, 5).map((s, i) => <li key={i}>Row {s.row}: {s.reason}</li>)}</ul>
+                )}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-3 border-t">
+              <button className="btn-secondary" onClick={() => setOpen(false)}>Close</button>
+              {!result && <button className="btn-primary" onClick={importNow} disabled={busy || rows.length === 0} data-testid={`${testid}-submit`}>{busy ? 'Importing...' : `Import ${rows.length} rows`}</button>}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function LeadImportButton({ onImported }) {
+  const sample = 'name,customer_name,contact_person,email,phone,source,estimated_value,stage,notes\nWebsite enquiry - ABC,ABC Pumps Ltd,John Doe,john@abc.com,9876543210,website,50000,enquiry,Follow up next week';
+  return <CSVImportButton endpoint="/api/crm/leads/import" sample={sample} testid="lead-import-btn" label="Import Leads" onImported={onImported} />;
+}
+
+function ContactImportButton({ onImported }) {
+  const sample = 'code,name,gstin,contact_person,email,phone,address,city,state,pin_code,payment_terms,status\nCUST-001,ABC Pumps Ltd,27AABCD1234E1Z5,John Doe,john@abc.com,9876543210,123 MIDC Road,Pune,Maharashtra,411001,Net 30,active';
+  return <CSVImportButton endpoint="/api/customers/import" sample={sample} testid="contact-import-btn" label="Import Contacts" onImported={onImported} />;
 }
 

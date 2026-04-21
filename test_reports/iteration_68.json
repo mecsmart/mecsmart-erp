@@ -1,0 +1,92 @@
+{
+  "summary": "CRM Batch Fixes testing complete. All 16 backend API tests passed. Frontend UI tests verified: (1) Support panel without top tab strip (sidebar drives navigation), (2) Quotation discount_pct column with correct totals computation, (3) Quotation accept auto-converts to SO with status=converted, (4) Quotation is_locked flag working (Edit/Delete hidden when SO active, visible when SO cancelled), (5) Lead/Contact import buttons present, (6) Lead/Ticket delete working, (7) Part delete blocked when referenced in transactions.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Quotation Dialog", "issues": ["Console warning: Missing Description or aria-describedby for DialogContent - accessibility improvement needed (existing issue)"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_crm_batch_fixes.py",
+    "/app/test_reports/pytest/pytest_iteration_68.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "All CRM batch fixes implemented correctly",
+    "Part delete referential integrity working - blocks delete when item referenced in BOMs/POs/GRNs/SC/DC/WO/Inventory/PI/Quotations/Tickets",
+    "Quotation discount_pct calculation verified: 10×1000 with 10% disc → subtotal 9000, gst 1620, total 10620",
+    "Quotation accept auto-converts to SO and sets status=converted",
+    "Quotation is_locked flag correctly computed based on linked SO status",
+    "Lead/Customer import endpoints working with auto-customer creation and duplicate skip",
+    "Lead and Ticket delete endpoints working"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_crm_batch_fixes.py"
+  ],
+  "success_rate": {
+    "backend": "100% (16 passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created test items, quotations, leads, tickets, customers during testing (cleaned up)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "CRM batch fixes fully tested. Key features verified: (1) Part delete blocked if referenced in any transaction (BOM/PO/GRN/SC/DC/WO/Inventory/PI/Quotation/Ticket), (2) Quotation line discount_pct with correct totals (subtotal=sum(qty*rate*(1-disc/100)), total_discount, total_gst, grand_total), (3) Quotation status=accepted auto-converts to SO and sets status=converted, updates lead to won, (4) Quotation is_locked=true when converted & SO active, false when SO cancelled, (5) Quotation edit/delete blocked when locked (400), allowed when SO cancelled, (6) Lead import with auto-customer creation, (7) Customer import with duplicate skip by code, (8) Lead/Ticket delete working, (9) Support panel has no top tab strip (sidebar drives navigation), (10) Quotation form has Disc % column, (11) Lead/Contact import buttons present.",
+  "features_tested": {
+    "part_delete_referential_integrity": {
+      "status": "PASSED",
+      "tests": ["Unreferenced item delete succeeds", "Item in quotation blocked (400)", "Item in ticket blocked (400)"]
+    },
+    "quotation_discount_calculation": {
+      "status": "PASSED",
+      "tests": ["10×1000 with 10% disc → subtotal 9000, gst 1620, total 10620", "Multi-line with different discounts calculated correctly"]
+    },
+    "quotation_accept_auto_convert": {
+      "status": "PASSED",
+      "tests": ["status=accepted auto-generates SO", "status changes to converted", "converted_so_id and converted_so_no set"]
+    },
+    "quotation_locking": {
+      "status": "PASSED",
+      "tests": ["Draft quotation is_locked=false", "Converted with active SO is_locked=true", "Edit blocked when locked (400)", "Delete blocked when locked (400)", "Unlocked when SO cancelled", "Delete succeeds after SO cancelled"]
+    },
+    "lead_import": {
+      "status": "PASSED",
+      "tests": ["Import with auto-customer creation", "Missing name skipped"]
+    },
+    "customer_import": {
+      "status": "PASSED",
+      "tests": ["Import succeeds", "Duplicate by code skipped"]
+    },
+    "lead_ticket_delete": {
+      "status": "PASSED",
+      "tests": ["Lead delete works", "Ticket delete works", "Draft quotation delete works"]
+    },
+    "frontend_support_no_tabs": {
+      "status": "PASSED",
+      "tests": ["No crm-tab-marketing element", "No crm-tab-quotations element", "No crm-tab-support element", "Sidebar drives navigation"]
+    },
+    "frontend_quotation_discount_column": {
+      "status": "PASSED",
+      "tests": ["Disc % column in line editor", "Subtotal (after discount) shown", "GST and Grand Total shown"]
+    },
+    "frontend_quotation_locking_ui": {
+      "status": "PASSED",
+      "tests": ["Converted quotation: Edit/Delete/Accept hidden, Print visible", "Draft quotation: Edit/Delete visible"]
+    },
+    "frontend_import_buttons": {
+      "status": "PASSED",
+      "tests": ["Lead Import button present", "Contact Import button present"]
+    }
+  },
+  "backend_tests_summary": {
+    "total": 16,
+    "passed": 16,
+    "skipped": 0,
+    "failed": 0
+  }
+}
