@@ -172,11 +172,26 @@ Unified BOM process-cost source of truth. Previous design stored a component's p
 - [x] Purchase Invoice from GRN with process cost (iter 63)
 - [x] V1 CRM — Leads + Tickets + Quotations with Enquiry → Quotation → SO flow (iter 98)
 - [x] CRM Restructure — Sidebar nested Marketing/Support, Contacts, Pipeline Config, Products multi-picker on tickets (iter 99)
+- [x] CRM Batch Fixes — discount column, print, auto-convert on Accept, edit/delete when SO cancelled, CSV import, part delete referential integrity (iter 100)
+- [ ] Per-user CRM contact ownership (created_by filter)
+- [ ] Quotation → PDF generation (library-based vs. current HTML print)
 - [ ] P1: GST Phase 2 (GST-compliant invoice generation + tax breakup reports), P2: Backend refactoring (split server.py into routers/models)
 - [ ] P3: GSTR-1/3B report formats + ITC tracking
 - [ ] P4: Barcode/QR scanning for inventory transactions
 - [ ] P5: Gantt chart for work order scheduling
 - [ ] Future: Windows-native desktop wrapper (Electron/Tauri)
+
+## CRM Batch Fixes (iter 100)
+- **Top tab strip removed** — sidebar Marketing/Support groups now drive all CRM navigation; no duplicate tabs.
+- **Quotation discount column** — per-line `discount_pct`, backend recomputes subtotal/total_discount/total_gst/grand_total on create/update.
+- **Quotation status flow** — Setting status=`accepted` via PUT auto-triggers convert-to-SO (creates Sales Order, marks quotation `converted`, moves linked lead to `won`). UI exposes an `Accept & Generate SO` action button on draft/sent quotations.
+- **is_locked flag** — backend enrichment returns `is_locked=true` only when status=converted AND linked SO is still active. When SO is cancelled, is_locked becomes false, re-enabling quotation edit/delete.
+- **Quotation printout** — HTML print via Blob URL + window.open pattern (bypasses iframe restrictions). Shows company header, customer block, line table with Qty/Rate/Disc/Amount/GST/Total and a totals block.
+- **Lead / Contact CSV Import** — `/api/crm/leads/import` and `/api/customers/import` batch endpoints. Frontend preview (first 10 rows), sample CSV downloader, and import-summary display (created / skipped with reasons).
+- **Part delete referential integrity** — `DELETE /api/items/{id}` now counts references across BOMs, POs, GRNs, Subcontract Orders, DCs, Work Orders, Inventory transactions, Purchase Invoices, Quotations, Tickets and blocks deletion with a detailed list when any reference exists.
+- **Confirm dialogs removed** — lead/ticket/quotation delete previously used `window.confirm` (blocked in iframe). Removed confirmation; direct delete via API with error handling.
+
+
 
 ## CRM Restructure (iter 99)
 - **Sidebar**: CRM group now sits right after Dashboard, expanded by default. Nested Marketing (pipeline + Contacts / Quotations / Products / Configuration) and Support (pipeline + SLA Due / Activity Logs / Configuration) dropdowns. Clicking the parent (Marketing/Support) navigates to its pipeline; chevron toggles children.
