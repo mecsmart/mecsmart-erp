@@ -69,6 +69,7 @@ class UserCreate(BaseModel):
     role_group_id: str  # REQUIRED — all users must be mapped to a group
 
 class UserUpdate(BaseModel):
+    email: Optional[str] = None  # Admins can update another user's email / login ID
     name: Optional[str] = None
     role: Optional[str] = None
     password: Optional[str] = None
@@ -774,6 +775,8 @@ class CompanySettingsUpdate(BaseModel):
     bank_upi: Optional[str] = None
     # Optional intro paragraph prepended as a cover page when printing Quotations.
     quotation_cover_intro: Optional[str] = None
+    # Default Terms & Conditions printed on Tax Invoices (separate from quotation_cover_intro).
+    invoice_terms_conditions: Optional[str] = None
 
 class CustomerCreate(BaseModel):
     code: Optional[str] = ""  # Auto-generated from number series if blank
@@ -2265,6 +2268,14 @@ async def update_user(user_id: str, data: UserUpdate, request: Request):
     update_data = {}
     # Non-admin self-update is restricted to signature_url + password + name
     if admin["role"] == "admin":
+        if data.email is not None:
+            new_email = data.email.lower().strip()
+            if new_email:
+                # Enforce unique email
+                clash = await db.users.find_one({"email": new_email, "id": {"$ne": user_id}})
+                if clash:
+                    raise HTTPException(status_code=400, detail=f"Email '{new_email}' is already in use by another user")
+                update_data["email"] = new_email
         if data.name is not None:
             update_data["name"] = data.name
         if data.role is not None:
@@ -9980,6 +9991,11 @@ async def create_packing_list(data: PackingListCreate, request: Request):
         "created_by": user["id"],
     }
     await db.packing_lists.insert_one(doc)
+    # Back-link on the Tax Invoice so the TI panel can show a "Packing List Created" badge.
+    await db.tax_invoices.update_one(
+        {"id": data.tax_invoice_id},
+        {"$set": {"packing_list_id": doc["id"], "packing_list_no": pl_no, "updated_at": datetime.now(timezone.utc)}}
+    )
     return await _enrich_packing_list(doc)
 
 @crm_router.put("/packing-lists/{pl_id}")
@@ -10003,6 +10019,12 @@ async def delete_packing_list(pl_id: str, request: Request):
     if existing.get("status") in ("dispatched", "received") and user.get("role") != "admin":
         raise HTTPException(status_code=400, detail="Only admins can delete dispatched/received packing lists")
     await db.packing_lists.delete_one({"id": pl_id})
+    # Clear the back-link on the source Tax Invoice so a fresh PL can be generated.
+    if existing.get("tax_invoice_id"):
+        await db.tax_invoices.update_one(
+            {"id": existing["tax_invoice_id"]},
+            {"$unset": {"packing_list_id": "", "packing_list_no": ""}, "$set": {"updated_at": datetime.now(timezone.utc)}}
+        )
     return {"message": "Packing List deleted"}
 
 @crm_router.post("/packing-lists/preview/{ti_id}")

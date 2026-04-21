@@ -162,7 +162,7 @@ export default function Layout() {
           <div className="flex items-center justify-between h-14 px-4 border-b border-[#1F2937]">
             <div className="flex items-center space-x-2">
               <Factory className="w-6 h-6 text-white" />
-              <span className="text-lg font-bold font-[Chivo] text-white">MachineWorks</span>
+              <span className="text-lg font-bold font-[Chivo] text-white">MechsmartERP</span>
             </div>
             <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 text-[#9CA3AF] hover:text-white">
               <X className="w-5 h-5" />
@@ -441,7 +441,7 @@ export default function Layout() {
             <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-1 text-[#4B5563] hover:text-[#111827]" data-testid="mobile-menu-btn">
               <Menu className="w-6 h-6" />
             </button>
-            <h1 className="text-lg font-semibold font-[Chivo] text-[#111827] hidden sm:block">Manufacturing ERP</h1>
+            <h1 className="text-lg font-semibold font-[Chivo] text-[#111827] hidden sm:block">MechsmartERP</h1>
           </div>
           <div className="flex items-center space-x-4">
             <span className={`status-badge ${getRoleBadge(user?.role)}`}>

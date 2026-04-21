@@ -1799,6 +1799,7 @@ function PipelineConfigPanel({ pipelineType, onRefresh, canEdit }) {
       )}
 
       {pipelineType === 'marketing' && <QuotationCoverPageConfig canEdit={canEdit} />}
+      {pipelineType === 'marketing' && <InvoiceTermsConfig canEdit={canEdit} />}
     </div>
   );
 }
@@ -1848,9 +1849,50 @@ function QuotationCoverPageConfig({ canEdit }) {
   );
 }
 
-/* ============================================================================
- *  SLA DUE PANEL (Support)
- * ========================================================================= */
+function InvoiceTermsConfig({ canEdit }) {
+  const { companySettings, refreshSettings } = useCompanySettings();
+  const [terms, setTerms] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setTerms(companySettings?.invoice_terms_conditions || '');
+  }, [companySettings]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.put('/api/settings/company', { invoice_terms_conditions: terms });
+      await refreshSettings();
+      alert('Invoice Terms & Conditions saved. They will auto-fill the T&C field when creating new Tax Invoices.');
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to save'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="card-flat p-4 space-y-3" data-testid="invoice-terms-config">
+      <div>
+        <h3 className="text-sm font-semibold text-[#1D3557]">Tax Invoice Terms &amp; Conditions</h3>
+        <p className="text-xs text-[#6B7280] mt-1">Default T&amp;C clauses that auto-fill the <strong>Tax Invoice</strong> form. Each new invoice picks these up automatically; per-invoice edits remain possible. Kept separate from Quotation terms.</p>
+      </div>
+      <textarea
+        className="w-full px-3 py-2 border border-[#D1D5DB] rounded-sm text-sm font-mono"
+        rows={8}
+        placeholder={"1. Payment due within 30 days of invoice date.\n2. Interest @ 18% p.a. on overdue amounts.\n3. Goods once sold will not be taken back.\n4. All disputes subject to <City> jurisdiction."}
+        value={terms}
+        onChange={e => setTerms(e.target.value)}
+        disabled={!canEdit}
+        data-testid="invoice-terms-textarea"
+      />
+      {canEdit && (
+        <div className="flex justify-end">
+          <button className="btn-primary" onClick={save} disabled={saving} data-testid="invoice-terms-save-btn">
+            {saving ? 'Saving...' : 'Save Invoice T&C'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 function SLAPanel({ tickets, search, stages }) {
   const TICKET_ST = (stages && stages.length) ? stages : TICKET_STAGES;
   const nonClosed = tickets.filter(t => t.stage !== 'closed');
@@ -2280,13 +2322,15 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, invoice: null });
   const [packingDialog, setPackingDialog] = useState({ open: false, invoice: null });
 
+  const [editingTI, setEditingTI] = useState(null);
+
   const load = useCallback(async () => {
     try { const r = await api.get('/api/crm/tax-invoices'); setList(r.data || []); } catch (e) { console.error(e); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
   // Fetch sales orders + items when dialog opens
-  const openDialog = async () => {
+  const openDialog = async (ti) => {
     try {
       const [soRes, itRes] = await Promise.all([
         api.get('/api/production').catch(() => ({ data: [] })),
@@ -2295,9 +2339,35 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
       setSalesOrders((soRes.data || []).filter(o => ['confirmed', 'in_progress', 'completed', 'partially_cancelled'].includes(o.status)));
       setItems(itRes.data || []);
     } catch (e) { console.error(e); }
-    setSourceType('sales_order');
-    setSelectedSO('');
-    setForm(emptyForm);
+    if (ti) {
+      // EDIT mode — pre-fill from existing TI
+      setEditingTI(ti);
+      setSourceType(ti.sales_order_id ? 'sales_order' : 'manual');
+      setSelectedSO(ti.sales_order_id || '');
+      setForm({
+        customer_id: ti.customer_id || '',
+        customer_name: ti.customer_name || '',
+        contact_person: ti.contact_person || '',
+        email: ti.email || '',
+        phone: ti.phone || '',
+        billing_address: ti.billing_address || '',
+        shipping_address: ti.shipping_address || '',
+        customer_po_number: ti.customer_po_number || '',
+        sales_order_id: ti.sales_order_id || '',
+        invoice_date: ti.invoice_date ? String(ti.invoice_date).slice(0, 10) : new Date().toISOString().slice(0, 10),
+        due_date: ti.due_date ? String(ti.due_date).slice(0, 10) : '',
+        place_of_supply: ti.place_of_supply || '',
+        notes: ti.notes || '',
+        terms: ti.terms || '',
+        lines: (ti.lines || []).map(l => ({ ...l })),
+      });
+    } else {
+      setEditingTI(null);
+      setSourceType('sales_order');
+      setSelectedSO('');
+      // Seed default T&C from invoice_terms_conditions (NOT quotation_cover_intro).
+      setForm({ ...emptyForm, terms: companySettings?.invoice_terms_conditions || '' });
+    }
     setDialog(true);
   };
 
@@ -2408,12 +2478,27 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
         invoice_date: form.invoice_date ? new Date(form.invoice_date).toISOString() : null,
         due_date: form.due_date ? new Date(form.due_date).toISOString() : null,
       };
-      await api.post('/api/crm/tax-invoices', payload);
+      if (editingTI) {
+        // EDIT mode — PUT against existing
+        await api.put(`/api/crm/tax-invoices/${editingTI.id}`, {
+          lines: payload.lines,
+          notes: payload.notes,
+          terms: payload.terms,
+          due_date: payload.due_date,
+          place_of_supply: payload.place_of_supply,
+          billing_address: payload.billing_address,
+          shipping_address: payload.shipping_address,
+          customer_po_number: payload.customer_po_number,
+        });
+      } else {
+        await api.post('/api/crm/tax-invoices', payload);
+      }
       setDialog(false);
+      setEditingTI(null);
       setForm(emptyForm);
       load(); onRefresh();
     } catch (e) {
-      alert(e.response?.data?.detail || 'Failed to create tax invoice');
+      alert(e.response?.data?.detail || 'Failed to save tax invoice');
     } finally { setSaving(false); }
   };
 
@@ -2452,7 +2537,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
           </div>
         </div>
         {canEdit && (
-          <button onClick={openDialog} className="btn-primary flex items-center gap-1 text-sm" data-testid="new-tax-invoice-btn">
+          <button onClick={() => openDialog(null)} className="btn-primary flex items-center gap-1 text-sm" data-testid="new-tax-invoice-btn">
             <Plus className="w-4 h-4" /> New Tax Invoice
           </button>
         )}
@@ -2473,7 +2558,14 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                     : <span className="text-[10px] text-[#9CA3AF]">Manual</span>;
               return (
                 <tr key={t.id} data-testid={`tax-invoice-row-${t.id}`}>
-                  <td className="mono font-medium">{t.invoice_no}</td>
+                  <td className="mono font-medium">
+                    {t.invoice_no}
+                    {t.packing_list_no && (
+                      <div className="text-[9px] font-semibold text-[#03543F] bg-[#DEF7EC] inline-block px-1.5 py-0.5 rounded mt-0.5" data-testid={`tax-invoice-pl-badge-${t.id}`}>
+                        <Package2 className="w-2.5 h-2.5 inline -mt-0.5 mr-0.5" />Packing List Created · {t.packing_list_no}
+                      </div>
+                    )}
+                  </td>
                   <td><div className="font-medium text-[#1D3557]">{t.customer_name}</div></td>
                   <td>{srcChip}</td>
                   <td className="text-xs">{t.invoice_date ? new Date(t.invoice_date).toLocaleDateString('en-IN') : '-'}</td>
@@ -2496,7 +2588,10 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                       <button onClick={() => printInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`tax-invoice-print-${t.id}`}><Printer className="w-4 h-4" /></button>
                       <button onClick={() => openWhatsAppShare({ doc: t, kind: 'tax_invoice', company: companySettings, user, includeLink: false })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="WhatsApp (text only)" data-testid={`tax-invoice-wa-text-${t.id}`}><MessageSquare className="w-4 h-4" /></button>
                       <button onClick={() => openWhatsAppShare({ doc: t, kind: 'tax_invoice', company: companySettings, user, includeLink: true })} className="p-1.5 text-[#0B7C3E] hover:bg-[#DCFCE7] rounded" title="WhatsApp + shareable link" data-testid={`tax-invoice-wa-link-${t.id}`}><Share2 className="w-4 h-4" /></button>
-                      <button onClick={() => setPackingDialog({ open: true, invoice: t })} className="p-1.5 text-[#92400E] hover:bg-[#FEF3C7] rounded" title="Generate Packing List" data-testid={`tax-invoice-packing-${t.id}`}><Package2 className="w-4 h-4" /></button>
+                      {canEdit && ['draft', 'issued'].includes(t.status) && (
+                        <button onClick={() => openDialog(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`tax-invoice-edit-${t.id}`}><Edit2 className="w-4 h-4" /></button>
+                      )}
+                      <button onClick={() => setPackingDialog({ open: true, invoice: t })} className="p-1.5 text-[#92400E] hover:bg-[#FEF3C7] rounded" title={t.packing_list_no ? `Packing List ${t.packing_list_no} exists — open to regenerate` : 'Generate Packing List'} data-testid={`tax-invoice-packing-${t.id}`}><Package2 className="w-4 h-4" /></button>
                       {canEdit && t.status === 'draft' && (
                         <button onClick={() => setDeleteConfirm({ open: true, invoice: t })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`tax-invoice-delete-${t.id}`}><Trash2 className="w-4 h-4" /></button>
                       )}
@@ -2509,9 +2604,9 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
         </table>
       </div>
 
-      <Dialog open={dialog} onOpenChange={(o) => { setDialog(o); if (!o) setForm(emptyForm); }}>
+      <Dialog open={dialog} onOpenChange={(o) => { setDialog(o); if (!o) { setForm(emptyForm); setEditingTI(null); } }}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" data-testid="tax-invoice-dialog">
-          <DialogHeader><DialogTitle className="font-[Chivo]">New Tax Invoice</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-[Chivo]">{editingTI ? `Edit Tax Invoice · ${editingTI.invoice_no}` : 'New Tax Invoice'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
             {/* Source type tabs */}
             <div className="flex gap-2 border-b border-[#E5E7EB] pb-2">
@@ -2665,7 +2760,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
             <div className="flex justify-end gap-2 border-t border-[#E5E7EB] pt-3">
               <button className="btn-secondary" onClick={() => setDialog(false)}>Cancel</button>
               <button className="btn-primary" onClick={saveInvoice} disabled={saving} data-testid="ti-save-btn">
-                {saving ? 'Saving...' : 'Create Tax Invoice'}
+                {saving ? 'Saving...' : (editingTI ? 'Save Changes' : 'Create Tax Invoice')}
               </button>
             </div>
           </div>
@@ -2837,6 +2932,7 @@ function PackingListDialog({ open, invoice, onClose, onCreated }) {
   };
 
   if (!invoice) return null;
+  const existingPL = invoice.packing_list_no;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -2845,6 +2941,12 @@ function PackingListDialog({ open, invoice, onClose, onCreated }) {
           <DialogTitle className="font-[Chivo]">Generate Packing List · {invoice.invoice_no}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 mt-2">
+          {existingPL && (
+            <div className="border border-[#FCD34D] bg-[#FEF3C7] rounded-sm p-3 text-xs text-[#78350F]" data-testid="pl-existing-warning">
+              <strong>A Packing List already exists for this invoice: {existingPL}.</strong><br />
+              Creating a new one will add a second Packing List. To regenerate, delete the existing one from the Packing Lists tab first (CRM → Marketing → Packing Lists or Stores → Packing Lists).
+            </div>
+          )}
           <div className="text-xs text-[#4B5563]">
             Tick the <strong>Expand to BOM</strong> box on any FG line to break it down into its <strong>first-level components</strong> with calculated quantities. Unticked lines print as-is (FG + qty).
           </div>
@@ -3266,8 +3368,10 @@ function printInvoiceDoc(doc, opts) {
   const isTaxInvoice = opts.kind === 'tax_invoice';
   const isProforma = opts.kind === 'proforma';
   const isQuotation = opts.kind === 'quotation';
-  // Accent colors — user-approved: Quotation #444853 (slate), PI #E0C09A (tan/beige), TI maroon.
-  const titleColor = isProforma ? '#E0C09A' : (isTaxInvoice ? '#7f1d1d' : '#444853');
+  // Accent: Quotation #444853 (slate), PI #E0C09A (tan/beige), TI → plain #2D3E50 used ONLY for
+  // emphasised text (company name, invoice no, TAX INVOICE title, grand total, T&C heading, item header bg).
+  // Everything else on TI stays plain black text on white — no filled info bars / no bars on bill-to etc.
+  const titleColor = isTaxInvoice ? '#2D3E50' : (isProforma ? '#E0C09A' : '#444853');
   const accentColor = titleColor;
   // For beige (PI), use dark foreground on header; otherwise white.
   const headerFg = isProforma ? '#3d3222' : '#ffffff';
@@ -3411,6 +3515,30 @@ function printInvoiceDoc(doc, opts) {
   .cover-sign-img{max-height:64px;max-width:220px;object-fit:contain;margin-bottom:4px;display:block}
   .cover-sign-name{font-size:13px;font-weight:700;color:#0f172a}
   .cover-sign-title{font-size:10px;color:#64748b}
+  /* ========================= TAX INVOICE — PLAIN OVERRIDES =========================
+   * Per user spec: TI must look plain. Only company name, "TAX INVOICE" title, invoice no,
+   * grand total, T&C heading and item table header retain the #2D3E50 accent.
+   * Everything else flattened: no filled info bar, no colored bill-to underlines,
+   * header separated from body by a single thick line. */
+  ${isTaxInvoice ? `
+  .header{border-bottom:2px solid #2D3E50;padding-bottom:10px;margin-bottom:14px}
+  .info-bar{display:none !important}
+  .doc-right .title{color:#2D3E50 !important}
+  .doc-right .docno{color:#2D3E50 !important;font-weight:700}
+  .brand-block .company-name{color:#2D3E50 !important}
+  .brand-block .tagline{color:#64748b !important;font-style:italic}
+  .addr-box h3{color:#2D3E50 !important;border-bottom-color:#2D3E50 !important}
+  .terms-block h4{color:#2D3E50 !important}
+  .totals tr.grand td{background:#fff !important;color:#2D3E50 !important;border-top:2px solid #2D3E50;border-bottom:2px solid #2D3E50;font-weight:800}
+  .totals tr.grand td.val{color:#2D3E50 !important}
+  .totals tr.words-row td{background:#fff !important;color:#334155 !important;border-bottom:1px solid #e2e8f0}
+  .totals tr.words-row td strong{color:#2D3E50 !important}
+  .bank-block h4{color:#2D3E50 !important;border-bottom-color:#2D3E50 !important}
+  /* Copy-type checkboxes (Original / Duplicate / Triplicate) */
+  .copy-ticks{display:flex;gap:14px;justify-content:flex-end;margin-bottom:4px;font-size:10px;color:#334155}
+  .copy-ticks .tk{display:flex;align-items:center;gap:4px}
+  .copy-ticks .tk .box{width:10px;height:10px;border:1.2px solid #2D3E50;display:inline-block;border-radius:1px}
+  ` : ''}
   @media print {@page {size:A4;margin:0} body{padding:0}}
 </style></head><body>
 ${(isQuotation && opts.includeCover) ? `
@@ -3453,6 +3581,11 @@ ${(isQuotation && opts.includeCover) ? `
       </div>
     </div>
     <div class="doc-right">
+      ${isTaxInvoice ? `<div class="copy-ticks">
+        <span class="tk"><span class="box"></span> Original</span>
+        <span class="tk"><span class="box"></span> Duplicate</span>
+        <span class="tk"><span class="box"></span> Triplicate</span>
+      </div>` : ''}
       <div class="title">${esc(opts.title)}</div>
       <div class="docno">${esc(docNo)}${(doc.revision && doc.revision > 0) ? ` <span style="color:${accentColor};font-size:11px">· Rev ${doc.revision}</span>` : ''}</div>
       ${doc.quotation?.quotation_no ? `<div class="quoref">Ref Quotation: <strong>${esc(doc.quotation.quotation_no)}</strong></div>` : ''}

@@ -176,6 +176,7 @@ export default function UserManagementPage() {
   const handleUpdate = async () => {
     try {
       const payload = { name: formData.name, role: formData.role, permissions: formData.permissions, role_group_id: formData.role_group_id || '', signature_url: formData.signature_url || '' };
+      if (formData.email && formData.email !== editingUser.email) payload.email = formData.email;
       if (formData.password) payload.password = formData.password;
       await api.put(`/api/users/${editingUser.id}`, payload);
       setIsCreateOpen(false);
@@ -300,7 +301,7 @@ export default function UserManagementPage() {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-[#374151]">Email *</label>
-                  <input type="email" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} disabled={!!editingUser} data-testid="user-email-input" />
+                  <input type="email" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} data-testid="user-email-input" />
                 </div>
                 <div>
                   <label className="text-sm font-medium text-[#374151]">{editingUser ? 'New Password (leave blank to keep)' : 'Password *'}</label>

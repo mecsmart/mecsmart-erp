@@ -17,6 +17,19 @@
 - DC print: "Delivery Challan" with 6-col Part Details + RM Issued sections (NOT 9-col Job OS format)
 
 ## Changelog
+- 2026-02-21 (iter 108): **Brand rename + TI plain styling + TI edit + Invoice T&C config + PL badge + admin email edit.**
+  (a) **Rebranding → MechsmartERP** everywhere — sidebar header, top bar header, browser title, login page. Removed the "Demo credentials: admin@erp.com / Admin@123" notice from the login screen for a cleaner production look.
+  (b) **Tax Invoice print redesigned to plain GST-form look**:
+    - Removed the coloured 4-column info ribbon (QUOTATION NO / DATE / etc.) — replaced with a single thick `#2D3E50` separator line below the header.
+    - Black text on white background everywhere by default. Only these elements retain the `#2D3E50` accent: company name, "TAX INVOICE" title, invoice number, item-table header background, Bill-To / Ship-To / Bank Details / T&C headings, and Grand Total row (with 2px top+bottom border).
+    - Added GST-standard **Original / Duplicate / Triplicate tickboxes** at the top-right above the TAX INVOICE title.
+    - Quotation (`#444853`) and Proforma (`#E0C09A`) layouts remain unchanged.
+  (c) **Tax Invoice edit flow**: new pencil icon on every TI row (draft + issued statuses). Opens the same dialog pre-filled with all existing data; header switches to "Edit Tax Invoice · <INV_NO>" and save button to "Save Changes". Save calls `PUT /api/crm/tax-invoices/{id}` which already recomputes subtotals + GST automatically.
+  (d) **Separate Invoice T&C config**: new admin-editable field `company_settings.invoice_terms_conditions`. New "Tax Invoice Terms & Conditions" card under **CRM → Marketing → Configuration** (`InvoiceTermsConfig` component). When creating a new Tax Invoice, the form's T&C field auto-fills from this setting (not from the quotation cover intro anymore).
+  (e) **Packing List back-link on Tax Invoice**: when a PL is created, `tax_invoice.packing_list_id` + `packing_list_no` are set on the source TI. The TI list row now shows a green **"Packing List Created · PL-XXXXXX"** badge under the invoice number. Opening the generate dialog while a PL already exists shows an amber warning strip — the user must delete the existing PL (from Marketing → Packing Lists or Stores → Packing Lists) before regenerating. Deleting a PL auto-clears the TI back-link.
+  (f) **Admin edit user email / login ID**: `UserUpdate` now accepts `email`. Admin-only update path validates uniqueness (409 if clash) and updates `users.email`. UI: the email input in the User Management edit dialog is now editable instead of locked after creation — admins can change a user's login ID on the fly.
+  Verified: New PL-000002 created on INV-FY26-27/000017 → TI list shows green badge with PL number; PUT `invoice_terms_conditions` persists & feeds TI form; TI print renders plain with three copy tickboxes; all brand strings show "MechsmartERP"; login page no longer shows demo creds.
+
 - 2026-02-21 (iter 107): **WhatsApp share + Packing List from Tax Invoice with BOM expansion + public share links.**
   (a) **WhatsApp share (two buttons per row)** on Quotation, Proforma and Tax Invoice rows:
     - Green chat icon → `wa.me/<phone>?text=...` with pre-drafted message ("Dear <customer>, please find our <Quotation/PI/TI> <number> (Amount: ₹X). Best regards, <user>, <company>"). Phone auto-prefixed to `91` if 10-digit Indian number.
