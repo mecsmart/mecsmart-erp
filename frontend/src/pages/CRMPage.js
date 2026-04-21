@@ -1228,6 +1228,25 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
               </div>
             </div>
 
+            {/* Customer Address card (master data) — shown when an Existing Customer is linked */}
+            {form.customer_id && (() => {
+              const c = customers.find(x => x.id === form.customer_id);
+              if (!c) return null;
+              const addrParts = [c.address, [c.city, c.state, c.pin_code].filter(Boolean).join(', ')].filter(Boolean);
+              return (
+                <div className="border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB]" data-testid="quotation-customer-address-card">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs font-semibold text-[#374151] uppercase tracking-wide">Customer Address <span className="text-[10px] font-normal text-[#6B7280] normal-case tracking-normal">(auto-filled on Quotation print)</span></div>
+                    {c.gstin && <div className="text-[11px] text-[#374151]"><strong className="text-[#1D3557]">GSTIN:</strong> <span className="mono">{c.gstin}</span></div>}
+                  </div>
+                  <div className="text-xs text-[#111827] whitespace-pre-line leading-snug" data-testid="quotation-customer-address-text">
+                    {addrParts.length ? addrParts.join('\n') : <span className="text-[#9CA3AF] italic">No address on file. Edit the Customer master to add one.</span>}
+                    {c.state_code && <div className="mt-1 text-[#4B5563]"><strong>State Code:</strong> <span className="mono">{c.state_code}</span></div>}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Lines editor */}
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -2101,6 +2120,7 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
   const { companySettings } = useCompanySettings();
   const [list, setList] = useState([]);
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, proforma: null });
+  const [convertConfirm, setConvertConfirm] = useState({ open: false, proforma: null });
 
   const load = useCallback(async () => {
     try { const r = await api.get('/api/crm/proformas'); setList(r.data || []); } catch (e) { console.error(e); }
@@ -2115,6 +2135,17 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
   const del = async (p) => {
     try { await api.delete(`/api/crm/proformas/${p.id}`); setDeleteConfirm({ open: false, proforma: null }); load(); onRefresh(); }
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
+
+  const convertToTaxInvoice = async () => {
+    const p = convertConfirm.proforma;
+    if (!p) return;
+    try {
+      const res = await api.post(`/api/crm/proformas/${p.id}/convert-to-tax-invoice`, {});
+      setConvertConfirm({ open: false, proforma: null });
+      load(); onRefresh();
+      alert(`Tax Invoice ${res.data.invoice_no} issued. Review it in the Tax Invoices tab.`);
+    } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
   const filtered = list.filter(p => {
@@ -2160,6 +2191,9 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
                   <td>
                     <div className="flex gap-0.5">
                       <button onClick={() => printProforma(p)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`proforma-print-${p.id}`}><Printer className="w-4 h-4" /></button>
+                      {canEdit && !isLocked && (
+                        <button onClick={() => setConvertConfirm({ open: true, proforma: p })} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Convert to Tax Invoice" data-testid={`proforma-to-invoice-${p.id}`}><Send className="w-4 h-4" /></button>
+                      )}
                       {canEdit && !isLocked && <button onClick={() => setDeleteConfirm({ open: true, proforma: p })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`proforma-delete-${p.id}`}><Trash2 className="w-4 h-4" /></button>}
                     </div>
                   </td>
@@ -2170,6 +2204,16 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
         </table>
       </div>
 
+      <ConfirmDialog
+        open={convertConfirm.open}
+        onOpenChange={(o) => !o && setConvertConfirm({ open: false, proforma: null })}
+        title="Generate Tax Invoice?"
+        message={<>This will issue a GST Tax Invoice for <strong>{convertConfirm.proforma?.proforma_no}</strong>. Once issued, this Proforma becomes read-only.</>}
+        confirmLabel="Issue Tax Invoice"
+        variant="primary"
+        onConfirm={convertToTaxInvoice}
+        testidPrefix="proforma-convert-confirm"
+      />
       <ConfirmDialog
         open={deleteConfirm.open}
         onOpenChange={(o) => !o && setDeleteConfirm({ open: false, proforma: null })}
@@ -2462,7 +2506,6 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
             <div className="flex gap-2 border-b border-[#E5E7EB] pb-2">
               {[
                 { k: 'sales_order', label: 'From Sales Order' },
-                { k: 'po', label: 'From Customer PO' },
                 { k: 'manual', label: 'Manual Entry' },
               ].map(s => (
                 <button key={s.k}
@@ -2487,23 +2530,6 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-[#6B7280] mt-1">Line items + customer + rates will be auto-populated from the SO.</p>
-              </div>
-            )}
-            {sourceType === 'po' && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium text-[#374151]">Customer PO Number *</label>
-                  <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm font-mono" placeholder="e.g. PO-12345 from customer" value={form.customer_po_number} onChange={e => setForm({ ...form, customer_po_number: e.target.value })} data-testid="ti-customer-po-input" />
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-[#374151]">Customer *</label>
-                  <Select value={form.customer_id} onValueChange={applyCustomer}>
-                    <SelectTrigger data-testid="ti-customer-select"><SelectValue placeholder="Select customer..." /></SelectTrigger>
-                    <SelectContent>
-                      {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
             )}
             {sourceType === 'manual' && (
@@ -2794,11 +2820,16 @@ function printInvoiceDoc(doc, opts) {
     const partNum = l.item?.part_number || '';
     const itemName = l.item?.name || '';
     const headTitle = partNum ? `${partNum} — ${itemName}` : (itemName || '-');
-    const desc = l.description || '';
+    // Description is shown BELOW the item name in the same cell (not a separate column).
+    // If the user's free-text description is identical to the item name, don't duplicate it.
+    const rawDesc = (l.description || '').trim();
+    const desc = rawDesc && rawDesc !== itemName ? rawDesc : '';
     return `<tr>
       <td class="sn">${i + 1}</td>
-      <td class="itemcell"><div class="item-name">${esc(headTitle)}</div></td>
-      <td class="desc-cell">${esc(desc) || '<span style="color:#cbd5e1">-</span>'}</td>
+      <td class="itemcell">
+        <div class="item-name">${esc(headTitle)}</div>
+        ${desc ? `<div class="item-desc">${esc(desc)}</div>` : ''}
+      </td>
       <td class="center mono">${esc(l.hsn_code || l.item?.hsn_code || '-')}</td>
       <td class="right">${qty.toFixed(2)}</td>
       <td class="center">${esc(l.uom || '')}</td>
@@ -2827,7 +2858,8 @@ function printInvoiceDoc(doc, opts) {
 <style>
   *{box-sizing:border-box}
   body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:#111;margin:0;padding:0}
-  .page{max-width:780px;margin:0 auto;padding:24px;box-sizing:border-box}
+  .page{max-width:780px;margin:0 auto;padding:32px 24px 20px;box-sizing:border-box}
+  .item-desc{font-size:9px;color:#64748b;margin-top:3px;line-height:1.35;white-space:pre-line;font-style:italic}
   /* Header */
   .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
   .brand-left{flex:1;display:flex;gap:12px;align-items:flex-start}
@@ -2899,46 +2931,46 @@ function printInvoiceDoc(doc, opts) {
   .sign-col .line-box{border-top:1px solid #0f172a;padding-top:4px;color:#475569;font-weight:600}
   .sign-col .auth-label{font-size:9px;color:#94a3b8}
   .footer-note{text-align:center;margin-top:24px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:9px;color:#94a3b8}
-  /* Cover page — A4, no top border, reduced gaps, left-aligned blocks */
-  .cover-page{min-height:265mm;display:flex;flex-direction:column;padding:18mm 16mm 14mm;box-sizing:border-box;page-break-after:always}
-  .cover-head{display:flex;flex-direction:column;align-items:center;gap:4px;margin-bottom:14px}
+  /* Cover page — exactly A4, standalone (outside .page wrapper) */
+  .cover-page{width:210mm;min-height:297mm;max-height:297mm;display:flex;flex-direction:column;padding:14mm 18mm;box-sizing:border-box;page-break-after:always;overflow:hidden}
+  .cover-head{display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:8px}
   .cover-logo{max-height:96px;max-width:260px;object-fit:contain}
   .cover-company{font-size:20px;font-weight:800;color:#0f172a;letter-spacing:0.3px;text-align:center}
   .cover-tagline{font-size:11px;color:${accentColor};font-style:italic;letter-spacing:0.3px;text-align:center}
-  .cover-title{font-size:26px;font-weight:800;color:${accentColor};letter-spacing:3px;text-align:center;margin:0 0 4px}
-  .cover-docno{font-size:12px;color:#334155;font-family:'Courier New',monospace;text-align:center;margin-bottom:16px}
-  .cover-meta{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#334155;margin-bottom:20px;align-self:flex-start}
+  .cover-title{font-size:24px;font-weight:800;color:${accentColor};letter-spacing:3px;text-align:center;margin:0 0 4px}
+  .cover-docno{font-size:12px;color:#334155;font-family:'Courier New',monospace;text-align:center;margin-bottom:12px}
+  .cover-meta{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#334155;margin-bottom:14px;align-self:flex-start}
   .cover-meta-label{color:#64748b;text-transform:uppercase;font-size:10px;letter-spacing:1px;margin-right:6px}
-  .cover-intro{font-size:11px;color:#334155;line-height:1.7;text-align:left;padding:8px 0;white-space:pre-line;margin-bottom:auto}
-  .cover-sign{margin-top:24px;text-align:left;font-size:11px;color:#475569;align-self:flex-start}
-  .cover-sign-img{max-height:72px;max-width:220px;object-fit:contain;margin-bottom:4px;display:block}
+  .cover-intro{font-size:11px;color:#334155;line-height:1.7;text-align:left;padding:4px 0;white-space:pre-line;margin-bottom:auto}
+  .cover-sign{margin-top:16px;text-align:left;font-size:11px;color:#475569;align-self:flex-start}
+  .cover-sign-img{max-height:64px;max-width:220px;object-fit:contain;margin-bottom:4px;display:block}
   .cover-sign-name{font-size:13px;font-weight:700;color:#0f172a}
   .cover-sign-title{font-size:10px;color:#64748b}
   @media print {@page {size:A4;margin:0} body{padding:0}}
 </style></head><body>
-<div class="page">${(isQuotation && opts.includeCover) ? `
-  <!-- Cover Page -->
-  <div class="cover-page">
-    <div class="cover-head">
-      ${cfg.logo_data ? `<img src="${esc(cfg.logo_data)}" class="cover-logo" alt="logo"/>` : `<div class="logo-fallback" style="width:100px;height:100px;font-size:36px">${esc((cfg.name || 'C').charAt(0).toUpperCase())}</div>`}
-      <div class="cover-company">${esc(cfg.name)}</div>
-      ${cfg.tagline ? `<div class="cover-tagline">${esc(cfg.tagline)}</div>` : ''}
-    </div>
-    <div class="cover-title">QUOTATION</div>
-    <div class="cover-docno">${esc(docNo)}${(doc.revision && doc.revision > 0) ? ` · Rev ${doc.revision}` : ''}</div>
-    <div class="cover-meta">
-      <div><span class="cover-meta-label">To:</span> <strong>${esc(doc.customer_name || '')}</strong></div>
-      <div><span class="cover-meta-label">Date:</span> ${docDate ? new Date(docDate).toLocaleDateString('en-IN') : '-'}</div>
-    </div>
-    ${(company.quotation_cover_intro || '') ? `<div class="cover-intro">${esc(company.quotation_cover_intro)}</div>` : ''}
-    <div class="cover-sign">
-      ${user.signature_url ? `<img src="${esc(user.signature_url)}" class="cover-sign-img" alt="sign"/>` : ''}
-      <div class="cover-sign-name">${esc(user.name || 'Authorised Signatory')}</div>
-      <div class="cover-sign-title">For ${esc(cfg.name)}</div>
-    </div>
+${(isQuotation && opts.includeCover) ? `
+<!-- Cover Page (full A4, outside .page padding) -->
+<div class="cover-page">
+  <div class="cover-head">
+    ${cfg.logo_data ? `<img src="${esc(cfg.logo_data)}" class="cover-logo" alt="logo"/>` : `<div class="logo-fallback" style="width:100px;height:100px;font-size:36px">${esc((cfg.name || 'C').charAt(0).toUpperCase())}</div>`}
+    <div class="cover-company">${esc(cfg.name)}</div>
+    ${cfg.tagline ? `<div class="cover-tagline">${esc(cfg.tagline)}</div>` : ''}
   </div>
-  <div style="page-break-after:always"></div>
+  <div class="cover-title">QUOTATION</div>
+  <div class="cover-docno">${esc(docNo)}${(doc.revision && doc.revision > 0) ? ` · Rev ${doc.revision}` : ''}</div>
+  <div class="cover-meta">
+    <div><span class="cover-meta-label">To:</span> <strong>${esc(doc.customer_name || '')}</strong></div>
+    <div><span class="cover-meta-label">Date:</span> ${docDate ? new Date(docDate).toLocaleDateString('en-IN') : '-'}</div>
+  </div>
+  ${(company.quotation_cover_intro || '') ? `<div class="cover-intro">${esc(company.quotation_cover_intro)}</div>` : ''}
+  <div class="cover-sign">
+    ${user.signature_url ? `<img src="${esc(user.signature_url)}" class="cover-sign-img" alt="sign"/>` : ''}
+    <div class="cover-sign-name">${esc(user.name || 'Authorised Signatory')}</div>
+    <div class="cover-sign-title">For ${esc(cfg.name)}</div>
+  </div>
+</div>
 ` : ''}
+<div class="page">
   <!-- Header -->
   <div class="header">
     <div class="brand-left">
@@ -2979,10 +3011,18 @@ function printInvoiceDoc(doc, opts) {
       <h3>Bill To</h3>
       <div class="name">${esc(doc.customer_name || '')}</div>
       ${doc.contact_person ? `<div class="line">Attn: ${esc(doc.contact_person)}</div>` : ''}
-      <div class="line">${esc(doc.billing_address || doc.customer?.address || '')}</div>
+      ${(() => {
+        // Prefer a structured multi-line address from the master (address + city, state pin) over the
+        // flat snapshot on the doc so the print always shows the full, up-to-date address.
+        const c = doc.customer || {};
+        const cityStatePin = [c.city, c.state, c.pin_code].filter(Boolean).join(', ');
+        const lines = [doc.billing_address || c.address || '', cityStatePin].filter(Boolean);
+        return lines.map(ln => `<div class="line">${esc(ln)}</div>`).join('');
+      })()}
       ${doc.email ? `<div class="line">${esc(doc.email)}</div>` : ''}
       ${doc.phone ? `<div class="line">${esc(doc.phone)}</div>` : ''}
-      ${doc.customer?.gstin ? `<div class="line"><strong>GSTIN:</strong> ${esc(doc.customer.gstin)}</div>` : ''}
+      ${doc.customer?.state_code ? `<div class="line"><strong>State Code:</strong> <span class="mono">${esc(doc.customer.state_code)}</span></div>` : ''}
+      ${doc.customer?.gstin ? `<div class="line"><strong>GSTIN:</strong> <span class="mono">${esc(doc.customer.gstin)}</span></div>` : ''}
     </div>
     ${isTaxInvoice && doc.customer_po_number ? `
     <div class="addr-box">
@@ -2995,7 +3035,13 @@ function printInvoiceDoc(doc, opts) {
     <div class="addr-box">
       <h3>Ship To</h3>
       <div class="name">${esc(doc.customer_name || '')}</div>
-      <div class="line">${esc(doc.shipping_address || doc.billing_address || doc.customer?.address || '-')}</div>
+      ${(() => {
+        const c = doc.customer || {};
+        const cityStatePin = [c.city, c.state, c.pin_code].filter(Boolean).join(', ');
+        const lines = [doc.shipping_address || doc.billing_address || c.address || '', cityStatePin].filter(Boolean);
+        return lines.length ? lines.map(ln => `<div class="line">${esc(ln)}</div>`).join('') : '<div class="line">-</div>';
+      })()}
+      ${doc.customer?.state_code ? `<div class="line"><strong>State Code:</strong> <span class="mono">${esc(doc.customer.state_code)}</span></div>` : ''}
     </div>
     `}
   </div>
@@ -3005,8 +3051,7 @@ function printInvoiceDoc(doc, opts) {
     <thead>
       <tr>
         <th class="sn">Sl</th>
-        <th>Item Name</th>
-        <th>Description</th>
+        <th>Item Name &amp; Description</th>
         <th class="center">HSN</th>
         <th class="right">Qty</th>
         <th class="center">UOM</th>
@@ -3017,7 +3062,7 @@ function printInvoiceDoc(doc, opts) {
         <th class="right">Total</th>
       </tr>
     </thead>
-    <tbody>${rows || '<tr><td colspan="11" style="text-align:center;padding:20px">No line items</td></tr>'}</tbody>
+    <tbody>${rows || '<tr><td colspan="10" style="text-align:center;padding:20px">No line items</td></tr>'}</tbody>
   </table>
 
   <!-- Bank + Totals -->
