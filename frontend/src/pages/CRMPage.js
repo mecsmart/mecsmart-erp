@@ -2320,21 +2320,26 @@ function NumberSeriesPanel({ canEdit }) {
  * ========================================================================= */
 function printInvoiceDoc(doc, opts) {
   const esc = (s) => String(s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-  const company = {
-    name: 'Machinery Manufacturing ERP',
-    address_line1: 'Industrial Estate, Plot No. 123',
-    address_line2: 'Pune, Maharashtra 411019',
-    phone: '+91 20 1234 5678',
-    email: 'sales@machineworks-erp.com',
-    gstin: '27AAACM1234E1Z5',
-    bank_name: 'HDFC Bank',
-    bank_branch: 'Pune Main Branch',
-    bank_account: '50200012345678',
-    bank_ifsc: 'HDFC0000123',
-    bank_upi: 'machineworks@upi',
+  const company = opts.company || {};
+  const user = opts.user || {};
+  const cfg = {
+    name: company.company_name || 'Company Name',
+    address_line1: company.address || 'Company Address Line 1',
+    address_line2: [company.city, company.state, company.pin_code].filter(Boolean).join(', ') || company.address_line2 || '',
+    phone: company.phone || '',
+    email: company.email || '',
+    gstin: company.gstin || '',
+    bank_name: company.bank_name || '',
+    bank_branch: company.bank_branch || '',
+    bank_account: company.bank_account || '',
+    bank_ifsc: company.bank_ifsc || '',
+    bank_upi: company.bank_upi || '',
   };
   const isInter = !!doc.is_inter_state;
   const isTaxInvoice = opts.kind === 'tax_invoice';
+  const isProforma = opts.kind === 'proforma';
+  const titleColor = isProforma ? '#0f766e' : (isTaxInvoice ? '#7f1d1d' : '#1e3a8a');  // PI teal, TI maroon, Quotation navy
+  const accentColor = titleColor;
 
   const rows = (doc.lines || []).map((l, i) => {
     const qty = parseFloat(l.quantity || 0);
@@ -2388,32 +2393,33 @@ function printInvoiceDoc(doc, opts) {
   /* Header */
   .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
   .brand-left{flex:1;display:flex;gap:12px;align-items:flex-start}
-  .logo{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#1D3557,#457B9D);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;letter-spacing:-0.5px;flex-shrink:0}
+  .logo{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,${accentColor},#64748b);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;letter-spacing:-0.5px;flex-shrink:0}
   .brand-block .company-name{font-size:17px;font-weight:800;color:#0f172a;margin:0 0 2px}
   .brand-block .company-addr{font-size:10px;color:#475569;line-height:1.5}
   .doc-right{text-align:right}
-  .doc-right .title{font-size:26px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;margin:0}
-  .doc-right .sub{font-size:10px;color:#64748b;margin-top:2px}
+  .doc-right .title{font-size:16px;font-weight:800;color:${accentColor};letter-spacing:0.5px;margin:0;text-transform:uppercase}
+  .doc-right .docno{font-size:14px;font-weight:700;color:#0f172a;margin-top:2px}
+  .doc-right .quoref{font-size:10px;color:#475569;margin-top:2px}
   /* Info bar */
-  .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:#1e3a8a;color:#fff;margin-top:14px;border-radius:2px;overflow:hidden}
+  .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:${accentColor};color:#fff;margin-top:14px;border-radius:2px;overflow:hidden}
   .info-bar .col{padding:10px 14px;border-right:1px solid rgba(255,255,255,0.15)}
   .info-bar .col:last-child{border-right:none}
-  .info-bar .label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#bfdbfe;margin-bottom:2px}
+  .info-bar .label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.75);margin-bottom:2px}
   .info-bar .value{font-size:13px;font-weight:700}
   /* Address rows */
   .address-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0}
-  .addr-box h3{font-size:10px;color:#0f172a;text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;border-bottom:2px solid #1e3a8a;padding-bottom:4px;display:inline-block}
+  .addr-box h3{font-size:10px;color:#0f172a;text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;border-bottom:2px solid ${accentColor};padding-bottom:4px;display:inline-block}
   .addr-box .name{font-size:13px;font-weight:700;color:#0f172a;margin-bottom:2px}
   .addr-box .line{font-size:10px;color:#475569;line-height:1.5;white-space:pre-line}
   /* Items table */
   table.items{width:100%;border-collapse:collapse;margin-top:6px}
-  table.items thead th{background:#1e3a8a;color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding:8px 6px;font-weight:600;border:none}
+  table.items thead th{background:${accentColor};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding:8px 6px;font-weight:600;border:none}
   table.items tbody td{border-bottom:1px solid #e2e8f0;padding:8px 6px;font-size:10px;vertical-align:top}
-  table.items tbody tr:last-child td{border-bottom:2px solid #1e3a8a}
+  table.items tbody tr:last-child td{border-bottom:2px solid ${accentColor}}
   .sn{width:28px;text-align:center;color:#64748b;font-weight:600}
-  .itemcell{min-width:140px}
+  .itemcell{min-width:180px}
   .item-name{font-weight:600;color:#0f172a;font-size:11px}
-  .item-desc{font-size:9px;color:#64748b;margin-top:2px;line-height:1.4;white-space:pre-line}
+  .item-desc{font-size:9px;color:#64748b;margin-top:3px;line-height:1.4;white-space:pre-line;font-style:italic}
   .center{text-align:center}
   .right{text-align:right}
   .total-cell{font-weight:700;color:#0f172a}
@@ -2422,30 +2428,32 @@ function printInvoiceDoc(doc, opts) {
   /* Totals */
   .bottom-row{display:grid;grid-template-columns:1.2fr 1fr;gap:20px;margin-top:16px}
   .bank-block{background:#f8fafc;border:1px solid #e2e8f0;border-radius:2px;padding:12px 14px;font-size:10px;color:#334155}
-  .bank-block h4{font-size:10px;color:#1e3a8a;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;font-weight:700}
+  .bank-block h4{font-size:10px;color:${accentColor};text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;font-weight:700}
   .bank-block .row{display:grid;grid-template-columns:90px 1fr;gap:6px;margin-bottom:4px;line-height:1.5}
   .bank-block .row strong{color:#0f172a}
   .totals{border-collapse:collapse;width:100%}
   .totals td{padding:6px 10px;font-size:11px;border-bottom:1px solid #e2e8f0}
   .totals td.lbl{color:#64748b;text-align:left}
   .totals td.val{text-align:right;font-weight:600;color:#0f172a;font-family:'Courier New',monospace}
-  .totals tr.grand td{background:#1e3a8a;color:#fff;font-size:15px;font-weight:800;padding:10px;border-bottom:none}
+  .totals tr.grand td{background:${accentColor};color:#fff;font-size:15px;font-weight:800;padding:10px;border-bottom:none}
   .totals tr.grand td.val{color:#fff}
   /* HSN summary */
-  h4.section{font-size:10px;color:#1e3a8a;text-transform:uppercase;letter-spacing:1px;margin:18px 0 6px;font-weight:700}
+  h4.section{font-size:10px;color:${accentColor};text-transform:uppercase;letter-spacing:1px;margin:18px 0 6px;font-weight:700}
   table.hsn{width:100%;border-collapse:collapse;font-size:10px}
-  table.hsn th{background:#e0e7ff;color:#1e3a8a;padding:6px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:0.5px}
+  table.hsn th{background:#e0e7ff;color:${accentColor};padding:6px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:0.5px}
   table.hsn td{padding:6px;border-bottom:1px solid #e2e8f0}
   /* Terms */
-  .terms{margin-top:18px;padding:12px 14px;background:#f8fafc;border-left:3px solid #1e3a8a;font-size:10px;color:#475569;line-height:1.6;white-space:pre-line}
-  .terms h4{font-size:10px;color:#1e3a8a;text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;font-weight:700}
+  .terms{margin-top:18px;padding:12px 14px;background:#f8fafc;border-left:3px solid ${accentColor};font-size:10px;color:#475569;line-height:1.6;white-space:pre-line}
+  .terms h4{font-size:10px;color:${accentColor};text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;font-weight:700}
   /* QR */
   .qr-block{margin-top:14px;display:flex;gap:12px;align-items:center;font-size:9px;color:#475569}
   .qr-box{width:72px;height:72px;border:1px dashed #94a3b8;display:flex;align-items:center;justify-content:center;font-size:8px;text-align:center;color:#94a3b8;flex-shrink:0}
-  /* Sign */
-  .sign-row{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:42px;font-size:10px}
+  /* Signature */
+  .sign-row{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:30px;font-size:10px}
   .sign-col{text-align:center}
-  .sign-col .line-box{border-top:1px solid #0f172a;margin-top:44px;padding-top:4px;color:#475569}
+  .sign-img{height:50px;object-fit:contain;margin-bottom:4px}
+  .sign-col .line-box{border-top:1px solid #0f172a;padding-top:4px;color:#475569;font-weight:600}
+  .sign-col .auth-label{font-size:9px;color:#94a3b8}
   .footer-note{text-align:center;margin-top:24px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:9px;color:#94a3b8}
   @media print {@page {size:A4;margin:10mm} body{padding:0}}
 </style></head><body>
@@ -2453,18 +2461,20 @@ function printInvoiceDoc(doc, opts) {
   <!-- Header -->
   <div class="header">
     <div class="brand-left">
-      <div class="logo">M</div>
+      <div class="logo">${esc((cfg.name || 'C').charAt(0).toUpperCase())}</div>
       <div class="brand-block">
-        <div class="company-name">${esc(company.name)}</div>
-        <div class="company-addr">${esc(company.address_line1)}</div>
-        <div class="company-addr">${esc(company.address_line2)}</div>
-        <div class="company-addr">Phone: ${esc(company.phone)} | ${esc(company.email)}</div>
-        <div class="company-addr"><strong>GSTIN: ${esc(company.gstin)}</strong></div>
+        <div class="company-name">${esc(cfg.name)}</div>
+        ${cfg.address_line1 ? `<div class="company-addr">${esc(cfg.address_line1)}</div>` : ''}
+        ${cfg.address_line2 ? `<div class="company-addr">${esc(cfg.address_line2)}</div>` : ''}
+        ${(cfg.phone || cfg.email) ? `<div class="company-addr">${cfg.phone ? 'Phone: ' + esc(cfg.phone) : ''}${cfg.phone && cfg.email ? ' | ' : ''}${cfg.email ? esc(cfg.email) : ''}</div>` : ''}
+        ${cfg.gstin ? `<div class="company-addr"><strong>GSTIN: ${esc(cfg.gstin)}</strong></div>` : ''}
       </div>
     </div>
     <div class="doc-right">
       <div class="title">${esc(opts.title)}</div>
-      <div class="sub">${esc(docNo)}</div>
+      <div class="docno">${esc(docNo)}</div>
+      ${doc.quotation?.quotation_no ? `<div class="quoref">Ref Quotation: <strong>${esc(doc.quotation.quotation_no)}</strong></div>` : ''}
+      ${doc.proforma?.proforma_no ? `<div class="quoref">Ref PI: <strong>${esc(doc.proforma.proforma_no)}</strong></div>` : ''}
     </div>
   </div>
 
@@ -2473,7 +2483,7 @@ function printInvoiceDoc(doc, opts) {
     <div class="col"><div class="label">${esc(opts.title)} No</div><div class="value">${esc(docNo)}</div></div>
     <div class="col"><div class="label">Date</div><div class="value">${docDate ? new Date(docDate).toLocaleDateString('en-IN') : '-'}</div></div>
     <div class="col"><div class="label">${esc(validLabel)}</div><div class="value">${validValue ? new Date(validValue).toLocaleDateString('en-IN') : '-'}</div></div>
-    <div class="col"><div class="label">${isTaxInvoice ? 'Place of Supply' : 'Salesperson'}</div><div class="value">${esc(isTaxInvoice ? (doc.place_of_supply || '-') : 'Sales Team')}</div></div>
+    <div class="col"><div class="label">${isTaxInvoice ? 'Place of Supply' : 'Salesperson'}</div><div class="value">${esc(isTaxInvoice ? (doc.place_of_supply || '-') : (user.name || 'Sales Team'))}</div></div>
   </div>
 
   <!-- Bill To / Ship To -->
@@ -2517,11 +2527,12 @@ function printInvoiceDoc(doc, opts) {
   <div class="bottom-row">
     <div class="bank-block">
       <h4>Bank Details</h4>
-      <div class="row"><strong>Bank:</strong><span>${esc(company.bank_name)}</span></div>
-      <div class="row"><strong>Branch:</strong><span>${esc(company.bank_branch)}</span></div>
-      <div class="row"><strong>A/C No:</strong><span class="mono">${esc(company.bank_account)}</span></div>
-      <div class="row"><strong>IFSC:</strong><span class="mono">${esc(company.bank_ifsc)}</span></div>
-      <div class="row"><strong>UPI:</strong><span class="mono">${esc(company.bank_upi)}</span></div>
+      ${cfg.bank_name ? `<div class="row"><strong>Bank:</strong><span>${esc(cfg.bank_name)}</span></div>` : ''}
+      ${cfg.bank_branch ? `<div class="row"><strong>Branch:</strong><span>${esc(cfg.bank_branch)}</span></div>` : ''}
+      ${cfg.bank_account ? `<div class="row"><strong>A/C No:</strong><span class="mono">${esc(cfg.bank_account)}</span></div>` : ''}
+      ${cfg.bank_ifsc ? `<div class="row"><strong>IFSC:</strong><span class="mono">${esc(cfg.bank_ifsc)}</span></div>` : ''}
+      ${cfg.bank_upi ? `<div class="row"><strong>UPI:</strong><span class="mono">${esc(cfg.bank_upi)}</span></div>` : ''}
+      ${(!cfg.bank_name && !cfg.bank_account) ? '<div style="font-size:10px;color:#94a3b8">Bank details not configured. Set them in Settings → Company Details.</div>' : ''}
     </div>
     <table class="totals">
       <tr><td class="lbl">Subtotal</td><td class="val">₹${(doc.subtotal || 0).toFixed(2)}</td></tr>
@@ -2552,11 +2563,19 @@ function printInvoiceDoc(doc, opts) {
 
   <!-- Signature -->
   <div class="sign-row">
-    <div class="sign-col"><div class="line-box">Customer Acceptance</div></div>
-    <div class="sign-col"><div class="line-box">For ${esc(company.name)}</div></div>
+    <div class="sign-col">
+      <div style="height:54px"></div>
+      <div class="line-box">Customer Acceptance</div>
+      <div class="auth-label">Signature &amp; Stamp</div>
+    </div>
+    <div class="sign-col">
+      ${user.signature_url ? `<img src="${esc(user.signature_url)}" class="sign-img" alt="signature"/>` : '<div style="height:54px"></div>'}
+      <div class="line-box">For ${esc(cfg.name)}</div>
+      <div class="auth-label">${esc(user.name || 'Authorised Signatory')}</div>
+    </div>
   </div>
 
-  <div class="footer-note">This is a computer-generated document.${isTaxInvoice ? ' Subject to Pune Jurisdiction.' : ''}</div>
+  <div class="footer-note">This is a computer-generated document.${isTaxInvoice ? ' Subject to Jurisdiction as per Place of Supply.' : ''}</div>
 </div>
 
 <script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>

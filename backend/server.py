@@ -75,6 +75,7 @@ class UserUpdate(BaseModel):
     permissions: Optional[dict] = None
     status: Optional[str] = None
     role_group_id: Optional[str] = None
+    signature_url: Optional[str] = None  # base64 PNG/JPG data-URL for digital signature
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -765,6 +766,12 @@ class CompanySettingsUpdate(BaseModel):
     secondary_currency: Optional[str] = None
     # Default Terms & Conditions printed on every Purchase Order. Multi-line string.
     po_terms_conditions: Optional[str] = None
+    # Bank details printed on Proforma Invoice / Tax Invoice
+    bank_name: Optional[str] = None
+    bank_branch: Optional[str] = None
+    bank_account: Optional[str] = None
+    bank_ifsc: Optional[str] = None
+    bank_upi: Optional[str] = None
 
 class CustomerCreate(BaseModel):
     code: Optional[str] = ""  # Auto-generated from number series if blank
