@@ -6057,10 +6057,19 @@ async def update_company_settings(data: CompanySettingsUpdate, request: Request)
 # ================== NUMBER SERIES (Vendor/Customer/PO/Sales Invoice) ==================
 # Each key stores: {prefix, padding, next_number}
 DEFAULT_NUMBER_SERIES = {
-    "supplier_code":  {"prefix": "SUP-",  "padding": 4, "next_number": 1, "label": "Vendor / Supplier Code"},
-    "customer_code":  {"prefix": "CUST-", "padding": 4, "next_number": 1, "label": "Customer Code"},
-    "po_number":      {"prefix": "PO-",   "padding": 6, "next_number": 1, "label": "Purchase Order"},
-    "sales_invoice":  {"prefix": "INV-",  "padding": 6, "next_number": 1, "label": "Sales Invoice"},
+    "supplier_code":  {"prefix": "SUP-",  "padding": 4, "next_number": 1, "label": "Vendor / Supplier Code", "reset_yearly": False, "group": "masters"},
+    "customer_code":  {"prefix": "CUST-", "padding": 4, "next_number": 1, "label": "Customer Code", "reset_yearly": False, "group": "masters"},
+    "po_number":      {"prefix": "PO-",   "padding": 6, "next_number": 1, "label": "Purchase Order", "reset_yearly": False, "group": "procurement"},
+    "sales_invoice":  {"prefix": "INV-",  "padding": 6, "next_number": 1, "label": "Sales Invoice", "reset_yearly": False, "group": "sales"},
+}
+
+# CRM-side series (new style, keyed by `doc_type` on same collection). Merged into the Settings UI.
+CRM_DEFAULT_NUMBER_SERIES = {
+    "quotation":       {"prefix": "QUO-",  "padding": 6, "next_number": 1, "label": "Quotation",       "reset_yearly": False, "group": "crm"},
+    "proforma":        {"prefix": "PI-",   "padding": 6, "next_number": 1, "label": "Proforma Invoice","reset_yearly": False, "group": "crm"},
+    "tax_invoice":     {"prefix": "INV-",  "padding": 6, "next_number": 1, "label": "Tax Invoice",     "reset_yearly": True,  "group": "crm"},
+    "sales_order":     {"prefix": "SO-",   "padding": 6, "next_number": 1, "label": "Sales Order",     "reset_yearly": False, "group": "sales"},
+    "purchase_invoice":{"prefix": "PUR-",  "padding": 6, "next_number": 1, "label": "Purchase Invoice","reset_yearly": False, "group": "procurement"},
 }
 
 async def get_next_series_number(key: str) -> str:
@@ -6082,18 +6091,46 @@ class NumberSeriesUpdate(BaseModel):
     prefix: Optional[str] = None
     padding: Optional[int] = None
     next_number: Optional[int] = None
+    reset_yearly: Optional[bool] = None
+
+def _current_fy_string() -> str:
+    """India FY starts Apr 1 — returns e.g. 'FY26-27' for 2026-04-01 through 2027-03-31."""
+    today = datetime.now(timezone.utc).date()
+    fy_start = today.year if today.month >= 4 else today.year - 1
+    return f"FY{str(fy_start)[-2:]}-{str(fy_start + 1)[-2:]}"
+
+def _format_series_preview(prefix: str, padding: int, next_num: int, reset_yearly: bool, current_fy: str = "") -> str:
+    """Build a preview string matching what `_get_next_number` would produce."""
+    padded = str(next_num).zfill(padding)
+    if reset_yearly:
+        fy = current_fy or _current_fy_string()
+        return f"{prefix}{fy}/{padded}"
+    return f"{prefix}{padded}"
 
 @settings_router.get("/number-series")
 async def get_number_series(request: Request):
+    """Return all configured number series (masters + CRM) with current FY + next-number preview."""
     await get_current_user(request)
     series_list = []
+    current_fy = _current_fy_string()
+    # Legacy/masters series (keyed by `key`)
     for key, default in DEFAULT_NUMBER_SERIES.items():
         doc = await db.number_series.find_one({"key": key}, {"_id": 0})
-        if not doc:
-            doc = {"key": key, **default}
-        else:
-            doc["label"] = default["label"]
-        series_list.append(doc)
+        merged = {"key": key, **default}
+        if doc:
+            merged.update({k: v for k, v in doc.items() if k != "label"})
+        merged["current_fy"] = merged.get("current_fy") or current_fy
+        merged["preview"] = _format_series_preview(merged.get("prefix", ""), int(merged.get("padding", 4)), int(merged.get("next_number", 1)), bool(merged.get("reset_yearly", False)), merged["current_fy"])
+        series_list.append(merged)
+    # CRM-side series (keyed by `doc_type`)
+    for dt, default in CRM_DEFAULT_NUMBER_SERIES.items():
+        doc = await db.number_series.find_one({"doc_type": dt}, {"_id": 0})
+        merged = {"key": dt, "doc_type": dt, **default}
+        if doc:
+            merged.update({k: v for k, v in doc.items() if k != "label"})
+        merged["current_fy"] = merged.get("current_fy") or current_fy
+        merged["preview"] = _format_series_preview(merged.get("prefix", ""), int(merged.get("padding", 4)), int(merged.get("next_number", 1)), bool(merged.get("reset_yearly", False)), merged["current_fy"])
+        series_list.append(merged)
     return series_list
 
 @settings_router.put("/number-series/{key}")
@@ -6101,23 +6138,33 @@ async def update_number_series(key: str, data: NumberSeriesUpdate, request: Requ
     user = await get_current_user(request)
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Only admin can update number series")
-    if key not in DEFAULT_NUMBER_SERIES:
+    # Which table: legacy masters (key-based) OR CRM (doc_type-based)?
+    if key in DEFAULT_NUMBER_SERIES:
+        id_field, default = "key", DEFAULT_NUMBER_SERIES[key]
+    elif key in CRM_DEFAULT_NUMBER_SERIES:
+        id_field, default = "doc_type", CRM_DEFAULT_NUMBER_SERIES[key]
+    else:
         raise HTTPException(status_code=404, detail=f"Unknown series key: {key}")
+
     update_fields = {k: v for k, v in data.model_dump().items() if v is not None}
     if not update_fields:
         raise HTTPException(status_code=400, detail="No data to update")
-    default = DEFAULT_NUMBER_SERIES[key]
-    existing = await db.number_series.find_one({"key": key})
+
+    existing = await db.number_series.find_one({id_field: key})
     if not existing:
-        # First-time: seed with defaults then apply updates
-        seed = {"key": key, **default}
-        seed.pop("label", None)
+        seed = {id_field: key, **default}
+        seed.pop("label", None); seed.pop("group", None)
         seed.update(update_fields)
         await db.number_series.insert_one(seed)
     else:
-        await db.number_series.update_one({"key": key}, {"$set": update_fields})
-    doc = await db.number_series.find_one({"key": key}, {"_id": 0})
+        await db.number_series.update_one({id_field: key}, {"$set": update_fields})
+    doc = await db.number_series.find_one({id_field: key}, {"_id": 0})
+    current_fy = _current_fy_string()
     doc["label"] = default["label"]
+    doc["group"] = default.get("group", "misc")
+    doc["key"] = key
+    doc["current_fy"] = doc.get("current_fy") or current_fy
+    doc["preview"] = _format_series_preview(doc.get("prefix", ""), int(doc.get("padding", 4)), int(doc.get("next_number", 1)), bool(doc.get("reset_yearly", False)), doc["current_fy"])
     return doc
 
 @settings_router.get("/states")
@@ -9198,26 +9245,16 @@ async def convert_quotation_to_so(qid: str, payload: dict = Body(default={}), re
 
 
 # --------- NUMBER SERIES CONFIGURATION ---------
-DEFAULT_NUMBER_SERIES = {
-    "quotation":       {"prefix": "QUO-",  "padding": 6, "next_number": 1, "reset_yearly": False},
-    "proforma":        {"prefix": "PI-",   "padding": 6, "next_number": 1, "reset_yearly": False},
-    "tax_invoice":     {"prefix": "INV-",  "padding": 6, "next_number": 1, "reset_yearly": True},
-    "sales_order":     {"prefix": "SO-",   "padding": 6, "next_number": 1, "reset_yearly": False},
-    "purchase_invoice":{"prefix": "PUR-",  "padding": 6, "next_number": 1, "reset_yearly": False},
-}
-NUMBER_SERIES_TYPES = list(DEFAULT_NUMBER_SERIES.keys())
-
-class NumberSeriesUpdate(BaseModel):
-    prefix: Optional[str] = None
-    padding: Optional[int] = None
-    next_number: Optional[int] = None
-    reset_yearly: Optional[bool] = None
+# Local alias used by CRM/Sales functions only. The Settings-page endpoints at
+# line ~6086 use MASTER_NUMBER_SERIES + CRM_DEFAULT_NUMBER_SERIES (merged view).
+_CRM_SERIES_LOCAL = CRM_DEFAULT_NUMBER_SERIES
+NUMBER_SERIES_TYPES = list(_CRM_SERIES_LOCAL.keys())
 
 async def _get_next_number(doc_type: str) -> str:
     """Atomic-ish next-number generation. Returns formatted number e.g. 'PI-000001'."""
     doc = await db.number_series.find_one({"doc_type": doc_type}, {"_id": 0})
     if not doc:
-        doc = {"doc_type": doc_type, **DEFAULT_NUMBER_SERIES.get(doc_type, {"prefix": f"{doc_type.upper()}-", "padding": 6, "next_number": 1, "reset_yearly": False})}
+        doc = {"doc_type": doc_type, **_CRM_SERIES_LOCAL.get(doc_type, {"prefix": f"{doc_type.upper()}-", "padding": 6, "next_number": 1, "reset_yearly": False})}
         await db.number_series.insert_one(doc)
     prefix = doc.get("prefix") or f"{doc_type.upper()}-"
     padding = int(doc.get("padding") or 6)
@@ -9242,12 +9279,12 @@ async def list_number_series(request: Request):
     for t in NUMBER_SERIES_TYPES:
         doc = await db.number_series.find_one({"doc_type": t}, {"_id": 0})
         if not doc:
-            doc = {"doc_type": t, **DEFAULT_NUMBER_SERIES[t]}
+            doc = {"doc_type": t, **_CRM_SERIES_LOCAL[t]}
         out.append(doc)
     return out
 
 @crm_router.put("/number-series/{doc_type}")
-async def update_number_series(doc_type: str, data: NumberSeriesUpdate, request: Request):
+async def update_crm_number_series(doc_type: str, data: NumberSeriesUpdate, request: Request):
     user = await get_current_user(request)
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")

@@ -116,6 +116,7 @@ export default function SettingsPage() {
         prefix: s.prefix || '',
         padding: parseInt(s.padding) || 4,
         next_number: parseInt(s.next_number) || 1,
+        reset_yearly: !!s.reset_yearly,
       };
       const { data } = await api.put(`/api/settings/number-series/${key}`, payload);
       setNumberSeries(prev => prev.map(x => x.key === key ? data : x));
@@ -489,69 +490,111 @@ export default function SettingsPage() {
         {/* ====== Number Series Tab ====== */}
         <TabsContent value="number-series" className="space-y-4 mt-4" data-testid="number-series-tab-content">
           <div className="bg-white border border-[#E5E7EB] rounded-sm p-5">
-            <h2 className="text-lg font-semibold text-[#111827] mb-1">Number Series</h2>
-            <p className="text-xs text-[#6B7280] mb-4">Configure auto-incrementing prefix and starting number for vendors, customers, POs and sales invoices. Existing records keep their old numbers; only new records use the updated series.</p>
-            <div className="space-y-3">
-              {numberSeries.map(s => {
-                const preview = `${s.prefix || ''}${String(s.next_number || 1).padStart(s.padding || 4, '0')}`;
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-[#111827] mb-1">Number Series</h2>
+                <p className="text-xs text-[#6B7280]">Configure auto-incrementing prefix, padding, and start number for each document type. Enable <strong>Reset on new Financial Year</strong> to restart the counter every April 1st — the FY tag (e.g. <span className="mono bg-[#E1EFFE] text-[#1E429F] px-1 rounded">FY26-27</span>) is automatically inserted between the prefix and the number.</p>
+              </div>
+              <div className="bg-[#F3F4F6] border border-[#D1D5DB] rounded-sm px-3 py-2 text-xs text-[#374151] shrink-0 ml-4">
+                <div className="text-[10px] uppercase tracking-wide text-[#6B7280]">Current FY</div>
+                <div className="mono font-semibold text-sm text-[#1D3557]" data-testid="current-fy-badge">{numberSeries[0]?.current_fy || 'FY—'}</div>
+              </div>
+            </div>
+
+            {(() => {
+              const groups = [
+                { key: 'crm', label: 'CRM — Sales Cycle', desc: 'Quotation → Proforma → Tax Invoice issued to customers' },
+                { key: 'sales', label: 'Sales Orders', desc: 'Internal SO numbering for confirmed orders' },
+                { key: 'procurement', label: 'Procurement', desc: 'Purchase Orders and Purchase Invoices' },
+                { key: 'masters', label: 'Master Codes', desc: 'Vendor and Customer code generation' },
+              ];
+              return groups.map(g => {
+                const items = numberSeries.filter(s => (s.group || 'misc') === g.key);
+                if (items.length === 0) return null;
                 return (
-                  <div key={s.key} className="grid grid-cols-12 gap-3 items-end border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB]" data-testid={`series-row-${s.key}`}>
-                    <div className="col-span-3">
-                      <label className="block text-xs font-semibold text-[#6B7280] uppercase mb-1">{s.label}</label>
-                      <div className="mono text-xs bg-[#E1EFFE] text-[#1E429F] inline-block px-2 py-1 rounded">Next: {preview}</div>
+                  <div key={g.key} className="mb-5 last:mb-0">
+                    <div className="flex items-baseline gap-2 mb-2">
+                      <h3 className="text-sm font-semibold text-[#1D3557]">{g.label}</h3>
+                      <span className="text-[11px] text-[#6B7280]">{g.desc}</span>
                     </div>
-                    <div className="col-span-3">
-                      <label className="block text-xs text-[#374151] mb-1">Prefix</label>
-                      <input
-                        type="text"
-                        value={s.prefix || ''}
-                        onChange={e => updateSeriesField(s.key, 'prefix', e.target.value)}
-                        className="input-field mono"
-                        disabled={!isAdmin}
-                        placeholder="e.g. SUP-"
-                        data-testid={`series-prefix-${s.key}`}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <label className="block text-xs text-[#374151] mb-1">Start #</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={s.next_number || 1}
-                        onChange={e => updateSeriesField(s.key, 'next_number', parseInt(e.target.value) || 1)}
-                        className="input-field mono"
-                        disabled={!isAdmin}
-                        data-testid={`series-start-${s.key}`}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <label className="block text-xs text-[#374151] mb-1">Padding</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="12"
-                        value={s.padding || 4}
-                        onChange={e => updateSeriesField(s.key, 'padding', parseInt(e.target.value) || 4)}
-                        className="input-field mono"
-                        disabled={!isAdmin}
-                        data-testid={`series-padding-${s.key}`}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <button
-                        onClick={() => saveSeries(s.key)}
-                        disabled={!isAdmin || savingSeries[s.key]}
-                        className="btn-primary w-full disabled:opacity-50"
-                        data-testid={`series-save-${s.key}`}
-                      >
-                        {savingSeries[s.key] ? 'Saving…' : 'Save'}
-                      </button>
+                    <div className="space-y-2">
+                      {items.map(s => {
+                        const preview = s.preview || `${s.prefix || ''}${String(s.next_number || 1).padStart(s.padding || 4, '0')}`;
+                        return (
+                          <div key={s.key} className="grid grid-cols-12 gap-3 items-end border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB]" data-testid={`series-row-${s.key}`}>
+                            <div className="col-span-3">
+                              <label className="block text-xs font-semibold text-[#6B7280] uppercase mb-1">{s.label}</label>
+                              <div className="mono text-xs bg-[#E1EFFE] text-[#1E429F] inline-block px-2 py-1 rounded" data-testid={`series-preview-${s.key}`}>Next: {preview}</div>
+                            </div>
+                            <div className="col-span-2">
+                              <label className="block text-xs text-[#374151] mb-1">Prefix</label>
+                              <input
+                                type="text"
+                                value={s.prefix || ''}
+                                onChange={e => updateSeriesField(s.key, 'prefix', e.target.value)}
+                                className="input-field mono"
+                                disabled={!isAdmin}
+                                placeholder="e.g. QUO-"
+                                data-testid={`series-prefix-${s.key}`}
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <label className="block text-xs text-[#374151] mb-1">Start / Next #</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={s.next_number || 1}
+                                onChange={e => updateSeriesField(s.key, 'next_number', parseInt(e.target.value) || 1)}
+                                className="input-field mono"
+                                disabled={!isAdmin}
+                                data-testid={`series-start-${s.key}`}
+                              />
+                            </div>
+                            <div className="col-span-1">
+                              <label className="block text-xs text-[#374151] mb-1">Padding</label>
+                              <input
+                                type="number"
+                                min="1"
+                                max="12"
+                                value={s.padding || 4}
+                                onChange={e => updateSeriesField(s.key, 'padding', parseInt(e.target.value) || 4)}
+                                className="input-field mono"
+                                disabled={!isAdmin}
+                                data-testid={`series-padding-${s.key}`}
+                              />
+                            </div>
+                            <div className="col-span-2">
+                              <label className="flex items-center gap-2 text-xs text-[#374151] pt-5 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={!!s.reset_yearly}
+                                  onChange={e => updateSeriesField(s.key, 'reset_yearly', e.target.checked)}
+                                  disabled={!isAdmin}
+                                  className="w-4 h-4 accent-[#1D3557]"
+                                  data-testid={`series-reset-yearly-${s.key}`}
+                                />
+                                <span>Reset on new FY</span>
+                              </label>
+                            </div>
+                            <div className="col-span-2">
+                              <button
+                                onClick={() => saveSeries(s.key)}
+                                disabled={!isAdmin || savingSeries[s.key]}
+                                className="btn-primary w-full disabled:opacity-50"
+                                data-testid={`series-save-${s.key}`}
+                              >
+                                {savingSeries[s.key] ? 'Saving…' : 'Save'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );
-              })}
-              {numberSeries.length === 0 && <p className="text-sm text-[#9CA3AF] italic">No series configured.</p>}
-            </div>
+              });
+            })()}
+            {numberSeries.length === 0 && <p className="text-sm text-[#9CA3AF] italic">No series configured.</p>}
           </div>
         </TabsContent>
       </Tabs>

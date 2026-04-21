@@ -891,13 +891,16 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
   const openDialog = useCallback((q, fromLead) => {
     if (q) {
       setEditing(q);
+      // If the quotation is tied to an existing customer, prefer the master record
+      // over stored snapshot fields (which may be stale after a customer-name update).
+      const master = q.customer_id ? customers.find(c => c.id === q.customer_id) : null;
       setForm({
         lead_id: q.lead_id || '',
         customer_id: q.customer_id || '',
-        customer_name: q.customer_name || '',
-        contact_person: q.contact_person || '',
-        email: q.email || '',
-        phone: q.phone || '',
+        customer_name: master ? master.name : (q.customer_name || ''),
+        contact_person: master ? (master.contact_person || '') : (q.contact_person || ''),
+        email: master ? (master.email || '') : (q.email || ''),
+        phone: master ? (master.phone || '') : (q.phone || ''),
         quotation_date: q.quotation_date ? String(q.quotation_date).slice(0, 10) : new Date().toISOString().slice(0, 10),
         valid_until: q.valid_until ? String(q.valid_until).slice(0, 10) : '',
         notes: q.notes || '',
@@ -922,7 +925,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     }
     setDialog(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [customers]);
 
   // Auto-open when arriving from "Create Quotation" on a lead
   useEffect(() => {
@@ -1236,8 +1239,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   <thead className="bg-[#F3F4F6]">
                     <tr>
                       <th className="text-left p-2 w-10">#</th>
-                      <th className="text-left p-2 min-w-[220px]">Item Name</th>
-                      <th className="text-left p-2 min-w-[180px]">Description</th>
+                      <th className="text-left p-2 min-w-[260px]">Item Name &amp; Description</th>
                       <th className="text-left p-2 w-20">Qty</th>
                       <th className="text-left p-2 w-20">UOM</th>
                       <th className="text-left p-2 w-24">Rate (₹)</th>
@@ -1254,7 +1256,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                       const amount = gross - disc;
                       return (
                         <tr key={idx} className="border-t border-[#E5E7EB]" data-testid={`quotation-line-${idx}`}>
-                          <td className="p-2 mono">{idx + 1}</td>
+                          <td className="p-2 mono align-top">{idx + 1}</td>
                           <td className="p-2">
                             <Select value={l.item_id || '__none__'} onValueChange={v => { if (v === '__none__') updateLine(idx, { item_id: '' }); else onPickItem(idx, v); }}>
                               <SelectTrigger className="h-7 text-xs" data-testid={`quotation-line-item-${idx}`}><SelectValue placeholder="Pick item..." /></SelectTrigger>
@@ -1263,9 +1265,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                                 {items.slice(0, 500).map(it => <SelectItem key={it.id} value={it.id}>{it.part_number} · {it.name}</SelectItem>)}
                               </SelectContent>
                             </Select>
-                          </td>
-                          <td className="p-2">
-                            <textarea rows={2} className="input-field text-xs resize-y min-h-[28px]" value={l.description} onChange={e => updateLine(idx, { description: e.target.value })} placeholder="Free text description (editable)" data-testid={`quotation-line-desc-${idx}`} />
+                            <textarea rows={2} className="input-field text-xs resize-y min-h-[28px] mt-1" value={l.description} onChange={e => updateLine(idx, { description: e.target.value })} placeholder="Description (auto-filled on item pick — editable)" data-testid={`quotation-line-desc-${idx}`} />
                           </td>
                           <td className="p-2">
                             <input type="number" step="0.01" className="input-field mono h-7 text-xs" value={l.quantity} onChange={e => updateLine(idx, { quantity: e.target.value })} data-testid={`quotation-line-qty-${idx}`} />
@@ -2560,7 +2560,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                 <table className="w-full text-xs">
                   <thead className="bg-[#F3F4F6]"><tr>
                     <th className="px-2 py-1 text-left w-8">#</th>
-                    <th className="px-2 py-1 text-left">Item</th>
+                    <th className="px-2 py-1 text-left min-w-[240px]">Item &amp; Description</th>
                     <th className="px-2 py-1 text-left w-20">HSN</th>
                     <th className="px-2 py-1 text-right w-16">Qty</th>
                     <th className="px-2 py-1 text-left w-14">UOM</th>
@@ -2575,15 +2575,15 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                       const amount = ((parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0)) * (1 - (parseFloat(l.discount_pct) || 0) / 100);
                       return (
                         <tr key={i} data-testid={`ti-line-${i}`}>
-                          <td className="px-2 py-1 text-[#6B7280]">{i + 1}</td>
+                          <td className="px-2 py-1 text-[#6B7280] align-top">{i + 1}</td>
                           <td className="px-1 py-1">
                             <Select value={l.item_id} onValueChange={(v) => applyItemToLine(i, v)}>
-                              <SelectTrigger className="h-7 text-xs" data-testid={`ti-line-item-${i}`}><SelectValue placeholder="Select item or enter description below" /></SelectTrigger>
+                              <SelectTrigger className="h-7 text-xs" data-testid={`ti-line-item-${i}`}><SelectValue placeholder="Select item (or leave blank for free text)" /></SelectTrigger>
                               <SelectContent>
                                 {items.map(it => <SelectItem key={it.id} value={it.id}>{it.part_number} — {it.name}</SelectItem>)}
                               </SelectContent>
                             </Select>
-                            <input type="text" className="w-full mt-1 px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-[11px]" placeholder="Description" value={l.description} onChange={e => updateLine(i, { description: e.target.value })} data-testid={`ti-line-desc-${i}`} />
+                            <textarea rows={2} className="w-full mt-1 px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-[11px] resize-y" placeholder="Description (auto-filled on item pick — editable)" value={l.description} onChange={e => updateLine(i, { description: e.target.value })} data-testid={`ti-line-desc-${i}`} />
                           </td>
                           <td className="px-1 py-1"><input type="text" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs mono" value={l.hsn_code} onChange={e => updateLine(i, { hsn_code: e.target.value })} /></td>
                           <td className="px-1 py-1"><input type="number" step="0.01" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs text-right mono" value={l.quantity} onChange={e => updateLine(i, { quantity: e.target.value })} data-testid={`ti-line-qty-${i}`} /></td>
@@ -2826,8 +2826,8 @@ function printInvoiceDoc(doc, opts) {
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(docNo)}</title>
 <style>
   *{box-sizing:border-box}
-  body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:#111;margin:0;padding:24px}
-  .page{max-width:780px;margin:0 auto}
+  body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:#111;margin:0;padding:0}
+  .page{max-width:780px;margin:0 auto;padding:24px;box-sizing:border-box}
   /* Header */
   .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
   .brand-left{flex:1;display:flex;gap:12px;align-items:flex-start}
@@ -2879,8 +2879,8 @@ function printInvoiceDoc(doc, opts) {
   .totals td.val{text-align:right;font-weight:600;color:#0f172a;font-family:'Courier New',monospace}
   .totals tr.grand td{background:${accentColor};color:${headerFg};font-size:15px;font-weight:800;padding:10px;border-bottom:none}
   .totals tr.grand td.val{color:${headerFg}}
-  .amt-in-words{margin-top:10px;padding:8px 12px;background:#f8fafc;border-left:3px solid ${accentColor};font-size:10px;color:#334155;font-style:italic}
-  .amt-in-words strong{color:#0f172a;font-style:normal}
+  .totals tr.words-row td{background:#f8fafc;color:#0f172a;font-size:10px;padding:8px 10px;border-bottom:none;font-style:italic;line-height:1.4}
+  .totals tr.words-row td strong{color:${accentColor};font-style:normal;text-transform:uppercase;letter-spacing:0.5px;font-size:9px;display:inline-block;margin-right:4px}
   /* HSN summary */
   h4.section{font-size:10px;color:${accentColor};text-transform:uppercase;letter-spacing:1px;margin:18px 0 6px;font-weight:700}
   table.hsn{width:100%;border-collapse:collapse;font-size:10px}
@@ -2899,22 +2899,22 @@ function printInvoiceDoc(doc, opts) {
   .sign-col .line-box{border-top:1px solid #0f172a;padding-top:4px;color:#475569;font-weight:600}
   .sign-col .auth-label{font-size:9px;color:#94a3b8}
   .footer-note{text-align:center;margin-top:24px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:9px;color:#94a3b8}
-  /* Cover page */
-  .cover-page{min-height:95vh;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:50px 30px;text-align:center;border:1px solid ${accentColor};border-top:6px solid ${accentColor};border-radius:2px}
-  .cover-head{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:40px}
-  .cover-logo{max-height:110px;max-width:260px;object-fit:contain}
-  .cover-company{font-size:22px;font-weight:800;color:#0f172a;letter-spacing:0.5px}
-  .cover-tagline{font-size:12px;color:${accentColor};font-style:italic;letter-spacing:0.3px}
-  .cover-title{font-size:42px;font-weight:900;color:${accentColor};letter-spacing:4px;margin:40px 0 6px}
-  .cover-docno{font-size:14px;color:#334155;font-family:'Courier New',monospace;margin-bottom:30px}
-  .cover-meta{display:flex;flex-direction:column;gap:8px;font-size:13px;color:#334155;margin-bottom:40px}
+  /* Cover page — A4, no top border, reduced gaps, left-aligned blocks */
+  .cover-page{min-height:265mm;display:flex;flex-direction:column;padding:18mm 16mm 14mm;box-sizing:border-box;page-break-after:always}
+  .cover-head{display:flex;flex-direction:column;align-items:center;gap:4px;margin-bottom:14px}
+  .cover-logo{max-height:96px;max-width:260px;object-fit:contain}
+  .cover-company{font-size:20px;font-weight:800;color:#0f172a;letter-spacing:0.3px;text-align:center}
+  .cover-tagline{font-size:11px;color:${accentColor};font-style:italic;letter-spacing:0.3px;text-align:center}
+  .cover-title{font-size:26px;font-weight:800;color:${accentColor};letter-spacing:3px;text-align:center;margin:0 0 4px}
+  .cover-docno{font-size:12px;color:#334155;font-family:'Courier New',monospace;text-align:center;margin-bottom:16px}
+  .cover-meta{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#334155;margin-bottom:20px;align-self:flex-start}
   .cover-meta-label{color:#64748b;text-transform:uppercase;font-size:10px;letter-spacing:1px;margin-right:6px}
-  .cover-intro{max-width:540px;font-size:12px;color:#334155;line-height:1.75;text-align:left;padding:20px 0;white-space:pre-line;margin-bottom:60px}
-  .cover-sign{margin-top:auto;text-align:center;font-size:11px;color:#475569}
-  .cover-sign-img{max-height:72px;max-width:220px;object-fit:contain;margin-bottom:6px}
+  .cover-intro{font-size:11px;color:#334155;line-height:1.7;text-align:left;padding:8px 0;white-space:pre-line;margin-bottom:auto}
+  .cover-sign{margin-top:24px;text-align:left;font-size:11px;color:#475569;align-self:flex-start}
+  .cover-sign-img{max-height:72px;max-width:220px;object-fit:contain;margin-bottom:4px;display:block}
   .cover-sign-name{font-size:13px;font-weight:700;color:#0f172a}
   .cover-sign-title{font-size:10px;color:#64748b}
-  @media print {@page {size:A4;margin:10mm} body{padding:0}}
+  @media print {@page {size:A4;margin:0} body{padding:0}}
 </style></head><body>
 <div class="page">${(isQuotation && opts.includeCover) ? `
   <!-- Cover Page -->
@@ -3020,9 +3020,6 @@ function printInvoiceDoc(doc, opts) {
     <tbody>${rows || '<tr><td colspan="11" style="text-align:center;padding:20px">No line items</td></tr>'}</tbody>
   </table>
 
-  <!-- Amount in words -->
-  <div class="amt-in-words"><strong>Amount in Words:</strong> ${esc(numberToIndianWords(doc.grand_total || 0))}</div>
-
   <!-- Bank + Totals -->
   <div class="bottom-row">
     <div class="bank-block">
@@ -3042,6 +3039,7 @@ function printInvoiceDoc(doc, opts) {
         : `<tr><td class="lbl">CGST</td><td class="val">₹${(doc.cgst || 0).toFixed(2)}</td></tr><tr><td class="lbl">SGST</td><td class="val">₹${(doc.sgst || 0).toFixed(2)}</td></tr>`
       }
       <tr class="grand"><td class="lbl">Grand Total</td><td class="val">₹${(doc.grand_total || 0).toFixed(2)}</td></tr>
+      <tr class="words-row"><td colspan="2"><strong>In Words:</strong> ${esc(numberToIndianWords(doc.grand_total || 0))}</td></tr>
     </table>
   </div>
 
