@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const categories = [
   { value: 'raw_material', label: 'Raw Material' },
@@ -35,6 +36,7 @@ export default function ItemsPage() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, item: null });
   const [formData, setFormData] = useState({
     part_number: '',
     name: '',
@@ -114,10 +116,10 @@ export default function ItemsPage() {
   };
 
   const handleDelete = async (item) => {
-    if (!window.confirm(`Delete item "${item.name}"?`)) return;
     try {
       await api.delete(`/api/items/${item.id}`);
       fetchItems();
+      setDeleteConfirm({ open: false, item: null });
     } catch (error) {
       console.error('Failed to delete item:', error);
       alert(error.response?.data?.detail || 'Failed to delete item');
@@ -519,7 +521,7 @@ export default function ItemsPage() {
                         )}
                         {canDelete && (
                           <button
-                            onClick={() => handleDelete(item)}
+                            onClick={() => setDeleteConfirm({ open: true, item })}
                             className="p-1 text-[#4B5563] hover:text-[#9B1C1C]"
                             data-testid={`delete-item-${item.part_number}`}
                           >
@@ -535,6 +537,17 @@ export default function ItemsPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(o) => !o && setDeleteConfirm({ open: false, item: null })}
+        title="Delete Item?"
+        message={<>This will permanently delete <strong>{deleteConfirm.item?.part_number}</strong> — {deleteConfirm.item?.name}. The operation will fail if this item is referenced in any BOM, Order, GRN, Invoice or Ticket.</>}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => handleDelete(deleteConfirm.item)}
+        testidPrefix="item-delete-confirm"
+      />
     </div>
   );
 }

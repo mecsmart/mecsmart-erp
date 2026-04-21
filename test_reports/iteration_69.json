@@ -1,0 +1,97 @@
+{
+  "summary": "CRM Third-Round Fixes testing complete. All 6 backend API tests passed. Frontend UI tests verified: (1) Lead delete opens ConfirmDialog with proper data-testids, (2) Ticket delete opens ConfirmDialog, (3) Quotation delete opens ConfirmDialog, (4) Contact delete opens ConfirmDialog, (5) Item delete opens ConfirmDialog with referential integrity warning, (6) Quotation Send button (green paper plane) changes status from draft to sent, (7) Quotation status dropdown 'Accepted' selection opens 'Confirm & Generate SO' popup instead of immediate update, (8) Quotation line editor has 'Item Name' column header, (9) Item description appears below dropdown when item with description is selected, (10) Quotation print HTML includes company header (name, address, GSTIN, phone, email), 'Item Name' header, and white-space:pre-line for multi-line T&C.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_crm_confirm_dialogs.py",
+    "/app/test_reports/pytest/pytest_iteration_69.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ConfirmDialog component properly implemented with testidPrefix prop for unique data-testids",
+    "All delete buttons (Lead, Ticket, Quotation, Contact, Item) now use ConfirmDialog instead of window.confirm",
+    "Quotation Send button correctly visible only for draft status, changes status to 'sent' on click",
+    "Quotation Accept flow correctly intercepts 'Accepted' dropdown selection and shows confirmation popup",
+    "Quotation line editor correctly shows 'Item Name' column header",
+    "Item description correctly appears below dropdown when item with description is selected",
+    "Quotation print HTML correctly includes company header block with all required info",
+    "T&C rendered with white-space:pre-line for multi-line support"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_crm_confirm_dialogs.py"
+  ],
+  "success_rate": {
+    "backend": "100% (6 passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created test leads, tickets, quotations, items during testing (cleaned up)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "CRM third-round fixes fully tested. Key features verified: (1) ConfirmDialog component with testidPrefix for unique data-testids (pattern: {prefix}-dialog, {prefix}-message, {prefix}-confirm-btn, {prefix}-cancel-btn), (2) All delete operations (Lead, Ticket, Quotation, Contact, Item) use ConfirmDialog, (3) Quotation Send button (data-testid: quotation-send-{id}) visible only for draft, changes status to sent, (4) Quotation Accept flow: selecting 'Accepted' from dropdown opens quotation-accept-confirm-dialog with 'Confirm & Generate SO' button, (5) Quotation line editor: 'Item Name' column header, item description below dropdown (data-testid: quotation-line-itemdesc-{idx}), (6) Quotation print: company header (Machinery Manufacturing ERP, address, GSTIN, phone, email), 'Item Name' header, white-space:pre-line for T&C.",
+  "features_tested": {
+    "lead_delete_confirm_dialog": {
+      "status": "PASSED",
+      "tests": ["Dialog opens on delete click", "Confirm button visible", "Cancel button visible", "Message shows lead number", "Cancel closes dialog without delete"]
+    },
+    "ticket_delete_confirm_dialog": {
+      "status": "PASSED",
+      "tests": ["Dialog opens on delete click", "Confirm button visible", "Cancel button visible", "Message shows ticket number", "Cancel closes dialog without delete"]
+    },
+    "quotation_delete_confirm_dialog": {
+      "status": "PASSED",
+      "tests": ["Dialog opens on delete click", "Confirm button visible", "Cancel button visible", "Cancel closes dialog without delete"]
+    },
+    "contact_delete_confirm_dialog": {
+      "status": "PASSED",
+      "tests": ["Dialog opens on delete click", "Confirm button visible", "Cancel button visible", "Cancel closes dialog without delete"]
+    },
+    "item_delete_confirm_dialog": {
+      "status": "PASSED",
+      "tests": ["Dialog opens on delete click", "Message warns about referential integrity", "Confirm button visible", "Cancel button visible"]
+    },
+    "quotation_send_button": {
+      "status": "PASSED",
+      "tests": ["Send button visible for draft quotations", "Send button has data-testid quotation-send-{id}", "Clicking Send changes status to sent", "Send button disappears after status change"]
+    },
+    "quotation_accept_flow": {
+      "status": "PASSED",
+      "tests": ["Selecting 'Accepted' from dropdown opens confirm dialog", "Dialog title is 'Confirm & Generate SO?'", "Dialog shows quotation number, customer, amount", "Confirm button labeled 'Confirm & Generate SO'", "Cancel closes dialog without status change"]
+    },
+    "quotation_line_item_name_header": {
+      "status": "PASSED",
+      "tests": ["Column header reads 'Item Name' not 'Item'"]
+    },
+    "quotation_line_item_description": {
+      "status": "PASSED",
+      "tests": ["Item description appears below dropdown when item selected", "Description has data-testid quotation-line-itemdesc-{idx}"]
+    },
+    "quotation_print_company_header": {
+      "status": "PASSED",
+      "tests": ["Company name 'Machinery Manufacturing ERP' in print HTML", "Company address in print HTML", "GSTIN in print HTML", "Phone in print HTML", "Email in print HTML", "'Item Name' header in print HTML", "white-space:pre-line for T&C multi-line support"]
+    }
+  },
+  "backend_tests_summary": {
+    "total": 6,
+    "passed": 6,
+    "skipped": 0,
+    "failed": 0
+  },
+  "data_testid_patterns": {
+    "lead_delete": ["lead-delete-confirm-dialog", "lead-delete-confirm-message", "lead-delete-confirm-confirm-btn", "lead-delete-confirm-cancel-btn"],
+    "ticket_delete": ["ticket-delete-confirm-dialog", "ticket-delete-confirm-message", "ticket-delete-confirm-confirm-btn", "ticket-delete-confirm-cancel-btn"],
+    "quotation_delete": ["quotation-delete-confirm-dialog", "quotation-delete-confirm-message", "quotation-delete-confirm-confirm-btn", "quotation-delete-confirm-cancel-btn"],
+    "quotation_accept": ["quotation-accept-confirm-dialog", "quotation-accept-confirm-message", "quotation-accept-confirm-confirm-btn", "quotation-accept-confirm-cancel-btn"],
+    "contact_delete": ["contact-delete-confirm-dialog", "contact-delete-confirm-message", "contact-delete-confirm-confirm-btn", "contact-delete-confirm-cancel-btn"],
+    "item_delete": ["item-delete-confirm-dialog", "item-delete-confirm-message", "item-delete-confirm-confirm-btn", "item-delete-confirm-cancel-btn"],
+    "quotation_send": "quotation-send-{id}",
+    "quotation_line_itemdesc": "quotation-line-itemdesc-{idx}"
+  }
+}

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 // Stage definitions per pipeline — aligned to the customer's CRM diagram:
 //   Marketing: Enquiry → Quotation → Negotiation → Won / Lost
@@ -201,6 +202,7 @@ function MarketingPanel({ leads, users, customers, stages, search, onRefresh, ca
   const [activityDialog, setActivityDialog] = useState({ open: false, lead: null, note: '' });
   const [convertDialog, setConvertDialog] = useState({ open: false, lead: null, code: '', gstin: '', address: '' });
   const [newCustomerDialog, setNewCustomerDialog] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, lead: null });
 
   const openDialog = (lead) => {
     if (lead) {
@@ -246,7 +248,7 @@ function MarketingPanel({ leads, users, customers, stages, search, onRefresh, ca
   };
 
   const deleteLead = async (lead) => {
-    try { await api.delete(`/api/crm/leads/${lead.id}`); onRefresh(); }
+    try { await api.delete(`/api/crm/leads/${lead.id}`); onRefresh(); setDeleteConfirm({ open: false, lead: null }); }
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
@@ -353,7 +355,7 @@ function MarketingPanel({ leads, users, customers, stages, search, onRefresh, ca
                       <button onClick={() => setConvertDialog({ open: true, lead: l, code: '', gstin: '', address: '' })} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Convert to Customer" data-testid={`lead-convert-${l.id}`}><UserCheck className="w-4 h-4" /></button>
                     )}
                     {canEdit && <button onClick={() => openDialog(l)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`lead-edit-${l.id}`}><Edit2 className="w-4 h-4" /></button>}
-                    {canEdit && <button onClick={() => deleteLead(l)} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`lead-delete-${l.id}`}><Trash2 className="w-4 h-4" /></button>}
+                    {canEdit && <button onClick={() => setDeleteConfirm({ open: true, lead: l })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`lead-delete-${l.id}`}><Trash2 className="w-4 h-4" /></button>}
                   </div>
                 </td>
               </tr>
@@ -532,6 +534,17 @@ function MarketingPanel({ leads, users, customers, stages, search, onRefresh, ca
           onRefresh();
         }}
       />
+
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(o) => !o && setDeleteConfirm({ open: false, lead: null })}
+        title="Delete Lead?"
+        message={<>This will permanently delete <strong>{deleteConfirm.lead?.lead_no}</strong>{deleteConfirm.lead?.name ? ` — ${deleteConfirm.lead.name}` : ''}. This action cannot be undone.</>}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => deleteLead(deleteConfirm.lead)}
+        testidPrefix="lead-delete-confirm"
+      />
     </div>
   );
 }
@@ -545,6 +558,7 @@ function SupportPanel({ tickets, customers, users, items, stages, search, onRefr
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ subject: '', customer_id: '', description: '', priority: 'medium', assignee_id: '', product_ids: [], stage: 'complaint' });
   const [activityDialog, setActivityDialog] = useState({ open: false, ticket: null, note: '' });
+  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, ticket: null });
 
   const openDialog = (t) => {
     if (t) {
@@ -586,7 +600,7 @@ function SupportPanel({ tickets, customers, users, items, stages, search, onRefr
   };
 
   const deleteTicket = async (t) => {
-    try { await api.delete(`/api/crm/tickets/${t.id}`); onRefresh(); }
+    try { await api.delete(`/api/crm/tickets/${t.id}`); onRefresh(); setDeleteConfirm({ open: false, ticket: null }); }
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
@@ -698,7 +712,7 @@ function SupportPanel({ tickets, customers, users, items, stages, search, onRefr
                     <div className="flex items-center gap-0.5">
                       <button onClick={() => setActivityDialog({ open: true, ticket: t, note: '' })} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Activity log" data-testid={`ticket-activity-${t.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && <button onClick={() => openDialog(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`ticket-edit-${t.id}`}><Edit2 className="w-4 h-4" /></button>}
-                      {canEdit && <button onClick={() => deleteTicket(t)} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`ticket-delete-${t.id}`}><Trash2 className="w-4 h-4" /></button>}
+                      {canEdit && <button onClick={() => setDeleteConfirm({ open: true, ticket: t })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`ticket-delete-${t.id}`}><Trash2 className="w-4 h-4" /></button>}
                     </div>
                   </td>
                 </tr>
@@ -797,6 +811,17 @@ function SupportPanel({ tickets, customers, users, items, stages, search, onRefr
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(o) => !o && setDeleteConfirm({ open: false, ticket: null })}
+        title="Delete Ticket?"
+        message={<>This will permanently delete <strong>{deleteConfirm.ticket?.ticket_no}</strong>{deleteConfirm.ticket?.subject ? ` — ${deleteConfirm.ticket.subject}` : ''}. This action cannot be undone.</>}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => deleteTicket(deleteConfirm.ticket)}
+        testidPrefix="ticket-delete-confirm"
+      />
     </div>
   );
 }
@@ -812,6 +837,15 @@ const QUOTATION_STATUSES = [
   { key: 'rejected', label: 'Rejected', color: 'bg-[#FDE8E8] text-[#9B1C1C]' },
   { key: 'converted', label: 'Converted → SO', color: 'bg-[#FCE7F3] text-[#9D174D]' },
 ];
+
+const COMPANY_INFO = {
+  name: 'Machinery Manufacturing ERP',
+  address: 'Industrial Estate, Plot No. 123, Pune, Maharashtra 411019',
+  phone: '+91 20 1234 5678',
+  email: 'sales@machineworks-erp.com',
+  gstin: '27AAACM1234E1Z5',
+  website: 'www.machineworks-erp.com',
+};
 
 function emptyQuotationLine() {
   return { item_id: '', description: '', quantity: 1, uom: 'Nos', rate: 0, discount_pct: 0, gst_rate: 18 };
@@ -836,6 +870,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
   };
   const [form, setForm] = useState(emptyForm);
   const [convertDialog, setConvertDialog] = useState({ open: false, quotation: null });
+  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, quotation: null });
+  const [acceptConfirm, setAcceptConfirm] = useState({ open: false, quotation: null });
 
   const openDialog = useCallback((q, fromLead) => {
     if (q) {
@@ -888,7 +924,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     const it = items.find(i => i.id === itemId);
     updateLine(idx, {
       item_id: itemId,
-      description: it?.name || '',
+      // Pre-fill the editable Description column from items.description if present; else leave empty/editable
+      description: it?.description || '',
       uom: it?.uom || 'Nos',
       rate: it?.sale_price || it?.unit_cost || 0,
       gst_rate: it?.gst_rate ?? 18,
@@ -943,34 +980,48 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
   };
 
   const deleteQuotation = async (q) => {
-    try { await api.delete(`/api/crm/quotations/${q.id}`); onRefresh(); }
+    try { await api.delete(`/api/crm/quotations/${q.id}`); onRefresh(); setDeleteConfirm({ open: false, quotation: null }); }
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
-  const quickStatusChange = async (q, status) => {
+  const acceptQuotation = async () => {
+    const q = acceptConfirm.quotation;
+    if (!q) return;
     try {
-      const res = await api.put(`/api/crm/quotations/${q.id}`, { status });
+      const res = await api.put(`/api/crm/quotations/${q.id}`, { status: 'accepted' });
+      setAcceptConfirm({ open: false, quotation: null });
       onRefresh();
-      if (status === 'accepted' && res.data?.converted_so_no) {
-        alert(`Quotation accepted & converted to Sales Order ${res.data.converted_so_no}.`);
-      }
+      if (res.data?.converted_so_no) alert(`Quotation accepted & converted to Sales Order ${res.data.converted_so_no}.`);
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to accept'); }
+  };
+
+  const quickStatusChange = async (q, status) => {
+    // Intercept 'accepted' — show confirm popup instead of firing directly
+    if (status === 'accepted') {
+      setAcceptConfirm({ open: true, quotation: q });
+      return;
+    }
+    try {
+      await api.put(`/api/crm/quotations/${q.id}`, { status });
+      onRefresh();
     }
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
   const printQuotation = (q) => {
-    // Build a simple printable HTML + Blob URL (bypass iframe constraints per established pattern)
+    const esc = (s) => String(s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
     const lines = q.lines || [];
     const rows = lines.map((l, i) => {
       const gross = (l.quantity || 0) * (l.rate || 0);
       const disc = gross * ((l.discount_pct || 0) / 100);
       const net = gross - disc;
       const gstAmt = net * ((l.gst_rate || 0) / 100);
+      const itemLabel = l.item?.part_number ? `${l.item.part_number} · ${l.item.name || ''}` : '';
       return `<tr>
         <td style="text-align:center">${i + 1}</td>
-        <td>${(l.item?.part_number ? l.item.part_number + ' · ' : '') + (l.description || l.item?.name || '')}</td>
+        <td><strong>${esc(itemLabel || l.description || '-')}</strong>${l.description && itemLabel ? `<div style="font-size:10px;color:#555;margin-top:2px">${esc(l.description)}</div>` : ''}</td>
         <td style="text-align:right">${(l.quantity || 0).toFixed(2)}</td>
-        <td>${l.uom || ''}</td>
+        <td>${esc(l.uom || '')}</td>
         <td style="text-align:right">₹${(l.rate || 0).toFixed(2)}</td>
         <td style="text-align:right">${(l.discount_pct || 0).toFixed(2)}%</td>
         <td style="text-align:right">₹${net.toFixed(2)}</td>
@@ -982,40 +1033,58 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${q.quotation_no}</title>
 <style>
   body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:20px}
-  h1{font-size:20px;color:#1D3557;margin:0 0 4px}
-  .meta{display:flex;justify-content:space-between;margin:12px 0}
-  table{width:100%;border-collapse:collapse;margin:16px 0}
-  th,td{border:1px solid #ccc;padding:6px 8px;font-size:11px}
-  th{background:#F3F4F6;text-align:left}
-  .totals{margin-left:auto;width:300px}
-  .totals td{border:none;padding:3px 6px}
-  .totals tr.grand td{border-top:2px solid #111;font-weight:bold;font-size:14px}
-  .notes{margin-top:16px;padding:8px;background:#F9FAFB;border:1px solid #E5E7EB;font-size:11px}
+  .company-block{border-bottom:2px solid #1D3557;padding-bottom:8px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-start}
+  .company-block .company-name{font-size:22px;color:#1D3557;font-weight:bold;margin:0 0 4px}
+  .company-block .company-addr{font-size:11px;color:#4B5563;line-height:1.4}
+  .doc-title{font-size:20px;color:#1D3557;font-weight:bold;text-align:right}
+  .doc-title .sub{font-size:11px;color:#6B7280;font-weight:normal;text-transform:uppercase;letter-spacing:1px}
+  .meta{display:flex;justify-content:space-between;gap:16px;margin:16px 0}
+  .meta > div{flex:1}
+  .meta h3{font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:1px;margin:0 0 4px;font-weight:normal}
+  table.items{width:100%;border-collapse:collapse;margin:16px 0}
+  table.items th, table.items td{border:1px solid #ccc;padding:6px 8px;font-size:11px}
+  table.items th{background:#F3F4F6;text-align:left}
+  .totals{margin-left:auto;width:320px;border-collapse:collapse}
+  .totals td{padding:4px 8px}
+  .totals tr.grand td{border-top:2px solid #111;font-weight:bold;font-size:14px;padding-top:6px}
+  .notes{margin-top:16px;padding:10px;background:#F9FAFB;border:1px solid #E5E7EB;font-size:11px;white-space:pre-line;line-height:1.5}
+  .notes strong{display:block;margin-bottom:4px;color:#1D3557}
   @media print {@page {size:A4; margin:15mm;}}
 </style></head><body>
-<div style="border-bottom:2px solid #1D3557;padding-bottom:8px;margin-bottom:12px">
-  <h1>Quotation</h1>
-  <div style="font-size:11px;color:#4B5563">Machinery Manufacturing ERP</div>
+<div class="company-block">
+  <div>
+    <div class="company-name">${esc(COMPANY_INFO.name)}</div>
+    <div class="company-addr">${esc(COMPANY_INFO.address)}</div>
+    <div class="company-addr">Phone: ${esc(COMPANY_INFO.phone)} &nbsp; | &nbsp; Email: ${esc(COMPANY_INFO.email)}</div>
+    <div class="company-addr">GSTIN: ${esc(COMPANY_INFO.gstin)} &nbsp; | &nbsp; ${esc(COMPANY_INFO.website)}</div>
+  </div>
+  <div class="doc-title">
+    <div class="sub">Quotation</div>
+    <div>${esc(q.quotation_no)}</div>
+  </div>
 </div>
+
 <div class="meta">
   <div>
-    <div><strong>Quotation No:</strong> ${q.quotation_no}</div>
-    <div><strong>Date:</strong> ${q.quotation_date ? new Date(q.quotation_date).toLocaleDateString('en-IN') : '-'}</div>
-    ${q.valid_until ? `<div><strong>Valid Until:</strong> ${new Date(q.valid_until).toLocaleDateString('en-IN')}</div>` : ''}
-    ${q.lead?.lead_no ? `<div><strong>Ref Lead:</strong> ${q.lead.lead_no}</div>` : ''}
-    <div><strong>Status:</strong> ${(q.status || '').toUpperCase()}${q.converted_so_no ? ` (SO: ${q.converted_so_no})` : ''}</div>
+    <h3>Bill To</h3>
+    <div style="font-size:13px;font-weight:bold">${esc(q.customer_name || '')}</div>
+    ${q.contact_person ? `<div>Attn: ${esc(q.contact_person)}</div>` : ''}
+    ${q.email ? `<div>${esc(q.email)}</div>` : ''}
+    ${q.phone ? `<div>${esc(q.phone)}</div>` : ''}
+    ${q.customer?.address ? `<div style="max-width:260px;white-space:pre-line">${esc(q.customer.address)}</div>` : ''}
+    ${q.customer?.gstin ? `<div>GSTIN: ${esc(q.customer.gstin)}</div>` : ''}
   </div>
   <div style="text-align:right">
-    <div style="font-size:14px;font-weight:bold">${q.customer_name || ''}</div>
-    ${q.contact_person ? `<div>Attn: ${q.contact_person}</div>` : ''}
-    ${q.email ? `<div>${q.email}</div>` : ''}
-    ${q.phone ? `<div>${q.phone}</div>` : ''}
-    ${q.customer?.address ? `<div style="max-width:260px">${q.customer.address}</div>` : ''}
-    ${q.customer?.gstin ? `<div>GSTIN: ${q.customer.gstin}</div>` : ''}
+    <h3>Quotation Details</h3>
+    <div><strong>Date:</strong> ${q.quotation_date ? new Date(q.quotation_date).toLocaleDateString('en-IN') : '-'}</div>
+    ${q.valid_until ? `<div><strong>Valid Until:</strong> ${new Date(q.valid_until).toLocaleDateString('en-IN')}</div>` : ''}
+    ${q.lead?.lead_no ? `<div><strong>Ref Lead:</strong> ${esc(q.lead.lead_no)}</div>` : ''}
+    <div><strong>Status:</strong> ${(q.status || '').toUpperCase()}${q.converted_so_no ? ` (SO: ${esc(q.converted_so_no)})` : ''}</div>
   </div>
 </div>
-<table>
-  <thead><tr><th>#</th><th>Item / Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Discount</th><th>Amount</th><th>GST</th><th>Total</th></tr></thead>
+
+<table class="items">
+  <thead><tr><th>#</th><th>Item Name</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Discount</th><th>Amount</th><th>GST</th><th>Total</th></tr></thead>
   <tbody>${rows || '<tr><td colspan="9" style="text-align:center">No lines</td></tr>'}</tbody>
 </table>
 <table class="totals">
@@ -1024,8 +1093,19 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
   <tr><td>GST:</td><td style="text-align:right">₹${(q.total_gst || 0).toFixed(2)}</td></tr>
   <tr class="grand"><td>Grand Total:</td><td style="text-align:right">₹${(q.grand_total || 0).toFixed(2)}</td></tr>
 </table>
-${q.notes ? `<div class="notes"><strong>Notes:</strong><br/>${q.notes}</div>` : ''}
-${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions:</strong><br/>${q.terms}</div>` : ''}
+
+${q.notes ? `<div class="notes"><strong>Notes</strong>${esc(q.notes)}</div>` : ''}
+${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions</strong>${esc(q.terms)}</div>` : ''}
+
+<div style="margin-top:40px;display:flex;justify-content:space-between;font-size:11px;color:#4B5563">
+  <div style="text-align:center;width:45%">
+    <div style="border-top:1px solid #111;margin-top:40px;padding-top:4px">Customer Acceptance</div>
+  </div>
+  <div style="text-align:center;width:45%">
+    <div style="border-top:1px solid #111;margin-top:40px;padding-top:4px">For ${esc(COMPANY_INFO.name)}</div>
+  </div>
+</div>
+
 <script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
 </body></html>`;
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
@@ -1085,7 +1165,6 @@ ${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions:</strong><br/>${q
             {filtered.map(q => {
               const statusData = QUOTATION_STATUSES.find(s => s.key === q.status);
               const isLocked = q.is_locked === true;  // from backend: true if converted & linked SO not cancelled
-              const isConverted = q.status === 'converted';
               return (
                 <tr key={q.id} data-testid={`quotation-row-${q.id}`}>
                   <td className="mono font-medium">{q.quotation_no}</td>
@@ -1117,11 +1196,11 @@ ${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions:</strong><br/>${q
                   <td>
                     <div className="flex items-center gap-0.5">
                       <button onClick={() => printQuotation(q)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`quotation-print-${q.id}`}><Printer className="w-4 h-4" /></button>
-                      {canEdit && !isLocked && !isConverted && q.status !== 'rejected' && (
-                        <button onClick={() => quickStatusChange(q, 'accepted')} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Accept & Generate SO" data-testid={`quotation-accept-${q.id}`}><CheckCircle2 className="w-4 h-4" /></button>
+                      {canEdit && !isLocked && q.status === 'draft' && (
+                        <button onClick={() => quickStatusChange(q, 'sent')} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Send to customer" data-testid={`quotation-send-${q.id}`}><Send className="w-4 h-4" /></button>
                       )}
                       {canEdit && !isLocked && <button onClick={() => openDialog(q, null)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`quotation-edit-${q.id}`}><Edit2 className="w-4 h-4" /></button>}
-                      {canEdit && !isLocked && <button onClick={() => deleteQuotation(q)} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`quotation-delete-${q.id}`}><Trash2 className="w-4 h-4" /></button>}
+                      {canEdit && !isLocked && <button onClick={() => setDeleteConfirm({ open: true, quotation: q })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`quotation-delete-${q.id}`}><Trash2 className="w-4 h-4" /></button>}
                     </div>
                   </td>
                 </tr>
@@ -1217,7 +1296,7 @@ ${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions:</strong><br/>${q
                   <thead className="bg-[#F3F4F6]">
                     <tr>
                       <th className="text-left p-2 w-10">#</th>
-                      <th className="text-left p-2 min-w-[200px]">Item</th>
+                      <th className="text-left p-2 min-w-[220px]">Item Name</th>
                       <th className="text-left p-2 min-w-[180px]">Description</th>
                       <th className="text-left p-2 w-20">Qty</th>
                       <th className="text-left p-2 w-20">UOM</th>
@@ -1244,6 +1323,12 @@ ${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions:</strong><br/>${q
                                 {items.slice(0, 500).map(it => <SelectItem key={it.id} value={it.id}>{it.part_number} · {it.name}</SelectItem>)}
                               </SelectContent>
                             </Select>
+                            {(() => {
+                              const it = items.find(x => x.id === l.item_id);
+                              const desc = it?.description || '';
+                              if (!desc) return null;
+                              return <div className="text-[10px] text-[#6B7280] mt-1 leading-tight" data-testid={`quotation-line-itemdesc-${idx}`}>{desc}</div>;
+                            })()}
                           </td>
                           <td className="p-2">
                             <input type="text" className="input-field h-7 text-xs" value={l.description} onChange={e => updateLine(idx, { description: e.target.value })} />
@@ -1330,6 +1415,37 @@ ${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions:</strong><br/>${q
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(o) => !o && setDeleteConfirm({ open: false, quotation: null })}
+        title="Delete Quotation?"
+        message={<>This will permanently delete <strong>{deleteConfirm.quotation?.quotation_no}</strong>{deleteConfirm.quotation?.customer_name ? ` — ${deleteConfirm.quotation.customer_name}` : ''}. This action cannot be undone.</>}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => deleteQuotation(deleteConfirm.quotation)}
+        testidPrefix="quotation-delete-confirm"
+      />
+
+      <ConfirmDialog
+        open={acceptConfirm.open}
+        onOpenChange={(o) => !o && setAcceptConfirm({ open: false, quotation: null })}
+        title="Confirm & Generate SO?"
+        message={<>
+          Accepting <strong>{acceptConfirm.quotation?.quotation_no}</strong> will generate a Sales Order for <strong>{acceptConfirm.quotation?.customer_name}</strong> worth <strong>{formatCurrency(acceptConfirm.quotation?.grand_total || 0)}</strong>.
+          <ul className="list-disc list-inside mt-2 text-xs text-[#4B5563]">
+            <li>Each line item must have a valid BOM attached.</li>
+            <li>Order type defaults to <strong>auto</strong> (smart MTS/MTO split).</li>
+            <li>The quotation becomes read-only until the linked SO is cancelled.</li>
+            {acceptConfirm.quotation?.lead_id && <li>The linked Lead will move to <strong>Won</strong> stage.</li>}
+          </ul>
+        </>}
+        confirmLabel="Confirm & Generate SO"
+        cancelLabel="Cancel"
+        variant="primary"
+        onConfirm={acceptQuotation}
+        testidPrefix="quotation-accept-confirm"
+      />
     </div>
   );
 }
@@ -1450,6 +1566,7 @@ function ContactsPanel({ customers, search, onRefresh, canEdit }) {
   const [editing, setEditing] = useState(null);
   const empty = { code: '', name: '', gstin: '', contact_person: '', email: '', phone: '', address: '', status: 'active' };
   const [form, setForm] = useState(empty);
+  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, contact: null });
 
   const openDialog = (c) => {
     if (c) { setEditing(c); setForm({ ...empty, ...c }); }
@@ -1465,8 +1582,7 @@ function ContactsPanel({ customers, search, onRefresh, canEdit }) {
     } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
   const del = async (c) => {
-    if (!window.confirm(`Delete contact "${c.name}"?`)) return;
-    try { await api.delete(`/api/customers/${c.id}`); onRefresh(); }
+    try { await api.delete(`/api/customers/${c.id}`); onRefresh(); setDeleteConfirm({ open: false, contact: null }); }
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
@@ -1509,7 +1625,7 @@ function ContactsPanel({ customers, search, onRefresh, canEdit }) {
                 <td>
                   <div className="flex gap-0.5">
                     {canEdit && <button onClick={() => openDialog(c)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" data-testid={`contact-edit-${c.id}`}><Edit2 className="w-4 h-4" /></button>}
-                    {canEdit && <button onClick={() => del(c)} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" data-testid={`contact-delete-${c.id}`}><Trash2 className="w-4 h-4" /></button>}
+                    {canEdit && <button onClick={() => setDeleteConfirm({ open: true, contact: c })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" data-testid={`contact-delete-${c.id}`}><Trash2 className="w-4 h-4" /></button>}
                   </div>
                 </td>
               </tr>
@@ -1566,6 +1682,17 @@ function ContactsPanel({ customers, search, onRefresh, canEdit }) {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(o) => !o && setDeleteConfirm({ open: false, contact: null })}
+        title="Delete Contact?"
+        message={<>This will permanently delete <strong>{deleteConfirm.contact?.name}</strong>{deleteConfirm.contact?.code ? ` (${deleteConfirm.contact.code})` : ''}. This may fail if the contact is referenced by orders or invoices.</>}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => del(deleteConfirm.contact)}
+        testidPrefix="contact-delete-confirm"
+      />
     </div>
   );
 }
