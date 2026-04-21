@@ -1030,110 +1030,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
-  const printQuotation = (q) => {
-    const esc = (s) => String(s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-    const lines = q.lines || [];
-    const rows = lines.map((l, i) => {
-      const gross = (l.quantity || 0) * (l.rate || 0);
-      const disc = gross * ((l.discount_pct || 0) / 100);
-      const net = gross - disc;
-      const gstAmt = net * ((l.gst_rate || 0) / 100);
-      const itemLabel = l.item?.part_number ? `${l.item.part_number} · ${l.item.name || ''}` : '';
-      return `<tr>
-        <td style="text-align:center">${i + 1}</td>
-        <td><strong>${esc(itemLabel || l.description || '-')}</strong>${l.description && itemLabel ? `<div style="font-size:10px;color:#555;margin-top:2px">${esc(l.description)}</div>` : ''}</td>
-        <td style="text-align:right">${(l.quantity || 0).toFixed(2)}</td>
-        <td>${esc(l.uom || '')}</td>
-        <td style="text-align:right">₹${(l.rate || 0).toFixed(2)}</td>
-        <td style="text-align:right">${(l.discount_pct || 0).toFixed(2)}%</td>
-        <td style="text-align:right">₹${net.toFixed(2)}</td>
-        <td style="text-align:right">${(l.gst_rate || 0).toFixed(1)}%</td>
-        <td style="text-align:right">₹${(net + gstAmt).toFixed(2)}</td>
-      </tr>`;
-    }).join('');
-    const totalDisc = (q.total_discount || 0);
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${q.quotation_no}</title>
-<style>
-  body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:20px}
-  .company-block{border-bottom:2px solid #1D3557;padding-bottom:8px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-start}
-  .company-block .company-name{font-size:22px;color:#1D3557;font-weight:bold;margin:0 0 4px}
-  .company-block .company-addr{font-size:11px;color:#4B5563;line-height:1.4}
-  .doc-title{font-size:20px;color:#1D3557;font-weight:bold;text-align:right}
-  .doc-title .sub{font-size:11px;color:#6B7280;font-weight:normal;text-transform:uppercase;letter-spacing:1px}
-  .meta{display:flex;justify-content:space-between;gap:16px;margin:16px 0}
-  .meta > div{flex:1}
-  .meta h3{font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:1px;margin:0 0 4px;font-weight:normal}
-  table.items{width:100%;border-collapse:collapse;margin:16px 0}
-  table.items th, table.items td{border:1px solid #ccc;padding:6px 8px;font-size:11px}
-  table.items th{background:#F3F4F6;text-align:left}
-  .totals{margin-left:auto;width:320px;border-collapse:collapse}
-  .totals td{padding:4px 8px}
-  .totals tr.grand td{border-top:2px solid #111;font-weight:bold;font-size:14px;padding-top:6px}
-  .notes{margin-top:16px;padding:10px;background:#F9FAFB;border:1px solid #E5E7EB;font-size:11px;white-space:pre-line;line-height:1.5}
-  .notes strong{display:block;margin-bottom:4px;color:#1D3557}
-  @media print {@page {size:A4; margin:15mm;}}
-</style></head><body>
-<div class="company-block">
-  <div>
-    <div class="company-name">${esc(COMPANY_INFO.name)}</div>
-    <div class="company-addr">${esc(COMPANY_INFO.address)}</div>
-    <div class="company-addr">Phone: ${esc(COMPANY_INFO.phone)} &nbsp; | &nbsp; Email: ${esc(COMPANY_INFO.email)}</div>
-    <div class="company-addr">GSTIN: ${esc(COMPANY_INFO.gstin)} &nbsp; | &nbsp; ${esc(COMPANY_INFO.website)}</div>
-  </div>
-  <div class="doc-title">
-    <div class="sub">Quotation</div>
-    <div>${esc(q.quotation_no)}</div>
-  </div>
-</div>
-
-<div class="meta">
-  <div>
-    <h3>Bill To</h3>
-    <div style="font-size:13px;font-weight:bold">${esc(q.customer_name || '')}</div>
-    ${q.contact_person ? `<div>Attn: ${esc(q.contact_person)}</div>` : ''}
-    ${q.email ? `<div>${esc(q.email)}</div>` : ''}
-    ${q.phone ? `<div>${esc(q.phone)}</div>` : ''}
-    ${q.customer?.address ? `<div style="max-width:260px;white-space:pre-line">${esc(q.customer.address)}</div>` : ''}
-    ${q.customer?.gstin ? `<div>GSTIN: ${esc(q.customer.gstin)}</div>` : ''}
-  </div>
-  <div style="text-align:right">
-    <h3>Quotation Details</h3>
-    <div><strong>Date:</strong> ${q.quotation_date ? new Date(q.quotation_date).toLocaleDateString('en-IN') : '-'}</div>
-    ${q.valid_until ? `<div><strong>Valid Until:</strong> ${new Date(q.valid_until).toLocaleDateString('en-IN')}</div>` : ''}
-    ${q.lead?.lead_no ? `<div><strong>Ref Lead:</strong> ${esc(q.lead.lead_no)}</div>` : ''}
-    <div><strong>Status:</strong> ${(q.status || '').toUpperCase()}${q.converted_so_no ? ` (SO: ${esc(q.converted_so_no)})` : ''}</div>
-  </div>
-</div>
-
-<table class="items">
-  <thead><tr><th>#</th><th>Item Name</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Discount</th><th>Amount</th><th>GST</th><th>Total</th></tr></thead>
-  <tbody>${rows || '<tr><td colspan="9" style="text-align:center">No lines</td></tr>'}</tbody>
-</table>
-<table class="totals">
-  <tr><td>Subtotal (after discount):</td><td style="text-align:right">₹${(q.subtotal || 0).toFixed(2)}</td></tr>
-  ${totalDisc ? `<tr><td>Total Discount:</td><td style="text-align:right">₹${totalDisc.toFixed(2)}</td></tr>` : ''}
-  <tr><td>GST:</td><td style="text-align:right">₹${(q.total_gst || 0).toFixed(2)}</td></tr>
-  <tr class="grand"><td>Grand Total:</td><td style="text-align:right">₹${(q.grand_total || 0).toFixed(2)}</td></tr>
-</table>
-
-${q.notes ? `<div class="notes"><strong>Notes</strong>${esc(q.notes)}</div>` : ''}
-${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions</strong>${esc(q.terms)}</div>` : ''}
-
-<div style="margin-top:40px;display:flex;justify-content:space-between;font-size:11px;color:#4B5563">
-  <div style="text-align:center;width:45%">
-    <div style="border-top:1px solid #111;margin-top:40px;padding-top:4px">Customer Acceptance</div>
-  </div>
-  <div style="text-align:center;width:45%">
-    <div style="border-top:1px solid #111;margin-top:40px;padding-top:4px">For ${esc(COMPANY_INFO.name)}</div>
-  </div>
-</div>
-
-<script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
-</body></html>`;
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const url = window.URL.createObjectURL(blob);
-    window.open(url, '_blank');
-  };
+  const printQuotation = (q) => printInvoiceDoc(q, { kind: 'quotation', title: 'QUOTATION', numberKey: 'quotation_no' });
 
   const convertToSO = async () => {
     try {
@@ -1196,6 +1093,8 @@ ${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions</strong>${esc(q.t
                   </td>
                   <td className="text-xs mono">
                     {q.lead?.lead_no ? <span className="text-[#1E429F]">{q.lead.lead_no}</span> : <span className="text-[#9CA3AF]">—</span>}
+                    {q.converted_so_no && <div className="text-[10px] text-[#03543F] font-medium" data-testid={`quotation-so-link-${q.id}`}>SO: {q.converted_so_no}{q.converted_so?.status === 'cancelled' ? ' · Cancelled' : ''}</div>}
+                    {q.proforma_no && <div className="text-[10px] text-[#9D174D] font-medium" data-testid={`quotation-pi-link-${q.id}`}>PI: {q.proforma_no}</div>}
                   </td>
                   <td className="text-xs">{q.quotation_date ? new Date(q.quotation_date).toLocaleDateString('en-IN') : '-'}</td>
                   <td className="text-xs">{q.valid_until ? new Date(q.valid_until).toLocaleDateString('en-IN') : '-'}</td>
@@ -1221,8 +1120,8 @@ ${q.terms ? `<div class="notes"><strong>Terms &amp; Conditions</strong>${esc(q.t
                       {canEdit && !isLocked && q.status === 'draft' && (
                         <button onClick={() => quickStatusChange(q, 'sent')} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Send to customer" data-testid={`quotation-send-${q.id}`}><Send className="w-4 h-4" /></button>
                       )}
-                      {canEdit && !q.proforma_id && q.status !== 'rejected' && (
-                        <button onClick={() => setProformaConfirm({ open: true, quotation: q })} className="p-1.5 text-[#1E429F] hover:bg-[#E1EFFE] rounded" title="Convert to Proforma Invoice" data-testid={`quotation-to-proforma-${q.id}`}><FileText className="w-4 h-4" /></button>
+                      {canEdit && q.status !== 'rejected' && (
+                        <button onClick={() => setProformaConfirm({ open: true, quotation: q })} className="p-1.5 text-[#1E429F] hover:bg-[#E1EFFE] rounded" title={q.proforma_id ? 'Create another Proforma Invoice' : 'Convert to Proforma Invoice'} data-testid={`quotation-to-proforma-${q.id}`}><FileText className="w-4 h-4" /></button>
                       )}
                       {canEdit && !isLocked && <button onClick={() => openDialog(q, null)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`quotation-edit-${q.id}`}><Edit2 className="w-4 h-4" /></button>}
                       {canEdit && !isLocked && <button onClick={() => setDeleteConfirm({ open: true, quotation: q })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`quotation-delete-${q.id}`}><Trash2 className="w-4 h-4" /></button>}
@@ -2423,149 +2322,241 @@ function printInvoiceDoc(doc, opts) {
   const esc = (s) => String(s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const company = {
     name: 'Machinery Manufacturing ERP',
-    address: 'Industrial Estate, Plot No. 123, Pune, Maharashtra 411019',
+    address_line1: 'Industrial Estate, Plot No. 123',
+    address_line2: 'Pune, Maharashtra 411019',
     phone: '+91 20 1234 5678',
     email: 'sales@machineworks-erp.com',
     gstin: '27AAACM1234E1Z5',
+    bank_name: 'HDFC Bank',
+    bank_branch: 'Pune Main Branch',
+    bank_account: '50200012345678',
+    bank_ifsc: 'HDFC0000123',
+    bank_upi: 'machineworks@upi',
   };
   const isInter = !!doc.is_inter_state;
+  const isTaxInvoice = opts.kind === 'tax_invoice';
+
   const rows = (doc.lines || []).map((l, i) => {
-    const taxable = l.taxable_value ?? l.amount ?? 0;
-    const cgstAmt = l.cgst_amt || 0;
-    const sgstAmt = l.sgst_amt || 0;
-    const igstAmt = l.igst_amt || 0;
-    const total = taxable + cgstAmt + sgstAmt + igstAmt;
-    const itemLabel = l.item?.part_number ? `${l.item.part_number} · ${l.item.name || ''}` : '';
+    const qty = parseFloat(l.quantity || 0);
+    const rate = parseFloat(l.rate || 0);
+    const discPct = parseFloat(l.discount_pct || 0);
+    const gross = qty * rate;
+    const disc = gross * discPct / 100;
+    const basic = gross - disc;  // taxable value
+    const gstRate = parseFloat(l.gst_rate || 0);
+    const gstAmt = basic * gstRate / 100;
+    const total = basic + gstAmt;
+    const partNum = l.item?.part_number || '';
+    const itemName = l.item?.name || '';
+    const headTitle = partNum ? `${partNum} — ${itemName}` : (l.description ? l.description.split('\n')[0] : '-');
+    const subDesc = l.description && (l.description !== itemName) ? l.description : '';
     return `<tr>
-      <td style="text-align:center">${i + 1}</td>
-      <td>${esc(itemLabel || l.description || '-')}${l.description && itemLabel ? `<div style="font-size:10px;color:#555">${esc(l.description)}</div>` : ''}</td>
-      <td style="text-align:center" class="mono">${esc(l.hsn_code || l.item?.hsn_code || '-')}</td>
-      <td style="text-align:right">${(l.quantity || 0).toFixed(2)} ${esc(l.uom || '')}</td>
-      <td style="text-align:right">₹${(l.rate || 0).toFixed(2)}</td>
-      <td style="text-align:right">${(l.discount_pct || 0).toFixed(1)}%</td>
-      <td style="text-align:right">₹${taxable.toFixed(2)}</td>
-      ${isInter
-        ? `<td style="text-align:right">${(l.igst_rate || 0).toFixed(1)}% / ₹${igstAmt.toFixed(2)}</td>`
-        : `<td style="text-align:right">${(l.cgst_rate || 0).toFixed(1)}% / ₹${cgstAmt.toFixed(2)}</td><td style="text-align:right">${(l.sgst_rate || 0).toFixed(1)}% / ₹${sgstAmt.toFixed(2)}</td>`
-      }
-      <td style="text-align:right">₹${total.toFixed(2)}</td>
+      <td class="sn">${i + 1}</td>
+      <td class="itemcell">
+        <div class="item-name">${esc(headTitle)}</div>
+        ${subDesc ? `<div class="item-desc">${esc(subDesc)}</div>` : ''}
+      </td>
+      <td class="center mono">${esc(l.hsn_code || l.item?.hsn_code || '-')}</td>
+      <td class="right">${qty.toFixed(2)}</td>
+      <td class="center">${esc(l.uom || '')}</td>
+      <td class="right">${rate.toFixed(2)}</td>
+      <td class="right">${discPct > 0 ? discPct.toFixed(2) + '%' : '-'}</td>
+      <td class="right">${basic.toFixed(2)}</td>
+      <td class="right">${gstRate.toFixed(1)}%<div class="subamt">${gstAmt.toFixed(2)}</div></td>
+      <td class="right total-cell">${total.toFixed(2)}</td>
     </tr>`;
   }).join('');
 
-  const hsnRows = (doc.hsn_summary || []).map(h => `<tr>
+  const hsnRows = isTaxInvoice ? (doc.hsn_summary || []).map(h => `<tr>
     <td class="mono">${esc(h.hsn)}</td>
-    <td style="text-align:right">${(h.rate || 0).toFixed(1)}%</td>
-    <td style="text-align:right">₹${(h.taxable || 0).toFixed(2)}</td>
-    ${isInter ? `<td style="text-align:right">₹${(h.igst || 0).toFixed(2)}</td>` : `<td style="text-align:right">₹${(h.cgst || 0).toFixed(2)}</td><td style="text-align:right">₹${(h.sgst || 0).toFixed(2)}</td>`}
-    <td style="text-align:right">₹${((h.igst || 0) + (h.cgst || 0) + (h.sgst || 0)).toFixed(2)}</td>
-  </tr>`).join('');
+    <td class="right">${(h.rate || 0).toFixed(1)}%</td>
+    <td class="right">${(h.taxable || 0).toFixed(2)}</td>
+    ${isInter ? `<td class="right">${(h.igst || 0).toFixed(2)}</td>` : `<td class="right">${(h.cgst || 0).toFixed(2)}</td><td class="right">${(h.sgst || 0).toFixed(2)}</td>`}
+    <td class="right"><strong>${((h.igst || 0) + (h.cgst || 0) + (h.sgst || 0)).toFixed(2)}</strong></td>
+  </tr>`).join('') : '';
 
   const docNo = doc[opts.numberKey] || '';
-  const docDate = opts.kind === 'tax_invoice' ? doc.invoice_date : doc.proforma_date;
+  const docDate = opts.kind === 'tax_invoice' ? doc.invoice_date : (opts.kind === 'proforma' ? doc.proforma_date : doc.quotation_date);
+  const validLabel = opts.kind === 'tax_invoice' ? 'Due Date' : 'Expiration Date';
+  const validValue = opts.kind === 'tax_invoice' ? doc.due_date : doc.valid_until;
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(docNo)}</title>
 <style>
-  body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:20px}
-  .company-block{border-bottom:2px solid #1D3557;padding-bottom:8px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:flex-start}
-  .company-block .company-name{font-size:22px;color:#1D3557;font-weight:bold;margin:0 0 4px}
-  .company-block .company-addr{font-size:11px;color:#4B5563;line-height:1.4}
-  .doc-title{font-size:20px;color:#1D3557;font-weight:bold;text-align:right}
-  .doc-title .sub{font-size:11px;color:#6B7280;font-weight:normal;text-transform:uppercase;letter-spacing:1px}
-  .meta{display:flex;justify-content:space-between;gap:16px;margin:16px 0}
-  .meta > div{flex:1}
-  .meta h3{font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:1px;margin:0 0 4px;font-weight:normal}
-  table.items, table.hsn{width:100%;border-collapse:collapse;margin:16px 0}
-  table.items th, table.items td, table.hsn th, table.hsn td{border:1px solid #ccc;padding:6px 8px;font-size:10px}
-  table.items th, table.hsn th{background:#F3F4F6;text-align:left}
-  .totals{margin-left:auto;width:340px;border-collapse:collapse}
-  .totals td{padding:4px 8px;font-size:11px}
-  .totals tr.grand td{border-top:2px solid #111;font-weight:bold;font-size:14px;padding-top:6px}
-  .notes{margin-top:16px;padding:10px;background:#F9FAFB;border:1px solid #E5E7EB;font-size:11px;white-space:pre-line;line-height:1.5}
-  .notes strong{display:block;margin-bottom:4px;color:#1D3557}
-  .qr-block{margin-top:16px;display:flex;gap:12px;align-items:center;font-size:10px;color:#555}
-  .qr-box{border:1px dashed #9CA3AF;width:80px;height:80px;display:flex;align-items:center;justify-content:center;font-size:9px;text-align:center;color:#6B7280}
-  @media print {@page {size:A4; margin:12mm;}}
+  *{box-sizing:border-box}
+  body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:#111;margin:0;padding:24px}
+  .page{max-width:780px;margin:0 auto}
+  /* Header */
+  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+  .brand-left{flex:1;display:flex;gap:12px;align-items:flex-start}
+  .logo{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#1D3557,#457B9D);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;letter-spacing:-0.5px;flex-shrink:0}
+  .brand-block .company-name{font-size:17px;font-weight:800;color:#0f172a;margin:0 0 2px}
+  .brand-block .company-addr{font-size:10px;color:#475569;line-height:1.5}
+  .doc-right{text-align:right}
+  .doc-right .title{font-size:26px;font-weight:800;color:#0f172a;letter-spacing:-0.5px;margin:0}
+  .doc-right .sub{font-size:10px;color:#64748b;margin-top:2px}
+  /* Info bar */
+  .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:#1e3a8a;color:#fff;margin-top:14px;border-radius:2px;overflow:hidden}
+  .info-bar .col{padding:10px 14px;border-right:1px solid rgba(255,255,255,0.15)}
+  .info-bar .col:last-child{border-right:none}
+  .info-bar .label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#bfdbfe;margin-bottom:2px}
+  .info-bar .value{font-size:13px;font-weight:700}
+  /* Address rows */
+  .address-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0}
+  .addr-box h3{font-size:10px;color:#0f172a;text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;border-bottom:2px solid #1e3a8a;padding-bottom:4px;display:inline-block}
+  .addr-box .name{font-size:13px;font-weight:700;color:#0f172a;margin-bottom:2px}
+  .addr-box .line{font-size:10px;color:#475569;line-height:1.5;white-space:pre-line}
+  /* Items table */
+  table.items{width:100%;border-collapse:collapse;margin-top:6px}
+  table.items thead th{background:#1e3a8a;color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding:8px 6px;font-weight:600;border:none}
+  table.items tbody td{border-bottom:1px solid #e2e8f0;padding:8px 6px;font-size:10px;vertical-align:top}
+  table.items tbody tr:last-child td{border-bottom:2px solid #1e3a8a}
+  .sn{width:28px;text-align:center;color:#64748b;font-weight:600}
+  .itemcell{min-width:140px}
+  .item-name{font-weight:600;color:#0f172a;font-size:11px}
+  .item-desc{font-size:9px;color:#64748b;margin-top:2px;line-height:1.4;white-space:pre-line}
+  .center{text-align:center}
+  .right{text-align:right}
+  .total-cell{font-weight:700;color:#0f172a}
   .mono{font-family:'Courier New',monospace}
+  .subamt{font-size:9px;color:#64748b;margin-top:2px}
+  /* Totals */
+  .bottom-row{display:grid;grid-template-columns:1.2fr 1fr;gap:20px;margin-top:16px}
+  .bank-block{background:#f8fafc;border:1px solid #e2e8f0;border-radius:2px;padding:12px 14px;font-size:10px;color:#334155}
+  .bank-block h4{font-size:10px;color:#1e3a8a;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;font-weight:700}
+  .bank-block .row{display:grid;grid-template-columns:90px 1fr;gap:6px;margin-bottom:4px;line-height:1.5}
+  .bank-block .row strong{color:#0f172a}
+  .totals{border-collapse:collapse;width:100%}
+  .totals td{padding:6px 10px;font-size:11px;border-bottom:1px solid #e2e8f0}
+  .totals td.lbl{color:#64748b;text-align:left}
+  .totals td.val{text-align:right;font-weight:600;color:#0f172a;font-family:'Courier New',monospace}
+  .totals tr.grand td{background:#1e3a8a;color:#fff;font-size:15px;font-weight:800;padding:10px;border-bottom:none}
+  .totals tr.grand td.val{color:#fff}
+  /* HSN summary */
+  h4.section{font-size:10px;color:#1e3a8a;text-transform:uppercase;letter-spacing:1px;margin:18px 0 6px;font-weight:700}
+  table.hsn{width:100%;border-collapse:collapse;font-size:10px}
+  table.hsn th{background:#e0e7ff;color:#1e3a8a;padding:6px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:0.5px}
+  table.hsn td{padding:6px;border-bottom:1px solid #e2e8f0}
+  /* Terms */
+  .terms{margin-top:18px;padding:12px 14px;background:#f8fafc;border-left:3px solid #1e3a8a;font-size:10px;color:#475569;line-height:1.6;white-space:pre-line}
+  .terms h4{font-size:10px;color:#1e3a8a;text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;font-weight:700}
+  /* QR */
+  .qr-block{margin-top:14px;display:flex;gap:12px;align-items:center;font-size:9px;color:#475569}
+  .qr-box{width:72px;height:72px;border:1px dashed #94a3b8;display:flex;align-items:center;justify-content:center;font-size:8px;text-align:center;color:#94a3b8;flex-shrink:0}
+  /* Sign */
+  .sign-row{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:42px;font-size:10px}
+  .sign-col{text-align:center}
+  .sign-col .line-box{border-top:1px solid #0f172a;margin-top:44px;padding-top:4px;color:#475569}
+  .footer-note{text-align:center;margin-top:24px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:9px;color:#94a3b8}
+  @media print {@page {size:A4;margin:10mm} body{padding:0}}
 </style></head><body>
-<div class="company-block">
-  <div>
-    <div class="company-name">${esc(company.name)}</div>
-    <div class="company-addr">${esc(company.address)}</div>
-    <div class="company-addr">Phone: ${esc(company.phone)} &nbsp; | &nbsp; Email: ${esc(company.email)}</div>
-    <div class="company-addr"><strong>GSTIN: ${esc(company.gstin)}</strong></div>
+<div class="page">
+  <!-- Header -->
+  <div class="header">
+    <div class="brand-left">
+      <div class="logo">M</div>
+      <div class="brand-block">
+        <div class="company-name">${esc(company.name)}</div>
+        <div class="company-addr">${esc(company.address_line1)}</div>
+        <div class="company-addr">${esc(company.address_line2)}</div>
+        <div class="company-addr">Phone: ${esc(company.phone)} | ${esc(company.email)}</div>
+        <div class="company-addr"><strong>GSTIN: ${esc(company.gstin)}</strong></div>
+      </div>
+    </div>
+    <div class="doc-right">
+      <div class="title">${esc(opts.title)}</div>
+      <div class="sub">${esc(docNo)}</div>
+    </div>
   </div>
-  <div class="doc-title">
-    <div class="sub">${esc(opts.title)}</div>
-    <div>${esc(docNo)}</div>
-    <div style="font-size:10px;color:#6B7280;font-weight:normal;margin-top:4px">Date: ${docDate ? new Date(docDate).toLocaleDateString('en-IN') : '-'}</div>
+
+  <!-- Info bar -->
+  <div class="info-bar">
+    <div class="col"><div class="label">${esc(opts.title)} No</div><div class="value">${esc(docNo)}</div></div>
+    <div class="col"><div class="label">Date</div><div class="value">${docDate ? new Date(docDate).toLocaleDateString('en-IN') : '-'}</div></div>
+    <div class="col"><div class="label">${esc(validLabel)}</div><div class="value">${validValue ? new Date(validValue).toLocaleDateString('en-IN') : '-'}</div></div>
+    <div class="col"><div class="label">${isTaxInvoice ? 'Place of Supply' : 'Salesperson'}</div><div class="value">${esc(isTaxInvoice ? (doc.place_of_supply || '-') : 'Sales Team')}</div></div>
   </div>
-</div>
 
-<div class="meta">
-  <div>
-    <h3>Bill To</h3>
-    <div style="font-size:13px;font-weight:bold">${esc(doc.customer_name || '')}</div>
-    ${doc.contact_person ? `<div>Attn: ${esc(doc.contact_person)}</div>` : ''}
-    ${doc.billing_address ? `<div style="max-width:260px;white-space:pre-line">${esc(doc.billing_address)}</div>` : (doc.customer?.address ? `<div style="max-width:260px;white-space:pre-line">${esc(doc.customer.address)}</div>` : '')}
-    ${doc.email ? `<div>${esc(doc.email)}</div>` : ''}
-    ${doc.phone ? `<div>${esc(doc.phone)}</div>` : ''}
-    ${doc.customer?.gstin ? `<div><strong>GSTIN:</strong> ${esc(doc.customer.gstin)}</div>` : ''}
+  <!-- Bill To / Ship To -->
+  <div class="address-row">
+    <div class="addr-box">
+      <h3>Bill To</h3>
+      <div class="name">${esc(doc.customer_name || '')}</div>
+      ${doc.contact_person ? `<div class="line">Attn: ${esc(doc.contact_person)}</div>` : ''}
+      <div class="line">${esc(doc.billing_address || doc.customer?.address || '')}</div>
+      ${doc.email ? `<div class="line">${esc(doc.email)}</div>` : ''}
+      ${doc.phone ? `<div class="line">${esc(doc.phone)}</div>` : ''}
+      ${doc.customer?.gstin ? `<div class="line"><strong>GSTIN:</strong> ${esc(doc.customer.gstin)}</div>` : ''}
+    </div>
+    <div class="addr-box">
+      <h3>Ship To</h3>
+      <div class="name">${esc(doc.customer_name || '')}</div>
+      <div class="line">${esc(doc.shipping_address || doc.billing_address || doc.customer?.address || '-')}</div>
+    </div>
   </div>
-  <div>
-    <h3>Ship To</h3>
-    <div style="max-width:260px;white-space:pre-line">${esc(doc.shipping_address || doc.billing_address || doc.customer?.address || '-')}</div>
+
+  <!-- Items -->
+  <table class="items">
+    <thead>
+      <tr>
+        <th class="sn">Sl</th>
+        <th>Item Name</th>
+        <th class="center">HSN</th>
+        <th class="right">Qty</th>
+        <th class="center">UOM</th>
+        <th class="right">Rate</th>
+        <th class="right">Discount</th>
+        <th class="right">Basic Amt</th>
+        <th class="right">GST</th>
+        <th class="right">Total</th>
+      </tr>
+    </thead>
+    <tbody>${rows || '<tr><td colspan="10" style="text-align:center;padding:20px">No line items</td></tr>'}</tbody>
+  </table>
+
+  <!-- Bank + Totals -->
+  <div class="bottom-row">
+    <div class="bank-block">
+      <h4>Bank Details</h4>
+      <div class="row"><strong>Bank:</strong><span>${esc(company.bank_name)}</span></div>
+      <div class="row"><strong>Branch:</strong><span>${esc(company.bank_branch)}</span></div>
+      <div class="row"><strong>A/C No:</strong><span class="mono">${esc(company.bank_account)}</span></div>
+      <div class="row"><strong>IFSC:</strong><span class="mono">${esc(company.bank_ifsc)}</span></div>
+      <div class="row"><strong>UPI:</strong><span class="mono">${esc(company.bank_upi)}</span></div>
+    </div>
+    <table class="totals">
+      <tr><td class="lbl">Subtotal</td><td class="val">₹${(doc.subtotal || 0).toFixed(2)}</td></tr>
+      ${doc.total_discount ? `<tr><td class="lbl">Total Discount</td><td class="val">-₹${doc.total_discount.toFixed(2)}</td></tr>` : ''}
+      ${isInter
+        ? `<tr><td class="lbl">IGST</td><td class="val">₹${(doc.igst || 0).toFixed(2)}</td></tr>`
+        : `<tr><td class="lbl">CGST</td><td class="val">₹${(doc.cgst || 0).toFixed(2)}</td></tr><tr><td class="lbl">SGST</td><td class="val">₹${(doc.sgst || 0).toFixed(2)}</td></tr>`
+      }
+      <tr class="grand"><td class="lbl">Grand Total</td><td class="val">₹${(doc.grand_total || 0).toFixed(2)}</td></tr>
+    </table>
   </div>
-  <div style="text-align:right">
-    <h3>Details</h3>
-    ${doc.valid_until ? `<div><strong>Valid Until:</strong> ${new Date(doc.valid_until).toLocaleDateString('en-IN')}</div>` : ''}
-    ${doc.due_date ? `<div><strong>Due Date:</strong> ${new Date(doc.due_date).toLocaleDateString('en-IN')}</div>` : ''}
-    ${doc.place_of_supply ? `<div><strong>Place of Supply:</strong> ${esc(doc.place_of_supply)}</div>` : ''}
-    ${doc.proforma?.proforma_no ? `<div><strong>Ref PI:</strong> ${esc(doc.proforma.proforma_no)}</div>` : ''}
-    ${doc.quotation?.quotation_no ? `<div><strong>Ref Quotation:</strong> ${esc(doc.quotation.quotation_no)}</div>` : ''}
-    <div><strong>Tax Type:</strong> ${isInter ? 'IGST (Inter-state)' : 'CGST+SGST (Intra-state)'}</div>
+
+  ${isTaxInvoice ? `
+  <h4 class="section">HSN-wise Tax Summary</h4>
+  <table class="hsn">
+    <thead><tr>
+      <th>HSN</th><th>Rate</th><th>Taxable</th>
+      ${isInter ? '<th>IGST</th>' : '<th>CGST</th><th>SGST</th>'}
+      <th>Total Tax</th>
+    </tr></thead>
+    <tbody>${hsnRows || `<tr><td colspan="${isInter ? 5 : 6}" class="center">-</td></tr>`}</tbody>
+  </table>
+  ${doc.qr_code ? `<div class="qr-block"><div class="qr-box">UPI<br/>QR</div><div><strong>Payment QR</strong><br/><span class="mono">${esc(doc.qr_code)}</span></div></div>` : ''}
+  ` : ''}
+
+  ${doc.notes ? `<div class="terms"><h4>Notes</h4>${esc(doc.notes)}</div>` : ''}
+  ${doc.terms ? `<div class="terms"><h4>Terms &amp; Conditions</h4>${esc(doc.terms)}</div>` : ''}
+
+  <!-- Signature -->
+  <div class="sign-row">
+    <div class="sign-col"><div class="line-box">Customer Acceptance</div></div>
+    <div class="sign-col"><div class="line-box">For ${esc(company.name)}</div></div>
   </div>
-</div>
 
-<table class="items">
-  <thead><tr>
-    <th>#</th><th>Item Name</th><th>HSN</th><th>Qty</th><th>Rate</th><th>Disc</th><th>Taxable</th>
-    ${isInter ? '<th>IGST</th>' : '<th>CGST</th><th>SGST</th>'}
-    <th>Total</th>
-  </tr></thead>
-  <tbody>${rows || '<tr><td colspan="9" style="text-align:center">No lines</td></tr>'}</tbody>
-</table>
-
-<h4 style="font-size:11px;margin:16px 0 4px;color:#1D3557;text-transform:uppercase;letter-spacing:1px">HSN-wise Tax Summary</h4>
-<table class="hsn">
-  <thead><tr>
-    <th>HSN</th><th>Rate</th><th>Taxable</th>
-    ${isInter ? '<th>IGST</th>' : '<th>CGST</th><th>SGST</th>'}
-    <th>Total Tax</th>
-  </tr></thead>
-  <tbody>${hsnRows || `<tr><td colspan="${isInter ? 5 : 6}" style="text-align:center">-</td></tr>`}</tbody>
-</table>
-
-<table class="totals">
-  <tr><td>Subtotal (after discount):</td><td style="text-align:right">₹${(doc.subtotal || 0).toFixed(2)}</td></tr>
-  ${doc.total_discount ? `<tr><td>Total Discount:</td><td style="text-align:right">₹${doc.total_discount.toFixed(2)}</td></tr>` : ''}
-  ${isInter
-    ? `<tr><td>IGST:</td><td style="text-align:right">₹${(doc.igst || 0).toFixed(2)}</td></tr>`
-    : `<tr><td>CGST:</td><td style="text-align:right">₹${(doc.cgst || 0).toFixed(2)}</td></tr><tr><td>SGST:</td><td style="text-align:right">₹${(doc.sgst || 0).toFixed(2)}</td></tr>`
-  }
-  <tr class="grand"><td>Grand Total:</td><td style="text-align:right">₹${(doc.grand_total || 0).toFixed(2)}</td></tr>
-</table>
-
-${doc.qr_code ? `<div class="qr-block">
-  <div class="qr-box">QR<br/>Placeholder</div>
-  <div><strong>Payment QR</strong><br/>${esc(doc.qr_code)}</div>
-</div>` : ''}
-
-${doc.notes ? `<div class="notes"><strong>Notes</strong>${esc(doc.notes)}</div>` : ''}
-${doc.terms ? `<div class="notes"><strong>Terms &amp; Conditions</strong>${esc(doc.terms)}</div>` : ''}
-
-<div style="margin-top:40px;display:flex;justify-content:space-between;font-size:11px;color:#4B5563">
-  <div style="text-align:center;width:45%"><div style="border-top:1px solid #111;margin-top:40px;padding-top:4px">Customer Acceptance</div></div>
-  <div style="text-align:center;width:45%"><div style="border-top:1px solid #111;margin-top:40px;padding-top:4px">For ${esc(company.name)}</div></div>
+  <div class="footer-note">This is a computer-generated document.${isTaxInvoice ? ' Subject to Pune Jurisdiction.' : ''}</div>
 </div>
 
 <script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>

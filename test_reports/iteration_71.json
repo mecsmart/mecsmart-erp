@@ -1,0 +1,105 @@
+{
+  "summary": "CRM Quotation workflow polish testing complete. All features verified: (1) Convert-to-Proforma button is now ALWAYS visible on quotation rows, even when quotation already has a proforma_id - allows creating multiple PIs per quotation, (2) SO/PI badges correctly displayed on quotation rows with data-testids quotation-so-link-{id} and quotation-pi-link-{id}, (3) Print template redesigned per PDF reference with all required elements verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_71.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Convert-to-Proforma button visibility fix verified at line ~1124 - button now shows for all quotations with status !== 'rejected', regardless of proforma_id",
+    "SO/PI badges correctly implemented at lines ~1096-1097 with proper data-testids",
+    "Print template (printInvoiceDoc) at line ~2321 correctly implements all PDF reference requirements"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created PI-000018 from QUO-000022 (which already had PI-000001) to verify multiple PI creation",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "CRM Quotation workflow polish verified. Key changes: (1) Convert-to-Proforma button always visible (line 1124 condition changed), (2) SO/PI badges show linked document numbers, (3) Print template completely rewritten with new PDF-matched design.",
+  "features_tested": {
+    "convert_to_proforma_button_visibility": {
+      "status": "PASSED",
+      "tests": [
+        "Button visible on quotation WITHOUT proforma (9 quotations tested)",
+        "Button visible on quotation WITH existing proforma (QUO-000022 with PI-000001)",
+        "Button hidden only for rejected quotations"
+      ],
+      "data_testid": "quotation-to-proforma-{id}"
+    },
+    "so_pi_badges_on_quotation_rows": {
+      "status": "PASSED",
+      "tests": [
+        "SO badge shows 'SO: SO-000244' format when converted_so_no present",
+        "PI badge shows 'PI: PI-000001' format when proforma_no present",
+        "Badges have correct data-testids: quotation-so-link-{id}, quotation-pi-link-{id}"
+      ]
+    },
+    "print_template_quotation": {
+      "status": "PASSED",
+      "tests": [
+        "Logo div with circular 'M' present",
+        "Company name 'Machinery Manufacturing ERP' present",
+        "Info bar with 4 columns (No/Date/Valid/Salesperson)",
+        "Bill To + Ship To address boxes side-by-side",
+        "Items table with headers: Sl, Item Name, HSN, Qty, UOM, Rate, Discount, Basic Amt, GST, Total",
+        "Bank block with Bank/Branch/A/C/IFSC/UPI rows",
+        "Totals table with grand total (dark background)",
+        "Signature row with 2 columns",
+        "Footer note 'computer-generated document'"
+      ]
+    },
+    "print_template_proforma": {
+      "status": "PASSED",
+      "tests": [
+        "Same structure as quotation",
+        "HSN summary section NOT present (correct - only for Tax Invoice)",
+        "Info bar shows 'PROFORMA INVOICE No' column"
+      ]
+    },
+    "print_template_tax_invoice": {
+      "status": "PASSED",
+      "tests": [
+        "HSN-wise Tax Summary section present (h4.section)",
+        "HSN table with headers: HSN, Rate, Taxable, CGST, SGST, Total Tax",
+        "QR block present (.qr-block)",
+        "Place of Supply column in info bar",
+        "Footer includes 'Subject to Pune Jurisdiction'"
+      ]
+    },
+    "backend_regression_multiple_pi": {
+      "status": "PASSED",
+      "tests": [
+        "POST /api/crm/quotations/{id}/convert-to-proforma works even when quotation already has proforma_id",
+        "Created PI-000018 from QUO-000022 (which already had PI-000001)",
+        "Quotation's proforma_id/proforma_no updated to latest PI"
+      ]
+    }
+  },
+  "print_template_css_classes_verified": {
+    "logo": ".logo with circular gradient background and 'M' text",
+    "company_name": ".company-name",
+    "info_bar": ".info-bar with 4 .col children",
+    "addr_box": ".addr-box for Bill To and Ship To",
+    "items_table": "table.items with thead/tbody",
+    "bank_block": ".bank-block with .row children",
+    "totals": ".totals table with tr.grand for grand total",
+    "hsn_section": "h4.section 'HSN-wise Tax Summary' (Tax Invoice only)",
+    "hsn_table": "table.hsn (Tax Invoice only)",
+    "qr_block": ".qr-block (Tax Invoice only)",
+    "terms": ".terms with white-space: pre-line",
+    "sign_row": ".sign-row with 2 .sign-col children",
+    "footer_note": ".footer-note"
+  }
+}
