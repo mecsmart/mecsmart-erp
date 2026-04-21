@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
+import { useCompanySettings } from '../context/CompanySettingsContext';
 import {
   Plus, Edit2, Trash2, MessageSquare, UserCheck, AlertTriangle, Clock,
   Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload
@@ -862,6 +863,8 @@ function emptyQuotationLine() {
 }
 
 function QuotationsPanel({ quotations, leads, customers, items, search, onRefresh, canEdit, prefillFromLead, onPrefillConsumed }) {
+  const { user } = useAuth();
+  const { companySettings } = useCompanySettings();
   const [dialog, setDialog] = useState(false);
   const [editing, setEditing] = useState(null);
   const emptyForm = {
@@ -1030,7 +1033,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
-  const printQuotation = (q) => printInvoiceDoc(q, { kind: 'quotation', title: 'QUOTATION', numberKey: 'quotation_no' });
+  const printQuotation = (q) => printInvoiceDoc(q, { kind: 'quotation', title: 'QUOTATION', numberKey: 'quotation_no', company: companySettings, user });
 
   const convertToSO = async () => {
     try {
@@ -2040,8 +2043,9 @@ const PROFORMA_STATUSES = [
 ];
 
 function ProformasPanel({ customers, search, onRefresh, canEdit }) {
+  const { user } = useAuth();
+  const { companySettings } = useCompanySettings();
   const [list, setList] = useState([]);
-  const [convertConfirm, setConvertConfirm] = useState({ open: false, proforma: null });
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, proforma: null });
 
   const load = useCallback(async () => {
@@ -2059,24 +2063,13 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
-  const convertToTaxInvoice = async () => {
-    const p = convertConfirm.proforma;
-    if (!p) return;
-    try {
-      const res = await api.post(`/api/crm/proformas/${p.id}/convert-to-tax-invoice`, {});
-      setConvertConfirm({ open: false, proforma: null });
-      load(); onRefresh();
-      alert(`Tax Invoice ${res.data.invoice_no} issued. Review it in the Tax Invoices tab.`);
-    } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
-  };
-
   const filtered = list.filter(p => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return [p.proforma_no, p.customer_name, p.quotation?.quotation_no].some(v => (v || '').toLowerCase().includes(q));
   });
 
-  const printProforma = (p) => printInvoiceDoc(p, { kind: 'proforma', title: 'PROFORMA INVOICE', numberKey: 'proforma_no' });
+  const printProforma = (p) => printInvoiceDoc(p, { kind: 'proforma', title: 'PROFORMA INVOICE', numberKey: 'proforma_no', company: companySettings, user });
 
   return (
     <div className="space-y-4" data-testid="proformas-panel">
@@ -2113,9 +2106,6 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
                   <td>
                     <div className="flex gap-0.5">
                       <button onClick={() => printProforma(p)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`proforma-print-${p.id}`}><Printer className="w-4 h-4" /></button>
-                      {canEdit && !isLocked && (
-                        <button onClick={() => setConvertConfirm({ open: true, proforma: p })} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Convert to Tax Invoice" data-testid={`proforma-to-invoice-${p.id}`}><Send className="w-4 h-4" /></button>
-                      )}
                       {canEdit && !isLocked && <button onClick={() => setDeleteConfirm({ open: true, proforma: p })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`proforma-delete-${p.id}`}><Trash2 className="w-4 h-4" /></button>}
                     </div>
                   </td>
@@ -2126,16 +2116,6 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
         </table>
       </div>
 
-      <ConfirmDialog
-        open={convertConfirm.open}
-        onOpenChange={(o) => !o && setConvertConfirm({ open: false, proforma: null })}
-        title="Generate Tax Invoice?"
-        message={<>This will issue a GST Tax Invoice for <strong>{convertConfirm.proforma?.proforma_no}</strong>. Once issued, this Proforma becomes read-only.</>}
-        confirmLabel="Issue Tax Invoice"
-        variant="primary"
-        onConfirm={convertToTaxInvoice}
-        testidPrefix="proforma-convert-confirm"
-      />
       <ConfirmDialog
         open={deleteConfirm.open}
         onOpenChange={(o) => !o && setDeleteConfirm({ open: false, proforma: null })}
@@ -2160,12 +2140,181 @@ const TAX_INVOICE_STATUSES = [
   { key: 'cancelled', label: 'Cancelled', color: 'bg-[#FDE8E8] text-[#9B1C1C]' },
 ];
 
+function emptyTaxInvoiceLine() {
+  return { item_id: '', description: '', hsn_code: '', quantity: 1, uom: 'Nos', rate: 0, discount_pct: 0, gst_rate: 18 };
+}
+
 function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
+  const { user } = useAuth();
+  const { companySettings } = useCompanySettings();
   const [list, setList] = useState([]);
+  const [salesOrders, setSalesOrders] = useState([]);
+  const [items, setItems] = useState([]);
+  const [dialog, setDialog] = useState(false);
+  const [sourceType, setSourceType] = useState('sales_order');  // 'sales_order' | 'po' | 'manual'
+  const [selectedSO, setSelectedSO] = useState('');
+  const emptyForm = {
+    customer_id: '',
+    customer_name: '',
+    contact_person: '',
+    email: '',
+    phone: '',
+    billing_address: '',
+    shipping_address: '',
+    customer_po_number: '',
+    sales_order_id: '',
+    invoice_date: new Date().toISOString().slice(0, 10),
+    due_date: '',
+    place_of_supply: '',
+    notes: '',
+    terms: '',
+    lines: [emptyTaxInvoiceLine()],
+  };
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState({ open: false, invoice: null });
+
   const load = useCallback(async () => {
     try { const r = await api.get('/api/crm/tax-invoices'); setList(r.data || []); } catch (e) { console.error(e); }
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Fetch sales orders + items when dialog opens
+  const openDialog = async () => {
+    try {
+      const [soRes, itRes] = await Promise.all([
+        api.get('/api/production').catch(() => ({ data: [] })),
+        api.get('/api/items').catch(() => ({ data: [] })),
+      ]);
+      setSalesOrders((soRes.data || []).filter(o => ['confirmed', 'in_progress', 'completed', 'partially_cancelled'].includes(o.status)));
+      setItems(itRes.data || []);
+    } catch (e) { console.error(e); }
+    setSourceType('sales_order');
+    setSelectedSO('');
+    setForm(emptyForm);
+    setDialog(true);
+  };
+
+  const applyCustomer = (cid) => {
+    const c = customers.find(x => x.id === cid);
+    if (c) {
+      setForm(prev => ({
+        ...prev,
+        customer_id: cid,
+        customer_name: c.name || '',
+        contact_person: c.contact_person || '',
+        email: c.email || '',
+        phone: c.phone || '',
+        billing_address: c.address || '',
+        shipping_address: c.address || '',
+        place_of_supply: c.state_code || '',
+      }));
+    }
+  };
+
+  const applySO = async (soId) => {
+    setSelectedSO(soId);
+    try {
+      // Use the backend endpoint to resolve lines from SO (but don't persist yet)
+      // We'll just auto-fill the form by pulling SO details
+      const r = await api.get(`/api/production/${soId}`);
+      const so = r.data;
+      if (!so) return;
+      const c = customers.find(x => x.id === so.customer_id) || {};
+      const soLines = so.lines || (so.bom_id ? [{ bom_id: so.bom_id, quantity: so.quantity }] : []);
+      const lines = [];
+      for (const ln of soLines) {
+        const bom = so.lines ? ln.bom : so.bom;
+        const item = bom ? items.find(x => x.id === bom.parent_item_id) : null;
+        const rate = item ? (parseFloat(item.sale_price) || parseFloat(item.purchase_price) || parseFloat(item.unit_cost) || 0) : 0;
+        lines.push({
+          item_id: item?.id || '',
+          description: item?.name || '',
+          hsn_code: item?.hsn_code || '',
+          quantity: parseFloat(ln.quantity) || 0,
+          uom: item?.uom || 'Nos',
+          rate,
+          discount_pct: 0,
+          gst_rate: parseFloat(item?.gst_rate) || 18,
+        });
+      }
+      setForm(prev => ({
+        ...prev,
+        sales_order_id: soId,
+        customer_id: so.customer_id || '',
+        customer_name: c.name || '',
+        contact_person: c.contact_person || '',
+        email: c.email || '',
+        phone: c.phone || '',
+        billing_address: c.address || '',
+        shipping_address: c.address || '',
+        place_of_supply: c.state_code || '',
+        lines: lines.length ? lines : [emptyTaxInvoiceLine()],
+      }));
+    } catch (e) { alert('Failed to load Sales Order details'); }
+  };
+
+  const updateLine = (idx, patch) => {
+    setForm(prev => ({ ...prev, lines: prev.lines.map((l, i) => i === idx ? { ...l, ...patch } : l) }));
+  };
+
+  const applyItemToLine = (idx, itemId) => {
+    const it = items.find(x => x.id === itemId);
+    if (!it) return;
+    updateLine(idx, {
+      item_id: itemId,
+      description: it.name || '',
+      hsn_code: it.hsn_code || '',
+      uom: it.uom || 'Nos',
+      rate: parseFloat(it.sale_price) || parseFloat(it.purchase_price) || parseFloat(it.unit_cost) || 0,
+      gst_rate: parseFloat(it.gst_rate) || 18,
+    });
+  };
+
+  const addLine = () => setForm(prev => ({ ...prev, lines: [...prev.lines, emptyTaxInvoiceLine()] }));
+  const removeLine = (idx) => setForm(prev => ({ ...prev, lines: prev.lines.length <= 1 ? prev.lines : prev.lines.filter((_, i) => i !== idx) }));
+
+  const computeTotals = () => {
+    let subtotal = 0, totalDiscount = 0, totalGst = 0;
+    form.lines.forEach(l => {
+      const qty = parseFloat(l.quantity) || 0;
+      const rate = parseFloat(l.rate) || 0;
+      const gross = qty * rate;
+      const disc = gross * (parseFloat(l.discount_pct) || 0) / 100;
+      const basic = gross - disc;
+      const gst = basic * (parseFloat(l.gst_rate) || 0) / 100;
+      subtotal += basic;
+      totalDiscount += disc;
+      totalGst += gst;
+    });
+    return { subtotal, totalDiscount, totalGst, grandTotal: subtotal + totalGst };
+  };
+
+  const totals = computeTotals();
+
+  const saveInvoice = async () => {
+    if (!form.customer_name.trim()) { alert('Customer is required'); return; }
+    if (!form.lines.length || form.lines.every(l => !l.quantity || !l.rate)) { alert('At least one valid line is required'); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        ...form,
+        invoice_date: form.invoice_date ? new Date(form.invoice_date).toISOString() : null,
+        due_date: form.due_date ? new Date(form.due_date).toISOString() : null,
+      };
+      await api.post('/api/crm/tax-invoices', payload);
+      setDialog(false);
+      setForm(emptyForm);
+      load(); onRefresh();
+    } catch (e) {
+      alert(e.response?.data?.detail || 'Failed to create tax invoice');
+    } finally { setSaving(false); }
+  };
+
+  const delInvoice = async (t) => {
+    try { await api.delete(`/api/crm/tax-invoices/${t.id}`); setDeleteConfirm({ open: false, invoice: null }); load(); onRefresh(); }
+    catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+  };
 
   const statusChange = async (t, status) => {
     try { await api.put(`/api/crm/tax-invoices/${t.id}`, { status }); load(); onRefresh(); }
@@ -2175,39 +2324,52 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   const filtered = list.filter(t => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
-    return [t.invoice_no, t.customer_name, t.proforma?.proforma_no].some(v => (v || '').toLowerCase().includes(q));
+    return [t.invoice_no, t.customer_name, t.proforma?.proforma_no, t.sales_order?.order_number, t.customer_po_number].some(v => (v || '').toLowerCase().includes(q));
   });
 
   const totalIssued = filtered.filter(t => t.status === 'issued').reduce((a, t) => a + (t.grand_total || 0), 0);
   const totalPaid = filtered.filter(t => t.status === 'paid').reduce((a, t) => a + (t.grand_total || 0), 0);
 
-  const printInvoice = (t) => printInvoiceDoc(t, { kind: 'tax_invoice', title: 'TAX INVOICE', numberKey: 'invoice_no' });
+  const printInvoice = (t) => printInvoiceDoc(t, { kind: 'tax_invoice', title: 'TAX INVOICE', numberKey: 'invoice_no', company: companySettings, user });
 
   return (
     <div className="space-y-4" data-testid="tax-invoices-panel">
-      <div className="flex gap-3 flex-wrap">
-        <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[150px]">
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-[#1E429F]">Issued</div>
-          <div className="text-lg font-semibold mono">{filtered.filter(t => t.status === 'issued').length} · {formatCurrency(totalIssued)}</div>
+      <div className="flex gap-3 flex-wrap items-center justify-between">
+        <div className="flex gap-3 flex-wrap">
+          <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[150px]">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-[#1E429F]">Issued</div>
+            <div className="text-lg font-semibold mono">{filtered.filter(t => t.status === 'issued').length} · {formatCurrency(totalIssued)}</div>
+          </div>
+          <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[150px]">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-[#03543F]">Paid</div>
+            <div className="text-lg font-semibold mono">{filtered.filter(t => t.status === 'paid').length} · {formatCurrency(totalPaid)}</div>
+          </div>
         </div>
-        <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[150px]">
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-[#03543F]">Paid</div>
-          <div className="text-lg font-semibold mono">{filtered.filter(t => t.status === 'paid').length} · {formatCurrency(totalPaid)}</div>
-        </div>
+        {canEdit && (
+          <button onClick={openDialog} className="btn-primary flex items-center gap-1 text-sm" data-testid="new-tax-invoice-btn">
+            <Plus className="w-4 h-4" /> New Tax Invoice
+          </button>
+        )}
       </div>
       <div className="card-flat overflow-hidden">
         <table className="w-full data-table" data-testid="tax-invoices-table">
-          <thead><tr><th>Invoice #</th><th>Customer</th><th>From PI</th><th>Date</th><th>Place of Supply</th><th>Subtotal</th><th>GST</th><th>Grand Total</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Invoice #</th><th>Customer</th><th>Source</th><th>Date</th><th>Place of Supply</th><th>Subtotal</th><th>GST</th><th>Grand Total</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
-            {filtered.length === 0 && <tr><td colSpan={10} className="text-center py-6 text-sm text-[#6B7280]">No Tax Invoices yet. Convert a Proforma Invoice to generate one.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={10} className="text-center py-6 text-sm text-[#6B7280]">No Tax Invoices yet. Click "New Tax Invoice" to create one.</td></tr>}
             {filtered.map(t => {
               const statusData = TAX_INVOICE_STATUSES.find(s => s.key === t.status);
-              const locked = ['issued', 'paid', 'cancelled'].includes(t.status);
+              const srcChip = t.sales_order?.order_number
+                ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#E1EFFE] text-[#1E429F] mono">SO: {t.sales_order.order_number}</span>
+                : t.customer_po_number
+                  ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#FEF3C7] text-[#92400E] mono">PO: {t.customer_po_number}</span>
+                  : t.proforma?.proforma_no
+                    ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#FCE7F3] text-[#9D174D] mono">PI: {t.proforma.proforma_no}</span>
+                    : <span className="text-[10px] text-[#9CA3AF]">Manual</span>;
               return (
                 <tr key={t.id} data-testid={`tax-invoice-row-${t.id}`}>
                   <td className="mono font-medium">{t.invoice_no}</td>
                   <td><div className="font-medium text-[#1D3557]">{t.customer_name}</div></td>
-                  <td className="text-xs mono">{t.proforma?.proforma_no || <span className="text-[#9CA3AF]">—</span>}</td>
+                  <td>{srcChip}</td>
                   <td className="text-xs">{t.invoice_date ? new Date(t.invoice_date).toLocaleDateString('en-IN') : '-'}</td>
                   <td className="text-xs mono">{t.place_of_supply || '—'}{t.is_inter_state && <span className="ml-1 text-[10px] text-[#9B1C1C]">(IGST)</span>}</td>
                   <td className="mono text-sm">{formatCurrency(t.subtotal)}</td>
@@ -2226,6 +2388,9 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                   <td>
                     <div className="flex gap-0.5">
                       <button onClick={() => printInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`tax-invoice-print-${t.id}`}><Printer className="w-4 h-4" /></button>
+                      {canEdit && t.status === 'draft' && (
+                        <button onClick={() => setDeleteConfirm({ open: true, invoice: t })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`tax-invoice-delete-${t.id}`}><Trash2 className="w-4 h-4" /></button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -2234,6 +2399,198 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
           </tbody>
         </table>
       </div>
+
+      <Dialog open={dialog} onOpenChange={(o) => { setDialog(o); if (!o) setForm(emptyForm); }}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" data-testid="tax-invoice-dialog">
+          <DialogHeader><DialogTitle className="font-[Chivo]">New Tax Invoice</DialogTitle></DialogHeader>
+          <div className="space-y-4 mt-2">
+            {/* Source type tabs */}
+            <div className="flex gap-2 border-b border-[#E5E7EB] pb-2">
+              {[
+                { k: 'sales_order', label: 'From Sales Order' },
+                { k: 'po', label: 'From Customer PO' },
+                { k: 'manual', label: 'Manual Entry' },
+              ].map(s => (
+                <button key={s.k}
+                  onClick={() => { setSourceType(s.k); setForm(prev => ({ ...prev, sales_order_id: '', customer_po_number: '' })); setSelectedSO(''); }}
+                  className={`px-3 py-1.5 text-sm rounded-sm border ${sourceType === s.k ? 'bg-[#1D3557] text-white border-[#1D3557]' : 'bg-white text-[#4B5563] border-[#D1D5DB]'}`}
+                  data-testid={`ti-source-${s.k}`}>{s.label}</button>
+              ))}
+            </div>
+
+            {/* Source selector */}
+            {sourceType === 'sales_order' && (
+              <div>
+                <label className="text-sm font-medium text-[#374151]">Sales Order *</label>
+                <Select value={selectedSO} onValueChange={applySO}>
+                  <SelectTrigger data-testid="ti-so-select"><SelectValue placeholder="Select a confirmed Sales Order..." /></SelectTrigger>
+                  <SelectContent>
+                    {salesOrders.length === 0 && <div className="p-3 text-xs text-[#6B7280]">No confirmed Sales Orders available.</div>}
+                    {salesOrders.map(so => {
+                      const c = customers.find(x => x.id === so.customer_id);
+                      return <SelectItem key={so.id} value={so.id}>{so.order_number} — {c?.name || 'No customer'} · {so.lines?.length || 1} line(s)</SelectItem>;
+                    })}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-[#6B7280] mt-1">Line items + customer + rates will be auto-populated from the SO.</p>
+              </div>
+            )}
+            {sourceType === 'po' && (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-[#374151]">Customer PO Number *</label>
+                  <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm font-mono" placeholder="e.g. PO-12345 from customer" value={form.customer_po_number} onChange={e => setForm({ ...form, customer_po_number: e.target.value })} data-testid="ti-customer-po-input" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-[#374151]">Customer *</label>
+                  <Select value={form.customer_id} onValueChange={applyCustomer}>
+                    <SelectTrigger data-testid="ti-customer-select"><SelectValue placeholder="Select customer..." /></SelectTrigger>
+                    <SelectContent>
+                      {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+            {sourceType === 'manual' && (
+              <div>
+                <label className="text-sm font-medium text-[#374151]">Customer *</label>
+                <Select value={form.customer_id} onValueChange={applyCustomer}>
+                  <SelectTrigger data-testid="ti-customer-select"><SelectValue placeholder="Select customer..." /></SelectTrigger>
+                  <SelectContent>
+                    {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Common fields */}
+            <div className="grid grid-cols-4 gap-3">
+              <div>
+                <label className="text-xs text-[#4B5563]">Invoice Date</label>
+                <input type="date" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" value={form.invoice_date} onChange={e => setForm({ ...form, invoice_date: e.target.value })} data-testid="ti-invoice-date" />
+              </div>
+              <div>
+                <label className="text-xs text-[#4B5563]">Due Date</label>
+                <input type="date" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} data-testid="ti-due-date" />
+              </div>
+              <div>
+                <label className="text-xs text-[#4B5563]">Place of Supply (State Code)</label>
+                <input type="text" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm mono uppercase" maxLength={2} placeholder="27" value={form.place_of_supply} onChange={e => setForm({ ...form, place_of_supply: e.target.value.toUpperCase() })} data-testid="ti-pos" />
+              </div>
+              <div>
+                <label className="text-xs text-[#4B5563]">Customer PO Ref <span className="text-[#9CA3AF]">(optional)</span></label>
+                <input type="text" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" placeholder="optional" value={form.customer_po_number} onChange={e => setForm({ ...form, customer_po_number: e.target.value })} data-testid="ti-po-ref" />
+              </div>
+            </div>
+
+            {/* Address */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-[#4B5563]">Billing Address</label>
+                <textarea className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs" rows={2} value={form.billing_address} onChange={e => setForm({ ...form, billing_address: e.target.value })} data-testid="ti-billing-addr" />
+              </div>
+              <div>
+                <label className="text-xs text-[#4B5563]">Shipping Address</label>
+                <textarea className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs" rows={2} value={form.shipping_address} onChange={e => setForm({ ...form, shipping_address: e.target.value })} data-testid="ti-shipping-addr" />
+              </div>
+            </div>
+
+            {/* Line items */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm font-medium text-[#374151]">Line Items</label>
+                <button type="button" onClick={addLine} className="text-xs text-[#1D3557] flex items-center gap-1" data-testid="ti-add-line"><Plus className="w-3 h-3" /> Add Line</button>
+              </div>
+              <div className="border border-[#E5E7EB] rounded-sm overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-[#F3F4F6]"><tr>
+                    <th className="px-2 py-1 text-left w-8">#</th>
+                    <th className="px-2 py-1 text-left">Item</th>
+                    <th className="px-2 py-1 text-left w-20">HSN</th>
+                    <th className="px-2 py-1 text-right w-16">Qty</th>
+                    <th className="px-2 py-1 text-left w-14">UOM</th>
+                    <th className="px-2 py-1 text-right w-20">Rate</th>
+                    <th className="px-2 py-1 text-right w-14">Disc%</th>
+                    <th className="px-2 py-1 text-right w-14">GST%</th>
+                    <th className="px-2 py-1 text-right w-20">Amount</th>
+                    <th className="px-2 py-1 w-8"></th>
+                  </tr></thead>
+                  <tbody>
+                    {form.lines.map((l, i) => {
+                      const amount = ((parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0)) * (1 - (parseFloat(l.discount_pct) || 0) / 100);
+                      return (
+                        <tr key={i} data-testid={`ti-line-${i}`}>
+                          <td className="px-2 py-1 text-[#6B7280]">{i + 1}</td>
+                          <td className="px-1 py-1">
+                            <Select value={l.item_id} onValueChange={(v) => applyItemToLine(i, v)}>
+                              <SelectTrigger className="h-7 text-xs" data-testid={`ti-line-item-${i}`}><SelectValue placeholder="Select item or enter description below" /></SelectTrigger>
+                              <SelectContent>
+                                {items.map(it => <SelectItem key={it.id} value={it.id}>{it.part_number} — {it.name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                            <input type="text" className="w-full mt-1 px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-[11px]" placeholder="Description" value={l.description} onChange={e => updateLine(i, { description: e.target.value })} data-testid={`ti-line-desc-${i}`} />
+                          </td>
+                          <td className="px-1 py-1"><input type="text" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs mono" value={l.hsn_code} onChange={e => updateLine(i, { hsn_code: e.target.value })} /></td>
+                          <td className="px-1 py-1"><input type="number" step="0.01" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs text-right mono" value={l.quantity} onChange={e => updateLine(i, { quantity: e.target.value })} data-testid={`ti-line-qty-${i}`} /></td>
+                          <td className="px-1 py-1"><input type="text" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs" value={l.uom} onChange={e => updateLine(i, { uom: e.target.value })} /></td>
+                          <td className="px-1 py-1"><input type="number" step="0.01" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs text-right mono" value={l.rate} onChange={e => updateLine(i, { rate: e.target.value })} data-testid={`ti-line-rate-${i}`} /></td>
+                          <td className="px-1 py-1"><input type="number" step="0.01" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs text-right mono" value={l.discount_pct} onChange={e => updateLine(i, { discount_pct: e.target.value })} data-testid={`ti-line-disc-${i}`} /></td>
+                          <td className="px-1 py-1"><input type="number" step="0.01" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs text-right mono" value={l.gst_rate} onChange={e => updateLine(i, { gst_rate: e.target.value })} data-testid={`ti-line-gst-${i}`} /></td>
+                          <td className="px-2 py-1 text-right mono">{formatCurrency(amount)}</td>
+                          <td className="px-1 py-1">
+                            <button type="button" onClick={() => removeLine(i)} className="text-[#9B1C1C]" data-testid={`ti-line-remove-${i}`} title="Remove line"><X className="w-3 h-3" /></button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Totals */}
+            <div className="flex justify-end">
+              <div className="w-64 border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB] text-sm">
+                <div className="flex justify-between"><span className="text-[#4B5563]">Subtotal</span><span className="mono">{formatCurrency(totals.subtotal)}</span></div>
+                {totals.totalDiscount > 0 && <div className="flex justify-between"><span className="text-[#4B5563]">Discount</span><span className="mono">-{formatCurrency(totals.totalDiscount)}</span></div>}
+                <div className="flex justify-between"><span className="text-[#4B5563]">GST</span><span className="mono">{formatCurrency(totals.totalGst)}</span></div>
+                <div className="flex justify-between border-t border-[#E5E7EB] mt-1 pt-1 font-semibold"><span>Grand Total</span><span className="mono text-[#1D3557]">{formatCurrency(totals.grandTotal)}</span></div>
+              </div>
+            </div>
+
+            {/* Notes + T&C */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-[#4B5563]">Notes</label>
+                <textarea className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} data-testid="ti-notes" />
+              </div>
+              <div>
+                <label className="text-xs text-[#4B5563]">Terms &amp; Conditions</label>
+                <textarea className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs" rows={3} value={form.terms} onChange={e => setForm({ ...form, terms: e.target.value })} data-testid="ti-terms" />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-[#E5E7EB] pt-3">
+              <button className="btn-secondary" onClick={() => setDialog(false)}>Cancel</button>
+              <button className="btn-primary" onClick={saveInvoice} disabled={saving} data-testid="ti-save-btn">
+                {saving ? 'Saving...' : 'Create Tax Invoice'}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(o) => !o && setDeleteConfirm({ open: false, invoice: null })}
+        title="Delete Tax Invoice?"
+        message={<>This will permanently delete <strong>{deleteConfirm.invoice?.invoice_no}</strong>. Only draft invoices can be deleted.</>}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => delInvoice(deleteConfirm.invoice)}
+        testidPrefix="ti-delete-confirm"
+      />
     </div>
   );
 }
@@ -2475,6 +2832,8 @@ function printInvoiceDoc(doc, opts) {
       <div class="docno">${esc(docNo)}</div>
       ${doc.quotation?.quotation_no ? `<div class="quoref">Ref Quotation: <strong>${esc(doc.quotation.quotation_no)}</strong></div>` : ''}
       ${doc.proforma?.proforma_no ? `<div class="quoref">Ref PI: <strong>${esc(doc.proforma.proforma_no)}</strong></div>` : ''}
+      ${doc.sales_order?.order_number ? `<div class="quoref">Ref SO: <strong>${esc(doc.sales_order.order_number)}</strong></div>` : ''}
+      ${doc.customer_po_number ? `<div class="quoref">Customer PO: <strong>${esc(doc.customer_po_number)}</strong></div>` : ''}
     </div>
   </div>
 

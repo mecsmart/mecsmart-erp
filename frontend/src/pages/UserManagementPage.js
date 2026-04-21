@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
-import { Plus, Edit2, Trash2, Shield, Key, UserPlus, Check, X, Users as UsersIcon } from 'lucide-react';
+import { Plus, Edit2, Trash2, Shield, Key, UserPlus, Check, X, Users as UsersIcon, Upload } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
@@ -72,7 +72,7 @@ export default function UserManagementPage() {
   const [editingUser, setEditingUser] = useState(null);
   const [permUser, setPermUser] = useState(null);
   const [permData, setPermData] = useState({});
-  const [formData, setFormData] = useState({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {} });
+  const [formData, setFormData] = useState({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {}, signature_url: '' });
   // Track if the admin has manually edited the permissions grid — so we don't auto-reset
   // their selections when switching roles after editing.
   const [permsTouched, setPermsTouched] = useState(false);
@@ -158,7 +158,7 @@ export default function UserManagementPage() {
     try {
       await api.post('/api/users', formData);
       setIsCreateOpen(false);
-      setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {} });
+      setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {}, signature_url: '' });
       setPermsTouched(false);
       fetchData();
     } catch (error) {
@@ -168,25 +168,37 @@ export default function UserManagementPage() {
 
   const handleEdit = (u) => {
     setEditingUser(u);
-    setFormData({ email: u.email, password: '', name: u.name, role: u.role, role_group_id: u.role_group_id || '', permissions: u.permissions || {} });
+    setFormData({ email: u.email, password: '', name: u.name, role: u.role, role_group_id: u.role_group_id || '', permissions: u.permissions || {}, signature_url: u.signature_url || '' });
     setPermsTouched(true);  // preserve existing user's permissions when dialog opens
     setIsCreateOpen(true);
   };
 
   const handleUpdate = async () => {
     try {
-      const payload = { name: formData.name, role: formData.role, permissions: formData.permissions, role_group_id: formData.role_group_id || '' };
+      const payload = { name: formData.name, role: formData.role, permissions: formData.permissions, role_group_id: formData.role_group_id || '', signature_url: formData.signature_url || '' };
       if (formData.password) payload.password = formData.password;
       await api.put(`/api/users/${editingUser.id}`, payload);
       setIsCreateOpen(false);
       setEditingUser(null);
-      setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {} });
+      setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {}, signature_url: '' });
       setPermsTouched(false);
       fetchData();
     } catch (error) {
       alert(error.response?.data?.detail || 'Failed to update user');
     }
   };
+
+  const handleSignatureUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 200 * 1024) { alert('Signature file must be under 200KB'); e.target.value = ''; return; }
+    if (!/^image\/(png|jpe?g)$/i.test(file.type)) { alert('Only PNG or JPG images are allowed'); e.target.value = ''; return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => setFormData(prev => ({ ...prev, signature_url: ev.target.result }));
+    reader.readAsDataURL(file);
+  };
+
+  const removeSignature = () => setFormData(prev => ({ ...prev, signature_url: '' }));
 
   const handleDelete = async (u) => {
     if (!window.confirm(`Delete user "${u.name}" (${u.email})?`)) return;
@@ -264,13 +276,13 @@ export default function UserManagementPage() {
 
         <TabsContent value="users" className="mt-4 space-y-6">
         <div className="flex justify-end">
-        <Dialog open={isCreateOpen} onOpenChange={(open) => { setIsCreateOpen(open); if (!open) { setEditingUser(null); setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {} }); setPermsTouched(false); } }}>
+        <Dialog open={isCreateOpen} onOpenChange={(open) => { setIsCreateOpen(open); if (!open) { setEditingUser(null); setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {}, signature_url: '' }); setPermsTouched(false); } }}>
           <DialogTrigger asChild>
             <button className="btn-primary flex items-center space-x-2" data-testid="add-user-btn" onClick={() => {
               // Pre-seed permissions with the default for the default role so the admin
               // sees pre-ticked checkboxes matching the role they'll likely keep.
               const defaults = modulesData?.default_permissions?.['inventory_manager'] || {};
-              setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: JSON.parse(JSON.stringify(defaults)) });
+              setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: JSON.parse(JSON.stringify(defaults)), signature_url: '' });
               setPermsTouched(false);
             }}>
               <UserPlus className="w-4 h-4" /><span>Add User</span>
@@ -314,6 +326,29 @@ export default function UserManagementPage() {
                       </Select>
                       <p className="text-[11px] text-[#6B7280] mt-1">Permissions are defined at the role group level. Admin Group members see BOM rollup costs.</p>
                     </>
+                  )}
+                </div>
+                <div className="col-span-2 pt-2 border-t border-[#E5E7EB]">
+                  <label className="text-sm font-medium text-[#374151] block mb-2">Signature (printed on invoices &amp; POs)</label>
+                  {formData.signature_url ? (
+                    <div className="flex items-start gap-3">
+                      <div className="border border-[#D1D5DB] rounded-sm bg-white p-2 inline-flex items-center justify-center">
+                        <img src={formData.signature_url} alt="signature" className="max-h-20 max-w-[200px] object-contain" data-testid="user-signature-preview" />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="btn-secondary text-xs px-2 py-1 cursor-pointer inline-flex items-center gap-1" data-testid="user-signature-replace-label">
+                          Replace
+                          <input type="file" className="hidden" accept="image/png,image/jpeg" onChange={handleSignatureUpload} data-testid="user-signature-upload-input" />
+                        </label>
+                        <button type="button" onClick={removeSignature} className="text-xs text-[#9B1C1C] underline" data-testid="user-signature-remove-btn">Remove</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="flex items-center gap-2 px-3 py-2 border-2 border-dashed border-[#D1D5DB] rounded-sm cursor-pointer hover:bg-[#F3F4F6] w-fit" data-testid="user-signature-upload-label">
+                      <Upload className="w-4 h-4 text-[#4B5563]" />
+                      <span className="text-sm text-[#4B5563]">Upload PNG or JPG (max 200KB)</span>
+                      <input type="file" className="hidden" accept="image/png,image/jpeg" onChange={handleSignatureUpload} data-testid="user-signature-upload-input" />
+                    </label>
                   )}
                 </div>
               </div>

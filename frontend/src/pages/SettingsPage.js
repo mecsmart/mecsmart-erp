@@ -140,7 +140,7 @@ export default function SettingsPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="company">Company & GST</TabsTrigger>
+          <TabsTrigger value="company">Company Details</TabsTrigger>
           <TabsTrigger value="branding" data-testid="branding-tab">Branding & Currency</TabsTrigger>
           <TabsTrigger value="po-charges" data-testid="po-charges-tab">PO Section</TabsTrigger>
           <TabsTrigger value="number-series" data-testid="number-series-tab">Number Series</TabsTrigger>
@@ -250,9 +250,33 @@ export default function SettingsPage() {
               ))}
             </div>
           </div>
+          <div className="card-flat p-6">
+            <h2 className="text-lg font-semibold font-[Chivo] text-[#1D3557] mb-2">Bank Details</h2>
+            <p className="text-sm text-[#4B5563] mb-4">Printed on Proforma &amp; Tax Invoices (auto-injected into the &quot;Bank Details&quot; block of every invoice layout).</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-[#374151]">Bank Name</label>
+                <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" placeholder="e.g. HDFC Bank" value={settings.bank_name || ''} onChange={e => setSettings({ ...settings, bank_name: e.target.value })} disabled={!isAdmin} data-testid="company-bank-name-input" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-[#374151]">Branch</label>
+                <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" placeholder="e.g. Koramangala, Bangalore" value={settings.bank_branch || ''} onChange={e => setSettings({ ...settings, bank_branch: e.target.value })} disabled={!isAdmin} data-testid="company-bank-branch-input" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-[#374151]">Account Number</label>
+                <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm font-mono" placeholder="e.g. 50100XXXXXX" value={settings.bank_account || ''} onChange={e => setSettings({ ...settings, bank_account: e.target.value })} disabled={!isAdmin} data-testid="company-bank-account-input" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-[#374151]">IFSC Code</label>
+                <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm font-mono uppercase" maxLength={11} placeholder="HDFC0000XXX" value={settings.bank_ifsc || ''} onChange={e => setSettings({ ...settings, bank_ifsc: e.target.value.toUpperCase() })} disabled={!isAdmin} data-testid="company-bank-ifsc-input" />
+              </div>
+              <div className="col-span-2">
+                <label className="text-sm font-medium text-[#374151]">UPI ID <span className="text-xs text-[#9CA3AF]">(optional)</span></label>
+                <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm font-mono" placeholder="e.g. machineworks@upi" value={settings.bank_upi || ''} onChange={e => setSettings({ ...settings, bank_upi: e.target.value })} disabled={!isAdmin} data-testid="company-bank-upi-input" />
+              </div>
+            </div>
+          </div>
         </TabsContent>
-
-        {/* ====== Branding & Currency Tab ====== */}
         <TabsContent value="branding" className="space-y-6 mt-4">
           {isAdmin && (
             <div className="flex justify-end">

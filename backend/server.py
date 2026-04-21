@@ -949,6 +949,7 @@ async def login(user_data: UserLogin, response: Response, request: Request):
             "role_group_id": user.get("role_group_id"),
             "role_group": role_group,
             "is_admin_group": is_admin_group,
+            "signature_url": user.get("signature_url", ""),
         }
     except HTTPException:
         raise
@@ -2255,23 +2256,30 @@ async def create_user(user_data: UserCreate, request: Request):
 @users_router.put("/{user_id}")
 async def update_user(user_id: str, data: UserUpdate, request: Request):
     admin = await get_current_user(request)
-    if admin["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admin can update users")
+    is_self = (admin.get("id") == user_id)
+    if admin["role"] != "admin" and not is_self:
+        raise HTTPException(status_code=403, detail="Only admin can update other users")
     
     update_data = {}
-    if data.name is not None:
-        update_data["name"] = data.name
-    if data.role is not None:
-        update_data["role"] = data.role
-    if data.permissions is not None:
-        update_data["permissions"] = data.permissions
-    if data.status is not None:
-        update_data["status"] = data.status
+    # Non-admin self-update is restricted to signature_url + password + name
+    if admin["role"] == "admin":
+        if data.name is not None:
+            update_data["name"] = data.name
+        if data.role is not None:
+            update_data["role"] = data.role
+        if data.permissions is not None:
+            update_data["permissions"] = data.permissions
+        if data.status is not None:
+            update_data["status"] = data.status
+        if data.role_group_id is not None:
+            update_data["role_group_id"] = data.role_group_id or None
+    else:
+        if data.name is not None:
+            update_data["name"] = data.name
     if data.password is not None and data.password.strip():
         update_data["password_hash"] = hash_password(data.password)
-    if data.role_group_id is not None:
-        # Empty string means clear the mapping
-        update_data["role_group_id"] = data.role_group_id or None
+    if data.signature_url is not None:
+        update_data["signature_url"] = data.signature_url
     
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
@@ -6256,12 +6264,23 @@ async def clear_transaction_data(request: Request):
 # ================== CUSTOMER ROUTES ==================
 
 @customers_router.get("")
-async def get_customers(request: Request, status: Optional[str] = None):
-    await get_current_user(request)
+async def get_customers(request: Request, status: Optional[str] = None, mine: Optional[bool] = False):
+    user = await get_current_user(request)
     query = {}
     if status:
         query["status"] = status
-    customers = await db.customers.find(query, {"_id": 0}).to_list(1000)
+    # Per-user contact ownership: non-admin users see only their own created contacts
+    # when `mine=true` is passed, OR always if the user doesn't have admin privileges.
+    # Admins (role=admin or is_admin_group from role-group) see ALL contacts.
+    is_admin = user.get("role") == "admin"
+    if not is_admin and user.get("role_group_id"):
+        rg = await db.role_groups.find_one({"id": user["role_group_id"]}, {"_id": 0, "is_admin_group": 1})
+        if rg and rg.get("is_admin_group"):
+            is_admin = True
+    if not is_admin:
+        # Non-admins: restrict to own contacts + those without a creator (legacy data)
+        query["$or"] = [{"created_by": user["id"]}, {"created_by": {"$exists": False}}, {"created_by": None}]
+    customers = await db.customers.find(query, {"_id": 0}).to_list(2000)
     return customers
 
 @customers_router.get("/{customer_id}")
@@ -9507,6 +9526,7 @@ class TaxInvoiceLine(BaseModel):
 class TaxInvoiceCreate(BaseModel):
     proforma_id: Optional[str] = ""
     sales_order_id: Optional[str] = ""
+    customer_po_number: Optional[str] = ""  # Customer's PO reference — used when TI is created without SO
     customer_id: Optional[str] = ""
     customer_name: str
     contact_person: Optional[str] = ""
@@ -9531,6 +9551,7 @@ class TaxInvoiceUpdate(BaseModel):
     place_of_supply: Optional[str] = None
     billing_address: Optional[str] = None
     shipping_address: Optional[str] = None
+    customer_po_number: Optional[str] = None
 
 async def _enrich_tax_invoice(t):
     t.pop("_id", None)
@@ -9540,6 +9561,10 @@ async def _enrich_tax_invoice(t):
     if t.get("proforma_id"):
         p = await db.proforma_invoices.find_one({"id": t["proforma_id"]}, {"_id": 0, "proforma_no": 1})
         t["proforma"] = p
+    if t.get("sales_order_id"):
+        so = await db.production_orders.find_one({"id": t["sales_order_id"]}, {"_id": 0, "order_number": 1})
+        if so:
+            t["sales_order"] = so
     for ln in (t.get("lines") or []):
         if ln.get("item_id"):
             it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1, "hsn_code": 1})
@@ -9683,6 +9708,96 @@ async def convert_proforma_to_tax_invoice(pid: str, payload: dict = Body(default
             "updated_at": datetime.now(timezone.utc),
         }}
     )
+    return await _enrich_tax_invoice(doc)
+
+
+@crm_router.post("/tax-invoices/from-sales-order/{so_id}", status_code=201)
+async def create_tax_invoice_from_sales_order(so_id: str, request: Request):
+    """Auto-generate a Tax Invoice draft from a confirmed Sales Order.
+
+    Pulls customer + all SO lines, resolves FG/item pricing from each line's BOM parent_item
+    (uses item.sale_price if set, else item.purchase_price, else line rate fallback),
+    applies the item's hsn_code and the standard GST slab, and returns the enriched invoice.
+    """
+    user = await get_current_user(request)
+    so = await db.production_orders.find_one({"id": so_id})
+    if not so:
+        raise HTTPException(status_code=404, detail="Sales Order not found")
+    if so.get("status") in ("draft", "cancelled"):
+        raise HTTPException(status_code=400, detail=f"Cannot invoice a {so.get('status')} Sales Order — confirm it first")
+
+    customer_id = so.get("customer_id") or ""
+    customer = None
+    if customer_id:
+        customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+
+    # Build line items from SO lines (multi-line) or fall back to legacy single-line
+    so_lines = so.get("lines") or []
+    if not so_lines and so.get("bom_id"):
+        so_lines = [{
+            "bom_id": so["bom_id"],
+            "quantity": so.get("quantity", 0),
+            "due_date": so.get("due_date"),
+            "order_type": "auto",
+        }]
+    if not so_lines:
+        raise HTTPException(status_code=400, detail="Sales Order has no lines to invoice")
+
+    ti_lines = []
+    for ln in so_lines:
+        bom = await db.boms.find_one({"id": ln.get("bom_id")}, {"_id": 0})
+        if not bom:
+            continue
+        item = await db.items.find_one({"id": bom.get("parent_item_id")}, {"_id": 0}) or {}
+        rate = float(item.get("sale_price") or 0) or float(item.get("purchase_price") or 0) or float(item.get("unit_cost") or 0)
+        ti_lines.append({
+            "item_id": item.get("id", ""),
+            "description": item.get("name", ""),
+            "hsn_code": item.get("hsn_code", ""),
+            "quantity": float(ln.get("quantity", 0)),
+            "uom": item.get("uom", "Nos"),
+            "rate": rate,
+            "discount_pct": 0.0,
+            "gst_rate": float(item.get("gst_rate") or 18.0),
+        })
+
+    if not ti_lines:
+        raise HTTPException(status_code=400, detail="Could not resolve any line items from this Sales Order")
+
+    invoice_no = await _get_next_number("tax_invoice")
+    base = await _finalize_invoice_lines(ti_lines)
+    gst = await _compute_gst_split(customer_id, ti_lines)
+
+    billing = (customer or {}).get("address", "") if customer else ""
+    doc = {
+        "id": str(uuid.uuid4()),
+        "invoice_no": invoice_no,
+        "sales_order_id": so_id,
+        "sales_order_number": so.get("order_number", ""),
+        "customer_id": customer_id,
+        "customer_name": (customer or {}).get("name", ""),
+        "contact_person": (customer or {}).get("contact_person", ""),
+        "email": (customer or {}).get("email", ""),
+        "phone": (customer or {}).get("phone", ""),
+        "billing_address": billing,
+        "shipping_address": billing,
+        "invoice_date": datetime.now(timezone.utc),
+        "place_of_supply": gst.get("customer_state", ""),
+        "lines": ti_lines,
+        "notes": "",
+        "terms": "",
+        **base,
+        "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
+        "total_gst": gst["total_gst"],
+        "is_inter_state": gst["is_inter_state"],
+        "hsn_summary": gst["hsn_summary"],
+        "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
+        "qr_code": f"UPI://pay?pa=machineworks@upi&pn=MachineWorksERP&am={round(base['subtotal'] + gst['total_gst'], 2)}&tn={invoice_no}",
+        "status": "draft",
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"],
+    }
+    await db.tax_invoices.insert_one(doc)
     return await _enrich_tax_invoice(doc)
 
 

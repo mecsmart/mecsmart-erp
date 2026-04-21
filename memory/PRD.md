@@ -17,6 +17,15 @@
 - DC print: "Delivery Challan" with 6-col Part Details + RM Issued sections (NOT 9-col Job OS format)
 
 ## Changelog
+- 2026-02-20 (iter 103): **Tax Invoice flow pivot + dynamic branding in printouts + per-user contact ownership**.
+  (a) **Proforma Invoice row**: removed the "Convert to Tax Invoice" button (PI → TI direct conversion no longer allowed per user spec).
+  (b) **Tax Invoice create**: new "+ New Tax Invoice" button on Tax Invoices panel opens a dialog with 3 source tabs — *From Sales Order* (dropdown of confirmed SOs auto-populates customer + all BOM-resolved lines with rate pulled from item.sale_price → purchase_price → unit_cost fallback), *From Customer PO* (customer + mandatory customer_po_number text), *Manual Entry* (customer only). All modes share a common line editor (Qty, UOM, Rate, Disc%, GST%, Amount), date/due/POS/customer-PO-ref fields, billing+shipping textarea, Notes + T&C. Backend: `TaxInvoiceCreate` gained `customer_po_number`; new `POST /api/crm/tax-invoices/from-sales-order/{so_id}` endpoint; `_enrich_tax_invoice` now hydrates `sales_order.order_number` for the table source chip.
+  (c) **Tax Invoices row source chip**: blue *SO: SO-000XXX*, yellow *PO: <text>*, pink *PI: PI-000XXX*, or "Manual".
+  (d) **Settings → Company Details** tab renamed from "Company & GST". New **Bank Details** card added with 5 inputs (Bank Name, Branch, Account Number, IFSC, UPI ID). Values auto-inject into the "Bank Details" block of every Proforma + Tax Invoice printout — `printInvoiceDoc()` now receives `company` from `useCompanySettings()` and `user` from `useAuth()` in each of Quotation/PI/TI panels.
+  (e) **User signature upload**: User Management edit dialog has a new Signature field (PNG/JPG max 200KB, stored as base64 data-URL). Uploaded image renders on all invoice printouts as the "Authorised Signatory" stamp. Backend `update_user` now allows self-update of signature_url (non-admins can update their own), and `/api/auth/login` + `/api/auth/me` both return `signature_url`.
+  (f) **Per-user contact ownership**: `GET /api/customers` now filters to `{created_by: user.id}` + legacy-unowned for non-admin users; `role=admin` OR `role_group.is_admin_group=true` sees all.
+  (g) **Print references**: print template now shows *Ref SO:* and *Customer PO:* in the top-right ref block when those fields are populated (in addition to existing Ref Quotation / Ref PI chains).
+  Verified live via curl + screenshots: `INV-FY26-27/000017` auto-created from `SO-000238` with 2 lines totalling ₹49,250 subtotal + ₹8,865 GST = ₹58,115 grand total; Bank Details card renders with all 5 inputs; Tax Invoice dialog renders all 3 source tabs + line editor + totals; existing Tax Invoices (PI-sourced + manual + SO-sourced) all display correct source chips.
 - 2026-02-18 (iter 50): Fixed Job OS regressions — consolidation no longer doubles per-unit charges; DC print format conditional (9-col for Job OS, 6-col for standard SC); Job Card hides Stop/Complete for outsourced ops.
 - 2026-02-18 (iter 51): Job Card UX polish — outsourced op badge now shows `JW: JW-000XXX — Receive via GRN` (reads from `op.outsource_sc_order_number`, persisted by backend on outsource). Removed "Manufacturing Order Tree" section from Job Card dialog. Tested & verified.
 - 2026-02-18 (iter 52): (a) Renamed "Processing Charges" → "Processing Charges / Unit" in Start Operation dialog. (b) Fixed DC print isJobOS check — was broken because Job OS DCs are created WITH lines; now uses `dc.order.subcontract_type === 'without_material' && job_work_parts.length > 0`. (c) Sales Order reference chip (`SO: SO-000XXX`) now displayed on parent MO summary row and in Job Card dialog header.
@@ -175,8 +184,8 @@ Unified BOM process-cost source of truth. Previous design stored a component's p
 - [x] CRM Batch Fixes — discount column, print, auto-convert on Accept, edit/delete when SO cancelled, CSV import, part delete referential integrity (iter 100)
 - [x] CRM UX Polish — ConfirmDialog everywhere, Quotation Send/Accept flow with popup, company header in print, multi-line T&C, Item Name column + item description below dropdown (iter 101)
 - [x] Quote-to-Cash chain — Proforma Invoice + Tax Invoice + GST (CGST/SGST/IGST) + HSN tax summary + Number Series settings + Quotation→PI→TI convert chain (iter 102)
+- [x] Tax Invoice flow pivot — Removed PI→TI direct convert; new TI create dialog with 3 sources (Sales Order / Customer PO / Manual) + auto-populate from SO + source chip (SO/PO/PI/Manual); Bank Details in Settings + injected into PI/TI print; User signature upload (base64 PNG/JPG) rendered on printout; Per-user contact ownership filter on /api/customers (iter 103)
 - [ ] Packing List from BOM (first level) — **next priority**
-- [ ] Per-user CRM contact ownership (created_by filter)
 - [ ] P1: GST Phase 2 (GST-compliant invoice generation + tax breakup reports), P2: Backend refactoring (split server.py into routers/models)
 - [ ] P3: GSTR-1/3B report formats + ITC tracking
 - [ ] P4: Barcode/QR scanning for inventory transactions
