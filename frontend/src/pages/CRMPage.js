@@ -3356,14 +3356,22 @@ function defaultWhatsAppPhone(doc) {
 
 // Open WhatsApp with a pre-drafted message. If `includeLink=true`, appends
 // a public read-only URL that the recipient can tap from their phone.
+// Build a WhatsApp share URL that bypasses the `api.whatsapp.com` redirect chain
+// (some browsers/CSP policies block api.whatsapp.com with ERR_BLOCKED_BY_RESPONSE when
+// wa.me tries to redirect there). `web.whatsapp.com/send` works on desktop AND mobile
+// (mobile devices redirect to the native app automatically).
+function buildWaUrl(phone, msg) {
+  const num = (phone || '').replace(/[^0-9]/g, '');
+  const text = encodeURIComponent(msg || '');
+  if (num) return `https://web.whatsapp.com/send?phone=${num}&text=${text}`;
+  return `https://web.whatsapp.com/send?text=${text}`;
+}
+
 // (Kept for legacy call sites — new UI opens WhatsAppShareDialog first.)
 function openWhatsAppShare({ doc, kind, company, user, includeLink }) {
   const phone = defaultWhatsAppPhone(doc);
   const msg = buildWhatsAppMessage({ doc, kind, company, user, includeLink });
-  const waUrl = phone
-    ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
-    : `https://wa.me/?text=${encodeURIComponent(msg)}`;
-  window.open(waUrl, '_blank', 'noopener,noreferrer');
+  window.open(buildWaUrl(phone, msg), '_blank', 'noopener,noreferrer');
 }
 
 function WhatsAppShareDialog({ open, onOpenChange, doc, kind, company, user }) {
@@ -3386,9 +3394,7 @@ function WhatsAppShareDialog({ open, onOpenChange, doc, kind, company, user }) {
   };
 
   const send = () => {
-    const num = (phone || '').replace(/[^0-9]/g, '');
-    const url = num ? `https://wa.me/${num}?text=${encodeURIComponent(message)}` : `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    window.open(buildWaUrl(phone, message), '_blank', 'noopener,noreferrer');
     onOpenChange(false);
   };
 

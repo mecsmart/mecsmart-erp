@@ -6120,6 +6120,21 @@ def _current_fy_string() -> str:
     fy_start = today.year if today.month >= 4 else today.year - 1
     return f"{str(fy_start)[-2:]}{str(fy_start + 1)[-2:]}"
 
+def _normalize_fy(fy: str) -> str:
+    """Coerce any legacy FY format (FY26-27, FY2627, 26-27, 26/27, "FY 2026-27") → compact '2627'."""
+    if not fy:
+        return _current_fy_string()
+    import re
+    digits = re.sub(r"[^0-9]", "", str(fy))
+    if len(digits) == 4:
+        return digits  # already compact
+    if len(digits) == 8:  # e.g. "20262027"
+        return digits[2:4] + digits[6:8]
+    if len(digits) == 6:  # e.g. "202627" or "262627"
+        # take last 2 of first half and last 2 of second half
+        return digits[:2] + digits[-2:]
+    return _current_fy_string()
+
 def _format_series_preview(prefix: str, padding: int, next_num: int, reset_yearly: bool, current_fy: str = "") -> str:
     """Build a preview string matching what `_get_next_number` would produce — compact, no dashes/slashes."""
     padded = str(next_num).zfill(padding)
@@ -6140,7 +6155,7 @@ async def get_number_series(request: Request):
         merged = {"key": key, **default}
         if doc:
             merged.update({k: v for k, v in doc.items() if k != "label"})
-        merged["current_fy"] = merged.get("current_fy") or current_fy
+        merged["current_fy"] = _normalize_fy(merged.get("current_fy") or current_fy)
         merged["preview"] = _format_series_preview(merged.get("prefix", ""), int(merged.get("padding", 4)), int(merged.get("next_number", 1)), bool(merged.get("reset_yearly", False)), merged["current_fy"])
         series_list.append(merged)
     # CRM-side series (keyed by `doc_type`)
@@ -6149,7 +6164,7 @@ async def get_number_series(request: Request):
         merged = {"key": dt, "doc_type": dt, **default}
         if doc:
             merged.update({k: v for k, v in doc.items() if k != "label"})
-        merged["current_fy"] = merged.get("current_fy") or current_fy
+        merged["current_fy"] = _normalize_fy(merged.get("current_fy") or current_fy)
         merged["preview"] = _format_series_preview(merged.get("prefix", ""), int(merged.get("padding", 4)), int(merged.get("next_number", 1)), bool(merged.get("reset_yearly", False)), merged["current_fy"])
         series_list.append(merged)
     return series_list
@@ -6925,6 +6940,30 @@ async def migrate_refresh_tax_invoice_qrs():
         logger.info(f"[migrate] Refreshed UPI QR on {count} legacy Tax Invoices (new payee: {upi_id})")
 
 
+async def migrate_compact_fy_number_series():
+    """Persistent cleanup: normalize any legacy `current_fy` value (e.g. 'FY26-27', '26-27') to the compact 4-digit form.
+    Also strips any trailing dashes from stored prefixes that survived the iter-109 migration."""
+    count_fy = 0
+    count_prefix = 0
+    async for doc in db.number_series.find({}, {"_id": 0, "key": 1, "doc_type": 1, "current_fy": 1, "prefix": 1}):
+        updates = {}
+        fy = doc.get("current_fy")
+        if fy:
+            norm = _normalize_fy(fy)
+            if norm != fy:
+                updates["current_fy"] = norm
+                count_fy += 1
+        prefix = doc.get("prefix")
+        if prefix and prefix.endswith(("-", "/", " ")):
+            updates["prefix"] = prefix.rstrip("-/ ")
+            count_prefix += 1
+        if updates:
+            q = {"key": doc["key"]} if doc.get("key") else {"doc_type": doc["doc_type"]}
+            await db.number_series.update_one(q, {"$set": updates})
+    if count_fy or count_prefix:
+        logger.info(f"[migrate] Normalized {count_fy} FY field(s) and stripped {count_prefix} prefix trailer(s) in number_series")
+
+
 @app.on_event("startup")
 async def startup():
     # Create indexes
@@ -6952,6 +6991,7 @@ async def startup():
     await migrate_backfill_child_mo_operations_status()
     await migrate_sc_jw_charges_from_bom()
     await migrate_refresh_tax_invoice_qrs()
+    await migrate_compact_fy_number_series()
     
     # Write credentials file (dev environment only, non-fatal on Windows/other OS)
     try:
