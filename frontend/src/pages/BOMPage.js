@@ -833,9 +833,12 @@ export default function BOMPage() {
         ) : (
           <div className="p-3 space-y-4">
             {(() => {
-              // Group by parent and show only FG (Finished Good) BOMs as top-level
+              // Group all BOMs by parent category (FG/SG/CP/RM). Previously only FG BOMs rendered
+              // at the top level — which caused Sub-Assembly and Component BOMs to be "invisible"
+              // until they were referenced by a parent FG BOM. Now every BOM always has a row.
               const grouped = {};
-              boms.filter(bom => bom.parent_item?.category === 'finished_good').forEach(bom => {
+              const orderedCats = ['finished_good', 'sub_assembly', 'component', 'raw_material'];
+              boms.forEach(bom => {
                 const pid = bom.parent_item_id || 'x';
                 if (!grouped[pid]) grouped[pid] = { item: bom.parent_item, boms: [] };
                 grouped[pid].boms.push(bom);
@@ -914,6 +917,12 @@ export default function BOMPage() {
                 const activeBom = group.boms.find(b => b.status === 'active') || group.boms[0];
                 const exp = allExplosions[activeBom?.id];
                 return exp ? searchNodes(exp.explosion) : false;
+              }).sort(([, a], [, b]) => {
+                // FG → SG → CP → RM order, then by part_number within each category
+                const catRank = orderedCats.indexOf(a.item?.category);
+                const catRankB = orderedCats.indexOf(b.item?.category);
+                if (catRank !== catRankB) return (catRank === -1 ? 99 : catRank) - (catRankB === -1 ? 99 : catRankB);
+                return (a.item?.part_number || '').localeCompare(b.item?.part_number || '');
               }).map(([pid, group]) => {
                 const parentItem = group.item;
                 const activeBom = group.boms.find(b => b.status === 'active') || group.boms[0];
@@ -923,8 +932,18 @@ export default function BOMPage() {
                 
                 return (
                   <div key={pid} className="border border-[#D1D5DB] rounded-sm overflow-hidden" data-testid={`bom-tree-${pid}`}>
-                    {/* FG Header Row */}
-                    <div className={`flex items-center justify-between px-4 py-3 text-white`} style={{ backgroundColor: 'rgba(29, 53, 87, 0.75)' }}>
+                    {/* Top-level header row — color by parent category */}
+                    <div
+                      className="flex items-center justify-between px-4 py-3 text-white"
+                      style={{
+                        backgroundColor:
+                          parentItem?.category === 'finished_good' ? 'rgba(29, 53, 87, 0.95)' :     // Navy
+                          parentItem?.category === 'sub_assembly' ? 'rgba(114, 59, 19, 0.9)' :      // Brown
+                          parentItem?.category === 'component' ? 'rgba(155, 28, 28, 0.85)' :        // Red
+                          parentItem?.category === 'raw_material' ? 'rgba(37, 99, 235, 0.85)' :     // Blue
+                          'rgba(75, 85, 99, 0.85)',                                                  // Gray fallback
+                      }}
+                    >
                       <div className="flex items-center gap-3">
                         <span className="text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded">{catLabel(parentItem?.category)}</span>
                         <span className="mono font-bold text-sm">{parentItem?.part_number || '-'}</span>
