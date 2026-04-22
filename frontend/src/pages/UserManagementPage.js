@@ -308,16 +308,33 @@ export default function UserManagementPage() {
                   <input type="password" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder={editingUser ? 'Leave blank to keep current' : ''} data-testid="user-password-input" />
                 </div>
                 <div className="col-span-2">
-                  <label className="text-sm font-medium text-[#374151]">Role Group *</label>
+                  <label className="text-sm font-medium text-[#374151]">Role</label>
+                  <Select value={formData.role} onValueChange={v => setFormData({ ...formData, role: v })}>
+                    <SelectTrigger data-testid="user-role-select"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">System Admin</SelectItem>
+                      <SelectItem value="inventory_manager">Inventory Manager</SelectItem>
+                      <SelectItem value="production_manager">Production Manager</SelectItem>
+                      <SelectItem value="purchase_manager">Purchase Manager</SelectItem>
+                      <SelectItem value="sales_manager">Sales Manager</SelectItem>
+                      <SelectItem value="quality_inspector">Quality Inspector</SelectItem>
+                      <SelectItem value="viewer">Viewer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-[#6B7280] mt-1">System Admin bypasses role groups and has full platform access.</p>
+                </div>
+                <div className="col-span-2">
+                  <label className="text-sm font-medium text-[#374151]">Role Group {formData.role === 'admin' ? <span className="text-[11px] font-normal text-[#6B7280]">(optional for System Admin)</span> : '*'}</label>
                   {roleGroups.length === 0 ? (
                     <div className="mt-1 px-3 py-3 border border-[#F59E0B] bg-[#FEF3C7] rounded-sm text-xs text-[#723B13]">
-                      <strong>No role groups exist yet.</strong> Go to the <em>Role Groups</em> tab and create at least one group (e.g. "Production Admin", "Purchase User") before adding users. Permissions are defined at the group level.
+                      <strong>No role groups exist yet.</strong> {formData.role === 'admin' ? 'System Admin can still be created without a group.' : 'Go to the Role Groups tab and create at least one group (e.g. "Production Admin", "Purchase User") before adding users. Permissions are defined at the group level.'}
                     </div>
                   ) : (
                     <>
-                      <Select value={formData.role_group_id || ''} onValueChange={v => setFormData({ ...formData, role_group_id: v })}>
+                      <Select value={formData.role_group_id || '__none__'} onValueChange={v => setFormData({ ...formData, role_group_id: v === '__none__' ? '' : v })}>
                         <SelectTrigger data-testid="user-group-select"><SelectValue placeholder="Select role group..." /></SelectTrigger>
                         <SelectContent>
+                          {formData.role === 'admin' && <SelectItem value="__none__">— None (full admin access) —</SelectItem>}
                           {roleGroups.map(g => (
                             <SelectItem key={g.id} value={g.id}>
                               {g.name}{g.is_admin_group ? ' (Admin Group)' : ''}
@@ -356,7 +373,7 @@ export default function UserManagementPage() {
 
               <div className="flex justify-end space-x-2 pt-4 border-t border-[#E5E7EB]">
                 <button className="btn-secondary" onClick={() => { setIsCreateOpen(false); setEditingUser(null); }}>Cancel</button>
-                <button className="btn-primary" onClick={editingUser ? handleUpdate : handleCreate} data-testid="save-user-btn" disabled={roleGroups.length === 0 || !formData.role_group_id}>
+                <button className="btn-primary" onClick={editingUser ? handleUpdate : handleCreate} data-testid="save-user-btn" disabled={formData.role !== 'admin' && (roleGroups.length === 0 || !formData.role_group_id)}>
                   {editingUser ? 'Update' : 'Create'} User
                 </button>
               </div>

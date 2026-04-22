@@ -6068,20 +6068,20 @@ async def update_company_settings(data: CompanySettingsUpdate, request: Request)
 # ================== NUMBER SERIES (Vendor/Customer/PO/Sales Invoice) ==================
 # Each key stores: {prefix, padding, next_number}
 DEFAULT_NUMBER_SERIES = {
-    "supplier_code":  {"prefix": "SUP-",  "padding": 4, "next_number": 1, "label": "Vendor / Supplier Code", "reset_yearly": False, "group": "masters"},
-    "customer_code":  {"prefix": "CUST-", "padding": 4, "next_number": 1, "label": "Customer Code", "reset_yearly": False, "group": "masters"},
-    "po_number":      {"prefix": "PO-",   "padding": 6, "next_number": 1, "label": "Purchase Order", "reset_yearly": False, "group": "procurement"},
-    "sales_invoice":  {"prefix": "INV-",  "padding": 6, "next_number": 1, "label": "Sales Invoice", "reset_yearly": False, "group": "sales"},
+    "supplier_code":  {"prefix": "SUP",  "padding": 4, "next_number": 1, "label": "Vendor / Supplier Code", "reset_yearly": False, "group": "masters"},
+    "customer_code":  {"prefix": "CUST", "padding": 4, "next_number": 1, "label": "Customer Code", "reset_yearly": False, "group": "masters"},
+    "po_number":      {"prefix": "PO",   "padding": 6, "next_number": 1, "label": "Purchase Order", "reset_yearly": False, "group": "procurement"},
+    "sales_invoice":  {"prefix": "INV",  "padding": 6, "next_number": 1, "label": "Sales Invoice", "reset_yearly": False, "group": "sales"},
 }
 
 # CRM-side series (new style, keyed by `doc_type` on same collection). Merged into the Settings UI.
 CRM_DEFAULT_NUMBER_SERIES = {
-    "quotation":       {"prefix": "QUO-",  "padding": 6, "next_number": 1, "label": "Quotation",       "reset_yearly": False, "group": "crm"},
-    "proforma":        {"prefix": "PI-",   "padding": 6, "next_number": 1, "label": "Proforma Invoice","reset_yearly": False, "group": "crm"},
-    "tax_invoice":     {"prefix": "INV-",  "padding": 6, "next_number": 1, "label": "Tax Invoice",     "reset_yearly": True,  "group": "crm"},
-    "sales_order":     {"prefix": "SO-",   "padding": 6, "next_number": 1, "label": "Sales Order",     "reset_yearly": False, "group": "sales"},
-    "purchase_invoice":{"prefix": "PUR-",  "padding": 6, "next_number": 1, "label": "Purchase Invoice","reset_yearly": False, "group": "procurement"},
-    "packing_list":    {"prefix": "PL-",   "padding": 6, "next_number": 1, "label": "Packing List",    "reset_yearly": False, "group": "stores"},
+    "quotation":       {"prefix": "QUO",  "padding": 6, "next_number": 1, "label": "Quotation",       "reset_yearly": False, "group": "crm"},
+    "proforma":        {"prefix": "PI",   "padding": 6, "next_number": 1, "label": "Proforma Invoice","reset_yearly": False, "group": "crm"},
+    "tax_invoice":     {"prefix": "INV",  "padding": 6, "next_number": 1, "label": "Tax Invoice",     "reset_yearly": True,  "group": "crm"},
+    "sales_order":     {"prefix": "SO",   "padding": 6, "next_number": 1, "label": "Sales Order",     "reset_yearly": False, "group": "sales"},
+    "purchase_invoice":{"prefix": "PUR",  "padding": 6, "next_number": 1, "label": "Purchase Invoice","reset_yearly": False, "group": "procurement"},
+    "packing_list":    {"prefix": "PL",   "padding": 6, "next_number": 1, "label": "Packing List",    "reset_yearly": False, "group": "stores"},
 }
 
 async def get_next_series_number(key: str) -> str:
@@ -6106,17 +6106,18 @@ class NumberSeriesUpdate(BaseModel):
     reset_yearly: Optional[bool] = None
 
 def _current_fy_string() -> str:
-    """India FY starts Apr 1 — returns e.g. 'FY26-27' for 2026-04-01 through 2027-03-31."""
+    """India FY starts Apr 1. Returns compact 4-digit form 'YYYY' made of last-2 digits of fy_start + fy_end.
+    Example: Apr 2026 - Mar 2027 → '2627'."""
     today = datetime.now(timezone.utc).date()
     fy_start = today.year if today.month >= 4 else today.year - 1
-    return f"FY{str(fy_start)[-2:]}-{str(fy_start + 1)[-2:]}"
+    return f"{str(fy_start)[-2:]}{str(fy_start + 1)[-2:]}"
 
 def _format_series_preview(prefix: str, padding: int, next_num: int, reset_yearly: bool, current_fy: str = "") -> str:
-    """Build a preview string matching what `_get_next_number` would produce."""
+    """Build a preview string matching what `_get_next_number` would produce — compact, no dashes/slashes."""
     padded = str(next_num).zfill(padding)
     if reset_yearly:
         fy = current_fy or _current_fy_string()
-        return f"{prefix}{fy}/{padded}"
+        return f"{prefix}{fy}{padded}"
     return f"{prefix}{padded}"
 
 @settings_router.get("/number-series")
@@ -9268,19 +9269,19 @@ async def _get_next_number(doc_type: str) -> str:
     if not doc:
         doc = {"doc_type": doc_type, **_CRM_SERIES_LOCAL.get(doc_type, {"prefix": f"{doc_type.upper()}-", "padding": 6, "next_number": 1, "reset_yearly": False})}
         await db.number_series.insert_one(doc)
-    prefix = doc.get("prefix") or f"{doc_type.upper()}-"
+    prefix = doc.get("prefix") or f"{doc_type.upper()}"
     padding = int(doc.get("padding") or 6)
     next_num = int(doc.get("next_number") or 1)
     year_part = ""
     if doc.get("reset_yearly"):
-        # Indian FY (Apr-Mar). Format as FY26-27
+        # Indian FY (Apr-Mar). Compact format '2627' (last-2 of start + end years)
         today = datetime.now(timezone.utc)
         fy_start = today.year if today.month >= 4 else today.year - 1
-        fy_str = f"FY{str(fy_start)[-2:]}-{str(fy_start + 1)[-2:]}"
+        fy_str = f"{str(fy_start)[-2:]}{str(fy_start + 1)[-2:]}"
         if doc.get("current_fy") != fy_str:
             next_num = 1
             await db.number_series.update_one({"doc_type": doc_type}, {"$set": {"current_fy": fy_str, "next_number": 1}})
-        year_part = f"{fy_str}/"
+        year_part = fy_str
     await db.number_series.update_one({"doc_type": doc_type}, {"$set": {"next_number": next_num + 1}})
     return f"{prefix}{year_part}{str(next_num).zfill(padding)}"
 
@@ -9712,10 +9713,13 @@ async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request)
     existing = await db.tax_invoices.find_one({"id": tid})
     if not existing:
         raise HTTPException(status_code=404, detail="Tax Invoice not found")
-    if existing.get("status") in ("paid", "issued"):
-        # Only status updates allowed post-issue
-        if data.status is None and (data.lines is not None or data.billing_address is not None):
-            raise HTTPException(status_code=400, detail="Cannot edit lines of an issued invoice — cancel it instead")
+    # NOTE: Previously this blocked ANY line-or-address edit once status became "issued".
+    # That silently dropped user-edited T&C too because the frontend sends a full payload.
+    # Now we allow edits at any status — users can always tweak T&C / notes / billing address.
+    # Only a paid invoice is fully locked.
+    if existing.get("status") == "paid":
+        if data.status is None and any(v is not None for v in (data.lines, data.billing_address, data.shipping_address, data.customer_po_number, data.due_date, data.place_of_supply)):
+            raise HTTPException(status_code=400, detail="A paid invoice is locked — only status changes and notes/terms are allowed")
     update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
     if "lines" in update:
         lines = [l if isinstance(l, dict) else l.model_dump() for l in update["lines"]]

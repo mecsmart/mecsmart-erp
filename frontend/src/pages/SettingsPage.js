@@ -493,7 +493,7 @@ export default function SettingsPage() {
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h2 className="text-lg font-semibold text-[#111827] mb-1">Number Series</h2>
-                <p className="text-xs text-[#6B7280]">Configure auto-incrementing prefix, padding, and start number for each document type. Enable <strong>Reset on new Financial Year</strong> to restart the counter every April 1st — the FY tag (e.g. <span className="mono bg-[#E1EFFE] text-[#1E429F] px-1 rounded">FY26-27</span>) is automatically inserted between the prefix and the number.</p>
+                <p className="text-xs text-[#6B7280]">Configure auto-incrementing prefix, padding, and start number for each document type. Enable <strong>Reset on new Financial Year</strong> to restart the counter every April 1st — the FY tag (e.g. <span className="mono bg-[#E1EFFE] text-[#1E429F] px-1 rounded">2627</span>) is automatically inserted between the prefix and the number.</p>
               </div>
               <div className="bg-[#F3F4F6] border border-[#D1D5DB] rounded-sm px-3 py-2 text-xs text-[#374151] shrink-0 ml-4">
                 <div className="text-[10px] uppercase tracking-wide text-[#6B7280]">Current FY</div>

@@ -17,6 +17,16 @@
 - DC print: "Delivery Challan" with 6-col Part Details + RM Issued sections (NOT 9-col Job OS format)
 
 ## Changelog
+- 2026-02-22 (iter 109): **3 quick fixes — admin group optional + compact numbering + T&C edit bug.**
+  (a) **Role Group optional for System Admin**: when `role === 'admin'` is selected in the user dialog, the Role Group picker label drops the `*` and gains an `— None (full admin access) —` option. Save button's disabled-gate relaxed. Previously an admin couldn't be created without first having at least one role-group defined.
+  (b) **Compact number series format** (no dashes/slashes/spaces):
+    - Plain: `QUO000024`, `PI000019`, `PO000011`, `PL000003` (was `QUO-000024`).
+    - With FY reset: `INV2627000019` (was `INV-FY26-27/000019`). FY tag is now compact 4-digit `<YYfrom><YYto>`.
+    - Updated defaults in both `DEFAULT_NUMBER_SERIES` + `CRM_DEFAULT_NUMBER_SERIES` (prefixes stripped of trailing `-`). `_get_next_number` no longer inserts `/` before the padded number. `_current_fy_string` returns `"2627"` instead of `"FY26-27"`.
+    - One-shot MongoDB migration ran: 8 existing series rows + 1 existing `current_fy` field converted to the new compact form. User's custom prefixes preserved.
+  (c) **Tax Invoice T&C edit now persists** on issued invoices. `update_tax_invoice` no longer blocks the entire payload when `status === 'issued'`. New rule: only a *paid* invoice is locked (and even then, status/notes/terms can still change). Root cause: frontend sends full payload (including `lines` / `billing_address`) on every save; the old check threw 400 for any edit on issued TIs, silently dropping T&C changes.
+  Verified: PUT terms on issued TI returns the new T&C text intact; new TI via POST issues `INV2627000019`; Settings UI shows all 10 series with compact previews; Current FY badge shows `2627`.
+
 - 2026-02-21 (iter 108): **Brand rename + TI plain styling + TI edit + Invoice T&C config + PL badge + admin email edit.**
   (a) **Rebranding → MechsmartERP** everywhere — sidebar header, top bar header, browser title, login page. Removed the "Demo credentials: admin@erp.com / Admin@123" notice from the login screen for a cleaner production look.
   (b) **Tax Invoice print redesigned to plain GST-form look**:
