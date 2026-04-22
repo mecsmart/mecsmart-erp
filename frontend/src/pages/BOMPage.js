@@ -127,6 +127,26 @@ export default function BOMPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // ── Pre-flight validation (visible via toast, NOT silent alert) ──
+    if (!formData.parent_item_id) {
+      toast.error('Please select a Parent Item before saving the BOM.');
+      return;
+    }
+    if (!formData.name?.trim()) {
+      toast.error('BOM Name is required.');
+      return;
+    }
+    // Make sure the selected parent_item_id actually exists in the items list.
+    // (Guards against stale/orphan ids if the items cache was out of sync.)
+    const parentExists = items.some(i => i.id === formData.parent_item_id);
+    if (!parentExists) {
+      toast.error('Selected parent item is no longer available. Please pick again.');
+      setFormData(fd => ({ ...fd, parent_item_id: '' }));
+      return;
+    }
+
+    const toastId = toast.loading(editingBom ? 'Updating BOM…' : 'Creating BOM…');
     try {
       const payload = {
         ...formData,
@@ -139,24 +159,26 @@ export default function BOMPage() {
           routings: c.routings || [],
         }));
       }
-      
+
       if (editingBom) {
         await api.put(`/api/bom/${editingBom.id}`, payload);
+        toast.success(`BOM "${payload.name}" updated`, { id: toastId });
       } else {
         await api.post('/api/bom', payload);
+        toast.success(`BOM "${payload.name}" created`, { id: toastId });
       }
       setIsDialogOpen(false);
       setEditingBom(null);
       resetForm();
       await fetchBoms();
-      // If a BOM tree is currently being viewed, refresh its explosion so cost changes
-      // (nested BOM edits, routing updates, etc.) propagate to the displayed Material/Process/Total columns.
       if (viewBom?.id) {
         await fetchBomExplosion(viewBom.id);
       }
     } catch (error) {
       console.error('Failed to save BOM:', error?.response?.data || error);
-      alert(error.response?.data?.detail || JSON.stringify(error.response?.data) || 'Failed to save BOM');
+      const detail = error?.response?.data?.detail || error?.response?.data || error?.message || 'Unknown error';
+      const msg = typeof detail === 'string' ? detail : JSON.stringify(detail);
+      toast.error(`Failed to save BOM: ${msg}`, { id: toastId, duration: 8000 });
     }
   };
 
@@ -467,15 +489,24 @@ export default function BOMPage() {
               <form onSubmit={handleSubmit} className="space-y-4 mt-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">Parent Item *</label>
-                    <SearchableItemSelect
-                      items={items}
-                      value={formData.parent_item_id}
-                      onChange={(v) => setFormData({ ...formData, parent_item_id: v })}
-                      filter={(i) => ['sub_assembly', 'finished_good', 'component'].includes(i.category)}
-                      placeholder="Select parent item"
-                      testId="bom-parent-item-select"
-                    />
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">
+                      Parent Item <span className="text-[#9B1C1C]">*</span>
+                      {items.length === 0 && <span className="ml-2 text-xs text-[#9B1C1C] font-normal">(loading items…)</span>}
+                    </label>
+                    <div className={!formData.parent_item_id ? 'ring-1 ring-transparent hover:ring-[#9B1C1C] rounded-sm' : ''}>
+                      <SearchableItemSelect
+                        items={items}
+                        value={formData.parent_item_id}
+                        onChange={(v) => setFormData({ ...formData, parent_item_id: v })}
+                        filter={(i) => ['sub_assembly', 'finished_good', 'component'].includes(i.category)}
+                        placeholder={items.length === 0 ? 'Items still loading…' : 'Search parent item by part number or name'}
+                        testId="bom-parent-item-select"
+                        disabled={items.length === 0}
+                      />
+                    </div>
+                    {!formData.parent_item_id && items.length > 0 && (
+                      <p className="text-[10px] text-[#6B7280] mt-1">Required — pick the FG / SA / Component this BOM builds.</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-[#111827] mb-1">BOM Name *</label>
