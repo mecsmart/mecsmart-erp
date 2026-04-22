@@ -10,7 +10,7 @@ import logging
 import io
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import uuid
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
@@ -777,6 +777,13 @@ class CompanySettingsUpdate(BaseModel):
     quotation_cover_intro: Optional[str] = None
     # Default Terms & Conditions printed on Tax Invoices (separate from quotation_cover_intro).
     invoice_terms_conditions: Optional[str] = None
+    # GST e-Invoice (IRN) integration credentials (NIC Sandbox or GSP like MasterGST/ClearTax).
+    gst_einvoice_enabled: Optional[bool] = None
+    gst_einvoice_provider: Optional[str] = None   # "nic_sandbox" / "nic_prod" / "mastergst" / custom
+    gst_einvoice_endpoint: Optional[str] = None   # e.g. https://einv-apisandbox.nic.in
+    gst_einvoice_username: Optional[str] = None
+    gst_einvoice_password: Optional[str] = None   # stored as-is; admin-only access
+    gst_einvoice_api_key: Optional[str] = None    # some GSPs (MasterGST) require additional API key
 
 class CustomerCreate(BaseModel):
     code: Optional[str] = ""  # Auto-generated from number series if blank
@@ -6902,6 +6909,22 @@ async def migrate_sync_component_routings_to_child_bom():
 
 # ================== APP SETUP ==================
 
+async def migrate_refresh_tax_invoice_qrs():
+    """One-shot: rebuild UPI QR on legacy Tax Invoices that used the hardcoded machineworks@upi string."""
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
+    upi_id = (company.get("bank_upi") or "").strip() or "na@upi"
+    payee_name = (company.get("company_name") or "Company").strip().replace(" ", "")[:30] or "Company"
+    count = 0
+    async for ti in db.tax_invoices.find({"qr_code": {"$regex": "machineworks@upi"}}, {"_id": 0, "id": 1, "invoice_no": 1, "grand_total": 1}):
+        amt = float(ti.get("grand_total") or 0)
+        safe_tn = (ti.get("invoice_no") or "").replace("/", "-")
+        new_qr = f"upi://pay?pa={upi_id}&pn={payee_name}&am={amt:.2f}&tn={safe_tn}&cu=INR"
+        await db.tax_invoices.update_one({"id": ti["id"]}, {"$set": {"qr_code": new_qr}})
+        count += 1
+    if count > 0:
+        logger.info(f"[migrate] Refreshed UPI QR on {count} legacy Tax Invoices (new payee: {upi_id})")
+
+
 @app.on_event("startup")
 async def startup():
     # Create indexes
@@ -6928,6 +6951,7 @@ async def startup():
     await migrate_sync_component_routings_to_child_bom()
     await migrate_backfill_child_mo_operations_status()
     await migrate_sc_jw_charges_from_bom()
+    await migrate_refresh_tax_invoice_qrs()
     
     # Write credentials file (dev environment only, non-fatal on Windows/other OS)
     try:
@@ -9313,8 +9337,19 @@ async def update_crm_number_series(doc_type: str, data: NumberSeriesUpdate, requ
 
 
 # --------- GST SPLIT HELPER ---------
-async def _compute_gst_split(customer_id: Optional[str], lines: List[dict]) -> dict:
-    """Compute CGST/SGST/IGST split based on company-state vs customer-state.
+async def _build_upi_qr_payload(amount: float, invoice_no: str) -> str:
+    """Build a UPI payment QR URI from company settings. Falls back gracefully when UPI not configured."""
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
+    upi_id = (company.get("bank_upi") or "").strip() or "na@upi"
+    payee_name = (company.get("company_name") or "Company").strip().replace(" ", "")[:30] or "Company"
+    # Escape & avoid breaking query string
+    safe_tn = invoice_no.replace("/", "-")
+    return f"upi://pay?pa={upi_id}&pn={payee_name}&am={amount:.2f}&tn={safe_tn}&cu=INR"
+
+
+async def _compute_gst_split(customer_id: Optional[str], lines: List[dict], place_of_supply: Optional[str] = None) -> dict:
+    """Compute CGST/SGST/IGST split based on company-state vs POS (falls back to customer-state).
+    `place_of_supply` (state code, e.g. "27") takes precedence over the customer master state.
     Returns: {is_inter_state, cgst, sgst, igst, total_gst, hsn_summary[]}
     """
     company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
@@ -9323,7 +9358,9 @@ async def _compute_gst_split(customer_id: Optional[str], lines: List[dict]) -> d
     if customer_id:
         c = await db.customers.find_one({"id": customer_id}, {"_id": 0, "state_code": 1, "state": 1}) or {}
         customer_state = (c.get("state_code") or "").strip()
-    is_inter_state = bool(company_state and customer_state and company_state != customer_state)
+    # POS override: if user explicitly set place_of_supply, use that for tax determination
+    effective_state = (place_of_supply or "").strip() or customer_state
+    is_inter_state = bool(company_state and effective_state and company_state != effective_state)
     cgst = 0.0
     sgst = 0.0
     igst = 0.0
@@ -9687,7 +9724,7 @@ async def create_tax_invoice(data: TaxInvoiceCreate, request: Request):
     invoice_no = await _get_next_number("tax_invoice")
     lines = [l.model_dump() for l in data.lines]
     base = await _finalize_invoice_lines(lines)
-    gst = await _compute_gst_split(data.customer_id, lines)
+    gst = await _compute_gst_split(data.customer_id, lines, place_of_supply=data.place_of_supply)
     doc = {
         "id": str(uuid.uuid4()),
         "invoice_no": invoice_no,
@@ -9705,6 +9742,8 @@ async def create_tax_invoice(data: TaxInvoiceCreate, request: Request):
     }
     if not doc.get("invoice_date"):
         doc["invoice_date"] = datetime.now(timezone.utc)
+    # Build dynamic UPI QR from company settings (bank_upi + company_name)
+    doc["qr_code"] = await _build_upi_qr_payload(doc["grand_total"], invoice_no)
     await db.tax_invoices.insert_one(doc)
     return await _enrich_tax_invoice(doc)
 
@@ -9722,10 +9761,13 @@ async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request)
         if data.status is None and any(v is not None for v in (data.lines, data.billing_address, data.shipping_address, data.customer_po_number, data.due_date, data.place_of_supply)):
             raise HTTPException(status_code=400, detail="A paid invoice is locked — only status changes and notes/terms are allowed")
     update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
-    if "lines" in update:
-        lines = [l if isinstance(l, dict) else l.model_dump() for l in update["lines"]]
+    # Recompute GST if lines OR place_of_supply changed (POS override affects inter-state detection)
+    needs_gst_recompute = "lines" in update or "place_of_supply" in update
+    if needs_gst_recompute:
+        lines = [l if isinstance(l, dict) else l.model_dump() for l in (update.get("lines") or existing.get("lines") or [])]
         base = await _finalize_invoice_lines(lines)
-        gst = await _compute_gst_split(existing.get("customer_id"), lines)
+        effective_pos = update.get("place_of_supply", existing.get("place_of_supply", ""))
+        gst = await _compute_gst_split(existing.get("customer_id"), lines, place_of_supply=effective_pos)
         update["lines"] = lines
         update.update(base)
         update.update({
@@ -9734,8 +9776,11 @@ async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request)
             "hsn_summary": gst["hsn_summary"],
             "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
         })
+        # Refresh UPI QR with current company settings + new grand total
+        update["qr_code"] = await _build_upi_qr_payload(update["grand_total"], existing.get("invoice_no", ""))
     update["updated_at"] = datetime.now(timezone.utc)
     await db.tax_invoices.update_one({"id": tid}, {"$set": update})
+    return await _enrich_tax_invoice(await db.tax_invoices.find_one({"id": tid}))
     return await _enrich_tax_invoice(await db.tax_invoices.find_one({"id": tid}))
 
 @crm_router.delete("/tax-invoices/{tid}")
@@ -9748,6 +9793,250 @@ async def delete_tax_invoice(tid: str, request: Request):
         raise HTTPException(status_code=400, detail="Cannot delete an issued/paid invoice — cancel it first")
     await db.tax_invoices.delete_one({"id": tid})
     return {"message": "Tax Invoice deleted"}
+
+# ============================================================================
+#  GST e-Invoice IRN Generation (NIC Sandbox / GSP adapter)
+#  Reads GSP credentials from company_settings.gst_einvoice_* fields.
+#  Returns a clear setup-instruction error when credentials are not configured.
+# ============================================================================
+
+# In-process token cache: {provider_key: (token, expires_at_utc)}
+_GST_TOKEN_CACHE: Dict[str, Tuple[str, datetime]] = {}
+
+def _build_einvoice_json(ti: dict, company: dict, customer: dict) -> dict:
+    """Build the GST e-Invoice v1.1 JSON payload from a Tax Invoice doc."""
+    inv_date = ti.get("invoice_date") or datetime.now(timezone.utc)
+    if isinstance(inv_date, str):
+        try:
+            inv_date = datetime.fromisoformat(inv_date.replace("Z", "+00:00"))
+        except Exception:
+            inv_date = datetime.now(timezone.utc)
+    dt_str = inv_date.strftime("%d/%m/%Y")
+
+    seller_state = (company.get("state_code") or "").strip()
+    buyer_state = (ti.get("place_of_supply") or (customer or {}).get("state_code") or "").strip()
+    buyer_gstin = (customer or {}).get("gstin", "")
+
+    item_list = []
+    for idx, ln in enumerate(ti.get("lines") or [], 1):
+        qty = float(ln.get("quantity") or 0)
+        rate = float(ln.get("rate") or 0)
+        disc_pct = float(ln.get("discount_pct") or 0)
+        gross = qty * rate
+        disc = round(gross * disc_pct / 100.0, 2)
+        net = round(gross - disc, 2)
+        gst_rate = float(ln.get("gst_rate") or 0)
+        cgst_amt = float(ln.get("cgst_amt") or 0)
+        sgst_amt = float(ln.get("sgst_amt") or 0)
+        igst_amt = float(ln.get("igst_amt") or 0)
+        item_list.append({
+            "SlNo": str(idx),
+            "IsServc": "N",
+            "HsnCd": (ln.get("hsn_code") or "").strip() or "0000",
+            "Qty": qty,
+            "Unit": (ln.get("uom") or "NOS")[:3].upper(),
+            "UnitPrice": rate,
+            "TotAmt": round(gross, 2),
+            "Discount": disc,
+            "PreTaxVal": net,
+            "AssAmt": net,
+            "GstRt": gst_rate,
+            "IgstAmt": igst_amt,
+            "CgstAmt": cgst_amt,
+            "SgstAmt": sgst_amt,
+            "CesAmt": 0.0,
+            "CesNonAdvlAmt": 0.0,
+            "StateCesAmt": 0.0,
+            "StateCesNonAdvlAmt": 0.0,
+            "OthChrg": 0.0,
+            "TotItemVal": round(net + cgst_amt + sgst_amt + igst_amt, 2),
+        })
+
+    ass_val = float(ti.get("subtotal") or 0)
+    grand = float(ti.get("grand_total") or 0)
+    return {
+        "Version": "1.1",
+        "TranDtls": {
+            "TaxSch": "GST",
+            "SupTyp": "B2B" if buyer_gstin else "B2C",
+            "RegRev": "N",
+            "IgstOnIntra": "N",
+        },
+        "DocDtls": {
+            "Typ": "INV",
+            "No": ti.get("invoice_no", ""),
+            "Dt": dt_str,
+        },
+        "SellerDtls": {
+            "Gstin": company.get("gstin", ""),
+            "LglNm": company.get("company_name", "")[:100],
+            "Addr1": (company.get("address") or "")[:100] or "NA",
+            "Loc": (company.get("city") or "")[:50] or "NA",
+            "Pin": int((company.get("pin_code") or "000000")[:6] or 0) or 110001,
+            "Stcd": seller_state or "00",
+            "Ph": (company.get("phone") or "")[:12],
+            "Em": (company.get("email") or "")[:100],
+        },
+        "BuyerDtls": {
+            "Gstin": buyer_gstin or "URP",  # URP = Unregistered person
+            "LglNm": (ti.get("customer_name") or "NA")[:100],
+            "Pos": buyer_state or seller_state or "00",
+            "Addr1": (ti.get("billing_address") or (customer or {}).get("address") or "NA")[:100],
+            "Loc": ((customer or {}).get("city") or "NA")[:50],
+            "Pin": int(((customer or {}).get("pin_code") or "000000")[:6] or 0) or 110001,
+            "Stcd": buyer_state or "00",
+            "Ph": (ti.get("phone") or "")[:12],
+            "Em": (ti.get("email") or "")[:100],
+        },
+        "ItemList": item_list,
+        "ValDtls": {
+            "AssVal": round(ass_val, 2),
+            "CgstVal": round(float(ti.get("cgst") or 0), 2),
+            "SgstVal": round(float(ti.get("sgst") or 0), 2),
+            "IgstVal": round(float(ti.get("igst") or 0), 2),
+            "CesVal": 0.0,
+            "StCesVal": 0.0,
+            "Discount": 0.0,
+            "OthChrg": 0.0,
+            "RndOffAmt": 0.0,
+            "TotInvVal": round(grand, 2),
+        },
+    }
+
+
+async def _gst_get_token(provider: str, endpoint: str, username: str, password: str, gstin: str, api_key: Optional[str] = None) -> str:
+    """Get/refresh authentication token for the GSP. Cached for ~6 hours."""
+    cache_key = f"{provider}|{endpoint}|{username}|{gstin}"
+    cached = _GST_TOKEN_CACHE.get(cache_key)
+    if cached and cached[1] > datetime.now(timezone.utc):
+        return cached[0]
+    import httpx
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # NIC-style auth (v0.03) — other GSPs (MasterGST) have slightly different schemas.
+        auth_url = f"{endpoint.rstrip('/')}/api/v0.03/common/gettoken"
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["api-key"] = api_key
+        r = await client.post(auth_url, json={"username": username, "password": password, "gstin": gstin}, headers=headers)
+        try:
+            body = r.json()
+        except Exception:
+            raise HTTPException(status_code=502, detail=f"GSP auth returned non-JSON response (HTTP {r.status_code})")
+        if r.status_code != 200 or body.get("status") not in (1, "1", True, "success"):
+            detail = body.get("message") or body.get("error") or body
+            raise HTTPException(status_code=502, detail=f"GSP auth failed: {detail}")
+        token = (body.get("data") or {}).get("token") or body.get("token")
+        if not token:
+            raise HTTPException(status_code=502, detail="GSP returned no auth token")
+        _GST_TOKEN_CACHE[cache_key] = (token, datetime.now(timezone.utc) + timedelta(hours=5, minutes=45))
+        return token
+
+
+@crm_router.post("/tax-invoices/{tid}/generate-irn")
+async def generate_tax_invoice_irn(tid: str, request: Request):
+    """Generate IRN + signed QR code for a Tax Invoice via configured GSP.
+
+    Pre-requisites: admin must configure GSP credentials in Settings → GST e-Invoice.
+    Stores irn, ack_no, ack_dt, signed_invoice, signed_qr_code, irn_generated_at.
+    """
+    await get_current_user(request)
+    ti = await db.tax_invoices.find_one({"id": tid})
+    if not ti:
+        raise HTTPException(status_code=404, detail="Tax Invoice not found")
+    if ti.get("irn"):
+        raise HTTPException(status_code=400, detail=f"IRN already generated: {ti.get('irn')}")
+
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
+    if not company.get("gst_einvoice_enabled"):
+        raise HTTPException(
+            status_code=400,
+            detail="GST e-Invoice is not enabled. Go to Settings → Company → GST e-Invoice and configure NIC Sandbox or GSP credentials.",
+        )
+    endpoint = (company.get("gst_einvoice_endpoint") or "").strip()
+    username = (company.get("gst_einvoice_username") or "").strip()
+    password = (company.get("gst_einvoice_password") or "").strip()
+    gstin = (company.get("gstin") or "").strip()
+    api_key = (company.get("gst_einvoice_api_key") or "").strip() or None
+    if not all([endpoint, username, password, gstin]):
+        raise HTTPException(
+            status_code=400,
+            detail="Missing GSP configuration. Please fill Endpoint, Username, Password and ensure Company GSTIN is set.",
+        )
+    if not company.get("state_code"):
+        raise HTTPException(status_code=400, detail="Company state_code missing — required for IRN generation.")
+
+    # Resolve buyer
+    customer = {}
+    if ti.get("customer_id"):
+        customer = await db.customers.find_one({"id": ti["customer_id"]}, {"_id": 0}) or {}
+
+    # Validate HSN on all lines (required by IRP)
+    for ln in (ti.get("lines") or []):
+        if not (ln.get("hsn_code") or "").strip():
+            raise HTTPException(status_code=400, detail=f"Line '{ln.get('description') or ln.get('item_id')}' is missing HSN code — required for IRN.")
+
+    try:
+        token = await _gst_get_token(
+            company.get("gst_einvoice_provider", "nic_sandbox"),
+            endpoint, username, password, gstin, api_key,
+        )
+        payload = _build_einvoice_json(ti, company, customer)
+        import httpx
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            irn_url = f"{endpoint.rstrip('/')}/api/v0.03/invoices"
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Gstin": gstin,
+            }
+            if api_key:
+                headers["api-key"] = api_key
+            r = await client.post(irn_url, json=payload, headers=headers)
+        try:
+            body = r.json()
+        except Exception:
+            raise HTTPException(status_code=502, detail=f"GSP returned non-JSON response (HTTP {r.status_code}): {r.text[:300]}")
+        if r.status_code != 200 or body.get("status") not in (1, "1", True, "success"):
+            detail = body.get("message") or body.get("error") or body
+            raise HTTPException(status_code=502, detail=f"IRN generation failed: {detail}")
+        data = body.get("data") or body
+        irn_fields = {
+            "irn": data.get("Irn") or data.get("IRN") or "",
+            "ack_no": data.get("AckNo") or data.get("ack_no") or "",
+            "ack_dt": data.get("AckDt") or data.get("ack_dt") or "",
+            "signed_invoice": data.get("SignedInvoice") or "",
+            "signed_qr_code": data.get("SignedQRCode") or "",
+            "irn_generated_at": datetime.now(timezone.utc),
+            "irn_status": "generated",
+            "status": "issued",
+        }
+        await db.tax_invoices.update_one({"id": tid}, {"$set": irn_fields})
+        updated = await db.tax_invoices.find_one({"id": tid})
+        return await _enrich_tax_invoice(updated)
+    except HTTPException:
+        raise
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach GSP endpoint: {e}")
+    except Exception as e:
+        logger.error(f"IRN generation unexpected error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"IRN generation error: {e}")
+
+
+@crm_router.get("/tax-invoices/{tid}/einvoice-payload")
+async def preview_einvoice_payload(tid: str, request: Request):
+    """Return the e-invoice JSON that WOULD be sent to the IRP — for pre-flight validation."""
+    await get_current_user(request)
+    ti = await db.tax_invoices.find_one({"id": tid})
+    if not ti:
+        raise HTTPException(status_code=404, detail="Tax Invoice not found")
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
+    customer = {}
+    if ti.get("customer_id"):
+        customer = await db.customers.find_one({"id": ti["customer_id"]}, {"_id": 0}) or {}
+    return _build_einvoice_json(ti, company, customer)
+
+
+
 
 @crm_router.post("/proformas/{pid}/convert-to-tax-invoice")
 async def convert_proforma_to_tax_invoice(pid: str, payload: dict = Body(default={}), request: Request = None):
@@ -9799,6 +10088,7 @@ async def convert_proforma_to_tax_invoice(pid: str, payload: dict = Body(default
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"],
     }
+    doc["qr_code"] = await _build_upi_qr_payload(doc["grand_total"], invoice_no)
     await db.tax_invoices.insert_one(doc)
     await db.proforma_invoices.update_one(
         {"id": pid},
@@ -9898,6 +10188,7 @@ async def create_tax_invoice_from_sales_order(so_id: str, request: Request):
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"],
     }
+    doc["qr_code"] = await _build_upi_qr_payload(doc["grand_total"], invoice_no)
     await db.tax_invoices.insert_one(doc)
     return await _enrich_tax_invoice(doc)
 

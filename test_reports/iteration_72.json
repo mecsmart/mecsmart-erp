@@ -1,0 +1,95 @@
+{
+  "summary": "GST Phase 2 (P2) backend testing complete. All 10 tests passed. Features verified: (1) GST split logic correctly computes CGST+SGST for intra-state (same state_code=27) and IGST for inter-state, (2) POS override field correctly flips GST split on both create and update, (3) HSN summary array contains all required keys (hsn, rate, taxable, cgst, sgst, igst), (4) UPI QR code uses company bank_upi dynamically (not hardcoded machineworks@upi), (5) IRN endpoint returns 400 with clear message when e-invoice not enabled or credentials incomplete, (6) E-invoice payload builder returns valid v1.1 JSON with all required keys, (7) Company settings accepts and persists all gst_einvoice_* fields.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/crm/tax-invoices", "issue": "Line 9739 has redundant hardcoded QR code string that is immediately overwritten by line 9746 - dead code, not a bug"},
+      {"endpoint": "PUT /api/crm/tax-invoices/{tid}", "issue": "Duplicate return statement on lines 9783-9784 - dead code, second return never reached"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_gst_phase2.py",
+    "/app/test_reports/pytest/pytest_gst_phase2.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Remove redundant hardcoded QR code string on line 9739 in server.py",
+    "OPTIONAL: Remove duplicate return statement on line 9784 in server.py"
+  ],
+  "critical_code_review_comments": [
+    "_compute_gst_split correctly uses place_of_supply parameter to override customer state for GST determination (lines 9350-9418)",
+    "update_tax_invoice correctly recomputes GST when place_of_supply changes (line 9765: needs_gst_recompute = 'lines' in update or 'place_of_supply' in update)",
+    "_build_upi_qr_payload correctly reads company.bank_upi with fallback to 'na@upi' (lines 9340-9347)",
+    "migrate_refresh_tax_invoice_qrs correctly updates legacy TIs with hardcoded machineworks@upi (lines 6912-6925)",
+    "_build_einvoice_json correctly builds v1.1 compliant JSON with all required sections (lines 9806-9904)",
+    "generate_tax_invoice_irn correctly validates gst_einvoice_enabled and credentials before attempting GSP call (lines 9935-10022)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_gst_phase2.py"
+  ],
+  "success_rate": {
+    "backend": "100% (10 passed)",
+    "frontend": "N/A (backend only testing requested)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST_SameState_Customer (state_code=27) and TEST_DiffState_Customer (state_code=29) for GST testing - cleaned up after tests",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "GST Phase 2 fully tested. Key features: (1) _compute_gst_split accepts place_of_supply param that overrides customer state, (2) TI update recomputes GST when POS changes, (3) UPI QR uses company.bank_upi dynamically, (4) IRN endpoint gracefully errors with 400 when not configured, (5) E-invoice payload returns v1.1 JSON. Company state_code is 27 (Maharashtra) - use 29 (Karnataka) or 07 (Delhi) for inter-state tests.",
+  "features_tested": {
+    "gst_split_intra_state": {
+      "status": "PASSED",
+      "tests": ["Create TI with customer state_code=27 (same as company) - CGST+SGST populated, IGST=0, is_inter_state=false"]
+    },
+    "gst_split_inter_state": {
+      "status": "PASSED",
+      "tests": ["Create TI with customer state_code=29 (different from company) - IGST populated, CGST=SGST=0, is_inter_state=true"]
+    },
+    "pos_override_on_create": {
+      "status": "PASSED",
+      "tests": ["Create TI with same-state customer but place_of_supply=29 - correctly makes inter-state with IGST"]
+    },
+    "pos_override_on_update": {
+      "status": "PASSED",
+      "tests": ["Update TI place_of_supply from 29 to 27 - correctly flips from IGST to CGST+SGST", "Update TI place_of_supply from 27 to 29 - correctly flips from CGST+SGST to IGST"]
+    },
+    "hsn_summary_structure": {
+      "status": "PASSED",
+      "tests": ["HSN summary array contains all required keys: hsn, rate, taxable, cgst, sgst, igst"]
+    },
+    "upi_qr_dynamic": {
+      "status": "PASSED",
+      "tests": ["QR code starts with upi://pay?pa=", "QR code does NOT contain hardcoded machineworks@upi", "QR code uses company.bank_upi when configured"]
+    },
+    "upi_qr_migration": {
+      "status": "PASSED",
+      "tests": ["All existing TIs have proper QR codes (no machineworks@upi found)"]
+    },
+    "irn_graceful_error_not_enabled": {
+      "status": "PASSED",
+      "tests": ["POST /api/crm/tax-invoices/{id}/generate-irn returns 400 with 'GST e-Invoice is not enabled' when gst_einvoice_enabled=false"]
+    },
+    "irn_graceful_error_incomplete_creds": {
+      "status": "PASSED",
+      "tests": ["POST /api/crm/tax-invoices/{id}/generate-irn returns 400 with 'Missing GSP configuration' when credentials incomplete"]
+    },
+    "einvoice_payload_structure": {
+      "status": "PASSED",
+      "tests": ["GET /api/crm/tax-invoices/{id}/einvoice-payload returns JSON with Version=1.1", "Payload contains TranDtls, DocDtls, SellerDtls, BuyerDtls, ItemList, ValDtls"]
+    },
+    "company_gst_settings": {
+      "status": "PASSED",
+      "tests": ["PUT /api/settings/company accepts gst_einvoice_enabled, gst_einvoice_provider, gst_einvoice_endpoint, gst_einvoice_username, gst_einvoice_password, gst_einvoice_api_key", "All fields correctly persisted and returned on GET"]
+    }
+  },
+  "backend_tests_summary": {
+    "total": 10,
+    "passed": 10,
+    "skipped": 0,
+    "failed": 0
+  }
+}

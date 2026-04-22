@@ -3595,8 +3595,11 @@ function printInvoiceDoc(doc, opts) {
   .terms{margin-top:18px;padding:12px 14px;background:#f8fafc;border-left:3px solid ${accentColor};font-size:10px;color:#475569;line-height:1.6;white-space:pre-line}
   .terms h4{font-size:10px;color:${accentColor};text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;font-weight:700}
   /* QR */
-  .qr-block{margin-top:14px;display:flex;gap:12px;align-items:center;font-size:9px;color:#475569}
+  .qr-block{margin-top:14px;display:flex;gap:12px;align-items:center;font-size:9px;color:#475569;page-break-inside:avoid}
   .qr-box{width:72px;height:72px;border:1px dashed #94a3b8;display:flex;align-items:center;justify-content:center;font-size:8px;text-align:center;color:#94a3b8;flex-shrink:0}
+  .qr-img{width:100px;height:100px;border:1px solid #cbd5e1;padding:3px;background:#fff;flex-shrink:0}
+  .qr-caption{font-size:10px;color:#334155;line-height:1.5}
+  .qr-note{font-size:9px;color:#64748b;font-style:italic}
   /* Signature */
   .sign-row{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:30px;font-size:10px}
   .sign-col{text-align:center}
@@ -3800,7 +3803,10 @@ ${(isQuotation && opts.includeCover) ? `
     </tr></thead>
     <tbody>${hsnRows || `<tr><td colspan="${isInter ? 5 : 6}" class="center">-</td></tr>`}</tbody>
   </table>
-  ${doc.qr_code ? `<div class="qr-block"><div class="qr-box">UPI<br/>QR</div><div><strong>Payment QR</strong><br/><span class="mono">${esc(doc.qr_code)}</span></div></div>` : ''}
+  ${doc.qr_code ? `<div class="qr-block">
+    <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=4&data=${encodeURIComponent(doc.qr_code)}" class="qr-img" alt="Payment QR"/>
+    <div class="qr-caption"><strong>Scan to Pay</strong><br/><span class="qr-note">UPI-compatible payment QR. Total: ₹${(doc.grand_total || 0).toFixed(2)}</span></div>
+  </div>` : ''}
   ` : ''}
 
   ${doc.notes ? `<div class="terms"><h4>Notes</h4>${esc(doc.notes)}</div>` : ''}
