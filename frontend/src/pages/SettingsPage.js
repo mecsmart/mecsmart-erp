@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
-import { Building2, Save, MapPin, Plus, Trash2, Edit2, Truck, X, Upload, Image, DollarSign, FileText } from 'lucide-react';
+import { Building2, Save, MapPin, Plus, Trash2, Edit2, Truck, X, Upload, Image, DollarSign, FileText, Database, Download, UploadCloud, AlertTriangle } from 'lucide-react';
+import { toast } from 'sonner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -601,6 +602,195 @@ export default function SettingsPage() {
           </div>
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
+// DataBackupRestoreCard — admin-only JSON backup/restore
+// Renders under Settings → Company tab. POST/GET /api/settings/(backup|restore)
+// ------------------------------------------------------------------
+function DataBackupRestoreCard() {
+  const fileRef = useRef(null);
+  const [downloading, setDownloading] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingPayload, setPendingPayload] = useState(null);
+  const [pendingFileName, setPendingFileName] = useState('');
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const { data } = await api.get('/api/settings/backup');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      a.href = url;
+      a.download = `mechsmart-backup-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success('Backup downloaded successfully');
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to download backup');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const handleFilePick = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (parsed.backup_version !== 1 || !parsed.collections) {
+          toast.error('Invalid backup file — expected v1 format');
+          return;
+        }
+        setPendingPayload(parsed);
+        setPendingFileName(file.name);
+        setConfirmOpen(true);
+      } catch {
+        toast.error('Could not parse JSON file');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleConfirmRestore = async () => {
+    if (!pendingPayload) return;
+    setRestoring(true);
+    try {
+      const { data } = await api.post('/api/settings/restore', pendingPayload);
+      const totalDocs = Object.values(data.summary || {}).reduce((s, n) => s + (n || 0), 0);
+      toast.success(`Restore complete — ${totalDocs} documents loaded across ${Object.keys(data.summary || {}).length} collections`);
+      setConfirmOpen(false);
+      setPendingPayload(null);
+      setPendingFileName('');
+      // Force reload so stale state is dropped
+      setTimeout(() => window.location.reload(), 800);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Restore failed');
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const collectionCount = pendingPayload ? Object.keys(pendingPayload.collections || {}).length : 0;
+  const totalDocs = pendingPayload
+    ? Object.values(pendingPayload.collections || {}).reduce((s, arr) => s + (Array.isArray(arr) ? arr.length : 0), 0)
+    : 0;
+
+  return (
+    <div className="card-flat p-6" data-testid="data-backup-restore-card">
+      <h2 className="text-lg font-semibold font-[Chivo] text-[#1D3557] mb-4 flex items-center space-x-2">
+        <Database className="w-5 h-5" /><span>Data Backup & Restore</span>
+      </h2>
+      <p className="text-sm text-[#6B7280] mb-4">
+        Export the entire ERP database as a single JSON file, or restore from a previously downloaded backup.
+        <span className="block mt-1 text-[#9B1C1C]">Restore will <b>wipe & replace</b> every collection — use with caution.</span>
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="border border-[#D1D5DB] rounded-sm p-4 bg-[#F9FAFB]">
+          <div className="flex items-center gap-2 mb-2">
+            <Download className="w-4 h-4 text-[#1D3557]" />
+            <span className="font-medium text-[#1D3557]">Download Backup</span>
+          </div>
+          <p className="text-xs text-[#6B7280] mb-3">Saves a timestamped <code>.json</code> file with all masters, transactions, users and settings.</p>
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
+            className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50"
+            data-testid="backup-download-btn"
+          >
+            <Download className="w-4 h-4" />
+            {downloading ? 'Preparing backup…' : 'Download Backup (JSON)'}
+          </button>
+        </div>
+
+        <div className="border border-[#F87171] rounded-sm p-4 bg-[#FEF2F2]">
+          <div className="flex items-center gap-2 mb-2">
+            <UploadCloud className="w-4 h-4 text-[#9B1C1C]" />
+            <span className="font-medium text-[#9B1C1C]">Restore from Backup</span>
+          </div>
+          <p className="text-xs text-[#991B1B] mb-3">Select a <code>.json</code> file saved earlier. Current data will be <b>replaced</b>.</p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json"
+            onChange={handleFilePick}
+            className="hidden"
+            data-testid="backup-restore-file-input"
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[#9B1C1C] text-white rounded-sm hover:bg-[#7F1D1D]"
+            data-testid="backup-restore-btn"
+          >
+            <UploadCloud className="w-4 h-4" />
+            Choose Backup File…
+          </button>
+        </div>
+      </div>
+
+      <Dialog open={confirmOpen} onOpenChange={(o) => { if (!restoring) setConfirmOpen(o); }}>
+        <DialogContent className="max-w-lg" data-testid="restore-confirm-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[#9B1C1C]">
+              <AlertTriangle className="w-5 h-5" /> Confirm Database Restore
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="bg-[#FEF2F2] border border-[#F87171] rounded-sm p-3 text-[#991B1B]">
+              <p className="font-semibold mb-1">This action cannot be undone.</p>
+              <p>Every listed collection will be wiped and replaced with the backup contents.
+                We strongly recommend downloading a fresh backup first.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-[#374151]">
+              <div>
+                <div className="text-xs text-[#6B7280]">File</div>
+                <div className="font-mono text-xs truncate">{pendingFileName}</div>
+              </div>
+              <div>
+                <div className="text-xs text-[#6B7280]">Generated</div>
+                <div className="text-xs">{pendingPayload?.generated_at?.slice(0, 19)?.replace('T', ' ') || '—'}</div>
+              </div>
+              <div>
+                <div className="text-xs text-[#6B7280]">Collections</div>
+                <div className="font-semibold">{collectionCount}</div>
+              </div>
+              <div>
+                <div className="text-xs text-[#6B7280]">Documents</div>
+                <div className="font-semibold">{totalDocs}</div>
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <button
+              onClick={() => { setConfirmOpen(false); setPendingPayload(null); }}
+              disabled={restoring}
+              className="px-4 py-2 border border-[#D1D5DB] text-[#374151] rounded-sm hover:bg-[#F3F4F6]"
+              data-testid="restore-cancel-btn"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirmRestore}
+              disabled={restoring}
+              className="px-4 py-2 bg-[#9B1C1C] text-white rounded-sm hover:bg-[#7F1D1D] disabled:opacity-50 flex items-center gap-2"
+              data-testid="restore-confirm-btn"
+            >
+              <UploadCloud className="w-4 h-4" />
+              {restoring ? 'Restoring…' : 'Yes, Wipe & Restore'}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

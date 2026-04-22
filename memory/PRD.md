@@ -17,6 +17,8 @@
 - DC print: "Delivery Challan" with 6-col Part Details + RM Issued sections (NOT 9-col Job OS format)
 
 ## Changelog
+- 2026-02-22 (iter 110): **Backup & Restore UI completed** — `DataBackupRestoreCard` component added to `SettingsPage.js` under the Company tab (admin-only). Features: (a) Download button hits `GET /api/settings/backup` and saves a timestamped `mechsmart-backup-YYYY-MM-DDTHH-MM-SS.json` via Blob + anchor. (b) Restore flow: file picker → JSON parse + v1 format validation → red-themed confirm dialog showing file name, generated_at, collection count and total doc count → POST to `/api/settings/restore` → toast with total docs loaded + auto reload. (c) Uses Dialog from shadcn, Sonner toasts, lucide-react icons (Database/Download/UploadCloud/AlertTriangle). All data-testids added (`data-backup-restore-card`, `backup-download-btn`, `backup-restore-btn`, `backup-restore-file-input`, `restore-confirm-dialog`, `restore-confirm-btn`, `restore-cancel-btn`). Backend verified via curl: 1361 docs across 27 collections dumped correctly. Settings page screenshot confirmed both panels render with correct visual hierarchy (navy-blue Download, red-warning Restore).
+
 - 2026-02-22 (iter 109): **3 quick fixes — admin group optional + compact numbering + T&C edit bug.**
   (a) **Role Group optional for System Admin**: when `role === 'admin'` is selected in the user dialog, the Role Group picker label drops the `*` and gains an `— None (full admin access) —` option. Save button's disabled-gate relaxed. Previously an admin couldn't be created without first having at least one role-group defined.
   (b) **Compact number series format** (no dashes/slashes/spaces):
