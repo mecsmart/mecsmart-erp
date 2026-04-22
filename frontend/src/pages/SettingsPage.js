@@ -277,6 +277,8 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+
+          {isAdmin && <DataBackupRestoreCard />}
         </TabsContent>
         <TabsContent value="branding" className="space-y-6 mt-4">
           {isAdmin && (

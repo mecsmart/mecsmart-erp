@@ -6071,8 +6071,9 @@ DEFAULT_NUMBER_SERIES = {
     "supplier_code":  {"prefix": "SUP",  "padding": 4, "next_number": 1, "label": "Vendor / Supplier Code", "reset_yearly": False, "group": "masters"},
     "customer_code":  {"prefix": "CUST", "padding": 4, "next_number": 1, "label": "Customer Code", "reset_yearly": False, "group": "masters"},
     "po_number":      {"prefix": "PO",   "padding": 6, "next_number": 1, "label": "Purchase Order", "reset_yearly": False, "group": "procurement"},
-    "sales_invoice":  {"prefix": "INV",  "padding": 6, "next_number": 1, "label": "Sales Invoice", "reset_yearly": False, "group": "sales"},
 }
+# NOTE: 'sales_invoice' series removed — duplicated the CRM 'tax_invoice' series.
+#       The Tax Invoice flow is the single source of truth for invoice numbering now.
 
 # CRM-side series (new style, keyed by `doc_type` on same collection). Merged into the Settings UI.
 CRM_DEFAULT_NUMBER_SERIES = {
@@ -10125,6 +10126,90 @@ async def public_company():
     doc = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
     return doc
 
+
+# ============================================================================
+#  DATA BACKUP & RESTORE — admin-only. Dumps every collection to a single JSON
+#  blob (ObjectId + datetime serialised as strings); restore wipes + reloads.
+# ============================================================================
+BACKUP_COLLECTIONS = [
+    "users", "role_groups", "company_settings", "number_series",
+    "items", "boms", "bom_revisions", "suppliers", "customers",
+    "warehouses", "inventory", "stock_movements", "production_orders",
+    "purchase_orders", "grns", "purchase_invoices", "quality_inspections",
+    "job_work_orders", "delivery_challans", "crm_leads", "crm_tickets",
+    "crm_quotations", "proforma_invoices", "tax_invoices", "packing_lists",
+    "pipeline_config", "activity_logs",
+]
+
+def _jsonable(doc):
+    """Convert ObjectId + datetime recursively so the entire dump is JSON-serialisable."""
+    from bson import ObjectId
+    if isinstance(doc, dict):
+        return {k: _jsonable(v) for k, v in doc.items()}
+    if isinstance(doc, list):
+        return [_jsonable(v) for v in doc]
+    if isinstance(doc, ObjectId):
+        return str(doc)
+    if isinstance(doc, datetime):
+        return doc.isoformat()
+    return doc
+
+@settings_router.get("/backup")
+async def backup_database(request: Request):
+    """Return a JSON dump of every ERP collection — admin-only."""
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can download a backup")
+    out = {
+        "backup_version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_by": user.get("email", ""),
+        "collections": {},
+    }
+    for coll in BACKUP_COLLECTIONS:
+        docs = await db[coll].find({}).to_list(200000)
+        out["collections"][coll] = [_jsonable(d) for d in docs]
+    return out
+
+@settings_router.post("/restore")
+async def restore_database(payload: dict = Body(...), request: Request = None):
+    """Restore from a backup JSON. Admin-only. **Wipes each listed collection** before inserting.
+
+    Expected payload shape: {"backup_version": 1, "collections": { "<name>": [docs...] }}
+    Skips `_id` fields (Mongo will generate new ones); preserves the app-level `id` field.
+    """
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can restore a backup")
+    if payload.get("backup_version") != 1:
+        raise HTTPException(status_code=400, detail="Unsupported backup version — expected version 1")
+    collections = payload.get("collections") or {}
+    if not isinstance(collections, dict):
+        raise HTTPException(status_code=400, detail="Backup has no `collections` object")
+
+    summary = {}
+    for name in BACKUP_COLLECTIONS:
+        if name not in collections:
+            continue
+        rows = collections[name] or []
+        # Wipe + reload
+        await db[name].delete_many({})
+        if rows:
+            cleaned = []
+            for r in rows:
+                r = dict(r or {})
+                r.pop("_id", None)
+                # Parse datetime-looking ISO strings back (best-effort)
+                for k, v in list(r.items()):
+                    if isinstance(v, str) and len(v) >= 20 and v[4] == "-" and "T" in v:
+                        try:
+                            r[k] = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                        except ValueError:
+                            pass
+                cleaned.append(r)
+            await db[name].insert_many(cleaned)
+        summary[name] = len(rows)
+    return {"message": "Restore complete", "summary": summary}
 
 
 # Include routers

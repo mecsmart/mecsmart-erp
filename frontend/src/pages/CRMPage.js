@@ -869,6 +869,7 @@ function emptyQuotationLine() {
 function QuotationsPanel({ quotations, leads, customers, items, search, onRefresh, canEdit, prefillFromLead, onPrefillConsumed }) {
   const { user } = useAuth();
   const { companySettings } = useCompanySettings();
+  const [waShare, setWaShare] = useState({ open: false, doc: null });
   const [dialog, setDialog] = useState(false);
   const [editing, setEditing] = useState(null);
   const emptyForm = {
@@ -1135,8 +1136,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   <td>
                     <div className="flex items-center gap-0.5">
                       <button onClick={() => printQuotation(q)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`quotation-print-${q.id}`}><Printer className="w-4 h-4" /></button>
-                      <button onClick={() => openWhatsAppShare({ doc: q, kind: 'quotation', company: companySettings, user, includeLink: false })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="WhatsApp (text only)" data-testid={`quotation-wa-text-${q.id}`}><MessageSquare className="w-4 h-4" /></button>
-                      <button onClick={() => openWhatsAppShare({ doc: q, kind: 'quotation', company: companySettings, user, includeLink: true })} className="p-1.5 text-[#0B7C3E] hover:bg-[#DCFCE7] rounded" title="WhatsApp + shareable link" data-testid={`quotation-wa-link-${q.id}`}><Share2 className="w-4 h-4" /></button>
+                      <button onClick={() => setWaShare({ open: true, doc: q })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`quotation-wa-${q.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && !isLocked && q.status === 'draft' && (
                         <button onClick={() => quickStatusChange(q, 'sent')} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Send to customer" data-testid={`quotation-send-${q.id}`}><Send className="w-4 h-4" /></button>
                       )}
@@ -1383,6 +1383,15 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
         variant="danger"
         onConfirm={() => deleteQuotation(deleteConfirm.quotation)}
         testidPrefix="quotation-delete-confirm"
+      />
+
+      <WhatsAppShareDialog
+        open={waShare.open}
+        onOpenChange={(o) => setWaShare({ open: o, doc: o ? waShare.doc : null })}
+        doc={waShare.doc}
+        kind="quotation"
+        company={companySettings}
+        user={user}
       />
 
       <ConfirmDialog
@@ -2168,6 +2177,7 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
   const [list, setList] = useState([]);
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, proforma: null });
   const [convertConfirm, setConvertConfirm] = useState({ open: false, proforma: null });
+  const [waShare, setWaShare] = useState({ open: false, doc: null });
 
   const load = useCallback(async () => {
     try { const r = await api.get('/api/crm/proformas'); setList(r.data || []); } catch (e) { console.error(e); }
@@ -2238,8 +2248,7 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
                   <td>
                     <div className="flex gap-0.5">
                       <button onClick={() => printProforma(p)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`proforma-print-${p.id}`}><Printer className="w-4 h-4" /></button>
-                      <button onClick={() => openWhatsAppShare({ doc: p, kind: 'proforma', company: companySettings, user, includeLink: false })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="WhatsApp (text only)" data-testid={`proforma-wa-text-${p.id}`}><MessageSquare className="w-4 h-4" /></button>
-                      <button onClick={() => openWhatsAppShare({ doc: p, kind: 'proforma', company: companySettings, user, includeLink: true })} className="p-1.5 text-[#0B7C3E] hover:bg-[#DCFCE7] rounded" title="WhatsApp + shareable link" data-testid={`proforma-wa-link-${p.id}`}><Share2 className="w-4 h-4" /></button>
+                      <button onClick={() => setWaShare({ open: true, doc: p })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`proforma-wa-${p.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && !isLocked && (
                         <button onClick={() => setConvertConfirm({ open: true, proforma: p })} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Convert to Tax Invoice" data-testid={`proforma-to-invoice-${p.id}`}><Send className="w-4 h-4" /></button>
                       )}
@@ -2272,6 +2281,15 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
         variant="danger"
         onConfirm={() => del(deleteConfirm.proforma)}
         testidPrefix="proforma-delete-confirm"
+      />
+
+      <WhatsAppShareDialog
+        open={waShare.open}
+        onOpenChange={(o) => setWaShare({ open: o, doc: o ? waShare.doc : null })}
+        doc={waShare.doc}
+        kind="proforma"
+        company={companySettings}
+        user={user}
       />
     </div>
   );
@@ -2321,6 +2339,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, invoice: null });
   const [packingDialog, setPackingDialog] = useState({ open: false, invoice: null });
+  const [waShare, setWaShare] = useState({ open: false, doc: null });
 
   const [editingTI, setEditingTI] = useState(null);
 
@@ -2586,8 +2605,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                   <td>
                     <div className="flex gap-0.5">
                       <button onClick={() => printInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`tax-invoice-print-${t.id}`}><Printer className="w-4 h-4" /></button>
-                      <button onClick={() => openWhatsAppShare({ doc: t, kind: 'tax_invoice', company: companySettings, user, includeLink: false })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="WhatsApp (text only)" data-testid={`tax-invoice-wa-text-${t.id}`}><MessageSquare className="w-4 h-4" /></button>
-                      <button onClick={() => openWhatsAppShare({ doc: t, kind: 'tax_invoice', company: companySettings, user, includeLink: true })} className="p-1.5 text-[#0B7C3E] hover:bg-[#DCFCE7] rounded" title="WhatsApp + shareable link" data-testid={`tax-invoice-wa-link-${t.id}`}><Share2 className="w-4 h-4" /></button>
+                      <button onClick={() => setWaShare({ open: true, doc: t })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`tax-invoice-wa-${t.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && ['draft', 'issued'].includes(t.status) && (
                         <button onClick={() => openDialog(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`tax-invoice-edit-${t.id}`}><Edit2 className="w-4 h-4" /></button>
                       )}
@@ -2783,6 +2801,15 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
         invoice={packingDialog.invoice}
         onClose={() => setPackingDialog({ open: false, invoice: null })}
         onCreated={() => { setPackingDialog({ open: false, invoice: null }); onRefresh(); }}
+      />
+
+      <WhatsAppShareDialog
+        open={waShare.open}
+        onOpenChange={(o) => setWaShare({ open: o, doc: o ? waShare.doc : null })}
+        doc={waShare.doc}
+        kind="tax_invoice"
+        company={companySettings}
+        user={user}
       />
     </div>
   );
@@ -3038,6 +3065,7 @@ export function PackingListsPanel({ search = '', canEdit = true }) {
   const { companySettings } = useCompanySettings();
   const [list, setList] = useState([]);
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, pl: null });
+  const [waShare, setWaShare] = useState({ open: false, doc: null });
 
   const load = useCallback(async () => {
     try { const r = await api.get('/api/crm/packing-lists'); setList(r.data || []); } catch (e) { console.error(e); }
@@ -3094,8 +3122,7 @@ export function PackingListsPanel({ search = '', canEdit = true }) {
                   <td>
                     <div className="flex gap-0.5">
                       <button onClick={() => printPL(pl)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`pl-print-${pl.id}`}><Printer className="w-4 h-4" /></button>
-                      <button onClick={() => openWhatsAppShare({ doc: pl, kind: 'packing_list', company: companySettings, user, includeLink: false })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="WhatsApp" data-testid={`pl-wa-${pl.id}`}><MessageSquare className="w-4 h-4" /></button>
-                      <button onClick={() => openWhatsAppShare({ doc: pl, kind: 'packing_list', company: companySettings, user, includeLink: true })} className="p-1.5 text-[#0B7C3E] hover:bg-[#DCFCE7] rounded" title="WhatsApp + link" data-testid={`pl-wa-link-${pl.id}`}><Share2 className="w-4 h-4" /></button>
+                      <button onClick={() => setWaShare({ open: true, doc: pl })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`pl-wa-${pl.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && pl.status === 'draft' && <button onClick={() => setDeleteConfirm({ open: true, pl })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`pl-delete-${pl.id}`}><Trash2 className="w-4 h-4" /></button>}
                     </div>
                   </td>
@@ -3115,6 +3142,15 @@ export function PackingListsPanel({ search = '', canEdit = true }) {
         variant="danger"
         onConfirm={() => del(deleteConfirm.pl)}
         testidPrefix="pl-delete-confirm"
+      />
+
+      <WhatsAppShareDialog
+        open={waShare.open}
+        onOpenChange={(o) => setWaShare({ open: o, doc: o ? waShare.doc : null })}
+        doc={waShare.doc}
+        kind="packing_list"
+        company={companySettings}
+        user={user}
       />
     </div>
   );
@@ -3291,12 +3327,8 @@ function printPackingListDoc(pl, company) {
  *  Shared printable invoice renderer (Proforma + Tax Invoice)
  * ========================================================================= */
 
-// Open WhatsApp with a pre-drafted message. If `includeLink=true`, appends
-// a public read-only URL that the recipient can tap from their phone.
-function openWhatsAppShare({ doc, kind, company, user, includeLink }) {
-  const phoneRaw = (doc.phone || doc.customer?.phone || '').replace(/[^0-9]/g, '');
-  // Accept a bare 10-digit Indian number → prefix 91 automatically.
-  const phone = phoneRaw.length === 10 ? '91' + phoneRaw : phoneRaw;
+// Build a default WhatsApp message given a doc + kind + options.
+function buildWhatsAppMessage({ doc, kind, company, user, includeLink }) {
   const names = {
     quotation: ['Quotation', doc.quotation_no],
     proforma: ['Proforma Invoice', doc.proforma_no],
@@ -3304,24 +3336,96 @@ function openWhatsAppShare({ doc, kind, company, user, includeLink }) {
     packing_list: ['Packing List', doc.packing_list_no],
   };
   const [label, number] = names[kind] || ['Document', doc.id];
-  const slug = kind === 'tax_invoice' ? 'tax-invoice' : (kind === 'packing_list' ? 'packing-list' : kind);
   const senderName = user?.name || 'our Sales Team';
   const orgName = company?.company_name || 'our company';
   const grandTotal = doc.grand_total ? ` (Amount: ₹${Number(doc.grand_total).toLocaleString('en-IN')})` : '';
-
   let msg = `Dear ${doc.customer_name || 'Customer'},\n\nPlease find our ${label} ${number}${grandTotal}.\n`;
   if (includeLink) {
-    // Public link uses the frontend app URL (not the API) — served by PublicPrintPage route.
-    const origin = window.location.origin;
-    const link = `${origin}/public/${slug}/${doc.id}`;
+    const slug = kind === 'tax_invoice' ? 'tax-invoice' : (kind === 'packing_list' ? 'packing-list' : kind);
+    const link = `${window.location.origin}/public/${slug}/${doc.id}`;
     msg += `\nView / print: ${link}\n`;
   }
   msg += `\nBest regards,\n${senderName}\n${orgName}`;
+  return msg;
+}
 
+function defaultWhatsAppPhone(doc) {
+  const raw = (doc.phone || doc.customer?.phone || '').replace(/[^0-9]/g, '');
+  return raw.length === 10 ? '91' + raw : raw;
+}
+
+// Open WhatsApp with a pre-drafted message. If `includeLink=true`, appends
+// a public read-only URL that the recipient can tap from their phone.
+// (Kept for legacy call sites — new UI opens WhatsAppShareDialog first.)
+function openWhatsAppShare({ doc, kind, company, user, includeLink }) {
+  const phone = defaultWhatsAppPhone(doc);
+  const msg = buildWhatsAppMessage({ doc, kind, company, user, includeLink });
   const waUrl = phone
     ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`
     : `https://wa.me/?text=${encodeURIComponent(msg)}`;
   window.open(waUrl, '_blank', 'noopener,noreferrer');
+}
+
+function WhatsAppShareDialog({ open, onOpenChange, doc, kind, company, user }) {
+  const [phone, setPhone] = useState('');
+  const [message, setMessage] = useState('');
+  const [includeLink, setIncludeLink] = useState(true);
+
+  useEffect(() => {
+    if (open && doc) {
+      setPhone(defaultWhatsAppPhone(doc));
+      setMessage(buildWhatsAppMessage({ doc, kind, company, user, includeLink: true }));
+      setIncludeLink(true);
+    }
+  }, [open, doc, kind, company, user]);
+
+  // Re-build base message when includeLink toggles (only if user hasn't hand-edited yet)
+  const toggleLink = (newVal) => {
+    setIncludeLink(newVal);
+    setMessage(buildWhatsAppMessage({ doc, kind, company, user, includeLink: newVal }));
+  };
+
+  const send = () => {
+    const num = (phone || '').replace(/[^0-9]/g, '');
+    const url = num ? `https://wa.me/${num}?text=${encodeURIComponent(message)}` : `https://wa.me/?text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    onOpenChange(false);
+  };
+
+  if (!doc) return null;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl" data-testid="whatsapp-share-dialog">
+        <DialogHeader>
+          <DialogTitle className="font-[Chivo]">Send via WhatsApp</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-semibold text-[#374151]">Recipient Number</label>
+            <input type="tel" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm font-mono" value={phone} onChange={e => setPhone(e.target.value)} placeholder="919876543210 (country-code + number, digits only)" data-testid="wa-phone-input" />
+            <p className="text-[10px] text-[#6B7280] mt-1">Include country code (no +, no spaces). Indian 10-digit numbers are auto-prefixed with 91.</p>
+          </div>
+          <div>
+            <label className="flex items-center gap-2 text-xs text-[#374151] cursor-pointer">
+              <input type="checkbox" checked={includeLink} onChange={e => toggleLink(e.target.checked)} className="w-4 h-4 accent-[#25D366]" data-testid="wa-include-link" />
+              <span>Include public view link in the message</span>
+            </label>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-[#374151]">Message</label>
+            <textarea rows={9} className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm text-sm font-mono" value={message} onChange={e => setMessage(e.target.value)} data-testid="wa-message-textarea" />
+            <p className="text-[10px] text-[#6B7280] mt-1">Edit freely before sending. WhatsApp will open with this exact text pre-filled.</p>
+          </div>
+          <div className="flex justify-end gap-2 pt-2 border-t border-[#E5E7EB]">
+            <button className="btn-secondary" onClick={() => onOpenChange(false)}>Cancel</button>
+            <button className="btn-primary bg-[#25D366] hover:bg-[#1CA85A]" onClick={send} data-testid="wa-send-btn">
+              <MessageSquare className="w-4 h-4 inline -mt-0.5 mr-1" />Open WhatsApp
+            </button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function numberToIndianWords(num) {
