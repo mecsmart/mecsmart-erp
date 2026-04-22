@@ -5625,61 +5625,101 @@ async def export_items_excel(request: Request, category: Optional[str] = None):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-    query = {}
-    valid_cats = {"raw_material", "component", "sub_assembly", "finished_good"}
-    if category and category != "all" and category in valid_cats:
-        query["category"] = category
-    items = await db.items.find(query, {"_id": 0}).to_list(10000)
+    try:
+        query = {}
+        valid_cats = {"raw_material", "component", "sub_assembly", "finished_good"}
+        if category and category != "all" and category in valid_cats:
+            query["category"] = category
+        items = await db.items.find(query, {"_id": 0}).to_list(10000)
 
-    wb = Workbook()
-    ws = wb.active
-    # Sheet title reflects the filter
-    cat_label_map = {"raw_material": "Raw Materials", "component": "Parts", "sub_assembly": "Sub-Assemblies", "finished_good": "Finished Goods"}
-    ws.title = cat_label_map.get(category, "Items Master") if category and category != "all" else "Items Master"
-    
-    headers = ["Part Number", "Name", "Description", "Category", "UOM", "Unit Cost", "Lead Time (Days)", "Safety Stock", "Current Stock", "Reorder Point", "HSN Code", "GST Rate (%)"]
-    header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF", size=11)
-    thin_border = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='thin')
-    )
-    
-    for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center')
-        cell.border = thin_border
-    
-    for row, item in enumerate(items, 2):
-        data = [
-            item.get("part_number", ""), item.get("name", ""), item.get("description", ""),
-            item.get("category", ""), item.get("unit_of_measure", ""), item.get("unit_cost", 0),
-            item.get("lead_time_days", 0), item.get("safety_stock", 0), item.get("current_stock", 0),
-            item.get("reorder_point", 0), item.get("hsn_code", ""), item.get("gst_rate", 18)
-        ]
-        for col, value in enumerate(data, 1):
-            cell = ws.cell(row=row, column=col, value=value)
+        wb = Workbook()
+        ws = wb.active
+        cat_label_map = {"raw_material": "Raw Materials", "component": "Parts", "sub_assembly": "Sub-Assemblies", "finished_good": "Finished Goods"}
+        ws.title = cat_label_map.get(category, "Items Master") if category and category != "all" else "Items Master"
+
+        headers = ["Part Number", "Name", "Description", "Category", "UOM", "Unit Cost", "Lead Time (Days)", "Safety Stock", "Current Stock", "Reorder Point", "HSN Code", "GST Rate (%)"]
+        header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        thin_border = Border(
+            left=Side(style='thin'), right=Side(style='thin'),
+            top=Side(style='thin'), bottom=Side(style='thin')
+        )
+
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center')
             cell.border = thin_border
-    
-    for col in range(1, len(headers) + 1):
-        ws.column_dimensions[chr(64 + col) if col <= 26 else 'A'].width = 18
-    
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
 
-    # Dynamic filename based on category filter
-    filename_map = {"raw_material": "items_raw_materials.xlsx", "component": "items_parts.xlsx",
-                    "sub_assembly": "items_sub_assemblies.xlsx", "finished_good": "items_finished_goods.xlsx"}
-    out_name = filename_map.get(category, "items_master.xlsx") if category and category != "all" else "items_master.xlsx"
+        # Safe value coercion — openpyxl rejects dicts/lists/None in some versions
+        def _safe_str(v):
+            if v is None:
+                return ""
+            if isinstance(v, (dict, list)):
+                return str(v)
+            return v
 
-    return StreamingResponse(
-        output,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={out_name}"}
-    )
+        def _safe_num(v, default=0):
+            if v is None:
+                return default
+            try:
+                return float(v) if isinstance(v, (int, float, str)) and str(v).strip() != "" else default
+            except (ValueError, TypeError):
+                return default
+
+        for row, item in enumerate(items, 2):
+            data = [
+                _safe_str(item.get("part_number", "")),
+                _safe_str(item.get("name", "")),
+                _safe_str(item.get("description", "")),
+                _safe_str(item.get("category", "")),
+                _safe_str(item.get("unit_of_measure", "")),
+                _safe_num(item.get("unit_cost"), 0),
+                _safe_num(item.get("lead_time_days"), 0),
+                _safe_num(item.get("safety_stock"), 0),
+                _safe_num(item.get("current_stock"), 0),
+                _safe_num(item.get("reorder_point"), 0),
+                _safe_str(item.get("hsn_code", "")),
+                _safe_num(item.get("gst_rate"), 18),
+            ]
+            for col, value in enumerate(data, 1):
+                try:
+                    cell = ws.cell(row=row, column=col, value=value)
+                    cell.border = thin_border
+                except Exception as cell_err:
+                    # If one cell fails, substitute with stringified fallback so the whole export doesn't 500
+                    logger.warning(f"[export_items] row={row} col={col} value={value!r} err={cell_err}; coerced to str")
+                    ws.cell(row=row, column=col, value=str(value)).border = thin_border
+
+        for col in range(1, len(headers) + 1):
+            # Safe column letter (handles up to 52 cols via AA-AZ path)
+            from openpyxl.utils import get_column_letter
+            ws.column_dimensions[get_column_letter(col)].width = 18
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        filename_map = {"raw_material": "items_raw_materials.xlsx", "component": "items_parts.xlsx",
+                        "sub_assembly": "items_sub_assemblies.xlsx", "finished_good": "items_finished_goods.xlsx"}
+        out_name = filename_map.get(category, "items_master.xlsx") if category and category != "all" else "items_master.xlsx"
+
+        # Read bytes once — avoids streaming-generator exceptions that would strip CORS headers
+        data_bytes = output.getvalue()
+        return Response(
+            content=data_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename={out_name}",
+                "Content-Length": str(len(data_bytes)),
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[export_items_excel] Unhandled error (category={category}): {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Export failed: {type(e).__name__}: {e}")
 
 @items_router.post("/import/excel")
 async def import_items_excel(request: Request, file: UploadFile = File(...)):
@@ -10592,3 +10632,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Global exception handler — ensures even unhandled errors return a JSON response
+# WITH CORS headers (so browser reports the real error instead of masking it as CORS).
+from fastapi.requests import Request as _FRequest
+
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: _FRequest, exc: Exception):
+    logger.error(f"[unhandled] {request.method} {request.url.path} → {type(exc).__name__}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Server error: {type(exc).__name__}: {exc}"},
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
