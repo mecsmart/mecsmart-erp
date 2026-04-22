@@ -9,6 +9,8 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { POPrintDialog } from '../components/PrintDialogs';
+import { SearchableItemSelect } from '../components/SearchableItemSelect';
+import { SearchableSelect } from '../components/SearchableSelect';
 
 const statusOptions = [
   { value: 'draft', label: 'Draft' },
@@ -379,12 +381,16 @@ export default function PurchaseOrdersPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier *</label>
-                <Select value={formData.supplier_id} onValueChange={(v) => setFormData({ ...formData, supplier_id: v })}>
-                  <SelectTrigger data-testid="po-supplier-select"><SelectValue placeholder="Select supplier" /></SelectTrigger>
-                  <SelectContent>
-                    {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={suppliers}
+                  value={formData.supplier_id}
+                  onChange={(v) => setFormData({ ...formData, supplier_id: v })}
+                  getLabel={(s) => s.name || ''}
+                  getSecondary={(s) => s.code || ''}
+                  matchFields={['name', 'code', 'gstin']}
+                  placeholder="Search supplier by code, name or GSTIN…"
+                  testId="po-supplier-select"
+                />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-[#111827] mb-1">Expected Date *</label>
@@ -446,12 +452,14 @@ export default function PurchaseOrdersPage() {
                   </div>
                   {formData.lines.map((line, index) => (
                     <div key={index} className="grid grid-cols-[2.5fr_1fr_0.8fr_0.8fr_1fr_1.2fr_1fr_1fr_auto] gap-1 p-1 bg-[#F9FAFB] border-b border-[#E5E7EB] items-center" data-testid={`po-line-row-${index}`}>
-                      <Select value={line.item_id} onValueChange={(v) => updateLine(index, 'item_id', v)}>
-                        <SelectTrigger className="bg-white text-xs h-8" data-testid={`po-line-item-${index}`}><SelectValue placeholder="Select item" /></SelectTrigger>
-                        <SelectContent>
-                          {items.map((item) => <SelectItem key={item.id} value={item.id}>{item.part_number} - {item.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                      <SearchableItemSelect
+                        items={items}
+                        value={line.item_id}
+                        onChange={(v) => updateLine(index, 'item_id', v)}
+                        placeholder="Search item by part no / name…"
+                        showCategory={true}
+                        testId={`po-line-item-${index}`}
+                      />
                       <input type="text" value={line.hsn_code} onChange={(e) => updateLine(index, 'hsn_code', e.target.value)} className="input-field bg-white text-xs h-8 mono" />
                       <input type="number" min="0" step="any" value={line.quantity} onChange={(e) => updateLine(index, 'quantity', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono" />
                       <input type="text" value={line.uom} onChange={(e) => updateLine(index, 'uom', e.target.value)} className="input-field bg-white text-xs h-8 mono" />

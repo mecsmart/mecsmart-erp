@@ -33,9 +33,11 @@ export default function ItemsPage() {
   const { user } = useAuth();
   const { formatCurrency, currencySymbol } = useCompanySettings();
   const [items, setItems] = useState([]);
+  const [itemGroups, setItemGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [groupFilter, setGroupFilter] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, item: null });
@@ -44,6 +46,7 @@ export default function ItemsPage() {
     name: '',
     description: '',
     category: 'raw_material',
+    group_id: '',
     unit_of_measure: 'pcs',
     unit_cost: 0,
     purchase_price: 0,
@@ -61,13 +64,25 @@ export default function ItemsPage() {
 
   useEffect(() => {
     fetchItems();
-  }, [search, categoryFilter]);
+  }, [search, categoryFilter, groupFilter]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await api.get('/api/item-groups');
+        setItemGroups(data || []);
+      } catch (e) {
+        console.warn('Failed to fetch item groups:', e);
+      }
+    })();
+  }, []);
 
   const fetchItems = async () => {
     try {
       const params = new URLSearchParams();
       if (search) params.append('search', search);
       if (categoryFilter) params.append('category', categoryFilter);
+      if (groupFilter) params.append('group_id', groupFilter);
       
       const { data } = await api.get(`/api/items?${params.toString()}`);
       setItems(data);
@@ -103,6 +118,7 @@ export default function ItemsPage() {
       name: item.name,
       description: item.description || '',
       category: item.category,
+      group_id: item.group_id || '',
       unit_of_measure: item.unit_of_measure,
       unit_cost: item.unit_cost,
       purchase_price: item.purchase_price || 0,
@@ -134,6 +150,7 @@ export default function ItemsPage() {
       name: '',
       description: '',
       category: 'raw_material',
+      group_id: '',
       unit_of_measure: 'pcs',
       unit_cost: 0,
       purchase_price: 0,
@@ -146,6 +163,11 @@ export default function ItemsPage() {
       gst_rate: 18,
     });
   };
+
+  // Groups matching current category, including "(any)" groups
+  const filteredGroupsForForm = itemGroups.filter(g => !g.parent_category || g.parent_category === formData.category);
+  const selectedGroup = itemGroups.find(g => g.id === formData.group_id);
+  const groupLocksHsn = !!(selectedGroup && (selectedGroup.default_hsn_code || selectedGroup.default_gst_rate != null));
 
   const isLowStock = (item) => item.current_stock <= item.reorder_point;
 
@@ -357,7 +379,7 @@ export default function ItemsPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-[#111827] mb-1">Category *</label>
-                    <Select value={formData.category} onValueChange={(v) => setFormData({ ...formData, category: v })}>
+                    <Select value={formData.category} onValueChange={(v) => setFormData({ ...formData, category: v, group_id: '' })}>
                       <SelectTrigger data-testid="item-category-select">
                         <SelectValue />
                       </SelectTrigger>
@@ -381,6 +403,38 @@ export default function ItemsPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+
+                {/* Item Group (optional, filters by current category) */}
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">
+                    Item Group <span className="text-[#6B7280] font-normal">(optional — groups items like Motors, Bearings, Valves)</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={formData.group_id || '__none__'}
+                      onValueChange={(v) => setFormData({ ...formData, group_id: v === '__none__' ? '' : v })}
+                    >
+                      <SelectTrigger data-testid="item-group-select" className="flex-1">
+                        <SelectValue placeholder="No group" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">(No group)</SelectItem>
+                        {filteredGroupsForForm.length === 0 ? (
+                          <div className="px-3 py-2 text-xs text-[#6B7280]">No groups defined for this category — create one in Settings → Item Groups</div>
+                        ) : filteredGroupsForForm.map(g => (
+                          <SelectItem key={g.id} value={g.id}>
+                            {g.name}{g.default_hsn_code ? ` · HSN ${g.default_hsn_code}` : ''}{g.default_gst_rate != null ? ` · ${g.default_gst_rate}%` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {groupLocksHsn && (
+                    <p className="text-xs text-[#1E429F] mt-1">
+                      HSN/GST are inherited from group <b>{selectedGroup?.name}</b> and cannot be edited here. Change at group level to update all items.
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">
@@ -472,20 +526,29 @@ export default function ItemsPage() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">HSN Code</label>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">
+                      HSN Code {groupLocksHsn && selectedGroup?.default_hsn_code && <span className="text-[10px] text-[#1E429F]">(from group)</span>}
+                    </label>
                     <input
                       type="text"
-                      value={formData.hsn_code}
+                      value={groupLocksHsn && selectedGroup?.default_hsn_code ? selectedGroup.default_hsn_code : formData.hsn_code}
                       onChange={(e) => setFormData({ ...formData, hsn_code: e.target.value })}
-                      className="input-field mono"
+                      className={`input-field mono ${groupLocksHsn && selectedGroup?.default_hsn_code ? 'bg-[#F3F4F6] cursor-not-allowed' : ''}`}
                       placeholder="e.g. 7208"
+                      disabled={!!(groupLocksHsn && selectedGroup?.default_hsn_code)}
                       data-testid="item-hsn-code-input"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">GST Rate (%)</label>
-                    <Select value={String(formData.gst_rate)} onValueChange={(v) => setFormData({ ...formData, gst_rate: parseFloat(v) })}>
-                      <SelectTrigger data-testid="item-gst-rate-select"><SelectValue placeholder="Select rate" /></SelectTrigger>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">
+                      GST Rate (%) {groupLocksHsn && selectedGroup?.default_gst_rate != null && <span className="text-[10px] text-[#1E429F]">(from group)</span>}
+                    </label>
+                    <Select
+                      value={String(groupLocksHsn && selectedGroup?.default_gst_rate != null ? selectedGroup.default_gst_rate : formData.gst_rate)}
+                      onValueChange={(v) => setFormData({ ...formData, gst_rate: parseFloat(v) })}
+                      disabled={!!(groupLocksHsn && selectedGroup?.default_gst_rate != null)}
+                    >
+                      <SelectTrigger data-testid="item-gst-rate-select" className={groupLocksHsn && selectedGroup?.default_gst_rate != null ? 'bg-[#F3F4F6] cursor-not-allowed' : ''}><SelectValue placeholder="Select rate" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="0">0%</SelectItem>
                         <SelectItem value="5">5%</SelectItem>
@@ -542,6 +605,24 @@ export default function ItemsPage() {
               </SelectContent>
             </Select>
           </div>
+          <div className="w-48">
+            <Select value={groupFilter || undefined} onValueChange={(v) => setGroupFilter(v === 'all' ? '' : v)}>
+              <SelectTrigger data-testid="items-group-filter">
+                <Filter className="w-4 h-4 mr-2" />
+                <SelectValue placeholder="All Groups" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Groups</SelectItem>
+                {itemGroups
+                  .filter(g => !categoryFilter || !g.parent_category || g.parent_category === categoryFilter)
+                  .map(g => (
+                    <SelectItem key={g.id} value={g.id}>
+                      {g.name} {g.parent_category ? `(${g.parent_category.replace('_', ' ')})` : ''} · {g.item_count ?? 0}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
           {categoryFilter && (
             <button onClick={() => setCategoryFilter('')} className="btn-secondary flex items-center space-x-1">
               <X className="w-4 h-4" />
@@ -570,6 +651,7 @@ export default function ItemsPage() {
                   <th>Part Number</th>
                   <th>Name</th>
                   <th>Category</th>
+                  <th>Group</th>
                   <th>HSN</th>
                   <th className="text-right">GST%</th>
                   <th className="text-right">Stock</th>
@@ -578,7 +660,9 @@ export default function ItemsPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {items.map((item) => {
+                  const itemGroup = itemGroups.find(g => g.id === item.group_id);
+                  return (
                   <tr key={item.id} className={isLowStock(item) ? 'bg-[#FDE8E8]/30' : ''} data-testid={`item-row-${item.part_number}`}>
                     <td className="mono font-medium">{item.part_number}</td>
                     <td>
@@ -596,6 +680,11 @@ export default function ItemsPage() {
                       }`}>
                         {item.category.replace('_', ' ')}
                       </span>
+                    </td>
+                    <td className="text-sm">
+                      {itemGroup ? (
+                        <span className="px-2 py-0.5 bg-[#EEF2FF] text-[#3730A3] rounded-sm text-xs font-medium">{itemGroup.name}</span>
+                      ) : <span className="text-[#9CA3AF]">-</span>}
                     </td>
                     <td className="mono text-sm">{item.hsn_code || '-'}</td>
                     <td className="text-right mono">{item.gst_rate != null ? `${item.gst_rate}%` : '-'}</td>
@@ -624,7 +713,8 @@ export default function ItemsPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

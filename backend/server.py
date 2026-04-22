@@ -34,6 +34,7 @@ app = FastAPI(title="Machinery Manufacturing ERP")
 api_router = APIRouter(prefix="/api")
 auth_router = APIRouter(prefix="/auth")
 items_router = APIRouter(prefix="/items")
+item_groups_router = APIRouter(prefix="/item-groups")
 bom_router = APIRouter(prefix="/bom")
 mrp_router = APIRouter(prefix="/mrp")
 quality_router = APIRouter(prefix="/quality")
@@ -160,6 +161,7 @@ class ItemCreate(BaseModel):
     name: str
     description: Optional[str] = ""
     category: str  # raw_material, component, sub_assembly, finished_good
+    group_id: Optional[str] = None  # NEW: reference to item_groups collection (optional)
     unit_of_measure: str = "pcs"
     unit_cost: float = 0.0
     purchase_price: float = 0.0  # Last PO price; auto-updates from new POs (RM only)
@@ -175,6 +177,7 @@ class ItemUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     category: Optional[str] = None
+    group_id: Optional[str] = None
     unit_of_measure: Optional[str] = None
     unit_cost: Optional[float] = None
     purchase_price: Optional[float] = None
@@ -185,6 +188,21 @@ class ItemUpdate(BaseModel):
     reorder_point: Optional[int] = None
     hsn_code: Optional[str] = None
     gst_rate: Optional[float] = None
+
+
+class ItemGroupCreate(BaseModel):
+    name: str  # e.g. "Motors", "Bearings", "V-Belts"
+    parent_category: Optional[str] = None  # raw_material / component / sub_assembly / finished_good (optional: leave blank = any)
+    default_hsn_code: Optional[str] = None  # When set, all items in this group inherit this HSN
+    default_gst_rate: Optional[float] = None  # When set, all items in this group inherit this GST%
+    description: Optional[str] = ""
+
+class ItemGroupUpdate(BaseModel):
+    name: Optional[str] = None
+    parent_category: Optional[str] = None
+    default_hsn_code: Optional[str] = None
+    default_gst_rate: Optional[float] = None
+    description: Optional[str] = None
 
 class RoutingEntry(BaseModel):
     name: str
@@ -1017,11 +1035,13 @@ async def refresh_token(request: Request, response: Response):
 # ================== ITEMS ROUTES ==================
 
 @items_router.get("")
-async def get_items(request: Request, category: Optional[str] = None, search: Optional[str] = None):
+async def get_items(request: Request, category: Optional[str] = None, search: Optional[str] = None, group_id: Optional[str] = None):
     await get_current_user(request)
     query = {}
     if category:
         query["category"] = category
+    if group_id:
+        query["group_id"] = group_id
     if search:
         query["$or"] = [
             {"part_number": {"$regex": search, "$options": "i"}},
@@ -1037,6 +1057,24 @@ async def get_item(item_id: str, request: Request):
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     return item
+
+async def _apply_item_group_overrides(item_doc: dict) -> dict:
+    """If item_doc has group_id AND the referenced group has default_hsn_code/default_gst_rate set,
+    OVERRIDE those fields on the item. This implements the user's rule:
+    "If HSN/GST is assigned at group level, all items under this group consider the same HSN & GST%".
+    """
+    group_id = item_doc.get("group_id")
+    if not group_id:
+        return item_doc
+    group = await db.item_groups.find_one({"id": group_id}, {"_id": 0})
+    if not group:
+        return item_doc
+    if group.get("default_hsn_code"):
+        item_doc["hsn_code"] = group["default_hsn_code"]
+    if group.get("default_gst_rate") is not None:
+        item_doc["gst_rate"] = float(group["default_gst_rate"])
+    return item_doc
+
 
 @items_router.post("", status_code=201)
 async def create_item(item_data: ItemCreate, request: Request):
@@ -1057,6 +1095,8 @@ async def create_item(item_data: ItemCreate, request: Request):
     # Sync unit_cost with purchase_price on creation if unit_cost not explicitly set
     if item_doc.get("purchase_price") and not item_doc.get("unit_cost"):
         item_doc["unit_cost"] = item_doc["purchase_price"]
+    # Apply group-level HSN/GST overrides
+    item_doc = await _apply_item_group_overrides(item_doc)
     await db.items.insert_one(item_doc)
     item_doc.pop("_id", None)
     return item_doc
@@ -1070,6 +1110,13 @@ async def update_item(item_id: str, item_data: ItemUpdate, request: Request):
     update_data = {k: v for k, v in item_data.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
+    
+    # If group_id is being set/changed, apply group-level HSN/GST overrides
+    if "group_id" in update_data and update_data["group_id"]:
+        merged = dict(update_data)
+        merged = await _apply_item_group_overrides(merged)
+        update_data["hsn_code"] = merged.get("hsn_code", update_data.get("hsn_code"))
+        update_data["gst_rate"] = merged.get("gst_rate", update_data.get("gst_rate"))
     
     update_data["updated_at"] = datetime.now(timezone.utc)
     result = await db.items.update_one({"id": item_id}, {"$set": update_data})
@@ -1120,6 +1167,81 @@ async def delete_item(item_id: str, request: Request):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
     return {"message": "Item deleted"}
+
+
+# ================== ITEM GROUPS ROUTES ==================
+# User-managed taxonomy (Motors, Bearings, Valves, V-Belts, etc.)
+# When a group has default_hsn_code / default_gst_rate, all items in that group inherit them.
+
+@item_groups_router.get("")
+async def list_item_groups(request: Request, parent_category: Optional[str] = None):
+    await get_current_user(request)
+    query = {}
+    if parent_category:
+        query["parent_category"] = parent_category
+    groups = await db.item_groups.find(query, {"_id": 0}).sort("name", 1).to_list(500)
+    # Attach item_count for UX (how many items belong to each group)
+    for g in groups:
+        g["item_count"] = await db.items.count_documents({"group_id": g["id"]})
+    return groups
+
+@item_groups_router.post("", status_code=201)
+async def create_item_group(data: ItemGroupCreate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    existing = await db.item_groups.find_one({"name": data.name, "parent_category": data.parent_category})
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Group '{data.name}' already exists under {data.parent_category or 'any category'}")
+    doc = {
+        "id": str(uuid.uuid4()),
+        **data.model_dump(),
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"],
+    }
+    await db.item_groups.insert_one(doc)
+    doc.pop("_id", None)
+    doc["item_count"] = 0
+    return doc
+
+@item_groups_router.put("/{group_id}")
+async def update_item_group(group_id: str, data: ItemGroupUpdate, request: Request):
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
+    if not update:
+        raise HTTPException(status_code=400, detail="No data to update")
+    update["updated_at"] = datetime.now(timezone.utc)
+    result = await db.item_groups.update_one({"id": group_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Item group not found")
+    # If default_hsn_code or default_gst_rate changed, cascade to ALL items in the group
+    if "default_hsn_code" in update or "default_gst_rate" in update:
+        cascade = {}
+        if "default_hsn_code" in update and update["default_hsn_code"]:
+            cascade["hsn_code"] = update["default_hsn_code"]
+        if "default_gst_rate" in update and update["default_gst_rate"] is not None:
+            cascade["gst_rate"] = float(update["default_gst_rate"])
+        if cascade:
+            await db.items.update_many({"group_id": group_id}, {"$set": cascade})
+    group = await db.item_groups.find_one({"id": group_id}, {"_id": 0})
+    group["item_count"] = await db.items.count_documents({"group_id": group_id})
+    return group
+
+@item_groups_router.delete("/{group_id}")
+async def delete_item_group(group_id: str, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can delete item groups")
+    count = await db.items.count_documents({"group_id": group_id})
+    if count > 0:
+        raise HTTPException(status_code=400, detail=f"Cannot delete — {count} item(s) still belong to this group. Reassign or remove them first.")
+    result = await db.item_groups.delete_one({"id": group_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Item group not found")
+    return {"message": "Item group deleted"}
+
 
 # ================== BOM ROUTES ==================
 
@@ -5637,7 +5759,7 @@ async def export_items_excel(request: Request, category: Optional[str] = None):
         cat_label_map = {"raw_material": "Raw Materials", "component": "Parts", "sub_assembly": "Sub-Assemblies", "finished_good": "Finished Goods"}
         ws.title = cat_label_map.get(category, "Items Master") if category and category != "all" else "Items Master"
 
-        headers = ["Part Number", "Name", "Description", "Category", "UOM", "Unit Cost", "Lead Time (Days)", "Safety Stock", "Current Stock", "Reorder Point", "HSN Code", "GST Rate (%)"]
+        headers = ["Part Number", "Name", "Description", "Category", "Group", "UOM", "Unit Cost", "Lead Time (Days)", "Safety Stock", "Current Stock", "Reorder Point", "HSN Code", "GST Rate (%)"]
         header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
         header_font = Font(bold=True, color="FFFFFF", size=11)
         thin_border = Border(
@@ -5668,12 +5790,16 @@ async def export_items_excel(request: Request, category: Optional[str] = None):
             except (ValueError, TypeError):
                 return default
 
+        # Build group lookup for export (only once)
+        group_map = {g["id"]: g.get("name", "") async for g in db.item_groups.find({}, {"_id": 0, "id": 1, "name": 1})}
+
         for row, item in enumerate(items, 2):
             data = [
                 _safe_str(item.get("part_number", "")),
                 _safe_str(item.get("name", "")),
                 _safe_str(item.get("description", "")),
                 _safe_str(item.get("category", "")),
+                _safe_str(group_map.get(item.get("group_id"), "")),
                 _safe_str(item.get("unit_of_measure", "")),
                 _safe_num(item.get("unit_cost"), 0),
                 _safe_num(item.get("lead_time_days"), 0),
@@ -5740,7 +5866,7 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
     # Map header names to field names
     field_map = {
         "Part Number": "part_number", "Name": "name", "Description": "description",
-        "Category": "category", "UOM": "unit_of_measure", "Unit Cost": "unit_cost",
+        "Category": "category", "Group": "group_name", "UOM": "unit_of_measure", "Unit Cost": "unit_cost",
         "Lead Time (Days)": "lead_time_days", "Safety Stock": "safety_stock",
         "Current Stock": "current_stock", "Reorder Point": "reorder_point",
         "HSN Code": "hsn_code", "GST Rate (%)": "gst_rate"
@@ -5751,15 +5877,22 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
         if header in field_map:
             col_indices[field_map[header]] = idx
     
+    # Pre-load existing groups for fast matching (name -> id)
+    existing_groups = {g["name"].lower(): g["id"] async for g in db.item_groups.find({}, {"_id": 0, "id": 1, "name": 1})}
+    
     for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
         try:
             if not row or not row[0]:
                 continue
             
             item_data = {}
+            group_name_raw = None
             for field, col_idx in col_indices.items():
                 if col_idx < len(row) and row[col_idx] is not None:
                     val = row[col_idx]
+                    if field == "group_name":
+                        group_name_raw = str(val).strip() if val else None
+                        continue
                     if field in ["unit_cost", "gst_rate"]:
                         val = float(val) if val else 0
                     elif field in ["lead_time_days", "safety_stock", "current_stock", "reorder_point"]:
@@ -5767,6 +5900,25 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
                     else:
                         val = str(val).strip()
                     item_data[field] = val
+            
+            # If "Group" column provided, find or create the group and store group_id
+            if group_name_raw:
+                parent_cat = item_data.get("category")
+                gid = existing_groups.get(group_name_raw.lower())
+                if not gid:
+                    gid = str(uuid.uuid4())
+                    await db.item_groups.insert_one({
+                        "id": gid,
+                        "name": group_name_raw,
+                        "parent_category": parent_cat,
+                        "default_hsn_code": None,
+                        "default_gst_rate": None,
+                        "description": "",
+                        "created_at": datetime.now(timezone.utc),
+                        "created_by": user["id"],
+                    })
+                    existing_groups[group_name_raw.lower()] = gid
+                item_data["group_id"] = gid
             
             if not item_data.get("part_number"):
                 results["errors"].append(f"Row {row_num}: Missing part number")
@@ -10597,6 +10749,7 @@ async def restore_database(payload: dict = Body(...), request: Request = None):
 # Include routers
 api_router.include_router(auth_router)
 api_router.include_router(items_router)
+api_router.include_router(item_groups_router)
 api_router.include_router(bom_router)
 api_router.include_router(mrp_router)
 api_router.include_router(quality_router)
