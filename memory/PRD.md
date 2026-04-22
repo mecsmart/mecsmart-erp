@@ -17,6 +17,18 @@
 - DC print: "Delivery Challan" with 6-col Part Details + RM Issued sections (NOT 9-col Job OS format)
 
 ## Changelog
+- 2026-02-22 (iter 114): **Export dropdown z-index + robust download on deployed envs.**
+  (a) **Dropdown z-index bug**: sticky table header (`z-index:20` via `.sticky-header-scroll`) was occluding the "Sub-Assemblies" and parts of "Finished Goods" items in the Export dropdown. Bumped dropdown z-index to `z-50` and scrim backdrop to `z-40`. All 5 options now render cleanly above the table.
+  (b) **Silent "toast success but no file download"**: root cause — `link.click(); link.remove();` is called synchronously back-to-back; on deployed URLs inside strict-CSP iframes or older Chrome configs the anchor can be removed from the DOM before the browser has a chance to process the click event, resulting in a suppressed download. Toast fires in the Promise chain even though the download never started.
+  Fix: adopted the industry-standard robust blob-download pattern —
+    • `link.dispatchEvent(new MouseEvent('click', {bubbles, cancelable, view:window}))` instead of `.click()` (more reliable across browsers).
+    • 100ms `setTimeout` before `removeChild` so the browser has time to start the download.
+    • 5-second (not 2s) delay before `URL.revokeObjectURL` — some browsers need the blob URL alive until the download actually begins.
+    • Wrapped in try/catch with a `window.open(url, '_blank')` fallback so the user always gets *something* even if the anchor path fails.
+    • Added `console.info('[Export] blob ready: <N> bytes — filename=...')` for DevTools diagnostics.
+  Applied to both `ItemsPage.handleExport` and `BOMPage.handleBomExport`.
+  Verified via Playwright: clicking "Sub-Assemblies" triggered real download `items_sub_assemblies.xlsx` (10,863 bytes) + info log confirmed blob size + success toast appeared.
+
 - 2026-02-22 (iter 113): **Items export by category + robust toast feedback on Items/BOM export+import.**
   User reported export/import silently failing on their deployed URL. Root cause: original handlers used `alert()` for errors and didn't surface any diagnostic info when the download failed (empty blob, network error, etc.), making it impossible to tell if the click even registered.
   (a) **Category-based Items export** (user-requested P0): `GET /api/items/export/excel?category=<raw_material|component|sub_assembly|finished_good|all>` now filters Mongo query + renames sheet title + picks dynamic filename (`items_raw_materials.xlsx` / `items_parts.xlsx` / `items_sub_assemblies.xlsx` / `items_finished_goods.xlsx`). Verified: RM=226 rows, Parts=93, SA=96, FG=141, All=557 — each in its own correctly-titled sheet.

@@ -230,14 +230,25 @@ export default function BOMPage() {
         return;
       }
       const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const filename = bomId ? `bom_${bomId.slice(0,8)}.xlsx` : 'bom_data.xlsx';
+      console.info(`[BOM Export] blob ready: ${blob.size} bytes — filename=${filename}`);
       const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.setAttribute('download', bomId ? `bom_${bomId.slice(0,8)}.xlsx` : 'bom_data.xlsx');
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+      let ok = false;
+      try {
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        link.rel = 'noopener';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        ok = true;
+        setTimeout(() => { try { document.body.removeChild(link); } catch { /* noop */ } }, 100);
+      } catch (err) {
+        console.warn('[BOM Export] anchor failed, falling back', err);
+      }
+      if (!ok) window.open(blobUrl, '_blank');
+      setTimeout(() => { try { window.URL.revokeObjectURL(blobUrl); } catch { /* noop */ } }, 5000);
       toast.success(`BOM exported (${(blob.size / 1024).toFixed(1)} KB)`, { id: toastId });
     } catch (error) {
       const msg = error?.response?.data?.detail || error?.message || 'Network/server error';

@@ -175,14 +175,33 @@ export default function ItemsPage() {
         return;
       }
       const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      console.info(`[Export] blob ready: ${blob.size} bytes — filename=${catMeta.filename}`);
+
+      // ROBUST DOWNLOAD: try native .download on anchor, then fall back to window.open.
+      // On deployed env inside iframes / strict CSP, anchor.click() can be silently dropped.
       const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', catMeta.filename);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => window.URL.revokeObjectURL(url), 2000);
+      let downloadStarted = false;
+      try {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = catMeta.filename;
+        link.rel = 'noopener';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        // Use MouseEvent dispatch — more reliable than .click() across browsers
+        link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        downloadStarted = true;
+        setTimeout(() => {
+          try { document.body.removeChild(link); } catch { /* noop */ }
+        }, 100);
+      } catch (clickErr) {
+        console.warn('[Export] anchor download failed, falling back to window.open', clickErr);
+      }
+      if (!downloadStarted) {
+        window.open(url, '_blank');
+      }
+      // Revoke later — some browsers need the URL alive until the download actually starts
+      setTimeout(() => { try { window.URL.revokeObjectURL(url); } catch { /* noop */ } }, 5000);
       toast.success(`${catMeta.label} exported (${(blob.size / 1024).toFixed(1)} KB)`, { id: toastId });
     } catch (error) {
       const msg = error?.response?.data?.detail || error?.message || 'Network/server error';
@@ -241,8 +260,8 @@ export default function ItemsPage() {
             </button>
             {exportMenuOpen && (
               <>
-                <div className="fixed inset-0 z-10" onClick={() => setExportMenuOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 z-20 w-64 bg-white border border-[#D1D5DB] rounded-sm shadow-lg py-1" data-testid="export-menu">
+                <div className="fixed inset-0 z-40" onClick={() => setExportMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-50 w-64 bg-white border border-[#D1D5DB] rounded-sm shadow-lg py-1" data-testid="export-menu">
                   <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-[#6B7280] font-semibold">Export by category</div>
                   {EXPORT_CATEGORIES.map(c => (
                     <button
