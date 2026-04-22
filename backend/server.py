@@ -10625,13 +10625,29 @@ async def health_check():
 app.include_router(api_router)
 
 # CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(',') if os.environ.get('CORS_ORIGINS') != '*' else ['*'],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Note: when frontend sends credentials (cookies), browsers REJECT the wildcard '*'
+# Access-Control-Allow-Origin. We must echo back the specific origin.
+# `allow_origin_regex=".*"` tells Starlette to match any origin AND respond with that
+# exact origin in the header, which is compatible with `allow_credentials=True`.
+_cors_env = os.environ.get('CORS_ORIGINS', '*')
+if _cors_env == '*':
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=".*",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["Content-Disposition"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_env.split(','),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["Content-Disposition"],
+    )
 
 
 # Global exception handler — ensures even unhandled errors return a JSON response
@@ -10641,8 +10657,15 @@ from fastapi.requests import Request as _FRequest
 @app.exception_handler(Exception)
 async def _global_exception_handler(request: _FRequest, exc: Exception):
     logger.error(f"[unhandled] {request.method} {request.url.path} → {type(exc).__name__}: {exc}", exc_info=True)
+    # Echo the request's Origin back so credentialed requests don't fail CORS on the error path
+    origin = request.headers.get("origin", "*")
+    cors_origin = origin if origin != "*" else "*"
     return JSONResponse(
         status_code=500,
         content={"detail": f"Server error: {type(exc).__name__}: {exc}"},
-        headers={"Access-Control-Allow-Origin": "*"},
+        headers={
+            "Access-Control-Allow-Origin": cors_origin,
+            "Access-Control-Allow-Credentials": "true" if origin != "*" else "false",
+            "Vary": "Origin",
+        },
     )

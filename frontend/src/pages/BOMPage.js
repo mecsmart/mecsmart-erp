@@ -221,39 +221,48 @@ export default function BOMPage() {
   const [bomImporting, setBomImporting] = useState(false);
 
   const handleBomExport = async (bomId = null) => {
-    const toastId = toast.loading(bomId ? 'Preparing BOM export…' : 'Preparing all BOMs export…');
+    const apiUrl = api.defaults.baseURL || process.env.REACT_APP_BACKEND_URL || '';
+    const url = bomId ? `/api/bom/export/excel?bom_id=${bomId}` : '/api/bom/export/excel';
+    const directUrl = `${apiUrl}${url}`;
+    const toastId = toast.loading(bomId ? 'Opening BOM export…' : 'Opening all BOMs export…');
     try {
-      const url = bomId ? `/api/bom/export/excel?bom_id=${bomId}` : '/api/bom/export/excel';
-      const response = await api.get(url, { responseType: 'blob' });
-      if (!response.data || response.data.size === 0) {
-        toast.error('Export returned an empty file', { id: toastId });
+      const topWin = window.top || window;
+      const popup = topWin.open(directUrl, '_blank', 'noopener,noreferrer');
+      if (!popup) {
+        console.warn('[BOM Export] popup blocked, falling back to hidden iframe');
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = directUrl;
+        document.body.appendChild(iframe);
+        setTimeout(() => { try { document.body.removeChild(iframe); } catch { /* noop */ } }, 10000);
+        toast.success('BOM download triggered — check your browser downloads', { id: toastId, duration: 4000 });
         return;
       }
-      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      const filename = bomId ? `bom_${bomId.slice(0,8)}.xlsx` : 'bom_data.xlsx';
-      console.info(`[BOM Export] blob ready: ${blob.size} bytes — filename=${filename}`);
-      const blobUrl = window.URL.createObjectURL(blob);
-      let ok = false;
+      toast.success('BOM export started — check your browser downloads', { id: toastId, duration: 4000 });
+    } catch (err) {
+      console.error('[BOM Export] direct open failed, falling back to blob', err);
       try {
+        const response = await api.get(url, { responseType: 'blob' });
+        if (!response.data || response.data.size === 0) {
+          toast.error('Export returned an empty file', { id: toastId });
+          return;
+        }
+        const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const filename = bomId ? `bom_${bomId.slice(0,8)}.xlsx` : 'bom_data.xlsx';
+        const blobUrl = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = blobUrl;
         link.download = filename;
-        link.rel = 'noopener';
-        link.style.display = 'none';
         document.body.appendChild(link);
         link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-        ok = true;
         setTimeout(() => { try { document.body.removeChild(link); } catch { /* noop */ } }, 100);
-      } catch (err) {
-        console.warn('[BOM Export] anchor failed, falling back', err);
+        setTimeout(() => { try { window.URL.revokeObjectURL(blobUrl); } catch { /* noop */ } }, 5000);
+        toast.success(`BOM exported (${(blob.size / 1024).toFixed(1)} KB)`, { id: toastId });
+      } catch (blobErr) {
+        const msg = blobErr?.response?.data?.detail || blobErr?.message || 'Network/server error';
+        toast.error(`BOM export failed: ${msg}`, { id: toastId });
+        console.error('BOM export error:', blobErr);
       }
-      if (!ok) window.open(blobUrl, '_blank');
-      setTimeout(() => { try { window.URL.revokeObjectURL(blobUrl); } catch { /* noop */ } }, 5000);
-      toast.success(`BOM exported (${(blob.size / 1024).toFixed(1)} KB)`, { id: toastId });
-    } catch (error) {
-      const msg = error?.response?.data?.detail || error?.message || 'Network/server error';
-      toast.error(`BOM export failed: ${msg}`, { id: toastId });
-      console.error('BOM export error:', error);
     }
   };
 

@@ -164,51 +164,60 @@ export default function ItemsPage() {
 
   const handleExport = async (category = 'all') => {
     setExportMenuOpen(false);
-    setExporting(true);
     const catMeta = EXPORT_CATEGORIES.find(c => c.value === category) || EXPORT_CATEGORIES[0];
-    const toastId = toast.loading(`Preparing ${catMeta.label} export…`);
+    const apiUrl = api.defaults.baseURL || process.env.REACT_APP_BACKEND_URL || '';
+    const qs = category && category !== 'all' ? `?category=${category}` : '';
+    const directUrl = `${apiUrl}/api/items/export/excel${qs}`;
+
+    // STRATEGY: open the API URL directly in a new top-level window.
+    // This delegates the entire download to the browser:
+    //  - Cookies (JWT) flow automatically because it's same-origin per CORS
+    //  - `Content-Disposition: attachment` header is honored natively
+    //  - No blob URL / iframe sandbox / popup-blocker issues
+    // We use window.top (not window.open) to escape the Emergent preview iframe.
+    const toastId = toast.loading(`Opening ${catMeta.label} export…`);
     try {
-      const qs = category && category !== 'all' ? `?category=${category}` : '';
-      const response = await api.get(`/api/items/export/excel${qs}`, { responseType: 'blob' });
-      if (!response.data || response.data.size === 0) {
-        toast.error('Export returned an empty file', { id: toastId });
+      const topWin = window.top || window;
+      const popup = topWin.open(directUrl, '_blank', 'noopener,noreferrer');
+      if (!popup) {
+        // Popup blocker hit — fall back to hidden iframe trick (keeps user on current page)
+        console.warn('[Export] popup blocked, falling back to hidden iframe');
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = directUrl;
+        document.body.appendChild(iframe);
+        setTimeout(() => { try { document.body.removeChild(iframe); } catch { /* noop */ } }, 10000);
+        toast.success(`${catMeta.label} download triggered — check your browser's downloads`, { id: toastId, duration: 4000 });
         return;
       }
-      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      console.info(`[Export] blob ready: ${blob.size} bytes — filename=${catMeta.filename}`);
-
-      // ROBUST DOWNLOAD: try native .download on anchor, then fall back to window.open.
-      // On deployed env inside iframes / strict CSP, anchor.click() can be silently dropped.
-      const url = window.URL.createObjectURL(blob);
-      let downloadStarted = false;
+      toast.success(`${catMeta.label} export started — check your browser downloads`, { id: toastId, duration: 4000 });
+    } catch (err) {
+      console.error('[Export] direct open failed, falling back to blob download', err);
+      // Fallback to blob download (original path) — keeps compatibility
+      setExporting(true);
       try {
+        const response = await api.get(`/api/items/export/excel${qs}`, { responseType: 'blob' });
+        if (!response.data || response.data.size === 0) {
+          toast.error('Export returned an empty file', { id: toastId });
+          return;
+        }
+        const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
         link.download = catMeta.filename;
-        link.rel = 'noopener';
-        link.style.display = 'none';
         document.body.appendChild(link);
-        // Use MouseEvent dispatch — more reliable than .click() across browsers
         link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-        downloadStarted = true;
-        setTimeout(() => {
-          try { document.body.removeChild(link); } catch { /* noop */ }
-        }, 100);
-      } catch (clickErr) {
-        console.warn('[Export] anchor download failed, falling back to window.open', clickErr);
+        setTimeout(() => { try { document.body.removeChild(link); } catch { /* noop */ } }, 100);
+        setTimeout(() => { try { window.URL.revokeObjectURL(url); } catch { /* noop */ } }, 5000);
+        toast.success(`${catMeta.label} exported (${(blob.size / 1024).toFixed(1)} KB)`, { id: toastId });
+      } catch (blobErr) {
+        const msg = blobErr?.response?.data?.detail || blobErr?.message || 'Network/server error';
+        toast.error(`Export failed: ${msg}`, { id: toastId });
+        console.error('Export error:', blobErr);
+      } finally {
+        setExporting(false);
       }
-      if (!downloadStarted) {
-        window.open(url, '_blank');
-      }
-      // Revoke later — some browsers need the URL alive until the download actually starts
-      setTimeout(() => { try { window.URL.revokeObjectURL(url); } catch { /* noop */ } }, 5000);
-      toast.success(`${catMeta.label} exported (${(blob.size / 1024).toFixed(1)} KB)`, { id: toastId });
-    } catch (error) {
-      const msg = error?.response?.data?.detail || error?.message || 'Network/server error';
-      toast.error(`Export failed: ${msg}`, { id: toastId });
-      console.error('Export error:', error);
-    } finally {
-      setExporting(false);
     }
   };
 
