@@ -17,6 +17,31 @@
 - DC print: "Delivery Challan" with 6-col Part Details + RM Issued sections (NOT 9-col Job OS format)
 
 ## Changelog
+- 2026-02-22 (iter 117): **Item Groups + Group-wise HSN inheritance + PO searchable dropdowns.**
+  User asked for 4 changes: (1) 2nd-level grouping under Category (Motors/Bearings/Valves…); (2) group-level HSN/GST auto-applied to all member items; (3) skip purchase_price/unit_cost change; (4) searchable typeahead on PO supplier + line-item pickers.
+
+  **Backend** (`/app/backend/server.py`):
+  - New models `ItemGroupCreate` + `ItemGroupUpdate` with fields `name, parent_category, default_hsn_code, default_gst_rate, description`.
+  - `ItemCreate` / `ItemUpdate` gained `group_id: Optional[str]`.
+  - New helper `_apply_item_group_overrides(item_doc)` — when an item has a `group_id` referencing a group with `default_hsn_code` or `default_gst_rate`, it OVERRIDES those values on the item (full lock as user requested: "all items under this group consider same HSN & GST%").
+  - `create_item` + `update_item` now call the helper so inheritance fires on every write.
+  - New router `item_groups_router` at `/api/item-groups` with full CRUD:
+    - `GET /api/item-groups[?parent_category=X]` — list with `item_count` attached.
+    - `POST /api/item-groups` — create (unique name+parent_category).
+    - `PUT /api/item-groups/{id}` — update; **if default_hsn_code or default_gst_rate change, cascades to ALL items with that group_id in one update_many**.
+    - `DELETE /api/item-groups/{id}` — blocks with 400 when member items exist (preserves referential integrity).
+  - `GET /api/items` now accepts `group_id` filter query param.
+  - Items Export: added "Group" column (group name, not id); builds group_id→name lookup once.
+  - Items Import: "Group" column auto-creates missing groups and links `group_id` (uses existing group if name matches, case-insensitive).
+
+  **Frontend**:
+  - `ItemsPage.js`: new `itemGroups` state fetched from `/api/item-groups`, new `groupFilter` state, Group dropdown in filters (reflects currently selected category), new **Group column** in the table rendered as an indigo badge, item form shows `item-group-select` dropdown (filtered by current category, collapses to "(No group)"), and when the selected group has `default_hsn_code` / `default_gst_rate`, the HSN input + GST dropdown become **disabled with a gray background + blue hint text** ("inherited from group X, change at group level").
+  - `SettingsPage.js`: new **Item Groups** tab with dedicated `<ItemGroupsCard>` component — inline add/edit form (Name, Parent Category, Default HSN, Default GST%), tabular list showing item_count per group, delete confirmation dialog (blocks delete with item_count > 0 message).
+  - `SearchableSelect.jsx` (NEW, ~120 lines): generic reusable typeahead-search dropdown; configurable `matchFields`, `getLabel`, `getSecondary`; keeps the same UX grammar as the existing `SearchableItemSelect`.
+  - `PurchaseOrdersPage.js`: Supplier field swapped from `<Select>` to `<SearchableSelect>` (searches by name/code/gstin). Line item field swapped from `<Select>` to `<SearchableItemSelect>` (searches by part_number/name).
+
+  **Verified via testing agent — 11/11 tests passed**: CRUD on groups, item inheritance on create, cascade on group update, delete blocked with items, filter by group_id (alone + combined with category), Excel import auto-creates groups, Excel export includes Group column, frontend Item Groups tab renders, Items page Group column renders, PO searchable supplier + item dropdowns render with working typeahead search.
+
 - 2026-02-22 (iter 116): **Two related deployment bugs — credentialed CORS conflict + export not downloading inside iframes.**
 
   **Issue 1 — CORS spec violation on local deployment**: User reported on local Docker/Kubernetes deployment: `"Access to XMLHttpRequest at 'http://localhost:8001/api/items/import/excel' from origin 'http://localhost:3000' has been blocked by CORS policy: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'."`  Root cause: frontend `axios` sends `withCredentials: true` (for JWT cookies) but our backend CORS middleware was configured as `allow_origins=['*']` + `allow_credentials=True` which the CORS spec EXPLICITLY forbids. Fix: changed CORS middleware to use `allow_origin_regex=".*"` (plus fallback to explicit list when `CORS_ORIGINS` env is set). Starlette's `allow_origin_regex` echoes the matched Origin value back instead of the wildcard, which IS spec-compliant with credentials. Also added `expose_headers=["Content-Disposition"]` so frontend can read the attachment filename. Updated the global 500-exception handler to echo the request's Origin header back (not `*`) with `Access-Control-Allow-Credentials: true`. Verified on localhost:8001 directly: OPTIONS preflight now returns `access-control-allow-origin: http://localhost:3000` + `access-control-allow-credentials: true` — fully spec-compliant.
