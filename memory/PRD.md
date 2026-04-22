@@ -17,6 +17,12 @@
 - DC print: "Delivery Challan" with 6-col Part Details + RM Issued sections (NOT 9-col Job OS format)
 
 ## Changelog
+- 2026-02-22 (iter 119): **BOM page "not working" — spinner stuck indefinitely → blocked all creation flows.**
+  User reported BOM creation broken. Root cause wasn't creation at all — the backend POST `/api/bom` was returning valid responses (verified via curl with a fresh BOM `bf98616d…`). The symptom was a **15–30 second loading spinner** that made the table + create button appear absent.
+  Trace: `BOMPage.fetchBoms()` fetched the BOM list correctly (269 rows in ~200ms) but then entered a `for…of` loop over every `status==='active'` BOM calling `/api/bom/{id}/explode` **sequentially** (`await` inside `for`). Each explode endpoint takes 50–100ms, so 269 serial calls ≈ 15–30 seconds of blocked UI. `setLoading(false)` was in the `finally` block of the whole function — NOT fired until all explosions completed.
+  Fix: (1) moved `setLoading(false)` to immediately after `setBoms(data)` so the table renders instantly. (2) Rewrote the explosion loop to fire in **parallel batches of 8** via `Promise.all(chunk.map(...))` — optional enhancement data (used by child-expander UX) populates in the background without blocking. Added second `setLoading(false)` in the catch path for safety.
+  Verified via Playwright: BOM rows render in **3.1s** (was infinite) with 105 rows visible, and Create BOM dialog opens without issue. No change to backend. Created + deleted a test BOM via curl to confirm the end-to-end write path still works.
+
 - 2026-02-22 (iter 118): **Five user-requested refinements — Purchase Cost column, Inventory Configuration tab, Category filters, 10-min idle logout, MecSmart ERP rebrand.**
 
   (1) **Item Import/Export: Purchase Cost column** — swapped `Unit Cost` header for `Purchase Cost` in both directions. field_map now points "Purchase Cost" → `purchase_price`. `Unit Cost` is still accepted as a fallback for backward compatibility with older templates. On import, if `purchase_price` is set but `unit_cost` is blank, it mirrors automatically so BOM/valuation logic keeps working. Verified via curl: import of RM-PC-TEST-01 with Purchase Cost=125.50 produced item with both `purchase_price=125.5` AND `unit_cost=125.5`.

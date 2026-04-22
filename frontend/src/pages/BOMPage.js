@@ -82,18 +82,26 @@ export default function BOMPage() {
       const params = statusFilter ? `?status=${statusFilter}` : '';
       const { data } = await api.get(`/api/bom${params}`);
       setBoms(data);
-      // Fetch explosions for all active BOMs (FG, SA, and component BOMs)
+      setLoading(false); // Show the table immediately — don't block on explosions
+
+      // Fire explosion requests in parallel (not sequential!) and cap to avoid huge concurrency.
+      // Only fire for BOMs currently visible in the default view. Explosions are optional UX data
+      // used by child-expanders; the main BOM rows don't need them to render.
+      const activeBoms = data.filter(b => b.status === 'active');
+      const MAX_PARALLEL = 8;
       const explosions = {};
-      for (const bom of data.filter(b => b.status === 'active')) {
-        try {
-          const { data: expData } = await api.get(`/api/bom/${bom.id}/explode`);
-          explosions[bom.id] = expData;
-        } catch (e) { /* skip */ }
+      for (let i = 0; i < activeBoms.length; i += MAX_PARALLEL) {
+        const chunk = activeBoms.slice(i, i + MAX_PARALLEL);
+        await Promise.all(chunk.map(async (bom) => {
+          try {
+            const { data: expData } = await api.get(`/api/bom/${bom.id}/explode`);
+            explosions[bom.id] = expData;
+          } catch { /* skip failed explode */ }
+        }));
       }
       setAllExplosions(explosions);
     } catch (error) {
       console.error('Failed to fetch BOMs:', error);
-    } finally {
       setLoading(false);
     }
   };
