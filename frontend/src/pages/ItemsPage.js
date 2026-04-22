@@ -12,10 +12,12 @@ import {
   X,
   AlertTriangle,
   Download,
-  Upload
+  Upload,
+  ChevronDown
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { toast } from 'sonner';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 const categories = [
@@ -149,19 +151,45 @@ export default function ItemsPage() {
 
   const fileInputRef = useRef(null);
   const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
-  const handleExport = async () => {
+  const EXPORT_CATEGORIES = [
+    { value: 'all', label: 'All Items', filename: 'items_master.xlsx' },
+    { value: 'raw_material', label: 'Raw Materials (RM)', filename: 'items_raw_materials.xlsx' },
+    { value: 'component', label: 'Parts / Components', filename: 'items_parts.xlsx' },
+    { value: 'sub_assembly', label: 'Sub-Assemblies', filename: 'items_sub_assemblies.xlsx' },
+    { value: 'finished_good', label: 'Finished Goods (FG)', filename: 'items_finished_goods.xlsx' },
+  ];
+
+  const handleExport = async (category = 'all') => {
+    setExportMenuOpen(false);
+    setExporting(true);
+    const catMeta = EXPORT_CATEGORIES.find(c => c.value === category) || EXPORT_CATEGORIES[0];
+    const toastId = toast.loading(`Preparing ${catMeta.label} export…`);
     try {
-      const response = await api.get('/api/items/export/excel', { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const qs = category && category !== 'all' ? `?category=${category}` : '';
+      const response = await api.get(`/api/items/export/excel${qs}`, { responseType: 'blob' });
+      if (!response.data || response.data.size === 0) {
+        toast.error('Export returned an empty file', { id: toastId });
+        return;
+      }
+      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', 'items_master.xlsx');
+      link.setAttribute('download', catMeta.filename);
       document.body.appendChild(link);
       link.click();
       link.remove();
+      setTimeout(() => window.URL.revokeObjectURL(url), 2000);
+      toast.success(`${catMeta.label} exported (${(blob.size / 1024).toFixed(1)} KB)`, { id: toastId });
     } catch (error) {
-      alert('Failed to export items');
+      const msg = error?.response?.data?.detail || error?.message || 'Network/server error';
+      toast.error(`Export failed: ${msg}`, { id: toastId });
+      console.error('Export error:', error);
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -169,14 +197,23 @@ export default function ItemsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setImporting(true);
+    const toastId = toast.loading(`Importing ${file.name}…`);
     try {
       const formData = new FormData();
       formData.append('file', file);
       const { data } = await api.post('/api/items/import/excel', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      alert(`Import complete!\nCreated: ${data.created}\nUpdated: ${data.updated}${data.errors?.length ? `\nErrors: ${data.errors.length}` : ''}`);
+      const created = data.created || 0, updated = data.updated || 0, errCount = data.errors?.length || 0;
+      if (errCount > 0) {
+        toast.warning(`Import partial: ${created} created, ${updated} updated, ${errCount} errors (see console)`, { id: toastId, duration: 8000 });
+        console.warn('Import errors:', data.errors);
+      } else {
+        toast.success(`Import complete: ${created} created, ${updated} updated`, { id: toastId });
+      }
       fetchItems();
     } catch (error) {
-      alert(error.response?.data?.detail || 'Failed to import items');
+      const msg = error?.response?.data?.detail || error?.message || 'Network/server error';
+      toast.error(`Import failed: ${msg}`, { id: toastId });
+      console.error('Import error:', error);
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -191,12 +228,40 @@ export default function ItemsPage() {
           <p className="text-sm text-[#4B5563]">Manage your inventory items and parts catalog</p>
         </div>
         <div className="flex items-center space-x-2">
-          <button onClick={handleExport} className="btn-secondary flex items-center space-x-1 text-sm" data-testid="export-items-btn">
-            <Download className="w-4 h-4" /><span>Export</span>
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setExportMenuOpen(o => !o)}
+              disabled={exporting}
+              className="btn-secondary flex items-center space-x-1 text-sm disabled:opacity-50"
+              data-testid="export-items-btn"
+            >
+              <Download className="w-4 h-4" />
+              <span>{exporting ? 'Exporting…' : 'Export'}</span>
+              <ChevronDown className="w-3 h-3 ml-1" />
+            </button>
+            {exportMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setExportMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-20 w-64 bg-white border border-[#D1D5DB] rounded-sm shadow-lg py-1" data-testid="export-menu">
+                  <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-[#6B7280] font-semibold">Export by category</div>
+                  {EXPORT_CATEGORIES.map(c => (
+                    <button
+                      key={c.value}
+                      onClick={() => handleExport(c.value)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-[#F3F4F6] flex items-center justify-between"
+                      data-testid={`export-cat-${c.value}`}
+                    >
+                      <span>{c.label}</span>
+                      <Download className="w-3 h-3 text-[#6B7280]" />
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           {canEdit && (
             <>
-              <input type="file" ref={fileInputRef} accept=".xlsx,.xls" onChange={handleImport} className="hidden" />
+              <input type="file" ref={fileInputRef} accept=".xlsx,.xls" onChange={handleImport} className="hidden" data-testid="import-items-file" />
               <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="btn-secondary flex items-center space-x-1 text-sm" data-testid="import-items-btn">
                 <Upload className="w-4 h-4" /><span>{importing ? 'Importing...' : 'Import'}</span>
               </button>

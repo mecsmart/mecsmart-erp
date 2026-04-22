@@ -24,6 +24,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { SearchableItemSelect } from '../components/SearchableItemSelect';
+import { toast } from 'sonner';
 
 const statusOptions = [
   { value: 'draft', label: 'Draft' },
@@ -220,18 +221,28 @@ export default function BOMPage() {
   const [bomImporting, setBomImporting] = useState(false);
 
   const handleBomExport = async (bomId = null) => {
+    const toastId = toast.loading(bomId ? 'Preparing BOM export…' : 'Preparing all BOMs export…');
     try {
       const url = bomId ? `/api/bom/export/excel?bom_id=${bomId}` : '/api/bom/export/excel';
       const response = await api.get(url, { responseType: 'blob' });
-      const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
+      if (!response.data || response.data.size === 0) {
+        toast.error('Export returned an empty file', { id: toastId });
+        return;
+      }
+      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
       link.setAttribute('download', bomId ? `bom_${bomId.slice(0,8)}.xlsx` : 'bom_data.xlsx');
       document.body.appendChild(link);
       link.click();
       link.remove();
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+      toast.success(`BOM exported (${(blob.size / 1024).toFixed(1)} KB)`, { id: toastId });
     } catch (error) {
-      alert('Failed to export BOM data');
+      const msg = error?.response?.data?.detail || error?.message || 'Network/server error';
+      toast.error(`BOM export failed: ${msg}`, { id: toastId });
+      console.error('BOM export error:', error);
     }
   };
 
@@ -239,14 +250,23 @@ export default function BOMPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setBomImporting(true);
+    const toastId = toast.loading(`Importing ${file.name}…`);
     try {
       const formData = new FormData();
       formData.append('file', file);
       const { data } = await api.post('/api/bom/import/excel', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-      alert(`BOM Import complete!\nCreated: ${data.created}\nUpdated: ${data.updated}${data.errors?.length ? `\nErrors: ${data.errors.length}\n${data.errors.slice(0, 5).join('\n')}` : ''}`);
+      const created = data.created || 0, updated = data.updated || 0, errCount = data.errors?.length || 0;
+      if (errCount > 0) {
+        toast.warning(`BOM import partial: ${created} created, ${updated} updated, ${errCount} errors (see console)`, { id: toastId, duration: 8000 });
+        console.warn('BOM import errors:', data.errors);
+      } else {
+        toast.success(`BOM import complete: ${created} created, ${updated} updated`, { id: toastId });
+      }
       fetchBoms();
     } catch (error) {
-      alert(error.response?.data?.detail || 'Failed to import BOMs');
+      const msg = error?.response?.data?.detail || error?.message || 'Network/server error';
+      toast.error(`BOM import failed: ${msg}`, { id: toastId });
+      console.error('BOM import error:', error);
     } finally {
       setBomImporting(false);
       if (bomFileRef.current) bomFileRef.current.value = '';

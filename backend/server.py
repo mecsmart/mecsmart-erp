@@ -5619,17 +5619,23 @@ async def get_work_order_print_data(wo_id: str, request: Request):
 # ================== EXPORT / IMPORT ROUTES ==================
 
 @items_router.get("/export/excel")
-async def export_items_excel(request: Request):
-    """Export all items to Excel"""
+async def export_items_excel(request: Request, category: Optional[str] = None):
+    """Export items to Excel. Optional `category` filter: raw_material | component | sub_assembly | finished_good | all"""
     await get_current_user(request)
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
-    items = await db.items.find({}, {"_id": 0}).to_list(10000)
-    
+
+    query = {}
+    valid_cats = {"raw_material", "component", "sub_assembly", "finished_good"}
+    if category and category != "all" and category in valid_cats:
+        query["category"] = category
+    items = await db.items.find(query, {"_id": 0}).to_list(10000)
+
     wb = Workbook()
     ws = wb.active
-    ws.title = "Items Master"
+    # Sheet title reflects the filter
+    cat_label_map = {"raw_material": "Raw Materials", "component": "Parts", "sub_assembly": "Sub-Assemblies", "finished_good": "Finished Goods"}
+    ws.title = cat_label_map.get(category, "Items Master") if category and category != "all" else "Items Master"
     
     headers = ["Part Number", "Name", "Description", "Category", "UOM", "Unit Cost", "Lead Time (Days)", "Safety Stock", "Current Stock", "Reorder Point", "HSN Code", "GST Rate (%)"]
     header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
@@ -5663,11 +5669,16 @@ async def export_items_excel(request: Request):
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    
+
+    # Dynamic filename based on category filter
+    filename_map = {"raw_material": "items_raw_materials.xlsx", "component": "items_parts.xlsx",
+                    "sub_assembly": "items_sub_assemblies.xlsx", "finished_good": "items_finished_goods.xlsx"}
+    out_name = filename_map.get(category, "items_master.xlsx") if category and category != "all" else "items_master.xlsx"
+
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=items_master.xlsx"}
+        headers={"Content-Disposition": f"attachment; filename={out_name}"}
     )
 
 @items_router.post("/import/excel")
