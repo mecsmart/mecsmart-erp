@@ -11,6 +11,41 @@ const api = axios.create({
   withCredentials: true,
 });
 
+// Response interceptor — auto-refresh the access token on 401.
+// This keeps users logged in while they're actively using the app
+// (within the 7-day refresh window), and lets the frontend idle-logout
+// handle explicit inactivity timeout (10 min).
+let _refreshingPromise = null;
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const original = error.config;
+    if (
+      error.response?.status === 401 &&
+      original &&
+      !original._retry &&
+      !original.url?.includes('/api/auth/login') &&
+      !original.url?.includes('/api/auth/refresh') &&
+      !original.url?.includes('/api/auth/me')
+    ) {
+      original._retry = true;
+      try {
+        // Share the refresh promise across concurrent 401s
+        if (!_refreshingPromise) {
+          _refreshingPromise = api.post('/api/auth/refresh').finally(() => {
+            _refreshingPromise = null;
+          });
+        }
+        await _refreshingPromise;
+        return api(original);
+      } catch {
+        return Promise.reject(error);
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Error formatter for FastAPI validation errors
 function formatApiErrorDetail(detail) {
   if (detail == null) return "Something went wrong. Please try again.";
@@ -96,6 +131,41 @@ export function AuthProvider({ children }) {
     if (!modulePerms) return false;
     return modulePerms.includes(action);
   };
+
+  // ============================================================================
+  // IDLE LOGOUT — auto-logs out after N minutes of inactivity.
+  // Resets on any mousemove / keydown / scroll / click / touchstart.
+  // ============================================================================
+  const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+  useEffect(() => {
+    if (!user) return; // Only run when authenticated
+
+    let timer = null;
+    const idleLogout = async () => {
+      try {
+        await api.post('/api/auth/logout');
+      } catch { /* noop */ }
+      setUser(false);
+      setPermissions({});
+      // Surface a clear notice so the user knows WHY they were logged out
+      try {
+        const { toast } = await import('sonner');
+        toast.warning('Session timed out after 10 minutes of inactivity. Please sign in again.', { duration: 6000 });
+      } catch { /* noop */ }
+    };
+    const resetTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(idleLogout, IDLE_TIMEOUT_MS);
+    };
+    const events = ['mousemove', 'keydown', 'scroll', 'click', 'touchstart'];
+    events.forEach(evt => window.addEventListener(evt, resetTimer, { passive: true }));
+    resetTimer();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      events.forEach(evt => window.removeEventListener(evt, resetTimer));
+    };
+  }, [user]);
 
   const value = {
     user,

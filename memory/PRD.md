@@ -17,6 +17,23 @@
 - DC print: "Delivery Challan" with 6-col Part Details + RM Issued sections (NOT 9-col Job OS format)
 
 ## Changelog
+- 2026-02-22 (iter 118): **Five user-requested refinements — Purchase Cost column, Inventory Configuration tab, Category filters, 10-min idle logout, MecSmart ERP rebrand.**
+
+  (1) **Item Import/Export: Purchase Cost column** — swapped `Unit Cost` header for `Purchase Cost` in both directions. field_map now points "Purchase Cost" → `purchase_price`. `Unit Cost` is still accepted as a fallback for backward compatibility with older templates. On import, if `purchase_price` is set but `unit_cost` is blank, it mirrors automatically so BOM/valuation logic keeps working. Verified via curl: import of RM-PC-TEST-01 with Purchase Cost=125.50 produced item with both `purchase_price=125.5` AND `unit_cost=125.5`.
+
+  (2) **Inventory → Configuration tab** — extracted the `ItemGroupsCard` into a shared component (`/app/frontend/src/components/ItemGroupsCard.jsx`). Added a third tab "Configuration" inside `InventoryPage.js` (next to Stock Levels + Transactions). Moved the Item Groups CRUD UI there. REMOVED the duplicate Item Groups tab from `SettingsPage.js` (tab trigger + TabsContent + inline definition). Cleaner UX because item configuration belongs with inventory, not company settings.
+
+  (3) **Category filter on Stores Stock + CRM Products** —
+     - `WarehousesPage.js` → Stores Stock tab gained a `stores-stock-category-filter` `<select>` (RM / Component / Sub-Assembly / FG) with a Clear button, filters the inventory list in real time.
+     - `CRMPage.js` → `MultiItemPicker` (used in Quotation / PI / TI / Packing List) gained a `-cat-filter` dropdown next to the search input, narrows suggestions by item category.
+     - Inventory Stock tab already had its own category filter (iter-113) — left unchanged.
+
+  (4) **Session idle logout after 10 minutes** — added IDLE_TIMEOUT_MS=10*60*1000 effect in `AuthContext.js`. Runs only when `user` is truthy, resets on any mousemove/keydown/scroll/click/touchstart. On timeout: calls `/api/auth/logout`, clears user+permissions state, and shows a Sonner warning toast "Session timed out after 10 minutes of inactivity. Please sign in again." (imported dynamically to avoid circular import). Also added an **axios response interceptor** that auto-refreshes the access token on 401 (via `/api/auth/refresh`) — this was missing before, which is why user reported "session logout even working also" (backend JWT expired at 15min but frontend had no refresh logic, so users were silently getting 401s before any idle timeout could fire). Interceptor shares refresh promise across concurrent 401s to avoid thundering-herd, excludes the auth endpoints themselves to prevent loops.
+
+  (5) **Rebrand "MechsmartERP" → "MecSmart ERP"** — `Layout.js` (sidebar logo + page header), `LoginPage.js` (2 spots), `public/index.html` (`<title>`). Grep confirms zero "MechsmartERP" strings remain.
+
+  Verified via screenshot: (a) Login + app header + sidebar all show "MecSmart ERP", (b) Inventory → Configuration tab shows full Item Groups CRUD with existing Bearings/Motors/V-Belts, (c) Stores Stock category filter renders, (d) Settings Item Groups tab is gone. Backend + frontend lint clean. No regressions on earlier features (Items Group column, filter, HSN inheritance, PO searchable dropdowns, category-based export — all still present).
+
 - 2026-02-22 (iter 117): **Item Groups + Group-wise HSN inheritance + PO searchable dropdowns.**
   User asked for 4 changes: (1) 2nd-level grouping under Category (Motors/Bearings/Valves…); (2) group-level HSN/GST auto-applied to all member items; (3) skip purchase_price/unit_cost change; (4) searchable typeahead on PO supplier + line-item pickers.
 

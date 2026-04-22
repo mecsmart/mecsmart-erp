@@ -1510,11 +1510,15 @@ function NewCustomerInlineDialog({ open, onClose, onCreated }) {
  * ========================================================================= */
 function MultiItemPicker({ items, selectedIds, onChange, testid }) {
   const [query, setQuery] = useState('');
+  const [catFilter, setCatFilter] = useState('');
   const selectedItems = items.filter(i => selectedIds.includes(i.id));
-  const matches = query.trim() ? items.filter(i => {
+  const matches = items.filter(i => {
+    if (selectedIds.includes(i.id)) return false;
+    if (catFilter && i.category !== catFilter) return false;
+    if (!query.trim()) return false;
     const q = query.toLowerCase();
-    return !selectedIds.includes(i.id) && ((i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q));
-  }).slice(0, 50) : [];
+    return ((i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q));
+  }).slice(0, 50);
   const add = (id) => { onChange([...selectedIds, id]); setQuery(''); };
   const remove = (id) => onChange(selectedIds.filter(x => x !== id));
   return (
@@ -1528,19 +1532,33 @@ function MultiItemPicker({ items, selectedIds, onChange, testid }) {
           </span>
         ))}
       </div>
-      <input
-        className="input-field text-sm"
-        type="text"
-        placeholder="Search items to add..."
-        value={query}
-        onChange={e => setQuery(e.target.value)}
-        data-testid={`${testid}-search`}
-      />
+      <div className="flex gap-2">
+        <input
+          className="input-field text-sm flex-1"
+          type="text"
+          placeholder="Search items to add..."
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          data-testid={`${testid}-search`}
+        />
+        <select
+          value={catFilter}
+          onChange={e => setCatFilter(e.target.value)}
+          className="input-field text-xs w-36"
+          data-testid={`${testid}-cat-filter`}
+        >
+          <option value="">All Categories</option>
+          <option value="raw_material">Raw Material</option>
+          <option value="component">Component</option>
+          <option value="sub_assembly">Sub-Assembly</option>
+          <option value="finished_good">Finished Good</option>
+        </select>
+      </div>
       {matches.length > 0 && (
         <div className="border border-[#E5E7EB] mt-1 max-h-40 overflow-y-auto bg-white text-xs">
           {matches.map(i => (
             <button key={i.id} onClick={() => add(i.id)} className="block w-full text-left px-2 py-1 hover:bg-[#F3F4F6]" data-testid={`${testid}-opt-${i.id}`}>
-              <span className="mono font-medium">{i.part_number}</span> · {i.name}
+              <span className="mono font-medium">{i.part_number}</span> · {i.name} <span className="text-[#9CA3AF]">({i.category?.replace('_', ' ')})</span>
             </button>
           ))}
         </div>

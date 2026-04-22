@@ -49,7 +49,7 @@ export default function LoginPage() {
         <div className="relative z-10 flex flex-col justify-center px-12 text-white">
           <div className="flex items-center space-x-3 mb-6">
             <Factory className="w-10 h-10" />
-            <span className="text-2xl font-bold font-[Chivo]">MechsmartERP</span>
+            <span className="text-2xl font-bold font-[Chivo]">MecSmart ERP</span>
           </div>
           <h1 className="text-4xl font-bold font-[Chivo] mb-4">
             Manufacturing Excellence
@@ -65,7 +65,7 @@ export default function LoginPage() {
         <div className="w-full max-w-md">
           <div className="lg:hidden flex items-center justify-center space-x-3 mb-8">
             <Factory className="w-8 h-8 text-[#1D3557]" />
-            <span className="text-xl font-bold font-[Chivo] text-[#1D3557]">MechsmartERP</span>
+            <span className="text-xl font-bold font-[Chivo] text-[#1D3557]">MecSmart ERP</span>
           </div>
 
           <h2 className="text-2xl font-bold font-[Chivo] text-[#111827] mb-2">

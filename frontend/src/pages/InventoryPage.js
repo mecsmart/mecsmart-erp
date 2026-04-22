@@ -16,6 +16,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { ItemGroupsCard } from '../components/ItemGroupsCard';
 
 const transactionTypes = [
   { value: 'receive', label: 'Receive', icon: ArrowDownRight, color: 'text-[#03543F]' },
@@ -274,6 +275,13 @@ export default function InventoryPage() {
           >
             Transactions
           </TabsTrigger>
+          <TabsTrigger 
+            value="configuration" 
+            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
+            data-testid="tab-configuration"
+          >
+            Configuration
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="stock" className="mt-4">
@@ -466,6 +474,10 @@ export default function InventoryPage() {
               </div>
             )}
           </div>
+        </TabsContent>
+
+        <TabsContent value="configuration" className="mt-4" data-testid="configuration-tab-content">
+          <ItemGroupsCard isAdmin={user?.role === 'admin'} />
         </TabsContent>
       </Tabs>
     </div>
