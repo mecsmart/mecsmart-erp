@@ -89,10 +89,23 @@ export default function SuppliersPage() {
     setGstinLookupError('');
     try {
       const { data } = await api.post('/api/suppliers/lookup-gstin', { gstin });
-      // Map Appyflow state name to state code (first 2 chars of GSTIN are authoritative)
+      // Appyflow free-tier always returns the same demo record (DISHANT MAHAJAN).
+      // Do NOT overwrite form fields in that case — warn the user instead.
+      if (data.sandbox_mode) {
+        alert(
+          '⚠️ Appyflow FREE-TIER response detected.\n\n' +
+          'Every free-tier lookup returns the same demo record ("DISHANT MAHAJAN / AppyFlow Technologies"), regardless of the GSTIN you entered.\n\n' +
+          'To fetch real GSTIN details:\n' +
+          '1. Top-up credits at https://dashboard.gstapi.appyflow.in/#/app/buy-credits (minimum ≈ ₹500 → 1,250 lookups at ₹0.40/call)\n' +
+          '2. Retry — the existing key will immediately start returning live data.\n\n' +
+          'Form fields were NOT auto-filled to prevent dummy data getting saved. The state code (' + gstin.substring(0, 2) + ') has been set from the GSTIN itself.'
+        );
+        // Still set the state_code from GSTIN (authoritative, derived locally, not from Appyflow)
+        setFormData(prev => ({ ...prev, gstin, state_code: gstin.substring(0, 2) || prev.state_code }));
+        return;
+      }
       const stateCode = data.state_code_from_gstin || '';
       const addr = data.principal_address || {};
-      // Build a readable address
       const addrLine1 = [addr.building, addr.street].filter(Boolean).join(', ');
       const addrLine2 = [addr.locality].filter(Boolean).join(', ');
       setFormData(prev => ({

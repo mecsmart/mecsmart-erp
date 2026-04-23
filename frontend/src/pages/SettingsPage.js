@@ -781,6 +781,9 @@ export default function SettingsPage() {
               <a href="https://appyflow.in/verify-gst/" target="_blank" rel="noopener noreferrer" className="text-xs text-[#1E429F] underline whitespace-nowrap">Get key →</a>
             </div>
             <div className="space-y-3 mt-4">
+              <div className="bg-[#FFFBEB] border border-[#F59E0B] rounded-sm p-3 text-xs text-[#92400E]">
+                <strong>Note on Appyflow free tier:</strong> The first 50 lookups are free but Appyflow returns the SAME demo record (<em>DISHANT MAHAJAN / AppyFlow Technologies</em>) for every free-tier call — this is by their design to discourage abuse. To get live GST portal data for any GSTIN, top-up credits (min ≈ ₹500 = 1,250 lookups at ₹0.40/call) at <a href="https://dashboard.gstapi.appyflow.in/#/app/buy-credits" target="_blank" rel="noopener noreferrer" className="underline">dashboard.gstapi.appyflow.in</a>. Existing key/code works immediately after top-up — no changes needed here.
+              </div>
               <div>
                 <label className="block text-sm font-semibold text-[#111827] mb-1">Appyflow API Key (key_secret)</label>
                 <input
@@ -807,7 +810,11 @@ export default function SettingsPage() {
                     if (!g) return;
                     try {
                       const { data } = await api.post('/api/suppliers/lookup-gstin', { gstin: g.trim().toUpperCase() });
-                      toast.success(`OK: ${data.legal_name || data.trade_name || 'Fetched'} (${data.status})`);
+                      if (data.sandbox_mode) {
+                        toast.warning('⚠️ Sandbox / free-tier response. Top up credits at appyflow.in to fetch real data.');
+                      } else {
+                        toast.success(`Live: ${data.legal_name || data.trade_name || 'Fetched'} (${data.status})`);
+                      }
                     } catch (e) {
                       toast.error(e.response?.data?.detail || 'Lookup failed');
                     }

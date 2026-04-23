@@ -2799,6 +2799,17 @@ async def lookup_gstin(payload: GSTINLookupRequest, request: Request):
     if not tp:
         raise HTTPException(status_code=404, detail="GSTIN not found (empty response)")
 
+    # Detect Appyflow "free tier / sandbox" responses. On the free plan, Appyflow
+    # ALWAYS returns the same demo record (DISHANT MAHAJAN / AppyFlow Technologies)
+    # and attaches a notice in `message`. Surface this to the caller so the UI
+    # can show a clear banner instead of silently trusting the stub data.
+    appyflow_notice = str(data.get("message") or "")
+    sandbox_mode = False
+    if appyflow_notice:
+        m = appyflow_notice.lower()
+        if "free credits" in m or "paid credits" in m or "sandbox" in m:
+            sandbox_mode = True
+
     pradr = tp.get("pradr") or {}
     addr = pradr.get("addr") or {}
     status_raw = str(tp.get("sts") or "").upper()
@@ -2822,6 +2833,10 @@ async def lookup_gstin(payload: GSTINLookupRequest, request: Request):
         },
         # State code from GSTIN (first 2 digits) — authoritative for CGST/SGST logic.
         "state_code_from_gstin": gstin[:2],
+        # Provider diagnostics — let the UI warn the user.
+        "provider": "appyflow",
+        "provider_message": appyflow_notice,
+        "sandbox_mode": sandbox_mode,
     }
     return normalized
 
