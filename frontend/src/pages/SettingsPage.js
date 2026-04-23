@@ -399,7 +399,7 @@ export default function SettingsPage() {
                 <h2 className="text-lg font-semibold font-[Chivo] text-[#1D3557] flex items-center space-x-2">
                   <Truck className="w-5 h-5" /><span>PO Section</span>
                 </h2>
-                <p className="text-sm text-[#4B5563]">Define charge types (Transportation, Handling, Packing, etc.) and default Terms &amp; Conditions printed on every Purchase Order.</p>
+                <p className="text-sm text-[#4B5563]">Define charge types (Transportation, Handling, Packing, etc.) that appear as additional cost lines on every Purchase Order. Default PO Terms &amp; Conditions have moved to <span className="font-medium">Inventory → Configuration</span>.</p>
               </div>
               {isAdmin && (
                 <button onClick={() => openChargeDialog()} className="btn-primary flex items-center space-x-2" data-testid="add-charge-type-btn">
@@ -464,30 +464,6 @@ export default function SettingsPage() {
               </div>
             </DialogContent>
           </Dialog>
-
-          {/* Default PO Terms & Conditions (prints on every PO) */}
-          <div className="card-flat p-6">
-            <h2 className="text-lg font-semibold font-[Chivo] text-[#1D3557] flex items-center space-x-2 mb-1">
-              <FileText className="w-5 h-5" /><span>Default Terms &amp; Conditions</span>
-            </h2>
-            <p className="text-sm text-[#4B5563] mb-4">These terms are auto-filled on every Purchase Order print. Supervisors can still override per-PO.</p>
-            <textarea
-              rows={8}
-              value={settings.po_terms_conditions || ''}
-              onChange={e => setSettings({ ...settings, po_terms_conditions: e.target.value })}
-              className="input-field w-full mono text-xs"
-              placeholder={`1. Payment: Net 30 days from invoice date.\n2. Delivery: As per schedule mentioned above.\n3. Quality: Supplier to provide material/test certificates.\n4. Warranty: 12 months from the date of receipt.\n5. Taxes: GST extra as applicable.\n6. Any deviation to this PO needs to be approved in writing before dispatch.`}
-              data-testid="po-terms-textarea"
-              disabled={!isAdmin}
-            />
-            <div className="flex justify-end mt-3">
-              {isAdmin && (
-                <button onClick={handleSave} disabled={saving} className="btn-primary" data-testid="save-po-terms-btn">
-                  {saving ? 'Saving...' : 'Save Terms'}
-                </button>
-              )}
-            </div>
-          </div>
         </TabsContent>
 
         {/* ====== Number Series Tab ====== */}

@@ -12,6 +12,7 @@ import MRPPage from "./pages/MRPPage";
 import ProductionPage from "./pages/ProductionPage";
 import QualityPage from "./pages/QualityPage";
 import InventoryPage from "./pages/InventoryPage";
+import InventoryConfigurationPage from "./pages/InventoryConfigurationPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import PurchaseOrdersPage from "./pages/PurchaseOrdersPage";
 import PurchaseInvoicePage from "./pages/PurchaseInvoicePage";
@@ -55,6 +56,7 @@ function App() {
             <Route path="production" element={<ProductionPage />} />
             <Route path="quality" element={<QualityPage />} />
             <Route path="inventory" element={<InventoryPage />} />
+            <Route path="inventory/configuration" element={<InventoryConfigurationPage />} />
             <Route path="suppliers" element={<SuppliersPage />} />
             <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
             <Route path="purchase-invoices" element={<PurchaseInvoicePage />} />

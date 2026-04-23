@@ -24,8 +24,8 @@ const inventoryGroupItems = [
   { name: 'Suppliers', href: '/suppliers', icon: Truck, module: 'suppliers' },
   { name: 'MRP', href: '/mrp', icon: Calculator, module: 'mrp' },
   { name: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart, module: 'purchase_orders' },
-  { name: 'Configuration', href: '/inventory?tab=configuration', icon: Cog, module: 'inventory' },
   { name: 'Purchase Invoices', href: '/purchase-invoices', icon: FileText, module: 'purchase_orders' },
+  { name: 'Configuration', href: '/inventory/configuration', icon: Cog, module: 'inventory' },
 ];
 
 const productionGroupItems = [

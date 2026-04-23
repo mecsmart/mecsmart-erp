@@ -16,7 +16,6 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { ItemGroupsCard } from '../components/ItemGroupsCard';
 
 const transactionTypes = [
   { value: 'receive', label: 'Receive', icon: ArrowDownRight, color: 'text-[#03543F]' },
@@ -34,11 +33,11 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('stock');
 
-  // Deep-link: sidebar "Configuration" sub-item uses ?tab=configuration
+  // Deep-link: sidebar "Configuration" now has its own route, keep only stock/transactions here
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get('tab');
-    if (tab && ['stock', 'transactions', 'configuration'].includes(tab)) {
+    if (tab && ['stock', 'transactions'].includes(tab)) {
       setActiveTab(tab);
     }
   }, []);
@@ -284,13 +283,6 @@ export default function InventoryPage() {
           >
             Transactions
           </TabsTrigger>
-          <TabsTrigger 
-            value="configuration" 
-            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
-            data-testid="tab-configuration"
-          >
-            Configuration
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="stock" className="mt-4">
@@ -483,10 +475,6 @@ export default function InventoryPage() {
               </div>
             )}
           </div>
-        </TabsContent>
-
-        <TabsContent value="configuration" className="mt-4" data-testid="configuration-tab-content">
-          <ItemGroupsCard isAdmin={user?.role === 'admin'} />
         </TabsContent>
       </Tabs>
     </div>
