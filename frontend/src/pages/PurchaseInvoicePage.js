@@ -9,7 +9,7 @@ import { SearchableSelect } from '../components/SearchableSelect';
 import { SearchableItemSelect } from '../components/SearchableItemSelect';
 
 export default function PurchaseInvoicePage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { formatCurrency } = useCompanySettings();
   const [invoices, setInvoices] = useState([]);
   const [pendingGRNs, setPendingGRNs] = useState([]);
@@ -29,7 +29,10 @@ export default function PurchaseInvoicePage() {
   });
 
   const isAdmin = user?.role === 'admin';
-  const canEdit = ['admin', 'production_manager'].includes(user?.role);
+  // Permission-driven visibility: admin always allowed, else granular permissions.
+  const canEdit = isAdmin
+    || hasPermission('purchase_invoices', 'create')
+    || hasPermission('purchase_invoices', 'edit');
 
   const fetchData = useCallback(async () => {
     setLoading(true);

@@ -29,7 +29,7 @@ const emptyForm = {
 };
 
 export default function PurchaseOrdersPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { formatCurrency, currencySymbol } = useCompanySettings();
   const [suppliers, setSuppliers] = useState([]);
   const [items, setItems] = useState([]);
@@ -45,7 +45,11 @@ export default function PurchaseOrdersPage() {
   const [allOrders, setAllOrders] = useState([]);
   const [poSearch, setPoSearch] = useState('');
 
-  const canEdit = ['admin', 'production_manager', 'inventory_manager'].includes(user?.role);
+  // Permission-driven visibility: admin always allowed, otherwise use granular permissions.
+  // This unblocks custom roles that were granted purchase_orders.create/edit explicitly.
+  const canEdit = user?.role === 'admin'
+    || hasPermission('purchase_orders', 'create')
+    || hasPermission('purchase_orders', 'edit');
 
   const fetchData = useCallback(async () => {
     setLoading(true);

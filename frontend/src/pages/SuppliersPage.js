@@ -18,7 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 
 export default function SuppliersPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
@@ -46,7 +46,10 @@ export default function SuppliersPage() {
   });
 
   const [states, setStates] = useState([]);
-  const canEdit = ['admin', 'production_manager'].includes(user?.role);
+  // Permission-driven visibility: admin always allowed, else granular permissions.
+  const canEdit = user?.role === 'admin'
+    || hasPermission('suppliers', 'create')
+    || hasPermission('suppliers', 'edit');
 
   useEffect(() => {
     fetchSuppliers();
