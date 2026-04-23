@@ -27,13 +27,14 @@ const categories = [
   { value: 'finished_good', label: 'Finished Good' },
 ];
 
-const units = ['pcs', 'kg', 'meter', 'sheet', 'kit', 'liter', 'set'];
+const FALLBACK_UNITS = ['pcs', 'kg', 'meter', 'sheet', 'kit', 'liter', 'set'];
 
 export default function ItemsPage() {
   const { user } = useAuth();
   const { formatCurrency, currencySymbol } = useCompanySettings();
   const [items, setItems] = useState([]);
   const [itemGroups, setItemGroups] = useState([]);
+  const [units, setUnits] = useState(FALLBACK_UNITS);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -73,6 +74,14 @@ export default function ItemsPage() {
         setItemGroups(data || []);
       } catch (e) {
         console.warn('Failed to fetch item groups:', e);
+      }
+      try {
+        const { data } = await api.get('/api/settings/uoms');
+        if (Array.isArray(data) && data.length) {
+          setUnits(data.map(u => u.code));
+        }
+      } catch (e) {
+        console.warn('Failed to fetch UOM master, using fallback:', e);
       }
     })();
   }, []);

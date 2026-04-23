@@ -969,6 +969,26 @@ def require_roles(allowed_roles: List[str]):
         return user
     return role_checker
 
+def _require_access(user: dict, allowed_roles: list, module: str = None, action: str = None):
+    """
+    Authorization helper.
+    Grants access if EITHER:
+      (a) user["role"] is in `allowed_roles` (legacy path), OR
+      (b) user has `action` on `module` in their effective permissions dict.
+    Raises HTTPException(403) otherwise. `module` & `action` are optional —
+    if omitted this falls back to strict role-only behaviour.
+    """
+    if allowed_roles and user.get("role") in allowed_roles:
+        return
+    if module and action:
+        perms = user.get("permissions") or {}
+        module_perms = perms.get(module) or []
+        if action in module_perms:
+            return
+    raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
+
 # ================== AUTH ROUTES ==================
 
 @auth_router.post("/register")
@@ -1139,9 +1159,7 @@ async def _apply_item_group_overrides(item_doc: dict) -> dict:
 @items_router.post("", status_code=201)
 async def create_item(item_data: ItemCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager", "inventory_manager"], module="items", action="create")
     existing = await db.items.find_one({"part_number": item_data.part_number})
     if existing:
         raise HTTPException(status_code=400, detail="Part number already exists")
@@ -1164,9 +1182,7 @@ async def create_item(item_data: ItemCreate, request: Request):
 @items_router.put("/{item_id}")
 async def update_item(item_id: str, item_data: ItemUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager", "inventory_manager"], module="items", action="edit")
     update_data = {k: v for k, v in item_data.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
@@ -1189,9 +1205,7 @@ async def update_item(item_id: str, item_data: ItemUpdate, request: Request):
 @items_router.delete("/{item_id}")
 async def delete_item(item_id: str, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
+    _require_access(user, ["admin"], module="items", action="delete")
     # Referential integrity — block delete if the item is referenced in transactions
     checks = [
         ("boms", {"$or": [{"parent_item_id": item_id}, {"components.item_id": item_id}]}, "BOM(s)"),
@@ -1248,8 +1262,7 @@ async def list_item_groups(request: Request, parent_category: Optional[str] = No
 @item_groups_router.post("", status_code=201)
 async def create_item_group(data: ItemGroupCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    _require_access(user, ["admin", "production_manager", "inventory_manager"], module="items", action="create")
     existing = await db.item_groups.find_one({"name": data.name, "parent_category": data.parent_category})
     if existing:
         raise HTTPException(status_code=400, detail=f"Group '{data.name}' already exists under {data.parent_category or 'any category'}")
@@ -1267,8 +1280,7 @@ async def create_item_group(data: ItemGroupCreate, request: Request):
 @item_groups_router.put("/{group_id}")
 async def update_item_group(group_id: str, data: ItemGroupUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    _require_access(user, ["admin", "production_manager", "inventory_manager"], module="items", action="edit")
     update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
     if not update:
         raise HTTPException(status_code=400, detail="No data to update")
@@ -1464,9 +1476,7 @@ async def explode_bom(bom_id: str, request: Request, levels: int = 10):
 @bom_router.post("")
 async def create_bom(bom_data: BOMCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="bom", action="create")
     # Verify parent item exists
     parent_item = await db.items.find_one({"id": bom_data.parent_item_id})
     if not parent_item:
@@ -1500,9 +1510,7 @@ async def create_bom(bom_data: BOMCreate, request: Request):
 @bom_router.put("/{bom_id}")
 async def update_bom(bom_id: str, bom_data: BOMUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="bom", action="edit")
     update_data = {}
     for k, v in bom_data.model_dump().items():
         if v is not None:
@@ -1533,9 +1541,7 @@ async def update_bom(bom_id: str, bom_data: BOMUpdate, request: Request):
 async def create_bom_revision(bom_id: str, new_revision: str, request: Request):
     """Create a new revision of an existing BOM"""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="bom", action="create")
     bom = await db.boms.find_one({"id": bom_id}, {"_id": 0})
     if not bom:
         raise HTTPException(status_code=404, detail="BOM not found")
@@ -1565,9 +1571,7 @@ async def create_bom_revision(bom_id: str, new_revision: str, request: Request):
 @bom_router.delete("/{bom_id}")
 async def delete_bom(bom_id: str, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin"], module="bom", action="delete")
     result = await db.boms.delete_one({"id": bom_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="BOM not found")
@@ -1620,9 +1624,7 @@ async def get_production_order(order_id: str, request: Request):
 @production_router.post("")
 async def create_production_order(order_data: ProductionOrderCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
+    _require_access(user, ["admin", "production_manager"], module="production", action="create")
     # Resolve lines — either provided directly (multi-line) or built from legacy fields (single-line).
     raw_lines = order_data.lines or []
     if not raw_lines:
@@ -1691,9 +1693,7 @@ async def create_production_order(order_data: ProductionOrderCreate, request: Re
 @production_router.put("/{order_id}")
 async def update_production_order(order_id: str, order_data: ProductionOrderUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="production", action="edit")
     order = await db.production_orders.find_one({"id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Production order not found")
@@ -1728,9 +1728,7 @@ async def confirm_production_order(order_id: str, request: Request):
     split so the floor team knows what to do per line.
     """
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
+    _require_access(user, ["admin", "production_manager"], module="production", action="create")
     order = await db.production_orders.find_one({"id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Sales order not found")
@@ -1817,9 +1815,7 @@ async def confirm_production_order(order_id: str, request: Request):
 async def cancel_production_order(order_id: str, request: Request):
     """Cancel a sales order with full cascade: SO → MOs → reverse stock → cancel job cards"""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="production", action="create")
     order = await db.production_orders.find_one({"id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Sales order not found")
@@ -2228,9 +2224,7 @@ async def get_inspection_template(template_id: str, request: Request):
 @quality_router.post("/templates")
 async def create_inspection_template(template_data: InspectionTemplateCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "quality_inspector"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "quality_inspector"], module="quality", action="create")
     template_doc = {
         "id": str(uuid.uuid4()),
         **template_data.model_dump(),
@@ -2261,9 +2255,7 @@ async def get_inspections(request: Request, result: Optional[str] = None, item_i
 @quality_router.post("/inspections")
 async def create_inspection(inspection_data: InspectionRecordCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "quality_inspector"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "quality_inspector"], module="quality", action="create")
     # Generate inspection number
     count = await db.inspections.count_documents({})
     inspection_number = f"INS-{str(count + 1).zfill(6)}"
@@ -2335,9 +2327,7 @@ async def get_inventory_transactions(request: Request, item_id: Optional[str] = 
 @inventory_router.post("/transactions")
 async def create_inventory_transaction(tx_data: InventoryTransactionCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "inventory_manager", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "inventory_manager", "production_manager"], module="inventory", action="create")
     # Warehouse is mandatory for stock-changing transactions
     if tx_data.transaction_type in ["receive", "issue", "adjust"] and not tx_data.warehouse_id:
         raise HTTPException(status_code=400, detail="Warehouse is required for stock-changing transactions")
@@ -2674,9 +2664,7 @@ async def get_supplier(supplier_id: str, request: Request):
 @suppliers_router.post("", status_code=201)
 async def create_supplier(supplier_data: SupplierCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="suppliers", action="create")
     # Auto-generate supplier code from configurable series if not provided
     provided_code = (supplier_data.code or "").strip()
     if not provided_code:
@@ -2701,9 +2689,7 @@ async def create_supplier(supplier_data: SupplierCreate, request: Request):
 @suppliers_router.put("/{supplier_id}")
 async def update_supplier(supplier_id: str, supplier_data: SupplierUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="suppliers", action="edit")
     update_data = {k: v for k, v in supplier_data.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
@@ -2719,9 +2705,7 @@ async def update_supplier(supplier_id: str, supplier_data: SupplierUpdate, reque
 @suppliers_router.delete("/{supplier_id}")
 async def delete_supplier(supplier_id: str, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin"], module="suppliers", action="delete")
     result = await db.suppliers.delete_one({"id": supplier_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Supplier not found")
@@ -2790,9 +2774,7 @@ async def get_po_print_data(po_id: str, request: Request):
 @purchase_orders_router.post("", status_code=201)
 async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager", "inventory_manager"], module="purchase_orders", action="create")
     supplier = await db.suppliers.find_one({"id": po_data.supplier_id})
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
@@ -2936,9 +2918,7 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
 async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
     """Create PO from MRP suggestions — blocks if items already covered by existing POs"""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager", "inventory_manager"], module="purchase_orders", action="create")
     supplier = await db.suppliers.find_one({"id": data.supplier_id})
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
@@ -3074,9 +3054,7 @@ async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
 @purchase_orders_router.put("/{po_id}")
 async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager", "inventory_manager"], module="purchase_orders", action="edit")
     existing_po = await db.purchase_orders.find_one({"id": po_id})
     if not existing_po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
@@ -3234,9 +3212,7 @@ async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, reques
 async def cancel_purchase_order(po_id: str, request: Request):
     """Cancel a PO. Only draft/approved/sent POs can be cancelled."""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="purchase_orders", action="create")
     po = await db.purchase_orders.find_one({"id": po_id})
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
@@ -3256,9 +3232,7 @@ async def cancel_purchase_order(po_id: str, request: Request):
 async def receive_purchase_order(po_id: str, request: Request):
     """Receive PO and update inventory"""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "inventory_manager"], module="purchase_orders", action="create")
     po = await db.purchase_orders.find_one({"id": po_id})
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
@@ -3404,9 +3378,7 @@ async def get_warehouse_stock(warehouse_id: str, request: Request):
 @warehouses_router.post("", status_code=201)
 async def create_warehouse(warehouse_data: WarehouseCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "inventory_manager"], module="stores", action="create")
     existing = await db.warehouses.find_one({"code": warehouse_data.code})
     if existing:
         raise HTTPException(status_code=400, detail="Warehouse code already exists")
@@ -3428,9 +3400,7 @@ async def create_warehouse(warehouse_data: WarehouseCreate, request: Request):
 @warehouses_router.put("/{warehouse_id}")
 async def update_warehouse(warehouse_id: str, warehouse_data: WarehouseUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "inventory_manager"], module="stores", action="edit")
     update_data = {k: v for k, v in warehouse_data.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
@@ -3451,9 +3421,7 @@ async def update_warehouse(warehouse_id: str, warehouse_data: WarehouseUpdate, r
 async def create_stock_transfer(transfer_data: StockTransferCreate, request: Request):
     """Transfer stock between warehouses"""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "inventory_manager"], module="stores", action="create")
     # Verify warehouses exist
     from_wh = await db.warehouses.find_one({"id": transfer_data.from_warehouse_id})
     to_wh = await db.warehouses.find_one({"id": transfer_data.to_warehouse_id})
@@ -3623,9 +3591,7 @@ async def get_pending_grn_pos(request: Request):
 async def create_grn(grn_data: GRNCreate, request: Request):
     """Create GRN - verify material, price, update inventory"""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "inventory_manager"], module="stores", action="create")
     po = await db.purchase_orders.find_one({"id": grn_data.po_id})
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
@@ -3768,9 +3734,7 @@ async def create_manual_grn(data: ManualGRNCreate, request: Request):
     Treats user-entered supplier + lines as authoritative, updates inventory + transactions.
     """
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
+    _require_access(user, ["admin", "inventory_manager"], module="stores", action="create")
     supplier = await db.suppliers.find_one({"id": data.supplier_id}, {"_id": 0})
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
@@ -3950,9 +3914,7 @@ async def get_work_center(wc_id: str, request: Request):
 @work_centers_router.post("", status_code=201)
 async def create_work_center(wc_data: WorkCenterCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="manufacturing", action="create")
     existing = await db.work_centers.find_one({"code": wc_data.code})
     if existing:
         raise HTTPException(status_code=400, detail="Work center code already exists")
@@ -3970,9 +3932,7 @@ async def create_work_center(wc_data: WorkCenterCreate, request: Request):
 @work_centers_router.put("/{wc_id}")
 async def update_work_center(wc_id: str, wc_data: WorkCenterUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="manufacturing", action="edit")
     update_data = {k: v for k, v in wc_data.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
@@ -4010,9 +3970,7 @@ async def get_routing(routing_id: str, request: Request):
 @routings_router.post("", status_code=201)
 async def create_routing(routing_data: RoutingCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="routings", action="create")
     routing_doc = {
         "id": str(uuid.uuid4()),
         "name": routing_data.name,
@@ -4028,9 +3986,7 @@ async def create_routing(routing_data: RoutingCreate, request: Request):
 @routings_router.put("/{routing_id}")
 async def update_routing(routing_id: str, routing_data: RoutingUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="routings", action="edit")
     update_data = {}
     for k, v in routing_data.model_dump().items():
         if v is not None:
@@ -4169,9 +4125,7 @@ async def get_work_order(wo_id: str, request: Request):
 @work_orders_router.post("", status_code=201)
 async def create_work_order(wo_data: WorkOrderCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="manufacturing", action="create")
     prod_order = await db.production_orders.find_one({"id": wo_data.production_order_id})
     if not prod_order:
         raise HTTPException(status_code=404, detail="Production order not found")
@@ -4549,9 +4503,7 @@ async def reserve_materials_for_wo(wo_id: str, request: Request):
     """Reserve materials for an MO by computing its full BOM requirement recursively.
     Stores reserved_materials on the MO. MRP uses this to calculate net RM demand."""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="manufacturing", action="create")
     wo = await db.work_orders.find_one({"id": wo_id})
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -4682,9 +4634,7 @@ async def reserve_materials_for_wo(wo_id: str, request: Request):
 async def create_sc_for_wo(wo_id: str, request: Request):
     """Dedicated endpoint: create SC order for a subcontract MO. Simple and direct."""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="manufacturing", action="create")
     wo = await db.work_orders.find_one({"id": wo_id})
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -4987,9 +4937,7 @@ async def create_sc_for_wo(wo_id: str, request: Request):
 async def unreserve_materials_for_wo(wo_id: str, request: Request):
     """Remove material reservation from an MO"""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="manufacturing", action="create")
     wo = await db.work_orders.find_one({"id": wo_id})
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -5009,9 +4957,7 @@ async def unreserve_materials_for_wo(wo_id: str, request: Request):
 async def start_work_order(wo_id: str, request: Request):
     """Start a work order - consumes required materials from inventory"""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="manufacturing", action="create")
     wo = await db.work_orders.find_one({"id": wo_id})
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -5242,9 +5188,7 @@ async def get_work_order_tree(wo_id: str, request: Request):
 @work_orders_router.put("/{wo_id}")
 async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="manufacturing", action="edit")
     wo = await db.work_orders.find_one({"id": wo_id})
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -5401,9 +5345,7 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
 async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOrderOperationUpdate, request: Request):
     """Update a specific operation status within a work order (Job Card)"""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="manufacturing", action="edit")
     wo = await db.work_orders.find_one({"id": wo_id})
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -5986,9 +5928,7 @@ async def export_items_excel(request: Request, category: Optional[str] = None):
 async def import_items_excel(request: Request, file: UploadFile = File(...)):
     """Import items from Excel file"""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager", "inventory_manager"], module="items", action="create")
     from openpyxl import load_workbook
     
     content = await file.read()
@@ -6327,9 +6267,7 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
 async def import_bom_excel(request: Request, file: UploadFile = File(...)):
     """Import BOMs from Excel - groups by parent part number"""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="bom", action="create")
     from openpyxl import load_workbook
     
     content = await file.read()
@@ -7001,9 +6939,7 @@ async def get_customer(customer_id: str, request: Request):
 @customers_router.post("", status_code=201)
 async def create_customer(data: CustomerCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="customers", action="create")
     # Auto-generate customer code from configurable series if not provided
     provided_code = (data.code or "").strip()
     if not provided_code:
@@ -7074,9 +7010,7 @@ async def import_customers(payload: dict = Body(...), request: Request = None):
 @customers_router.put("/{customer_id}")
 async def update_customer(customer_id: str, data: CustomerUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="customers", action="edit")
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
@@ -7713,9 +7647,7 @@ async def get_grns_pending_invoice(request: Request):
 @purchase_invoices_router.post("", status_code=201)
 async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="purchase_invoices", action="create")
     count = await db.purchase_invoices.count_documents({})
     inv_number = f"PI-{str(count + 1).zfill(6)}"
     
@@ -7796,9 +7728,7 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request)
 @purchase_invoices_router.put("/{invoice_id}")
 async def update_purchase_invoice(invoice_id: str, data: PurchaseInvoiceUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="purchase_invoices", action="edit")
     invoice = await db.purchase_invoices.find_one({"id": invoice_id})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -8159,9 +8089,7 @@ async def get_subcontract_orders(request: Request, status: str = None):
 @jobwork_router.post("/orders", status_code=201)
 async def create_subcontract_order(data: SubcontractOrderCreate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="job_work", action="create")
     supplier = await db.suppliers.find_one({"id": data.supplier_id})
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
@@ -8217,8 +8145,7 @@ async def create_subcontract_order(data: SubcontractOrderCreate, request: Reques
 @jobwork_router.put("/orders/{order_id}")
 async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    _require_access(user, ["admin", "production_manager"], module="job_work", action="edit")
     order = await db.subcontract_orders.find_one({"id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -8462,9 +8389,7 @@ async def create_manual_delivery_challan(data: ManualDCCreate, request: Request)
     Deducts stock (unless skip_stock_deduct is true).
     """
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
+    _require_access(user, ["admin", "production_manager", "inventory_manager"], module="job_work", action="create")
     supplier = await db.suppliers.find_one({"id": data.supplier_id})
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
@@ -8550,9 +8475,7 @@ async def create_manual_delivery_challan(data: ManualDCCreate, request: Request)
 async def create_delivery_challan(data: DCCreate, request: Request):
     """Create DC - Send materials to subcontractor. Deducts stock."""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="job_work", action="create")
     order = await db.subcontract_orders.find_one({"id": data.subcontract_order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Subcontract order not found")
@@ -8658,9 +8581,7 @@ async def create_delivery_challan(data: DCCreate, request: Request):
 async def send_draft_dc(dc_id: str, request: Request):
     """Send a draft DC - deducts stock and marks as sent"""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="job_work", action="create")
     dc = await db.delivery_challans.find_one({"id": dc_id})
     if not dc:
         raise HTTPException(status_code=404, detail="Delivery challan not found")
@@ -8741,9 +8662,7 @@ async def send_draft_dc(dc_id: str, request: Request):
 async def receive_grn_from_jw(request: Request, data: dict = Body(...)):
     """Create GRN directly from JW number (SC with RM). Adds FG/SA stock, process cost tracked."""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager", "inventory_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager", "inventory_manager"], module="job_work", action="create")
     # Mandatory fields validation first
     supplier_invoice_no = data.get("supplier_invoice_no", "").strip() if data.get("supplier_invoice_no") else ""
     supplier_invoice_date = data.get("supplier_invoice_date")
@@ -8906,9 +8825,7 @@ async def get_subcontract_receipts(request: Request):
 async def create_subcontract_receipt(data: SubcontractReceiptCreate, request: Request):
     """Receive materials back from subcontractor. Adds stock for FG/SA items only."""
     user = await get_current_user(request)
-    if user["role"] not in ["admin", "production_manager"]:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    
+    _require_access(user, ["admin", "production_manager"], module="job_work", action="create")
     order = await db.subcontract_orders.find_one({"id": data.subcontract_order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Subcontract order not found")
