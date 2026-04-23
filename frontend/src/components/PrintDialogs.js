@@ -214,7 +214,7 @@ export function POPrintDialog({ po, open, onClose }) {
       });
       tableHTML += `</tbody></table>`;
     } else if (opts.template === 'detailed') {
-      const cols = ['SN','Item Code','Description'];
+      const cols = ['SN','Item'];
       if (opts.showHSN) cols.push('HSN');
       cols.push('Qty','UOM','Rate');
       if (opts.showDiscount) cols.push('Discount');
@@ -228,8 +228,11 @@ export function POPrintDialog({ po, open, onClose }) {
         const net = gross - disc;
         const tax = l.tax_amount || (net * (l.gst_rate||0)/100);
         const extraDesc = (l.description || '').trim();
-        const descCell = `${l.item?.name||''}${extraDesc ? `<div style="color:#444;font-size:9px;margin-top:2px;">${extraDesc}</div>` : ''}`;
-        let row = `<td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${descCell}</td>`;
+        // Merged Item cell: part_number on top, item name + any extra description below.
+        const itemCell = `<span class="mono">${l.item?.part_number||''}</span>` +
+          `<div style="font-size:10px;margin-top:1px;">${l.item?.name||''}</div>` +
+          (extraDesc ? `<div style="color:#444;font-size:9px;margin-top:2px;font-style:italic;">${extraDesc}</div>` : '');
+        let row = `<td>${i+1}</td><td>${itemCell}</td>`;
         if (opts.showHSN) row += `<td class="mono">${l.hsn_code||''}</td>`;
         row += `<td class="text-right mono">${l.quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${(l.unit_price||0).toFixed(2)}</td>`;
         if (opts.showDiscount) row += `<td class="text-right mono">${disc > 0 ? disc.toFixed(2) : '-'}</td>`;
@@ -241,7 +244,7 @@ export function POPrintDialog({ po, open, onClose }) {
       tableHTML += `</tbody></table>`;
     } else {
       // standard / modern
-      const cols = ['SN','Item Code','Description'];
+      const cols = ['SN','Item'];
       if (opts.showHSN) cols.push('HSN');
       cols.push('Qty','UOM','Rate');
       if (opts.showDiscount) cols.push('Disc');
@@ -252,8 +255,10 @@ export function POPrintDialog({ po, open, onClose }) {
         const disc = l.discount_amount || (l.discount_type === 'percentage' ? gross * (l.discount_value||0)/100 : (l.discount_value||0));
         const net = gross - disc;
         const extraDesc = (l.description || '').trim();
-        const descCell = `${l.item?.name||''}${extraDesc ? `<div style="color:#444;font-size:9px;margin-top:2px;">${extraDesc}</div>` : ''}`;
-        let row = `<td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${descCell}</td>`;
+        const itemCell = `<span class="mono">${l.item?.part_number||''}</span>` +
+          `<div style="font-size:10px;margin-top:1px;">${l.item?.name||''}</div>` +
+          (extraDesc ? `<div style="color:#444;font-size:9px;margin-top:2px;font-style:italic;">${extraDesc}</div>` : '');
+        let row = `<td>${i+1}</td><td>${itemCell}</td>`;
         if (opts.showHSN) row += `<td class="mono">${l.hsn_code||''}</td>`;
         row += `<td class="text-right mono">${l.quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${(l.unit_price||0).toFixed(2)}</td>`;
         if (opts.showDiscount) row += `<td class="text-right mono">${disc > 0 ? disc.toFixed(2) : '-'}</td>`;
