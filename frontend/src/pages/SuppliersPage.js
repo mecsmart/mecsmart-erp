@@ -108,16 +108,25 @@ export default function SuppliersPage() {
       const addr = data.principal_address || {};
       const addrLine1 = [addr.building, addr.street].filter(Boolean).join(', ');
       const addrLine2 = [addr.locality].filter(Boolean).join(', ');
+      // Prefer TRADE name as the Company Name. For proprietorship GSTINs,
+      // `legal_name` (lgnm) is the proprietor's personal name while `trade_name`
+      // (tradeNam) is the actual business/brand name — which is what belongs in
+      // the supplier "Company Name" field. Fall back to legal_name only when
+      // the trade name is absent (rare, usually private limited / LLP cases).
+      const businessName = (data.trade_name || '').trim() || (data.legal_name || '').trim();
       setFormData(prev => ({
         ...prev,
         gstin,
-        name: prev.name || data.legal_name || data.trade_name || '',
+        name: prev.name || businessName,
         state_code: stateCode || prev.state_code,
         state: addr.state_name || prev.state,
         city: addr.city || prev.city,
         pin_code: addr.pin_code || prev.pin_code,
         address: prev.address || addrLine1,
         address_line2: prev.address_line2 || addrLine2,
+        // Keep the proprietor's name as the Contact Person if the form doesn't
+        // already have one — saves another round of manual typing.
+        contact_person: prev.contact_person || (data.legal_name && data.legal_name !== businessName ? data.legal_name : prev.contact_person),
       }));
       if (data.status !== 'active') {
         alert(`⚠️ This GSTIN status is "${data.status}". Please verify before adding as supplier.`);
