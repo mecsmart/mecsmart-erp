@@ -230,6 +230,7 @@ export default function SettingsPage() {
           <TabsTrigger value="branding" data-testid="branding-tab">Branding & Currency</TabsTrigger>
           <TabsTrigger value="po-charges" data-testid="po-charges-tab">PO Section</TabsTrigger>
           <TabsTrigger value="number-series" data-testid="number-series-tab">Number Series</TabsTrigger>
+          <TabsTrigger value="integrations" data-testid="integrations-tab">Integrations</TabsTrigger>
         </TabsList>
 
         {/* ====== Company & GST Tab ====== */}
@@ -767,6 +768,57 @@ export default function SettingsPage() {
               });
             })()}
             {numberSeries.length === 0 && <p className="text-sm text-[#9CA3AF] italic">No series configured.</p>}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="integrations" className="space-y-4 mt-4" data-testid="integrations-tab-content">
+          <div className="card-flat p-6">
+            <div className="flex items-start justify-between mb-2">
+              <div>
+                <h2 className="text-lg font-semibold font-[Chivo] text-[#1D3557]">GSTIN Lookup (Appyflow)</h2>
+                <p className="text-sm text-[#4B5563]">Auto-fetch supplier / vendor details (legal name, trade name, state, PIN, principal address) from GST portal by entering a GSTIN. Free 50 lookups/month, then ₹0.40–0.50/call on Appyflow.</p>
+              </div>
+              <a href="https://appyflow.in/verify-gst/" target="_blank" rel="noopener noreferrer" className="text-xs text-[#1E429F] underline whitespace-nowrap">Get key →</a>
+            </div>
+            <div className="space-y-3 mt-4">
+              <div>
+                <label className="block text-sm font-semibold text-[#111827] mb-1">Appyflow API Key (key_secret)</label>
+                <input
+                  type="text"
+                  value={settings.appyflow_api_key || ''}
+                  onChange={e => setSettings({ ...settings, appyflow_api_key: e.target.value })}
+                  className="input-field mono"
+                  placeholder="Leave blank to use backend APPYFLOW_API_KEY env var"
+                  disabled={!isAdmin}
+                  data-testid="appyflow-key-input"
+                />
+                <p className="text-[11px] text-[#6B7280] mt-1">Override: this value takes precedence over the backend .env key. Keeps key portable when you switch environments.</p>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                {isAdmin && (
+                  <button onClick={handleSave} disabled={saving} className="btn-primary" data-testid="save-integrations-btn">
+                    {saving ? 'Saving…' : 'Save Integrations'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const g = prompt('Enter a 15-char GSTIN to verify the integration:');
+                    if (!g) return;
+                    try {
+                      const { data } = await api.post('/api/suppliers/lookup-gstin', { gstin: g.trim().toUpperCase() });
+                      toast.success(`OK: ${data.legal_name || data.trade_name || 'Fetched'} (${data.status})`);
+                    } catch (e) {
+                      toast.error(e.response?.data?.detail || 'Lookup failed');
+                    }
+                  }}
+                  className="btn-secondary"
+                  data-testid="test-appyflow-btn"
+                >
+                  Test Lookup
+                </button>
+              </div>
+            </div>
           </div>
         </TabsContent>
       </Tabs>

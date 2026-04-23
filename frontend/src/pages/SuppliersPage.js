@@ -46,6 +46,8 @@ export default function SuppliersPage() {
   });
 
   const [states, setStates] = useState([]);
+  const [gstinLookupLoading, setGstinLookupLoading] = useState(false);
+  const [gstinLookupError, setGstinLookupError] = useState('');
   // Permission-driven visibility: admin always allowed, else granular permissions.
   const canEdit = user?.role === 'admin'
     || hasPermission('suppliers', 'create')
@@ -74,6 +76,43 @@ export default function SuppliersPage() {
       console.error('Failed to fetch suppliers:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGstinLookup = async (raw) => {
+    const gstin = (raw || '').trim().toUpperCase();
+    if (!/^[0-9A-Z]{15}$/.test(gstin)) {
+      setGstinLookupError('GSTIN must be 15 alphanumeric characters');
+      return;
+    }
+    setGstinLookupLoading(true);
+    setGstinLookupError('');
+    try {
+      const { data } = await api.post('/api/suppliers/lookup-gstin', { gstin });
+      // Map Appyflow state name to state code (first 2 chars of GSTIN are authoritative)
+      const stateCode = data.state_code_from_gstin || '';
+      const addr = data.principal_address || {};
+      // Build a readable address
+      const addrLine1 = [addr.building, addr.street].filter(Boolean).join(', ');
+      const addrLine2 = [addr.locality].filter(Boolean).join(', ');
+      setFormData(prev => ({
+        ...prev,
+        gstin,
+        name: prev.name || data.legal_name || data.trade_name || '',
+        state_code: stateCode || prev.state_code,
+        state: addr.state_name || prev.state,
+        city: addr.city || prev.city,
+        pin_code: addr.pin_code || prev.pin_code,
+        address: prev.address || addrLine1,
+        address_line2: prev.address_line2 || addrLine2,
+      }));
+      if (data.status !== 'active') {
+        alert(`⚠️ This GSTIN status is "${data.status}". Please verify before adding as supplier.`);
+      }
+    } catch (e) {
+      setGstinLookupError(e.response?.data?.detail || 'Lookup failed');
+    } finally {
+      setGstinLookupLoading(false);
     }
   };
 
@@ -319,16 +358,32 @@ export default function SuppliersPage() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">GSTIN</label>
-                    <input
-                      type="text"
-                      value={formData.gstin}
-                      onChange={(e) => setFormData({ ...formData, gstin: e.target.value.toUpperCase() })}
-                      className="input-field mono uppercase"
-                      maxLength={15}
-                      placeholder="22AAAAA0000A1Z5"
-                      data-testid="supplier-gstin-input"
-                    />
+                    <label className="block text-sm font-semibold text-[#111827] mb-1 flex items-center justify-between">
+                      <span>GSTIN</span>
+                      {gstinLookupLoading && <span className="text-[11px] text-[#1E429F] font-normal">Verifying…</span>}
+                      {gstinLookupError && <span className="text-[11px] text-[#9B1C1C] font-normal">{gstinLookupError}</span>}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={formData.gstin}
+                        onChange={(e) => setFormData({ ...formData, gstin: e.target.value.toUpperCase() })}
+                        className="input-field mono uppercase flex-1"
+                        maxLength={15}
+                        placeholder="22AAAAA0000A1Z5"
+                        data-testid="supplier-gstin-input"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleGstinLookup(formData.gstin)}
+                        disabled={gstinLookupLoading || !/^[0-9A-Z]{15}$/.test(formData.gstin || '')}
+                        className="btn-secondary text-xs whitespace-nowrap"
+                        title="Auto-fill details from GST portal via Appyflow"
+                        data-testid="gstin-fetch-btn"
+                      >
+                        {gstinLookupLoading ? '…' : 'Fetch'}
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-[#111827] mb-1">State * <span className="text-[11px] text-[#6B7280] font-normal">(for GST CGST/SGST/IGST)</span></label>

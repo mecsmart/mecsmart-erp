@@ -829,6 +829,8 @@ class CompanySettingsUpdate(BaseModel):
     quotation_cover_intro: Optional[str] = None
     # Default Terms & Conditions printed on Tax Invoices (separate from quotation_cover_intro).
     invoice_terms_conditions: Optional[str] = None
+    # Appyflow GSTIN lookup API key (override for backend APPYFLOW_API_KEY env var).
+    appyflow_api_key: Optional[str] = None
     # GST e-Invoice (IRN) integration credentials (NIC Sandbox or GSP like MasterGST/ClearTax).
     gst_einvoice_enabled: Optional[bool] = None
     gst_einvoice_provider: Optional[str] = None   # "nic_sandbox" / "nic_prod" / "mastergst" / custom
@@ -2725,6 +2727,103 @@ async def delete_supplier(supplier_id: str, request: Request):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Supplier not found")
     return {"message": "Supplier deleted"}
+
+
+# ---------- GSTIN Lookup (Appyflow) ----------
+class GSTINLookupRequest(BaseModel):
+    gstin: str
+
+
+def _get_appyflow_key(company_settings: dict) -> str:
+    """Prefer Settings override, fall back to backend .env."""
+    if company_settings and company_settings.get("appyflow_api_key"):
+        return str(company_settings["appyflow_api_key"]).strip()
+    return (os.environ.get("APPYFLOW_API_KEY") or "").strip()
+
+
+@suppliers_router.post("/lookup-gstin")
+async def lookup_gstin(payload: GSTINLookupRequest, request: Request):
+    """
+    Look up GSTIN details via Appyflow API and return a normalized dict
+    the Supplier form can use to pre-fill legal name, trade name, state, PIN,
+    principal address and registration status.
+
+    Key resolution order:
+      1) `company_settings.appyflow_api_key` (editable in Settings UI)
+      2) `APPYFLOW_API_KEY` env var (backend/.env)
+    """
+    await get_current_user(request)
+    gstin = (payload.gstin or "").strip().upper()
+    if len(gstin) != 15 or not gstin.isalnum():
+        raise HTTPException(status_code=400, detail="GSTIN must be exactly 15 alphanumeric characters")
+
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
+    key = _get_appyflow_key(company or {})
+    if not key:
+        raise HTTPException(
+            status_code=503,
+            detail="GSTIN lookup is not configured. Set 'Appyflow API Key' in Settings → Integrations "
+                   "or APPYFLOW_API_KEY in backend .env."
+        )
+
+    import httpx
+    url = "https://appyflow.in/api/verifyGST"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, params={"gstNo": gstin, "key_secret": key},
+                                    headers={"Accept": "application/json"})
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="GSTIN lookup timed out")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Unable to reach Appyflow: {e}")
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Appyflow error: HTTP {resp.status_code}")
+
+    try:
+        data = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Invalid JSON from Appyflow")
+
+    if data.get("error") is True:
+        msg = str(data.get("message", "GSTIN lookup failed"))
+        # Map common errors to precise status codes.
+        m = msg.lower()
+        if "invalid" in m:
+            raise HTTPException(status_code=400, detail=f"Invalid GSTIN: {msg}")
+        if "not found" in m or "not exist" in m:
+            raise HTTPException(status_code=404, detail="GSTIN not found in GST database")
+        raise HTTPException(status_code=422, detail=msg)
+
+    tp = data.get("taxpayerInfo") or {}
+    if not tp:
+        raise HTTPException(status_code=404, detail="GSTIN not found (empty response)")
+
+    pradr = tp.get("pradr") or {}
+    addr = pradr.get("addr") or {}
+    status_raw = str(tp.get("sts") or "").upper()
+    normalized = {
+        "gstin": gstin,
+        "legal_name": tp.get("lgnm") or "",
+        "trade_name": tp.get("tradeNam") or tp.get("tradeName") or "",
+        "status": "active" if status_raw not in {"CANCELLED", "INACTIVE", "SUSPENDED"} else status_raw.lower(),
+        "registration_date": tp.get("rgdt") or "",
+        "taxpayer_type": tp.get("dty") or tp.get("dpty") or "",
+        "constitution": tp.get("ctb") or "",
+        "state_jurisdiction": tp.get("stj") or "",
+        "principal_address": {
+            "building": addr.get("bno") or "",
+            "street": addr.get("st") or "",
+            "locality": addr.get("loc") or "",
+            "city": addr.get("dst") or addr.get("city") or "",
+            "state_name": addr.get("stcd") or "",  # "Maharashtra" etc — caller should map to code
+            "pin_code": addr.get("pncd") or "",
+            "full": pradr.get("adr") or "",
+        },
+        # State code from GSTIN (first 2 digits) — authoritative for CGST/SGST logic.
+        "state_code_from_gstin": gstin[:2],
+    }
+    return normalized
 
 # ================== PURCHASE ORDER ROUTES ==================
 
