@@ -14,7 +14,7 @@ const CURRENCIES = [
 ];
 
 export default function SettingsPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { refreshSettings } = useCompanySettings();
   const [settings, setSettings] = useState({
     company_name: '', gstin: '', state_code: '',
@@ -41,7 +41,7 @@ export default function SettingsPage() {
   const [editingUom, setEditingUom] = useState(null);
   const [uomForm, setUomForm] = useState({ code: '', name: '', description: '' });
   const fileInputRef = useRef(null);
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || hasPermission('settings', 'edit');
 
   useEffect(() => { fetchData(); }, []);
 

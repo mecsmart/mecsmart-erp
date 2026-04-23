@@ -445,12 +445,12 @@ export default function PurchaseOrdersPage() {
                 <div className="overflow-x-auto border border-[#E5E7EB] rounded-sm">
                   <table className="w-full text-xs" data-testid="po-lines-table">
                     <colgroup>
-                      <col style={{ width: '22%' }} />
+                      <col style={{ width: '20%' }} />
+                      <col style={{ width: '11%' }} />
                       <col style={{ width: '10%' }} />
-                      <col style={{ width: '9%' }} />
                       <col style={{ width: '7%' }} />
-                      <col style={{ width: '12%' }} />
-                      <col style={{ width: '10%' }} />
+                      <col style={{ width: '14%' }} />
+                      <col style={{ width: '8%' }} />
                       <col style={{ width: '9%' }} />
                       <col style={{ width: '15%' }} />
                       <col style={{ width: '6%' }} />
@@ -490,25 +490,30 @@ export default function PurchaseOrdersPage() {
                               data-testid={`po-line-description-${index}`}
                             />
                           </td>
-                          <td className="px-2 py-1.5">
-                            <input type="text" value={line.hsn_code} onChange={(e) => updateLine(index, 'hsn_code', e.target.value)} className="w-full px-2 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono" />
+                          <td className="px-1 py-1.5">
+                            <input type="text" value={line.hsn_code} onChange={(e) => updateLine(index, 'hsn_code', e.target.value)} className="w-full px-1.5 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono" />
                           </td>
-                          <td className="px-2 py-1.5">
-                            <input type="number" min="0" step="any" value={line.quantity} onChange={(e) => updateLine(index, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono text-right" />
+                          <td className="px-1 py-1.5">
+                            <input type="number" min="0" step="any" value={line.quantity} onChange={(e) => updateLine(index, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-1.5 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono text-right" />
                           </td>
-                          <td className="px-2 py-1.5">
-                            <input type="text" value={line.uom} onChange={(e) => updateLine(index, 'uom', e.target.value)} className="w-full px-2 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono" />
+                          <td className="px-1 py-1.5">
+                            <input type="text" value={line.uom} onChange={(e) => updateLine(index, 'uom', e.target.value)} className="w-full px-1.5 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono" />
                           </td>
-                          <td className="px-2 py-1.5">
-                            <input type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => updateLine(index, 'unit_price', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono text-right" />
+                          <td className="px-1 py-1.5">
+                            <input type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => updateLine(index, 'unit_price', parseFloat(e.target.value) || 0)} className="w-full px-1.5 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono text-right" />
                           </td>
-                          <td className="px-2 py-1.5">
-                            <div className="flex items-center gap-1">
-                              <input type="number" min="0" step="0.01" value={line.discount_value === 0 ? '' : line.discount_value} onChange={(e) => updateLine(index, 'discount_value', e.target.value === '' ? 0 : parseFloat(e.target.value))} className="flex-1 min-w-0 px-2 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono" placeholder="0" data-testid={`po-line-discount-${index}`} />
-                              <select value={line.discount_type} onChange={(e) => updateLine(index, 'discount_type', e.target.value)} className="text-xs h-8 border border-[#D1D5DB] rounded-sm bg-white px-1" data-testid={`po-line-discount-type-${index}`}>
-                                <option value="percentage">%</option>
-                                <option value="amount">Amt</option>
-                              </select>
+                          <td className="px-1 py-1.5">
+                            <div className="flex items-center gap-0.5">
+                              <input type="number" min="0" step="0.01" value={line.discount_value === 0 ? '' : line.discount_value} onChange={(e) => updateLine(index, 'discount_value', e.target.value === '' ? 0 : parseFloat(e.target.value))} className="flex-1 min-w-0 px-1.5 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono text-right" placeholder="0" data-testid={`po-line-discount-${index}`} />
+                              <button
+                                type="button"
+                                onClick={() => updateLine(index, 'discount_type', line.discount_type === 'percentage' ? 'amount' : 'percentage')}
+                                className="text-[10px] h-8 w-7 shrink-0 border border-[#D1D5DB] rounded-sm bg-[#F3F4F6] font-semibold text-[#1D3557]"
+                                title={line.discount_type === 'percentage' ? 'Switch to flat Amount' : 'Switch to Percentage'}
+                                data-testid={`po-line-discount-type-${index}`}
+                              >
+                                {line.discount_type === 'percentage' ? '%' : '₹'}
+                              </button>
                             </div>
                           </td>
                           <td className="px-2 py-1.5">

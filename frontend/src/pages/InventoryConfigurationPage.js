@@ -6,8 +6,14 @@ import { toast } from 'sonner';
 import { ItemGroupsCard } from '../components/ItemGroupsCard';
 
 export default function InventoryConfigurationPage() {
-  const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const { user, hasPermission } = useAuth();
+  // Edit is allowed for admin OR anyone with settings.edit or inventory.edit.
+  // We prefer a wider check here so operations leads can maintain module config
+  // without needing full admin rights.
+  const canEdit = user?.role === 'admin'
+    || hasPermission('settings', 'edit')
+    || hasPermission('inventory', 'edit');
+  const isAdmin = canEdit; // legacy name retained in JSX below; now permission-driven.
   const [poTerms, setPoTerms] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
