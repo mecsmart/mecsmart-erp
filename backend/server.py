@@ -3081,6 +3081,7 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
         "is_inter_state": is_inter_state,
         "status": "draft",
         "notes": po_data.notes,
+        "terms_conditions": po_data.terms_conditions if po_data.terms_conditions is not None else None,
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -3378,6 +3379,10 @@ async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, reques
         update_data["quotation_ref"] = po_data.quotation_ref
     if po_data.quotation_date is not None:
         update_data["quotation_date"] = po_data.quotation_date
+    # Persist PO-specific Terms & Conditions (overrides the default from Inventory → Configuration).
+    # Use hasattr-style explicit include so an empty string ("") is saved as "clear override".
+    if po_data.terms_conditions is not None:
+        update_data["terms_conditions"] = po_data.terms_conditions
     
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
