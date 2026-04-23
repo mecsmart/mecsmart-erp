@@ -22,6 +22,8 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { GRNPrintDialog } from '../components/PrintDialogs';
+import { SearchableItemSelect } from '../components/SearchableItemSelect';
+import { SearchableSelect } from '../components/SearchableSelect';
 import { PackingListsPanel } from './CRMPage';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
@@ -33,6 +35,7 @@ export default function WarehousesPage() {
   const [warehouses, setWarehouses] = useState([]);
   const [transfers, setTransfers] = useState([]);
   const [items, setItems] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'stock');
   const [storesStockSearch, setStoresStockSearch] = useState('');
@@ -81,6 +84,52 @@ export default function WarehousesPage() {
   });
   const [confirmGrnModal, setConfirmGrnModal] = useState({ open: false, kind: null, payload: null, summary: null });
 
+  // Manual GRN (no PO) state
+  const [manualGrnOpen, setManualGrnOpen] = useState(false);
+  const [manualGrnForm, setManualGrnForm] = useState({
+    supplier_id: '',
+    supplier_invoice_no: '',
+    supplier_invoice_date: '',
+    warehouse_id: '',
+    notes: '',
+    lines: [{ item_id: '', received_quantity: 1, verified_price: 0 }],
+  });
+  const [manualGrnSubmitting, setManualGrnSubmitting] = useState(false);
+
+  const submitManualGrn = async () => {
+    if (!manualGrnForm.supplier_id) { toast.error('Please select a supplier'); return; }
+    if (!manualGrnForm.supplier_invoice_no.trim()) { toast.error('Supplier Invoice No. is mandatory'); return; }
+    const validLines = manualGrnForm.lines.filter(l => l.item_id && l.received_quantity > 0);
+    if (validLines.length === 0) { toast.error('Add at least one line with quantity > 0'); return; }
+    setManualGrnSubmitting(true);
+    try {
+      await api.post('/api/grn/manual', {
+        supplier_id: manualGrnForm.supplier_id,
+        supplier_invoice_no: manualGrnForm.supplier_invoice_no,
+        supplier_invoice_date: manualGrnForm.supplier_invoice_date ? new Date(manualGrnForm.supplier_invoice_date).toISOString() : null,
+        warehouse_id: manualGrnForm.warehouse_id || '',
+        notes: manualGrnForm.notes || '',
+        lines: validLines.map(l => ({
+          item_id: l.item_id,
+          received_quantity: Number(l.received_quantity),
+          verified_price: Number(l.verified_price || 0),
+        })),
+      });
+      toast.success('Manual GRN created');
+      setManualGrnOpen(false);
+      setManualGrnForm({
+        supplier_id: '', supplier_invoice_no: '', supplier_invoice_date: '',
+        warehouse_id: '', notes: '',
+        lines: [{ item_id: '', received_quantity: 1, verified_price: 0 }],
+      });
+      fetchData();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to create manual GRN');
+    } finally {
+      setManualGrnSubmitting(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -97,7 +146,7 @@ export default function WarehousesPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [warehousesRes, transfersRes, itemsRes, grnRes, pendingRes, inventoryRes, jwRes] = await Promise.all([
+      const [warehousesRes, transfersRes, itemsRes, grnRes, pendingRes, inventoryRes, jwRes, suppliersRes] = await Promise.all([
         api.get('/api/warehouses'),
         api.get('/api/warehouses/transfers/history'),
         api.get('/api/items'),
@@ -105,6 +154,7 @@ export default function WarehousesPage() {
         api.get('/api/grn/pending-pos'),
         api.get('/api/inventory'),
         api.get('/api/job-work/orders').catch(() => ({ data: [] })),
+        api.get('/api/suppliers').catch(() => ({ data: [] })),
       ]);
       setWarehouses(warehousesRes.data);
       setTransfers(transfersRes.data);
@@ -112,6 +162,7 @@ export default function WarehousesPage() {
       setGrnList(grnRes.data);
       setPendingPOs(pendingRes.data);
       setInventory(inventoryRes.data);
+      setSuppliers(suppliersRes.data || []);
       // Filter JW orders that are in_progress with DC sent (pending GRN receive)
       const pendingJW = (jwRes.data || []).filter(jw => 
         jw.status === 'in_progress' && jw.job_work_parts?.length > 0 && (
@@ -844,6 +895,18 @@ export default function WarehousesPage() {
 
         {/* GRN Tab */}
         <TabsContent value="grn" className="mt-4 space-y-4">
+          {/* Manual GRN button */}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setManualGrnOpen(true)}
+              className="btn-primary flex items-center gap-2 text-sm"
+              data-testid="manual-grn-btn"
+            >
+              <Plus className="w-4 h-4" /> Manual GRN (no PO)
+            </button>
+          </div>
+
           {/* Pending POs for GRN */}
           {pendingPOs.length > 0 && (
             <div className="card-flat overflow-hidden">
@@ -1201,6 +1264,108 @@ export default function WarehousesPage() {
             <button onClick={confirmGRNSave} className="bg-[#03543F] hover:bg-[#024733] text-white px-4 py-2 rounded-sm text-sm font-medium flex items-center gap-1" data-testid="confirm-grn-ok">
               <CheckCircle2 className="w-4 h-4" />
               Yes, Confirm Receipt
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manual GRN Dialog (no PO) */}
+      <Dialog open={manualGrnOpen} onOpenChange={setManualGrnOpen}>
+        <DialogContent className="max-w-4xl" data-testid="manual-grn-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-[Chivo] text-[#1D3557]">Manual GRN (No Purchase Order)</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-3 text-sm">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold mb-1">Supplier *</label>
+                <SearchableSelect
+                  options={suppliers}
+                  value={manualGrnForm.supplier_id}
+                  onChange={(v) => setManualGrnForm(f => ({ ...f, supplier_id: v }))}
+                  getLabel={(s) => s.name || ''}
+                  getSecondary={(s) => s.code || ''}
+                  matchFields={['name', 'code', 'gstin']}
+                  placeholder="Type supplier code / name / GSTIN…"
+                  testId="mgrn-supplier"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Warehouse</label>
+                <select className="input-field text-sm h-10" value={manualGrnForm.warehouse_id} onChange={(e) => setManualGrnForm(f => ({ ...f, warehouse_id: e.target.value }))} data-testid="mgrn-warehouse">
+                  <option value="">(none)</option>
+                  {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Supplier Invoice No *</label>
+                <input className="input-field text-sm h-10" value={manualGrnForm.supplier_invoice_no} onChange={(e) => setManualGrnForm(f => ({ ...f, supplier_invoice_no: e.target.value }))} placeholder="INV-XXXX" data-testid="mgrn-supplier-invoice" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Supplier Invoice Date</label>
+                <input type="date" className="input-field text-sm h-10" value={manualGrnForm.supplier_invoice_date} onChange={(e) => setManualGrnForm(f => ({ ...f, supplier_invoice_date: e.target.value }))} data-testid="mgrn-supplier-invoice-date" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Notes</label>
+              <textarea className="input-field text-sm" rows={2} value={manualGrnForm.notes} onChange={(e) => setManualGrnForm(f => ({ ...f, notes: e.target.value }))} data-testid="mgrn-notes" />
+            </div>
+            <div className="border border-[#E5E7EB] rounded-sm overflow-hidden">
+              <table className="w-full text-xs">
+                <thead className="bg-[#1D3557] text-white">
+                  <tr>
+                    <th className="p-2 text-left">Item</th>
+                    <th className="p-2 text-right w-28">Qty Received</th>
+                    <th className="p-2 text-right w-28">Price</th>
+                    <th className="p-2 text-right w-32">Line Total</th>
+                    <th className="w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {manualGrnForm.lines.map((ln, idx) => (
+                    <tr key={idx} className="border-b border-[#F3F4F6]" data-testid={`mgrn-line-${idx}`}>
+                      <td className="p-2">
+                        <SearchableItemSelect
+                          items={items}
+                          value={ln.item_id}
+                          onChange={(v) => {
+                            const it = items.find(x => x.id === v);
+                            setManualGrnForm(f => {
+                              const lines = [...f.lines];
+                              lines[idx] = { ...lines[idx], item_id: v, verified_price: lines[idx].verified_price || (it?.purchase_price || it?.unit_cost || 0) };
+                              return { ...f, lines };
+                            });
+                          }}
+                          placeholder="Type part no / name…"
+                          showCategory={false}
+                          testId={`mgrn-line-item-${idx}`}
+                        />
+                      </td>
+                      <td className="p-2">
+                        <input type="number" step="0.01" className="input-field text-xs text-right h-8" value={ln.received_quantity} onChange={(e) => setManualGrnForm(f => { const lines = [...f.lines]; lines[idx].received_quantity = parseFloat(e.target.value) || 0; return { ...f, lines }; })} data-testid={`mgrn-line-qty-${idx}`} />
+                      </td>
+                      <td className="p-2">
+                        <input type="number" step="0.01" className="input-field text-xs text-right h-8" value={ln.verified_price} onChange={(e) => setManualGrnForm(f => { const lines = [...f.lines]; lines[idx].verified_price = parseFloat(e.target.value) || 0; return { ...f, lines }; })} data-testid={`mgrn-line-price-${idx}`} />
+                      </td>
+                      <td className="p-2 text-right mono font-semibold">{currencySymbol}{((ln.received_quantity || 0) * (ln.verified_price || 0)).toFixed(2)}</td>
+                      <td className="p-2 text-center">
+                        <button onClick={() => setManualGrnForm(f => ({ ...f, lines: f.lines.filter((_, i) => i !== idx) }))} className="text-[#9B1C1C]" disabled={manualGrnForm.lines.length === 1}>
+                          <X className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button type="button" onClick={() => setManualGrnForm(f => ({ ...f, lines: [...f.lines, { item_id: '', received_quantity: 1, verified_price: 0 }] }))} className="w-full text-xs text-[#1D3557] py-1.5 border-t border-[#E5E7EB] hover:bg-[#F9FAFB] flex items-center justify-center gap-1" data-testid="mgrn-add-line">
+                <Plus className="w-3 h-3" /> Add Line
+              </button>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-3">
+            <button onClick={() => setManualGrnOpen(false)} className="btn-secondary text-sm">Cancel</button>
+            <button onClick={submitManualGrn} disabled={manualGrnSubmitting} className="btn-primary text-sm disabled:opacity-50" data-testid="mgrn-submit">
+              {manualGrnSubmitting ? 'Creating…' : 'Create GRN'}
             </button>
           </div>
         </DialogContent>

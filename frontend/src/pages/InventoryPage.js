@@ -33,6 +33,15 @@ export default function InventoryPage() {
   const [stockByItem, setStockByItem] = useState({});
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('stock');
+
+  // Deep-link: sidebar "Configuration" sub-item uses ?tab=configuration
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    if (tab && ['stock', 'transactions', 'configuration'].includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, []);
   const [showLowStock, setShowLowStock] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [stockSearch, setStockSearch] = useState('');

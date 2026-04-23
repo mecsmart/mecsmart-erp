@@ -278,13 +278,15 @@ export default function ProductionPage() {
                   </div>
                   {(formData.lines || []).map((line, idx) => {
                     const q = (line.bom_search || '').trim().toLowerCase();
-                    const filtered = boms.filter(b => {
-                      if (!q) return true;
+                    // Match PO-picker behavior: DON'T show any list until user starts typing.
+                    // Previously all BOMs rendered on focus which flooded the dropdown and
+                    // slowed the form. Now the list is empty until a query is entered.
+                    const filtered = q ? boms.filter(b => {
                       const code = (b.parent_item?.part_number || '').toLowerCase();
                       const name = (b.name || '').toLowerCase();
                       const itemName = (b.parent_item?.name || '').toLowerCase();
                       return code.includes(q) || name.includes(q) || itemName.includes(q);
-                    });
+                    }) : [];
                     const selected = boms.find(b => b.id === line.bom_id);
                     return (
                       <div key={idx} className="border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB] space-y-2" data-testid={`so-line-${idx}`}>
@@ -315,32 +317,38 @@ export default function ProductionPage() {
                             <>
                               <input
                                 type="text"
-                                placeholder="Search by part number, BOM name or item..."
+                                placeholder="Type part number, BOM name or item to search…"
                                 value={line.bom_search || ''}
                                 onChange={(e) => updateLine(idx, { bom_search: e.target.value })}
                                 className="input-field text-xs"
                                 data-testid={`so-bom-search-${idx}`}
                                 disabled={!!editingOrder}
+                                autoComplete="off"
                               />
-                              <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-40 overflow-auto bg-white" data-testid={`so-bom-list-${idx}`}>
-                                {filtered.length === 0 && (
-                                  <div className="px-3 py-3 text-center text-[11px] text-[#6B7280]">No matching BOMs.</div>
-                                )}
-                                {filtered.slice(0, 200).map(bom => (
-                                  <button
-                                    key={bom.id}
-                                    type="button"
-                                    onClick={() => updateLine(idx, { bom_id: bom.id, bom_search: '' })}
-                                    data-testid={`so-bom-option-${idx}-${bom.id}`}
-                                    className="w-full text-left px-2 py-1.5 text-[11px] border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]"
-                                  >
-                                    <span className="mono font-semibold">{bom.parent_item?.part_number || '-'}</span>
-                                    <span className="mx-2">—</span>
-                                    <span>{bom.parent_item?.name || bom.name}</span>
-                                    <span className="ml-2 text-[#6B7280]">Rev {bom.revision}</span>
-                                  </button>
-                                ))}
-                              </div>
+                              {q && (
+                                <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-40 overflow-auto bg-white" data-testid={`so-bom-list-${idx}`}>
+                                  <div className="px-3 py-1 text-[10px] text-[#6B7280] uppercase tracking-wide border-b border-[#F3F4F6]">
+                                    {filtered.length} match{filtered.length !== 1 ? 'es' : ''} for "{q}"
+                                  </div>
+                                  {filtered.length === 0 && (
+                                    <div className="px-3 py-3 text-center text-[11px] text-[#6B7280]">No matching BOMs.</div>
+                                  )}
+                                  {filtered.slice(0, 200).map(bom => (
+                                    <button
+                                      key={bom.id}
+                                      type="button"
+                                      onClick={() => updateLine(idx, { bom_id: bom.id, bom_search: '' })}
+                                      data-testid={`so-bom-option-${idx}-${bom.id}`}
+                                      className="w-full text-left px-2 py-1.5 text-[11px] border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]"
+                                    >
+                                      <span className="mono font-semibold">{bom.parent_item?.part_number || '-'}</span>
+                                      <span className="mx-2">—</span>
+                                      <span>{bom.parent_item?.name || bom.name}</span>
+                                      <span className="ml-2 text-[#6B7280]">Rev {bom.revision}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                             </>
                           )}
                         </div>

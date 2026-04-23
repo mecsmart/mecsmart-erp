@@ -544,6 +544,22 @@ class GRNCreate(BaseModel):
     warehouse_id: Optional[str] = ""
     notes: Optional[str] = ""
 
+class ManualGRNLine(BaseModel):
+    item_id: str
+    received_quantity: float
+    verified_price: float
+    uom: Optional[str] = "pcs"
+    hsn_code: Optional[str] = ""
+
+class ManualGRNCreate(BaseModel):
+    """GRN created without a preceding Purchase Order (direct receipt)."""
+    supplier_id: str
+    supplier_invoice_no: str = ""
+    supplier_invoice_date: Optional[datetime] = None
+    lines: List[ManualGRNLine]
+    warehouse_id: Optional[str] = ""
+    notes: Optional[str] = ""
+
 class POChargeTypeCreate(BaseModel):
     name: str
     hsn_code: Optional[str] = ""
@@ -3699,6 +3715,81 @@ async def create_grn(grn_data: GRNCreate, request: Request):
             }})
     
     return grn_doc
+
+
+@grn_router.post("/manual", status_code=201)
+async def create_manual_grn(data: ManualGRNCreate, request: Request):
+    """Create a GRN WITHOUT a preceding Purchase Order.
+    Used for: direct receipts, cash purchases, emergency deliveries, returns-in etc.
+    Treats user-entered supplier + lines as authoritative, updates inventory + transactions.
+    """
+    user = await get_current_user(request)
+    if user["role"] not in ["admin", "inventory_manager"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    supplier = await db.suppliers.find_one({"id": data.supplier_id}, {"_id": 0})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+
+    count = await db.grn.count_documents({})
+    grn_number = f"GRN-{str(count + 1).zfill(6)}"
+
+    grn_lines = []
+    for ln in data.lines:
+        item = await db.items.find_one({"id": ln.item_id})
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Item {ln.item_id} not found")
+        new_stock = (item.get("current_stock") or 0) + ln.received_quantity
+        grn_lines.append({
+            "item_id": ln.item_id,
+            "po_quantity": 0,
+            "received_quantity": ln.received_quantity,
+            "po_price": 0,
+            "verified_price": ln.verified_price,
+            "uom": ln.uom or item.get("unit_of_measure") or "pcs",
+            "hsn_code": ln.hsn_code or item.get("hsn_code", ""),
+        })
+        # Inventory transaction
+        await db.inventory_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "item_id": ln.item_id,
+            "warehouse_id": data.warehouse_id or None,
+            "transaction_type": "goods_receipt",
+            "quantity": ln.received_quantity,
+            "unit_cost": ln.verified_price,
+            "reference_id": grn_number,
+            "reference_type": "manual_grn",
+            "notes": f"Manual GRN {grn_number} (supplier: {supplier.get('name')})",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"],
+        })
+        await db.items.update_one(
+            {"id": ln.item_id},
+            {"$set": {"current_stock": new_stock, "purchase_price": ln.verified_price, "unit_cost": ln.verified_price}},
+        )
+
+    grn_doc = {
+        "id": str(uuid.uuid4()),
+        "grn_number": grn_number,
+        "po_id": None,
+        "manual": True,
+        "supplier_id": data.supplier_id,
+        "supplier_invoice_no": data.supplier_invoice_no,
+        "supplier_invoice_date": data.supplier_invoice_date,
+        "warehouse_id": data.warehouse_id,
+        "notes": data.notes,
+        "lines": grn_lines,
+        "total_received_quantity": sum(l["received_quantity"] for l in grn_lines),
+        "total_cost": sum(l["received_quantity"] * l["verified_price"] for l in grn_lines),
+        "qty_mismatches": [],
+        "price_mismatches": [],
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"],
+    }
+    await db.grn.insert_one(grn_doc)
+    grn_doc.pop("_id", None)
+    return grn_doc
+
 
 @grn_router.get("/{grn_id}/print-data")
 async def get_grn_print_data(grn_id: str, request: Request):

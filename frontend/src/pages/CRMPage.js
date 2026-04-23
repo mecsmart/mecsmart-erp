@@ -10,6 +10,8 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { SearchableSelect } from '../components/SearchableSelect';
+import { SearchableItemSelect } from '../components/SearchableItemSelect';
 
 // Stage definitions per pipeline — aligned to the customer's CRM diagram:
 //   Marketing: Enquiry → Quotation → Negotiation → Won / Lost
@@ -748,10 +750,16 @@ function SupportPanel({ tickets, customers, users, items, stages, search, onRefr
               </div>
               <div className="col-span-2">
                 <label className="block text-xs font-semibold mb-1">Customer *</label>
-                <Select value={form.customer_id} onValueChange={v => setForm({ ...form, customer_id: v })}>
-                  <SelectTrigger data-testid="ticket-customer"><SelectValue placeholder="Select customer..." /></SelectTrigger>
-                  <SelectContent>{customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}{c.customer_code ? ` (${c.customer_code})` : ''}</SelectItem>)}</SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={customers}
+                  value={form.customer_id}
+                  onChange={v => setForm({ ...form, customer_id: v })}
+                  getLabel={(c) => c.name || ''}
+                  getSecondary={(c) => c.customer_code || ''}
+                  matchFields={['name', 'customer_code', 'phone', 'email']}
+                  placeholder="Type customer code / name / phone…"
+                  testId="ticket-customer"
+                />
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1">Priority</label>
@@ -1165,40 +1173,45 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-semibold mb-1">Link to Lead (optional)</label>
-                <Select value={form.lead_id || '__none__'} onValueChange={v => {
-                  if (v === '__none__') { setForm(f => ({ ...f, lead_id: '' })); return; }
-                  const lead = leads.find(l => l.id === v);
-                  setForm(f => ({
-                    ...f,
-                    lead_id: v,
-                    customer_id: lead?.customer_id || f.customer_id,
-                    customer_name: lead?.customer_name || f.customer_name,
-                    contact_person: lead?.contact_person || f.contact_person,
-                    email: lead?.email || f.email,
-                    phone: lead?.phone || f.phone,
-                  }));
-                }}>
-                  <SelectTrigger data-testid="quotation-lead-select"><SelectValue placeholder="— Unlinked —" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">— Unlinked —</SelectItem>
-                    {leads.map(l => <SelectItem key={l.id} value={l.id}>{l.lead_no} · {l.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={leads}
+                  value={form.lead_id}
+                  onChange={(v) => {
+                    if (!v) { setForm(f => ({ ...f, lead_id: '' })); return; }
+                    const lead = leads.find(l => l.id === v);
+                    setForm(f => ({
+                      ...f,
+                      lead_id: v,
+                      customer_id: lead?.customer_id || f.customer_id,
+                      customer_name: lead?.customer_name || f.customer_name,
+                      contact_person: lead?.contact_person || f.contact_person,
+                      email: lead?.email || f.email,
+                      phone: lead?.phone || f.phone,
+                    }));
+                  }}
+                  getLabel={(l) => l.name || ''}
+                  getSecondary={(l) => l.lead_no || ''}
+                  matchFields={['name', 'lead_no', 'customer_name', 'phone', 'email']}
+                  placeholder="Type lead no / name / customer…"
+                  testId="quotation-lead-select"
+                />
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1">Existing Customer (optional)</label>
-                <Select value={form.customer_id || '__none__'} onValueChange={v => {
-                  if (v === '__none__') { setForm(f => ({ ...f, customer_id: '' })); return; }
-                  const c = customers.find(x => x.id === v);
-                  // When a customer is picked, the Customer Name field becomes a mirror of the master record (locked).
-                  setForm(f => ({ ...f, customer_id: v, customer_name: c?.name || '', contact_person: c?.contact_person || '', email: c?.email || '', phone: c?.phone || '' }));
-                }}>
-                  <SelectTrigger data-testid="quotation-customer-select"><SelectValue placeholder="— Free text only —" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">— Free text only —</SelectItem>
-                    {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}{c.customer_code ? ` (${c.customer_code})` : ''}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={customers}
+                  value={form.customer_id}
+                  onChange={(v) => {
+                    if (!v) { setForm(f => ({ ...f, customer_id: '' })); return; }
+                    const c = customers.find(x => x.id === v);
+                    setForm(f => ({ ...f, customer_id: v, customer_name: c?.name || '', contact_person: c?.contact_person || '', email: c?.email || '', phone: c?.phone || '' }));
+                  }}
+                  getLabel={(c) => c.name || ''}
+                  getSecondary={(c) => c.customer_code || ''}
+                  matchFields={['name', 'customer_code', 'phone', 'email']}
+                  placeholder="Type customer code / name…"
+                  testId="quotation-customer-select"
+                />
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1">Customer Name *{form.customer_id && <span className="ml-1 text-[10px] text-[#6B7280]">(auto-synced from master)</span>}</label>
@@ -1282,13 +1295,14 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                         <tr key={idx} className="border-t border-[#E5E7EB]" data-testid={`quotation-line-${idx}`}>
                           <td className="p-2 mono align-top">{idx + 1}</td>
                           <td className="p-2">
-                            <Select value={l.item_id || '__none__'} onValueChange={v => { if (v === '__none__') updateLine(idx, { item_id: '' }); else onPickItem(idx, v); }}>
-                              <SelectTrigger className="h-7 text-xs" data-testid={`quotation-line-item-${idx}`}><SelectValue placeholder="Pick item..." /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="__none__">— Free text —</SelectItem>
-                                {items.slice(0, 500).map(it => <SelectItem key={it.id} value={it.id}>{it.part_number} · {it.name}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
+                            <SearchableItemSelect
+                              items={items}
+                              value={l.item_id}
+                              onChange={(v) => { if (!v) updateLine(idx, { item_id: '' }); else onPickItem(idx, v); }}
+                              placeholder="Type part no / name…"
+                              showCategory={false}
+                              testId={`quotation-line-item-${idx}`}
+                            />
                             <textarea rows={2} className="input-field text-xs resize-y min-h-[28px] mt-1" value={l.description} onChange={e => updateLine(idx, { description: e.target.value })} placeholder="Description (auto-filled on item pick — editable)" data-testid={`quotation-line-desc-${idx}`} />
                           </td>
                           <td className="p-2">
@@ -2677,12 +2691,16 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
             {sourceType === 'manual' && (
               <div>
                 <label className="text-sm font-medium text-[#374151]">Customer *</label>
-                <Select value={form.customer_id} onValueChange={applyCustomer}>
-                  <SelectTrigger data-testid="ti-customer-select"><SelectValue placeholder="Select customer..." /></SelectTrigger>
-                  <SelectContent>
-                    {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={customers}
+                  value={form.customer_id}
+                  onChange={applyCustomer}
+                  getLabel={(c) => c.name || ''}
+                  getSecondary={(c) => c.customer_code || ''}
+                  matchFields={['name', 'customer_code', 'phone', 'email', 'gstin']}
+                  placeholder="Type customer code / name / GSTIN…"
+                  testId="ti-customer-select"
+                />
               </div>
             )}
 
@@ -2745,12 +2763,14 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                         <tr key={i} data-testid={`ti-line-${i}`}>
                           <td className="px-2 py-1 text-[#6B7280] align-top">{i + 1}</td>
                           <td className="px-1 py-1">
-                            <Select value={l.item_id} onValueChange={(v) => applyItemToLine(i, v)}>
-                              <SelectTrigger className="h-7 text-xs" data-testid={`ti-line-item-${i}`}><SelectValue placeholder="Select item (or leave blank for free text)" /></SelectTrigger>
-                              <SelectContent>
-                                {items.map(it => <SelectItem key={it.id} value={it.id}>{it.part_number} — {it.name}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
+                            <SearchableItemSelect
+                              items={items}
+                              value={l.item_id}
+                              onChange={(v) => applyItemToLine(i, v)}
+                              placeholder="Type part no / name…"
+                              showCategory={false}
+                              testId={`ti-line-item-${i}`}
+                            />
                             <textarea rows={2} className="w-full mt-1 px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-[11px] resize-y" placeholder="Description (auto-filled on item pick — editable)" value={l.description} onChange={e => updateLine(i, { description: e.target.value })} data-testid={`ti-line-desc-${i}`} />
                           </td>
                           <td className="px-1 py-1"><input type="text" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs mono" value={l.hsn_code} onChange={e => updateLine(i, { hsn_code: e.target.value })} /></td>
