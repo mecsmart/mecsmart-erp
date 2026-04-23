@@ -1,8 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, X, ChevronDown } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 
 /**
- * Searchable item dropdown — filter by part number OR name.
+ * Searchable item dropdown — INLINE variant (search-first).
+ * Instead of click-to-open → search → select, the input is always a search box.
+ * Type to see matches immediately; click a match to select.
+ * Selected item is shown above the input with an "X" to clear.
+ *
  * Props:
  *   items: full list of items (id, part_number, name, category)
  *   value: currently selected id
@@ -10,87 +14,117 @@ import { Search, X, ChevronDown } from 'lucide-react';
  *   placeholder: string
  *   filter: optional (item) => boolean to pre-filter list
  *   showCategory: default true — shows (category) label next to name
- *   testId: data-testid for the trigger
+ *   testId: data-testid prefix
+ *   disabled: bool
  */
-export const SearchableItemSelect = ({ items = [], value, onChange, placeholder = 'Select item', filter, showCategory = true, testId, disabled }) => {
-  const [open, setOpen] = useState(false);
+export const SearchableItemSelect = ({
+  items = [],
+  value,
+  onChange,
+  placeholder = 'Type to search item by part number or name…',
+  filter,
+  showCategory = true,
+  testId,
+  disabled,
+}) => {
   const [query, setQuery] = useState('');
+  const [focused, setFocused] = useState(false);
   const wrapRef = useRef(null);
 
   const selected = items.find(i => i.id === value);
 
-  const list = (filter ? items.filter(filter) : items).filter(i => {
-    if (!query.trim()) return true;
+  const baseList = filter ? items.filter(filter) : items;
+  const list = baseList.filter(i => {
+    if (!query.trim()) return false; // Don't flood with all items on focus — wait for keystroke
     const q = query.toLowerCase();
     return (i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q);
-  });
+  }).slice(0, 100);
 
   useEffect(() => {
     const handler = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setFocused(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  const handleSelect = (item) => {
+    onChange(item.id);
+    setQuery('');
+    setFocused(false);
+  };
+
+  const handleClear = () => {
+    onChange('');
+    setQuery('');
+  };
+
   return (
     <div ref={wrapRef} className="relative">
-      <button
-        type="button"
-        onClick={() => !disabled && setOpen(o => !o)}
-        disabled={disabled}
-        data-testid={testId}
-        className="flex h-10 w-full items-center justify-between rounded-sm border border-[#D1D5DB] bg-white px-3 py-2 text-sm disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-[#1D3557]"
-      >
-        <span className={`truncate ${selected ? 'text-[#111827]' : 'text-[#9CA3AF]'}`}>
-          {selected ? <><span className="mono font-medium">{selected.part_number}</span> - {selected.name}{showCategory && <span className="text-[#9CA3AF]"> ({selected.category})</span>}</> : placeholder}
-        </span>
-        <ChevronDown className="w-4 h-4 text-[#6B7280] shrink-0 ml-2" />
-      </button>
-      {open && (
-        <div className="absolute z-50 mt-1 w-full bg-white border border-[#E5E7EB] rounded-sm shadow-lg max-h-72 overflow-hidden flex flex-col">
-          <div className="p-2 border-b border-[#E5E7EB] bg-[#F9FAFB]">
-            <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-              <input
-                autoFocus
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by Part No or Name…"
-                className="w-full pl-8 pr-7 py-1.5 text-sm border border-[#D1D5DB] rounded-sm focus:outline-none focus:ring-1 focus:ring-[#1D3557]"
-                data-testid={`${testId || 'item'}-search-input`}
-              />
-              {query && (
-                <button type="button" onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#6B7280] hover:text-[#111827]">
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-            <div className="text-[10px] text-[#6B7280] mt-1">{list.length} of {(filter ? items.filter(filter) : items).length} items</div>
-          </div>
-          <div className="overflow-y-auto flex-1">
-            {list.length === 0 ? (
-              <div className="p-3 text-xs text-[#9CA3AF] text-center">No items match "{query}"</div>
-            ) : (
-              list.slice(0, 200).map(i => (
-                <button
-                  key={i.id}
-                  type="button"
-                  onClick={() => { onChange(i.id); setOpen(false); setQuery(''); }}
-                  className={`w-full text-left px-3 py-1.5 text-sm hover:bg-[#F3F4F6] border-b border-[#F9FAFB] last:border-0 ${value === i.id ? 'bg-[#E1EFFE] text-[#1E429F] font-medium' : ''}`}
-                  data-testid={`${testId || 'item'}-option-${i.id}`}
-                >
-                  <span className="mono text-xs font-medium">{i.part_number}</span>
-                  <span className="ml-2">{i.name}</span>
-                  {showCategory && <span className="text-[#9CA3AF] text-xs ml-1">({i.category})</span>}
-                </button>
-              ))
-            )}
-            {list.length > 200 && (
-              <div className="p-2 text-[10px] text-[#9CA3AF] text-center italic">Showing first 200. Refine your search.</div>
+      {selected ? (
+        <div
+          className="flex items-center justify-between h-10 w-full rounded-sm border border-[#D1D5DB] bg-[#F0F9FF] px-3 py-2 text-sm"
+          data-testid={testId}
+        >
+          <div className="flex items-center gap-2 truncate">
+            <span className="mono text-xs font-semibold">{selected.part_number}</span>
+            <span className="text-[#111827] truncate">{selected.name}</span>
+            {showCategory && selected.category && (
+              <span className="text-[10px] text-[#6B7280] italic">({selected.category.replace('_', ' ')})</span>
             )}
           </div>
+          {!disabled && (
+            <button
+              type="button"
+              onClick={handleClear}
+              className="text-[#6B7280] hover:text-[#9B1C1C] ml-2 shrink-0"
+              data-testid={`${testId || 'ss'}-clear`}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setFocused(true); }}
+            onFocus={() => setFocused(true)}
+            placeholder={placeholder}
+            disabled={disabled}
+            className="h-10 w-full rounded-sm border border-[#D1D5DB] bg-white pl-8 pr-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#1D3557] disabled:opacity-50"
+            data-testid={testId}
+            autoComplete="off"
+          />
+        </div>
+      )}
+
+      {!selected && focused && query.trim() && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-[#E5E7EB] rounded-sm shadow-lg max-h-64 overflow-y-auto">
+          <div className="px-3 py-1 text-[10px] text-[#6B7280] uppercase tracking-wide border-b border-[#F3F4F6]">
+            {list.length} match{list.length !== 1 ? 'es' : ''} for "{query}"
+          </div>
+          {list.length === 0 ? (
+            <div className="p-3 text-xs text-[#9CA3AF] text-center italic">No items found</div>
+          ) : (
+            list.map(i => (
+              <button
+                key={i.id}
+                type="button"
+                onClick={() => handleSelect(i)}
+                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-[#F3F4F6] border-b border-[#F9FAFB] last:border-0"
+                data-testid={`${testId || 'ss'}-option-${i.id}`}
+              >
+                <span className="mono font-semibold text-xs">{i.part_number}</span>
+                <span className="ml-2">{i.name}</span>
+                {showCategory && i.category && (
+                  <span className="ml-2 text-[10px] text-[#6B7280] italic">({i.category.replace('_', ' ')})</span>
+                )}
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>

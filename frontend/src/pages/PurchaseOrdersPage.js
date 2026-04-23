@@ -388,7 +388,7 @@ export default function PurchaseOrdersPage() {
                   getLabel={(s) => s.name || ''}
                   getSecondary={(s) => s.code || ''}
                   matchFields={['name', 'code', 'gstin']}
-                  placeholder="Search supplier by code, name or GSTIN…"
+                  placeholder="Type supplier code / name / GSTIN…"
                   testId="po-supplier-select"
                 />
               </div>
@@ -456,7 +456,7 @@ export default function PurchaseOrdersPage() {
                         items={items}
                         value={line.item_id}
                         onChange={(v) => updateLine(index, 'item_id', v)}
-                        placeholder="Search item by part no / name…"
+                        placeholder="Type part no / name…"
                         showCategory={true}
                         testId={`po-line-item-${index}`}
                       />

@@ -88,7 +88,7 @@ export default function BOMPage() {
       // Only fire for BOMs currently visible in the default view. Explosions are optional UX data
       // used by child-expanders; the main BOM rows don't need them to render.
       const activeBoms = data.filter(b => b.status === 'active');
-      const MAX_PARALLEL = 8;
+      const MAX_PARALLEL = 20;
       const explosions = {};
       for (let i = 0; i < activeBoms.length; i += MAX_PARALLEL) {
         const chunk = activeBoms.slice(i, i + MAX_PARALLEL);
@@ -96,10 +96,14 @@ export default function BOMPage() {
           try {
             const { data: expData } = await api.get(`/api/bom/${bom.id}/explode`);
             explosions[bom.id] = expData;
-          } catch { /* skip failed explode */ }
+          } catch {
+            // Mark as "loaded with no data" so UI stops showing "Loading…" spinner
+            explosions[bom.id] = { explosion: [], total_rollup_cost: 0 };
+          }
         }));
+        // Flush partial progress to state — lets rows populate incrementally
+        setAllExplosions({ ...explosions });
       }
-      setAllExplosions(explosions);
     } catch (error) {
       console.error('Failed to fetch BOMs:', error);
       setLoading(false);
@@ -499,7 +503,7 @@ export default function BOMPage() {
                         value={formData.parent_item_id}
                         onChange={(v) => setFormData({ ...formData, parent_item_id: v })}
                         filter={(i) => ['sub_assembly', 'finished_good', 'component'].includes(i.category)}
-                        placeholder={items.length === 0 ? 'Items still loading…' : 'Search parent item by part number or name'}
+                        placeholder={items.length === 0 ? 'Items still loading…' : 'Type part number or name to search…'}
                         testId="bom-parent-item-select"
                         disabled={items.length === 0}
                       />
@@ -833,12 +837,25 @@ export default function BOMPage() {
         ) : (
           <div className="p-3 space-y-4">
             {(() => {
-              // Group all BOMs by parent category (FG/SG/CP/RM). Previously only FG BOMs rendered
-              // at the top level — which caused Sub-Assembly and Component BOMs to be "invisible"
-              // until they were referenced by a parent FG BOM. Now every BOM always has a row.
+              // Build a set of item_ids that appear as a COMPONENT in at least one other BOM.
+              // These are already nested under a parent in the explosion tree, so rendering
+              // them as standalone top-level rows would duplicate + clutter the list.
+              const childItemIds = new Set();
+              boms.forEach(bom => {
+                (bom.components || []).forEach(c => {
+                  if (c.item_id) childItemIds.add(c.item_id);
+                });
+              });
+
+              // Group all BOMs by parent category (FG/SG/CP/RM), EXCEPT ones whose parent_item
+              // is referenced as a child component in another BOM (those show nested in their
+              // parent's explosion tree instead).
               const grouped = {};
               const orderedCats = ['finished_good', 'sub_assembly', 'component', 'raw_material'];
               boms.forEach(bom => {
+                // Skip BOMs whose parent is already a child in some other BOM — they'll render
+                // automatically inside their parent's explosion, so no duplicate top-level row.
+                if (childItemIds.has(bom.parent_item_id)) return;
                 const pid = bom.parent_item_id || 'x';
                 if (!grouped[pid]) grouped[pid] = { item: bom.parent_item, boms: [] };
                 grouped[pid].boms.push(bom);
@@ -985,7 +1002,13 @@ export default function BOMPage() {
                       </thead>
                       <tbody>
                         {explosionRows.length === 0 && (
-                          <tr><td colSpan="8" className="text-center py-4 text-[#9CA3AF] text-xs">Loading explosion data...</td></tr>
+                          <tr>
+                            <td colSpan="8" className="text-center py-4 text-[#9CA3AF] text-xs">
+                              {explosion === undefined
+                                ? 'Loading explosion data…'
+                                : 'No components yet — click the edit icon to add rows.'}
+                            </td>
+                          </tr>
                         )}
                         {explosionRows.map((row) => (
                           <tr key={row.key} className={`${rowColor(row.cat, row.level)} transition-colors hover:brightness-95 ${row.is_alternate ? 'opacity-60 italic' : ''}`}>
