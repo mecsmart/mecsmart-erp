@@ -148,10 +148,10 @@ export function POPrintDialog({ po, open, onClose }) {
     const accentLight = '#E8EDF3';
 
     const baseStyles = `
-      @page { size: ${paper.w} ${paper.h}; margin: 12mm; }
+      @page { size: ${paper.w} ${paper.h}; margin: 25mm 12mm 15mm 12mm; }
       * { margin:0; padding:0; box-sizing:border-box; }
       body { font-family:'Segoe UI',Arial,sans-serif; font-size:10.5px; color:#222; line-height:1.5; }
-      .page { max-width:${paper.w}; margin:0 auto; padding:${isModern ? '15px' : '15px'}; }
+      .page { max-width:${paper.w}; margin:0 auto; padding:${isModern ? '15px' : '15px'}; padding-top:${isModern ? '22px' : '22px'}; }
       ${isModern ? `.page { border:2px solid ${accent}; }` : ''}
       ${letterheadCSS(accent)}
       .doc-title { font-size:14px; font-weight:700; color:${accent}; text-transform:uppercase; padding:8px 15px; ${isModern ? `background:${accentLight};` : `border-bottom:1px solid ${accent};`} margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }

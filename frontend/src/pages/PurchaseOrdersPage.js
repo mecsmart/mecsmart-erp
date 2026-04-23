@@ -463,15 +463,15 @@ export default function PurchaseOrdersPage() {
                 <div className="border border-[#E5E7EB] rounded-sm">
                   <table className="w-full text-xs" data-testid="po-lines-table">
                     <colgroup>
-                      <col style={{ width: '20%' }} />
-                      <col style={{ width: '11%' }} />
-                      <col style={{ width: '10%' }} />
-                      <col style={{ width: '7%' }} />
-                      <col style={{ width: '14%' }} />
+                      <col style={{ width: '12%' }} />
+                      <col style={{ width: '22%' }} />
                       <col style={{ width: '8%' }} />
-                      <col style={{ width: '9%' }} />
-                      <col style={{ width: '15%' }} />
                       <col style={{ width: '6%' }} />
+                      <col style={{ width: '28%' }} />
+                      <col style={{ width: '3%' }} />
+                      <col style={{ width: '7%' }} />
+                      <col style={{ width: '9%' }} />
+                      <col style={{ width: '5%' }} />
                     </colgroup>
                     <thead className="bg-[#1D3557] text-white">
                       <tr className="text-left">
