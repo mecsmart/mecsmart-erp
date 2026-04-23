@@ -5,6 +5,8 @@ import { useCompanySettings } from '../context/CompanySettingsContext';
 import { Plus, FileText, CheckCircle2, DollarSign, X, Search, Download } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { SearchableSelect } from '../components/SearchableSelect';
+import { SearchableItemSelect } from '../components/SearchableItemSelect';
 
 export default function PurchaseInvoicePage() {
   const { user } = useAuth();
@@ -356,12 +358,16 @@ export default function PurchaseInvoicePage() {
               <div className="bg-[#F0F4F8] border border-[#D1D5DB] rounded-sm p-4 space-y-3">
                 <div>
                   <label className="block text-sm font-semibold text-[#111827] mb-2">Supplier *</label>
-                  <Select value={formData.supplier_id || undefined} onValueChange={(v) => setFormData({ ...formData, supplier_id: v })}>
-                    <SelectTrigger data-testid="manual-pi-supplier"><SelectValue placeholder="Select a supplier..." /></SelectTrigger>
-                    <SelectContent>
-                      {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}{s.gstin ? ` (${s.gstin})` : ''}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    options={suppliers}
+                    value={formData.supplier_id}
+                    onChange={(v) => setFormData({ ...formData, supplier_id: v })}
+                    getLabel={(s) => s?.name || ''}
+                    getSecondary={(s) => s?.gstin || ''}
+                    matchFields={['name', 'gstin', 'code']}
+                    placeholder="Type supplier name or GSTIN…"
+                    testId="manual-pi-supplier"
+                  />
                 </div>
                 <p className="text-xs text-[#723B13] bg-[#FDF6B2] border border-[#FDF6B2] rounded-sm px-3 py-2">
                   <strong>Manual entry mode:</strong> Use this for invoices not tied to a GRN (freight, services, direct expenses). No stock movement happens. Add line items manually below.
@@ -512,18 +518,21 @@ export default function PurchaseInvoicePage() {
                             <tr key={idx} className="border-t">
                               <td className="py-1 px-2">
                                 {manualMode ? (
-                                  <select value={line.item_id || ''} onChange={e => {
-                                    const picked = items.find(i => i.id === e.target.value);
-                                    updateLine(idx, 'item_id', e.target.value);
-                                    if (picked) {
-                                      updateLine(idx, 'unit_price', picked.purchase_price || picked.unit_cost || 0);
-                                      updateLine(idx, 'gst_rate', picked.gst_rate || 18);
-                                      updateLine(idx, 'hsn_code', picked.hsn_code || '');
-                                    }
-                                  }} className="w-full px-2 py-1 border rounded-sm text-xs" data-testid={`manual-pi-line-item-${idx}`}>
-                                    <option value="">Select item...</option>
-                                    {items.map(i => <option key={i.id} value={i.id}>{i.part_number} — {i.name}</option>)}
-                                  </select>
+                                  <SearchableItemSelect
+                                    items={items}
+                                    value={line.item_id || ''}
+                                    onChange={(id) => {
+                                      const picked = items.find(i => i.id === id);
+                                      updateLine(idx, 'item_id', id);
+                                      if (picked) {
+                                        updateLine(idx, 'unit_price', picked.purchase_price || picked.unit_cost || 0);
+                                        updateLine(idx, 'gst_rate', picked.gst_rate || 18);
+                                        updateLine(idx, 'hsn_code', picked.hsn_code || '');
+                                      }
+                                    }}
+                                    placeholder="Type part # or name…"
+                                    testId={`manual-pi-line-item-${idx}`}
+                                  />
                                 ) : (
                                   <>
                                     <div className="text-xs"><span className="mono font-medium">{it?.part_number || '-'}</span> {it?.name || ''}</div>
