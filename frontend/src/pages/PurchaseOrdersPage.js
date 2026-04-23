@@ -463,26 +463,26 @@ export default function PurchaseOrdersPage() {
                 <div className="border border-[#E5E7EB] rounded-sm">
                   <table className="w-full text-xs" data-testid="po-lines-table">
                     <colgroup>
-                      <col style={{ width: '9%' }} />
-                      <col style={{ width: '30%' }} />
+                      <col style={{ width: '40%' }} />
+                      <col style={{ width: '8%' }} />
+                      <col style={{ width: '8%' }} />
+                      <col style={{ width: '8%' }} />
+                      <col style={{ width: '8%' }} />
+                      <col style={{ width: '8%' }} />
                       <col style={{ width: '7%' }} />
-                      <col style={{ width: '5%' }} />
-                      <col style={{ width: '35%' }} />
-                      <col style={{ width: '1.5%' }} />
-                      <col style={{ width: '5%' }} />
-                      <col style={{ width: '4.5%' }} />
+                      <col style={{ width: '10%' }} />
                       <col style={{ width: '3%' }} />
                     </colgroup>
                     <thead className="bg-[#1D3557] text-white">
                       <tr className="text-left">
-                        <th className="px-2 py-1.5 font-semibold">Item / Description</th>
+                        <th className="px-2 py-1.5 font-semibold">Part No. / Name &amp; Description</th>
                         <th className="px-2 py-1.5 font-semibold">HSN</th>
                         <th className="px-2 py-1.5 font-semibold text-right">Qty</th>
                         <th className="px-2 py-1.5 font-semibold">UOM</th>
                         <th className="px-2 py-1.5 font-semibold text-right">Rate</th>
                         <th className="px-2 py-1.5 font-semibold">Discount</th>
                         <th className="px-2 py-1.5 font-semibold">GST%</th>
-                        <th className="px-2 py-1.5 font-semibold text-right">Amount</th>
+                        <th className="px-2 py-1.5 font-semibold text-right">Total Amount</th>
                         <th className="px-2 py-1.5"></th>
                       </tr>
                     </thead>
@@ -543,8 +543,8 @@ export default function PurchaseOrdersPage() {
                             </Select>
                           </td>
                           <td className="px-2 py-1.5 text-right mono font-medium">{calcLineAmount(line).toFixed(2)}</td>
-                          <td className="px-2 py-1.5 text-center">
-                            <button type="button" onClick={() => removeLine(index)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"><X className="w-3.5 h-3.5" /></button>
+                          <td className="px-1 py-1.5 text-center">
+                            <button type="button" onClick={() => removeLine(index)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Remove line" data-testid={`po-line-remove-${index}`}><X className="w-3.5 h-3.5" /></button>
                           </td>
                         </tr>
                       ))}
