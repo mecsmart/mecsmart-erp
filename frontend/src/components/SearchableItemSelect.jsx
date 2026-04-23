@@ -26,6 +26,7 @@ export const SearchableItemSelect = ({
   showCategory = true,
   testId,
   disabled,
+  allowClear = true,
 }) => {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
@@ -73,7 +74,7 @@ export const SearchableItemSelect = ({
               <span className="text-[10px] text-[#6B7280] italic">({selected.category.replace('_', ' ')})</span>
             )}
           </div>
-          {!disabled && (
+          {!disabled && allowClear && (
             <button
               type="button"
               onClick={handleClear}

@@ -59,20 +59,32 @@ export function POPrintDialog({ po, open, onClose }) {
   const [printData, setPrintData] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // When the dialog opens and company-settings default T&C are available, pre-fill
-  // termsText IF the user hasn't already entered/edited anything for this session.
+  // When the dialog opens, pre-fill termsText with (in priority):
+  //   1. The PO's own terms_conditions (overrides the global default on this PO)
+  //   2. companySettings.po_terms_conditions (Inventory → Configuration default)
+  // We re-apply whenever the PO changes so switching between POs picks up the right T&C.
   useEffect(() => {
-    if (open && defaultTerms && !opts.termsText) {
-      setOpts(o => ({ ...o, termsText: defaultTerms }));
+    if (!open) return;
+    const poSpecific = (po && typeof po.terms_conditions === 'string') ? po.terms_conditions : '';
+    const effective = poSpecific || defaultTerms;
+    if (effective) {
+      setOpts(o => ({ ...o, termsText: effective }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultTerms]);
+  }, [open, po?.id, defaultTerms]);
 
   useEffect(() => {
     if (open && po) {
       setLoading(true);
       api.get(`/api/purchase-orders/${po.id}/print-data`)
-        .then(res => setPrintData(res.data))
+        .then(res => {
+          setPrintData(res.data);
+          // Backend now returns PO-specific or injected default T&C; re-apply to dialog.
+          const tc = res?.data?.terms_conditions;
+          if (typeof tc === 'string' && tc.trim()) {
+            setOpts(o => ({ ...o, termsText: tc }));
+          }
+        })
         .catch(() => {})
         .finally(() => setLoading(false));
     }
@@ -215,7 +227,9 @@ export function POPrintDialog({ po, open, onClose }) {
         const disc = l.discount_amount || (l.discount_type === 'percentage' ? gross * (l.discount_value||0)/100 : (l.discount_value||0));
         const net = gross - disc;
         const tax = l.tax_amount || (net * (l.gst_rate||0)/100);
-        let row = `<td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${l.item?.name||''}</td>`;
+        const extraDesc = (l.description || '').trim();
+        const descCell = `${l.item?.name||''}${extraDesc ? `<div style="color:#444;font-size:9px;margin-top:2px;">${extraDesc}</div>` : ''}`;
+        let row = `<td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${descCell}</td>`;
         if (opts.showHSN) row += `<td class="mono">${l.hsn_code||''}</td>`;
         row += `<td class="text-right mono">${l.quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${(l.unit_price||0).toFixed(2)}</td>`;
         if (opts.showDiscount) row += `<td class="text-right mono">${disc > 0 ? disc.toFixed(2) : '-'}</td>`;
@@ -237,7 +251,9 @@ export function POPrintDialog({ po, open, onClose }) {
         const gross = (l.quantity||0) * (l.unit_price||0);
         const disc = l.discount_amount || (l.discount_type === 'percentage' ? gross * (l.discount_value||0)/100 : (l.discount_value||0));
         const net = gross - disc;
-        let row = `<td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${l.item?.name||''}</td>`;
+        const extraDesc = (l.description || '').trim();
+        const descCell = `${l.item?.name||''}${extraDesc ? `<div style="color:#444;font-size:9px;margin-top:2px;">${extraDesc}</div>` : ''}`;
+        let row = `<td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${descCell}</td>`;
         if (opts.showHSN) row += `<td class="mono">${l.hsn_code||''}</td>`;
         row += `<td class="text-right mono">${l.quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${(l.unit_price||0).toFixed(2)}</td>`;
         if (opts.showDiscount) row += `<td class="text-right mono">${disc > 0 ? disc.toFixed(2) : '-'}</td>`;

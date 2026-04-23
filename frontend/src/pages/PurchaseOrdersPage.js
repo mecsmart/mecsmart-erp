@@ -445,14 +445,14 @@ export default function PurchaseOrdersPage() {
                 <div className="overflow-x-auto border border-[#E5E7EB] rounded-sm">
                   <table className="w-full text-xs" data-testid="po-lines-table">
                     <colgroup>
-                      <col style={{ width: '26%' }} />
-                      <col style={{ width: '11%' }} />
-                      <col style={{ width: '7%' }} />
-                      <col style={{ width: '7%' }} />
+                      <col style={{ width: '22%' }} />
                       <col style={{ width: '10%' }} />
-                      <col style={{ width: '13%' }} />
-                      <col style={{ width: '8%' }} />
+                      <col style={{ width: '9%' }} />
+                      <col style={{ width: '7%' }} />
                       <col style={{ width: '12%' }} />
+                      <col style={{ width: '10%' }} />
+                      <col style={{ width: '9%' }} />
+                      <col style={{ width: '15%' }} />
                       <col style={{ width: '6%' }} />
                     </colgroup>
                     <thead className="bg-[#1D3557] text-white">
@@ -478,6 +478,7 @@ export default function PurchaseOrdersPage() {
                               onChange={(v) => updateLine(index, 'item_id', v)}
                               placeholder="Type part no / name…"
                               showCategory={true}
+                              allowClear={false}
                               testId={`po-line-item-${index}`}
                             />
                             <input
