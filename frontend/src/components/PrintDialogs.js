@@ -418,13 +418,9 @@ export function POPrintDialog({ po, open, onClose }) {
               </div>
             </div>
 
-            {/* Terms & Conditions */}
-            {opts.showTerms && (
-              <div>
-                <label className="text-xs font-semibold text-[#374151] uppercase tracking-wide mb-1 block">Terms & Conditions</label>
-                <textarea value={opts.termsText} onChange={(e) => setOpts({ ...opts, termsText: e.target.value })} className="input-field text-xs" rows={3} placeholder="1. Delivery within 7 working days&#10;2. Payment: 30 days net&#10;3. Quality as per approved sample" data-testid="terms-input" />
-              </div>
-            )}
+            {/* Terms & Conditions textarea removed — T&C is maintained on the PO itself
+                (Inventory → Configuration default + per-PO override). The "Terms & Conditions"
+                toggle under DISPLAY OPTIONS still controls whether the saved T&C is printed. */}
 
             {/* Actions */}
             <div className="flex justify-between items-center pt-4 border-t border-[#E5E7EB]">
