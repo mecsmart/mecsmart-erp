@@ -499,7 +499,7 @@ export default function PurchaseInvoicePage() {
                     })()}</label>
                     <button onClick={addLine} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1"><Plus className="w-3 h-3" />Add Line</button>
                   </div>
-                  <div className="border rounded-sm overflow-hidden">
+                  <div className="border rounded-sm overflow-visible">
                     <table className="w-full text-sm">
                       <thead><tr className="bg-[#F3F4F6]">
                         <th className="text-left py-2 px-2 text-xs">Item</th>
