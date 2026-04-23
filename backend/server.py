@@ -903,6 +903,34 @@ async def get_current_user(request: Request) -> dict:
         # Ensure permissions exist
         if "permissions" not in user or not user["permissions"]:
             user["permissions"] = get_default_permissions(user.get("role", "inventory_manager"))
+        # Overlay role_group permissions + admin-group flag (mirrors /auth/me logic)
+        group_id = user.get("role_group_id")
+        if group_id:
+            try:
+                group = await db.role_groups.find_one({"id": group_id}, {"_id": 0})
+            except Exception:
+                group = None
+            if group:
+                if group.get("permissions"):
+                    user["permissions"] = group["permissions"]
+                user["is_admin_group"] = bool(group.get("is_admin_group"))
+        # Auto-elevate effective role to "admin" when the user either
+        #   (a) belongs to an admin role_group, OR
+        #   (b) has every action on every module in their effective permissions.
+        # This unblocks all hardcoded `user["role"] not in [...]` route guards for
+        # users who legitimately hold all granular permissions.
+        if user.get("is_admin_group"):
+            user["role"] = "admin"
+        else:
+            perms = user.get("permissions") or {}
+            try:
+                if perms and all(
+                    set(allowed_actions_for(m)).issubset(set(perms.get(m, [])))
+                    for m in ALL_MODULES
+                ):
+                    user["role"] = "admin"
+            except Exception:
+                pass
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
@@ -6047,81 +6075,232 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
 
 @bom_router.get("/export/excel")
 async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
-    """Export BOMs to Excel with routings. Optionally filter by bom_id."""
+    """
+    Export BOMs to Excel. Produces the FULL multi-level tree (depth-first explosion)
+    with per-row routings and routing-cost totals.
+
+    Columns:
+      Level | Parent PN | Parent Name | Revision | Status
+           | Parent Routing Count | Parent Routing Cost Total | Parent Routings (Name:Cost)
+           | Component PN | Component Name | Quantity
+           | Component Routing Count | Component Routing Cost Total | Component Routings
+           | Is Alternate | Effectivity
+
+    A second "Routings Summary" sheet aggregates every named routing across the tree
+    with its per-occurrence cost and total cost contribution.
+    """
     await get_current_user(request)
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    
+
     if bom_id:
         boms = await db.boms.find({"id": bom_id}, {"_id": 0}).to_list(1)
     else:
         boms = await db.boms.find({}, {"_id": 0}).to_list(10000)
+
     items_map = {}
     async for item in db.items.find({}, {"_id": 0}):
         items_map[item["id"]] = item
-    
+
+    # Index BOMs by parent_item_id -> active revision preferred for recursion
+    boms_by_parent = {}
+    for b in await db.boms.find({}, {"_id": 0}).to_list(10000):
+        pid = b.get("parent_item_id")
+        if not pid:
+            continue
+        # Prefer active; otherwise first seen
+        existing = boms_by_parent.get(pid)
+        if existing is None or (b.get("status") == "active" and existing.get("status") != "active"):
+            boms_by_parent[pid] = b
+
     wb = Workbook()
     ws = wb.active
-    ws.title = "BOM Data"
-    
-    headers = ["Parent Part Number", "Parent Name", "Revision", "Status", "Parent Routings (Name:Cost)", "Component Part Number", "Component Name", "Quantity", "Component Routings (Name:Cost)", "Is Alternate", "Effectivity Date"]
+    ws.title = "BOM Tree"
+
+    headers = [
+        "Level", "Parent Part Number", "Parent Name", "Revision", "Status",
+        "Parent Routing Count", "Parent Routing Cost Total", "Parent Routings (Name:Cost)",
+        "Component Part Number", "Component Name", "Quantity",
+        "Component Routing Count", "Component Routing Cost Total", "Component Routings (Name:Cost)",
+        "Is Alternate", "Effectivity Date"
+    ]
     header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=11)
     thin_border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin')
     )
-    
+    sub_fill = PatternFill(start_color="E1EFFE", end_color="E1EFFE", fill_type="solid")
+
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
         cell.font = header_font
         cell.fill = header_fill
-        cell.alignment = Alignment(horizontal='center')
+        cell.alignment = Alignment(horizontal='center', wrap_text=True)
         cell.border = thin_border
-    
-    row_num = 2
-    def fmt_routings(rs):
-        """Format routings as 'Name:Cost, Name:Cost' (or just 'Name' when cost=0)"""
+
+    def _routing_stats(rs):
+        """Return (count, total_cost, formatted_str) for a routing list."""
+        count = 0
+        total = 0.0
         parts = []
         for r in (rs or []):
             if isinstance(r, str):
+                if not r.strip():
+                    continue
+                count += 1
                 parts.append(r)
             elif isinstance(r, dict):
-                n = r.get("name", "")
-                c = r.get("cost", 0) or 0
-                parts.append(f"{n}:{c}" if c else n)
-        return ", ".join(parts)
-    
-    for bom in boms:
-        parent = items_map.get(bom.get("parent_item_id"), {})
-        parent_routings_str = fmt_routings(bom.get("parent_routings", []))
-        eff_date = str(bom.get("effectivity_date", ""))[:10] if bom.get("effectivity_date") else ""
-        for comp in bom.get("components", []):
-            comp_item = items_map.get(comp.get("item_id"), {})
-            comp_routings_str = fmt_routings(comp.get("routings", []))
+                name = str(r.get("name", "")).strip()
+                if not name:
+                    continue
+                try:
+                    cost = float(r.get("cost", 0) or 0)
+                except (TypeError, ValueError):
+                    cost = 0.0
+                count += 1
+                total += cost
+                parts.append(f"{name}:{cost}" if cost else name)
+        return count, round(total, 2), ", ".join(parts)
+
+    # Routings summary aggregator: name -> {occurrences, total_cost}
+    routings_summary = {}
+
+    def _record_summary(context, rs):
+        for r in (rs or []):
+            if isinstance(r, dict):
+                name = str(r.get("name", "")).strip()
+                if not name:
+                    continue
+                try:
+                    cost = float(r.get("cost", 0) or 0)
+                except (TypeError, ValueError):
+                    cost = 0.0
+                key = (context, name)
+                entry = routings_summary.setdefault(key, {"occurrences": 0, "total_cost": 0.0})
+                entry["occurrences"] += 1
+                entry["total_cost"] = round(entry["total_cost"] + cost, 2)
+
+    row_num = 2
+    visited_parents = set()  # guard against cyclic BOMs
+
+    def _walk(parent_bom, level):
+        nonlocal row_num
+        if not parent_bom:
+            return
+        parent_id = parent_bom.get("parent_item_id")
+        if parent_id in visited_parents:
+            return
+        visited_parents.add(parent_id)
+
+        parent_item = items_map.get(parent_id, {})
+        p_count, p_total, p_str = _routing_stats(parent_bom.get("parent_routings", []))
+        _record_summary("parent", parent_bom.get("parent_routings", []))
+        eff_date = str(parent_bom.get("effectivity_date", ""))[:10] if parent_bom.get("effectivity_date") else ""
+
+        components = parent_bom.get("components", []) or []
+        if not components:
+            # Still emit a row so the parent is visible in the export
             data = [
-                parent.get("part_number", ""), parent.get("name", ""),
-                bom.get("revision", ""), bom.get("status", ""),
-                parent_routings_str,
+                level,
+                parent_item.get("part_number", ""), parent_item.get("name", ""),
+                parent_bom.get("revision", ""), parent_bom.get("status", ""),
+                p_count, p_total, p_str,
+                "", "", "",
+                0, 0.0, "",
+                "", eff_date
+            ]
+            for col, value in enumerate(data, 1):
+                cell = ws.cell(row=row_num, column=col, value=value)
+                cell.border = thin_border
+                if level > 0:
+                    cell.fill = sub_fill
+            row_num += 1
+            return
+
+        for comp in components:
+            comp_item = items_map.get(comp.get("item_id"), {})
+            c_count, c_total, c_str = _routing_stats(comp.get("routings", []))
+            _record_summary("component", comp.get("routings", []))
+            indent = "  " * level  # visual indentation in part number column for tree view
+            data = [
+                level,
+                (indent + (parent_item.get("part_number", "") or "")),
+                parent_item.get("name", ""),
+                parent_bom.get("revision", ""), parent_bom.get("status", ""),
+                p_count, p_total, p_str,
                 comp_item.get("part_number", ""), comp_item.get("name", ""),
                 comp.get("quantity", 0),
-                comp_routings_str,
+                c_count, c_total, c_str,
                 "Yes" if comp.get("is_alternate") else "No",
                 eff_date
             ]
             for col, value in enumerate(data, 1):
                 cell = ws.cell(row=row_num, column=col, value=value)
                 cell.border = thin_border
+                if level > 0:
+                    cell.fill = sub_fill
             row_num += 1
-    
-    for col in range(1, len(headers) + 1):
-        ws.column_dimensions[chr(64 + col) if col <= 26 else 'A'].width = 22
-    
+
+            # Recurse into the component if it has its own BOM (sub-assembly explosion)
+            child_bom = boms_by_parent.get(comp.get("item_id"))
+            if child_bom:
+                _walk(child_bom, level + 1)
+
+        visited_parents.discard(parent_id)
+
+    # If user requested a single BOM, explode from there; otherwise explode every top-level.
+    if bom_id:
+        for b in boms:
+            _walk(b, 0)
+    else:
+        # Top-level = BOMs whose parent item is NOT used as a component anywhere.
+        used_as_component = set()
+        for b in boms:
+            for c in b.get("components", []) or []:
+                if c.get("item_id"):
+                    used_as_component.add(c["item_id"])
+        top_level = [b for b in boms if b.get("parent_item_id") not in used_as_component]
+        # Fallback: if nothing qualifies as top level (e.g. all BOMs are sub), export everything at level 0
+        if not top_level:
+            top_level = boms
+        for b in top_level:
+            visited_parents = set()
+            _walk(b, 0)
+
+    # Auto-size common columns
+    widths = [7, 28, 28, 10, 10, 14, 18, 32, 28, 28, 10, 14, 18, 32, 10, 14]
+    for idx, w in enumerate(widths, 1):
+        col_letter = ws.cell(row=1, column=idx).column_letter
+        ws.column_dimensions[col_letter].width = w
+    ws.freeze_panes = "A2"
+
+    # ---------- Routings Summary Sheet ----------
+    ws2 = wb.create_sheet("Routings Summary")
+    summary_headers = ["Scope", "Routing Name", "Occurrences", "Total Cost"]
+    for col, h in enumerate(summary_headers, 1):
+        cell = ws2.cell(row=1, column=col, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center')
+        cell.border = thin_border
+    r = 2
+    # Sort: scope then by total_cost desc
+    for (scope, name), vals in sorted(routings_summary.items(), key=lambda kv: (kv[0][0], -kv[1]["total_cost"])):
+        for col, value in enumerate([scope, name, vals["occurrences"], vals["total_cost"]], 1):
+            cell = ws2.cell(row=r, column=col, value=value)
+            cell.border = thin_border
+        r += 1
+    for idx, w in enumerate([12, 32, 14, 16], 1):
+        col_letter = ws2.cell(row=1, column=idx).column_letter
+        ws2.column_dimensions[col_letter].width = w
+    ws2.freeze_panes = "A2"
+
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    
-    filename = f"bom_{boms[0].get('revision','')}.xlsx" if bom_id and boms else "bom_data.xlsx"
+
+    filename = f"bom_{boms[0].get('revision','')}.xlsx" if bom_id and boms else "bom_full_tree.xlsx"
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

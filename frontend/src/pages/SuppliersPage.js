@@ -184,14 +184,15 @@ export default function SuppliersPage() {
               <form onSubmit={handleSubmit} className="space-y-4 mt-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier Code *</label>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">
+                      Supplier Code {editingSupplier ? '*' : <span className="text-[11px] font-normal text-[#6B7280]">(auto-generated if blank)</span>}
+                    </label>
                     <input
                       type="text"
                       value={formData.code}
                       onChange={(e) => setFormData({ ...formData, code: e.target.value })}
                       className="input-field mono"
-                      placeholder="SUP-001"
-                      required
+                      placeholder={editingSupplier ? 'SUP-001' : 'Leave blank to auto-generate'}
                       disabled={!!editingSupplier}
                       data-testid="supplier-code-input"
                     />
