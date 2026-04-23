@@ -30,7 +30,7 @@ const emptyForm = {
 
 export default function PurchaseOrdersPage() {
   const { user, hasPermission } = useAuth();
-  const { formatCurrency, currencySymbol } = useCompanySettings();
+  const { formatCurrency, currencySymbol, companySettings } = useCompanySettings();
   const [suppliers, setSuppliers] = useState([]);
   const [items, setItems] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -115,6 +115,7 @@ export default function PurchaseOrdersPage() {
         amount: c.amount || 0,
       })),
       notes: po.notes || '',
+      terms_conditions: po.terms_conditions !== undefined ? po.terms_conditions : undefined,
     });
     setIsDialogOpen(true);
   };
@@ -441,50 +442,90 @@ export default function PurchaseOrdersPage() {
                   <ShoppingCart className="w-8 h-8 mx-auto mb-2 text-[#9CA3AF]" /><p className="text-sm">No items added yet</p>
                 </div>
               ) : (
-                <div className="space-y-0">
-                  {/* Column Headers */}
-                  <div className="grid grid-cols-[2.5fr_1fr_0.8fr_0.8fr_1fr_1.2fr_1fr_1fr_auto] gap-1 px-2 py-1 bg-[#1D3557] text-white text-xs font-semibold rounded-t-sm" data-testid="po-line-headers">
-                    <span>Item</span>
-                    <span>HSN</span>
-                    <span>Qty</span>
-                    <span>UOM</span>
-                    <span>Rate</span>
-                    <span>Discount</span>
-                    <span>GST%</span>
-                    <span className="text-right">Amount</span>
-                    <span></span>
-                  </div>
-                  {formData.lines.map((line, index) => (
-                    <div key={index} className="grid grid-cols-[2.5fr_1fr_0.8fr_0.8fr_1fr_1.2fr_1fr_1fr_auto] gap-1 p-1 bg-[#F9FAFB] border-b border-[#E5E7EB] items-center" data-testid={`po-line-row-${index}`}>
-                      <SearchableItemSelect
-                        items={items}
-                        value={line.item_id}
-                        onChange={(v) => updateLine(index, 'item_id', v)}
-                        placeholder="Type part no / name…"
-                        showCategory={true}
-                        testId={`po-line-item-${index}`}
-                      />
-                      <input type="text" value={line.hsn_code} onChange={(e) => updateLine(index, 'hsn_code', e.target.value)} className="input-field bg-white text-xs h-8 mono" />
-                      <input type="number" min="0" step="any" value={line.quantity} onChange={(e) => updateLine(index, 'quantity', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono" />
-                      <input type="text" value={line.uom} onChange={(e) => updateLine(index, 'uom', e.target.value)} className="input-field bg-white text-xs h-8 mono" />
-                      <input type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => updateLine(index, 'unit_price', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono" />
-                      <div className="flex items-center gap-1">
-                        <input type="number" min="0" step="0.01" value={line.discount_value === 0 ? '' : line.discount_value} onChange={(e) => updateLine(index, 'discount_value', e.target.value === '' ? 0 : parseFloat(e.target.value))} className="input-field bg-white text-xs h-8 mono flex-1" placeholder="0" data-testid={`po-line-discount-${index}`} />
-                        <select value={line.discount_type} onChange={(e) => updateLine(index, 'discount_type', e.target.value)} className="text-xs h-8 border border-[#D1D5DB] rounded-sm bg-white px-1 w-12" data-testid={`po-line-discount-type-${index}`}>
-                          <option value="percentage">%</option>
-                          <option value="amount">Amt</option>
-                        </select>
-                      </div>
-                      <Select value={String(line.gst_rate)} onValueChange={(v) => updateLine(index, 'gst_rate', parseFloat(v))}>
-                        <SelectTrigger className="bg-white text-xs h-8"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {[0,5,12,18,28].map(r => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                      <div className="text-right mono text-xs font-medium pr-1">{calcLineAmount(line).toFixed(2)}</div>
-                      <button type="button" onClick={() => removeLine(index)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"><X className="w-3.5 h-3.5" /></button>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto border border-[#E5E7EB] rounded-sm">
+                  <table className="w-full text-xs" data-testid="po-lines-table">
+                    <colgroup>
+                      <col style={{ width: '26%' }} />
+                      <col style={{ width: '11%' }} />
+                      <col style={{ width: '7%' }} />
+                      <col style={{ width: '7%' }} />
+                      <col style={{ width: '10%' }} />
+                      <col style={{ width: '13%' }} />
+                      <col style={{ width: '8%' }} />
+                      <col style={{ width: '12%' }} />
+                      <col style={{ width: '6%' }} />
+                    </colgroup>
+                    <thead className="bg-[#1D3557] text-white">
+                      <tr className="text-left">
+                        <th className="px-2 py-1.5 font-semibold">Item / Description</th>
+                        <th className="px-2 py-1.5 font-semibold">HSN</th>
+                        <th className="px-2 py-1.5 font-semibold text-right">Qty</th>
+                        <th className="px-2 py-1.5 font-semibold">UOM</th>
+                        <th className="px-2 py-1.5 font-semibold text-right">Rate</th>
+                        <th className="px-2 py-1.5 font-semibold">Discount</th>
+                        <th className="px-2 py-1.5 font-semibold">GST%</th>
+                        <th className="px-2 py-1.5 font-semibold text-right">Amount</th>
+                        <th className="px-2 py-1.5"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {formData.lines.map((line, index) => (
+                        <tr key={index} className="bg-[#F9FAFB] border-b border-[#E5E7EB] align-top" data-testid={`po-line-row-${index}`}>
+                          <td className="px-2 py-1.5">
+                            <SearchableItemSelect
+                              items={items}
+                              value={line.item_id}
+                              onChange={(v) => updateLine(index, 'item_id', v)}
+                              placeholder="Type part no / name…"
+                              showCategory={true}
+                              testId={`po-line-item-${index}`}
+                            />
+                            <input
+                              type="text"
+                              value={line.description || ''}
+                              onChange={(e) => updateLine(index, 'description', e.target.value)}
+                              className="mt-1 w-full px-2 py-1 border border-[#D1D5DB] rounded-sm text-[11px] italic"
+                              placeholder="Description (printed on PO)"
+                              data-testid={`po-line-description-${index}`}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input type="text" value={line.hsn_code} onChange={(e) => updateLine(index, 'hsn_code', e.target.value)} className="w-full px-2 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input type="number" min="0" step="any" value={line.quantity} onChange={(e) => updateLine(index, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono text-right" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input type="text" value={line.uom} onChange={(e) => updateLine(index, 'uom', e.target.value)} className="w-full px-2 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => updateLine(index, 'unit_price', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono text-right" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <div className="flex items-center gap-1">
+                              <input type="number" min="0" step="0.01" value={line.discount_value === 0 ? '' : line.discount_value} onChange={(e) => updateLine(index, 'discount_value', e.target.value === '' ? 0 : parseFloat(e.target.value))} className="flex-1 min-w-0 px-2 py-1 border border-[#D1D5DB] rounded-sm bg-white text-xs h-8 mono" placeholder="0" data-testid={`po-line-discount-${index}`} />
+                              <select value={line.discount_type} onChange={(e) => updateLine(index, 'discount_type', e.target.value)} className="text-xs h-8 border border-[#D1D5DB] rounded-sm bg-white px-1" data-testid={`po-line-discount-type-${index}`}>
+                                <option value="percentage">%</option>
+                                <option value="amount">Amt</option>
+                              </select>
+                            </div>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <Select value={String(line.gst_rate)} onValueChange={(v) => updateLine(index, 'gst_rate', parseFloat(v))}>
+                              <SelectTrigger className="bg-white text-xs h-8"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {[0,5,12,18,28].map(r => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </td>
+                          <td className="px-2 py-1.5 text-right mono font-medium">{calcLineAmount(line).toFixed(2)}</td>
+                          <td className="px-2 py-1.5 text-center">
+                            <button type="button" onClick={() => removeLine(index)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"><X className="w-3.5 h-3.5" /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
@@ -541,6 +582,21 @@ export default function PurchaseOrdersPage() {
                 </div>
               </div>
             )}
+
+            {/* Terms & Conditions (auto-filled from Inventory → Configuration, editable per PO) */}
+            <div>
+              <label className="block text-sm font-semibold text-[#111827] mb-1">
+                Terms &amp; Conditions <span className="text-[11px] text-[#6B7280] font-normal">(defaults from Inventory → Configuration; edit to override for this PO)</span>
+              </label>
+              <textarea
+                value={formData.terms_conditions !== undefined ? formData.terms_conditions : (companySettings?.po_terms_conditions || '')}
+                onChange={(e) => setFormData({ ...formData, terms_conditions: e.target.value })}
+                className="input-field w-full mono text-xs"
+                rows={5}
+                placeholder={`1. Payment: Net 30 days from invoice date.\n2. Delivery: As per schedule mentioned above.\n3. Quality: Supplier to provide material/test certificates.\n4. Warranty: 12 months from the date of receipt.`}
+                data-testid="po-terms-textarea"
+              />
+            </div>
 
             {/* Notes */}
             <div>

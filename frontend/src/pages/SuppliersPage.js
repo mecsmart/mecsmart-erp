@@ -79,6 +79,15 @@ export default function SuppliersPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    // Mandatory GST identity fields
+    if (!formData.state_code) {
+      alert('State is required for GST compliance (CGST/SGST/IGST logic). Please select a state.');
+      return;
+    }
+    if (!formData.pin_code || !/^\d{6}$/.test(formData.pin_code)) {
+      alert('PIN Code is required and must be a valid 6-digit number.');
+      return;
+    }
     try {
       if (editingSupplier) {
         await api.put(`/api/suppliers/${editingSupplier.id}`, formData);
@@ -303,8 +312,8 @@ export default function SuppliersPage() {
                     <input type="text" value={formData.state} onChange={(e) => setFormData({ ...formData, state: e.target.value })} className="input-field" placeholder="State" data-testid="supplier-state-name-input" />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">Pin Code</label>
-                    <input type="text" value={formData.pin_code} onChange={(e) => setFormData({ ...formData, pin_code: e.target.value.replace(/\D/g, '') })} className="input-field mono" maxLength={6} placeholder="411019" data-testid="supplier-pincode-input" />
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Pin Code *</label>
+                    <input type="text" value={formData.pin_code} onChange={(e) => setFormData({ ...formData, pin_code: e.target.value.replace(/\D/g, '') })} className="input-field mono" maxLength={6} placeholder="411019" required data-testid="supplier-pincode-input" />
                   </div>
                 </div>
 
@@ -322,10 +331,10 @@ export default function SuppliersPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">State</label>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">State * <span className="text-[11px] text-[#6B7280] font-normal">(for GST CGST/SGST/IGST)</span></label>
                     <Select value={formData.state_code || undefined} onValueChange={(v) => setFormData({ ...formData, state_code: v })}>
                       <SelectTrigger data-testid="supplier-state-select">
-                        <SelectValue placeholder="Select state" />
+                        <SelectValue placeholder="Select state (required)" />
                       </SelectTrigger>
                       <SelectContent>
                         {states.map((s) => (

@@ -519,6 +519,7 @@ class PurchaseOrderCreate(BaseModel):
     lines: List[PurchaseOrderLineCreate]
     additional_charges: Optional[List[POAdditionalCharge]] = []
     notes: Optional[str] = ""
+    terms_conditions: Optional[str] = None  # Overrides default PO T&C from company settings
 
 class PurchaseOrderUpdate(BaseModel):
     supplier_id: Optional[str] = None
@@ -530,6 +531,7 @@ class PurchaseOrderUpdate(BaseModel):
     additional_charges: Optional[List[POAdditionalCharge]] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+    terms_conditions: Optional[str] = None
 
 class GRNLineVerify(BaseModel):
     item_id: str
@@ -2665,6 +2667,12 @@ async def get_supplier(supplier_id: str, request: Request):
 async def create_supplier(supplier_data: SupplierCreate, request: Request):
     user = await get_current_user(request)
     _require_access(user, ["admin", "production_manager"], module="suppliers", action="create")
+    # Mandatory GST identity fields for correct CGST/SGST/IGST split on POs/Invoices.
+    if not (supplier_data.state_code or "").strip():
+        raise HTTPException(status_code=400, detail="State code is required (needed for GST CGST/SGST/IGST logic).")
+    pin = (supplier_data.pin_code or "").strip()
+    if not pin or not pin.isdigit() or len(pin) != 6:
+        raise HTTPException(status_code=400, detail="PIN Code is required and must be a 6-digit number.")
     # Auto-generate supplier code from configurable series if not provided
     provided_code = (supplier_data.code or "").strip()
     if not provided_code:
@@ -2690,6 +2698,13 @@ async def create_supplier(supplier_data: SupplierCreate, request: Request):
 async def update_supplier(supplier_id: str, supplier_data: SupplierUpdate, request: Request):
     user = await get_current_user(request)
     _require_access(user, ["admin", "production_manager"], module="suppliers", action="edit")
+    # If the update payload sets these fields, validate them (None means "don't change").
+    if supplier_data.state_code is not None and not supplier_data.state_code.strip():
+        raise HTTPException(status_code=400, detail="State code cannot be blank.")
+    if supplier_data.pin_code is not None:
+        pin = (supplier_data.pin_code or "").strip()
+        if not pin or not pin.isdigit() or len(pin) != 6:
+            raise HTTPException(status_code=400, detail="PIN Code must be a 6-digit number.")
     update_data = {k: v for k, v in supplier_data.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
@@ -2753,7 +2768,7 @@ async def get_purchase_order(po_id: str, request: Request):
 
 @purchase_orders_router.get("/{po_id}/print-data")
 async def get_po_print_data(po_id: str, request: Request):
-    """Get PO data with company settings for printing"""
+    """Get PO data with company settings for printing."""
     await get_current_user(request)
     order = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
     if not order:
@@ -2769,6 +2784,58 @@ async def get_po_print_data(po_id: str, request: Request):
     if order.get("delivery_warehouse_id"):
         wh = await db.warehouses.find_one({"id": order["delivery_warehouse_id"]}, {"_id": 0})
         order["delivery_warehouse"] = wh
+
+    # Recompute is_inter_state + tax split from CURRENT supplier/company state
+    # (stored totals can go stale if state_code is later corrected on either party).
+    company_state = (company or {}).get("state_code", "")
+    supplier_state = (supplier or {}).get("state_code", "")
+    is_inter_state = bool(company_state and supplier_state and company_state != supplier_state)
+    order["is_inter_state"] = is_inter_state
+
+    # Rebuild tax totals from line items for a consistent print.
+    subtotal = 0.0
+    total_cgst = 0.0
+    total_sgst = 0.0
+    total_igst = 0.0
+    for ln in order.get("lines", []):
+        qty = float(ln.get("quantity", 0) or 0)
+        price = float(ln.get("unit_price", 0) or 0)
+        gross = qty * price
+        disc_amt = float(ln.get("discount_amount", 0) or 0)
+        if not disc_amt and ln.get("discount_value"):
+            dv = float(ln.get("discount_value", 0) or 0)
+            disc_amt = gross * dv / 100 if ln.get("discount_type") == "percentage" else dv
+        net = gross - disc_amt
+        gst_rate = float(ln.get("gst_rate", 0) or 0)
+        tax = round(net * gst_rate / 100, 2)
+        if is_inter_state:
+            ln["igst_amount"] = tax
+            ln["cgst_amount"] = 0
+            ln["sgst_amount"] = 0
+            total_igst += tax
+        else:
+            half = round(tax / 2, 2)
+            ln["igst_amount"] = 0
+            ln["cgst_amount"] = half
+            ln["sgst_amount"] = tax - half  # absorb rounding into SGST
+            total_cgst += half
+            total_sgst += (tax - half)
+        subtotal += net
+    order["subtotal"] = round(subtotal, 2)
+    order["total_cgst"] = round(total_cgst, 2)
+    order["total_sgst"] = round(total_sgst, 2)
+    order["total_igst"] = round(total_igst, 2)
+    order["total_tax"] = round(total_cgst + total_sgst + total_igst, 2)
+    # Respect any additional charges already on the order (don't recompute here).
+    charges_total = sum(float(c.get("amount", 0) or 0) + float(c.get("tax_amount", 0) or 0)
+                        for c in order.get("additional_charges", []) or [])
+    order["total_amount"] = round(subtotal + total_cgst + total_sgst + total_igst + charges_total, 2)
+
+    # Inject Default PO Terms & Conditions (from Inventory → Configuration) so
+    # every printed PO carries the terms unless the PO itself already has custom terms.
+    if not order.get("terms_conditions") and company and company.get("po_terms_conditions"):
+        order["terms_conditions"] = company.get("po_terms_conditions")
+
     return order
 
 @purchase_orders_router.post("", status_code=201)
