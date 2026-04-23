@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
   Plus, ShoppingCart, FileText, Filter, X, CheckCircle2, Send, 
-  Edit2, History, ChevronDown, ChevronUp, Trash2, Printer, XCircle, Search
+  Edit2, History, ChevronDown, ChevronUp, Trash2, Printer, XCircle, Search, Truck
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';

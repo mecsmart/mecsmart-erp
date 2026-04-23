@@ -250,18 +250,24 @@ export default function SuppliersPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-[#111827] mb-1">Payment Terms</label>
-                    <Select value={formData.payment_terms} onValueChange={(v) => setFormData({ ...formData, payment_terms: v })}>
-                      <SelectTrigger data-testid="supplier-terms-select">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Net 15">Net 15</SelectItem>
-                        <SelectItem value="Net 30">Net 30</SelectItem>
-                        <SelectItem value="Net 45">Net 45</SelectItem>
-                        <SelectItem value="Net 60">Net 60</SelectItem>
-                        <SelectItem value="COD">COD</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <input
+                      type="text"
+                      value={formData.payment_terms}
+                      onChange={(e) => setFormData({ ...formData, payment_terms: e.target.value })}
+                      className="input-field"
+                      placeholder="e.g. Net 30, 50% advance + 50% before dispatch, COD"
+                      list="supplier-payment-terms-suggestions"
+                      data-testid="supplier-terms-input"
+                    />
+                    <datalist id="supplier-payment-terms-suggestions">
+                      <option value="Net 15" />
+                      <option value="Net 30" />
+                      <option value="Net 45" />
+                      <option value="Net 60" />
+                      <option value="COD" />
+                      <option value="Advance 100%" />
+                      <option value="50% advance + 50% on dispatch" />
+                    </datalist>
                   </div>
                 </div>
 
