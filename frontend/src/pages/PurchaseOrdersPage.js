@@ -26,6 +26,7 @@ const emptyCharge = { charge_type_id: '', name: '', hsn_code: '', gst_rate: 18, 
 const emptyForm = {
   supplier_id: '', expected_date: '', delivery_warehouse_id: '', 
   quotation_ref: '', quotation_date: '', lines: [], additional_charges: [], notes: '',
+  revision_label: '',  // Manual revision label ("A", "1", "Rev-01"); blank = auto
 };
 
 export default function PurchaseOrdersPage() {
@@ -116,6 +117,7 @@ export default function PurchaseOrdersPage() {
       })),
       notes: po.notes || '',
       terms_conditions: po.terms_conditions !== undefined ? po.terms_conditions : undefined,
+      revision_label: po.revision_label || (po.revision ? `R${po.revision}` : ''),
     });
     setIsDialogOpen(true);
   };
@@ -414,18 +416,34 @@ export default function PurchaseOrdersPage() {
                 <input type="date" value={formData.quotation_date} onChange={(e) => setFormData({ ...formData, quotation_date: e.target.value })} className="input-field" data-testid="po-quotation-date-input" />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-[#111827] mb-1">Delivery Warehouse</label>
-                <Select value={formData.delivery_warehouse_id || undefined} onValueChange={(v) => setFormData({ ...formData, delivery_warehouse_id: v })}>
-                  <SelectTrigger data-testid="po-delivery-warehouse-select"><SelectValue placeholder="Select warehouse" /></SelectTrigger>
-                  <SelectContent>
-                    {warehouses.map((w) => <SelectItem key={w.id} value={w.id}>{w.code} - {w.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                {formData.delivery_warehouse_id && (() => {
-                  const wh = warehouses.find(w => w.id === formData.delivery_warehouse_id);
-                  return wh?.address ? <p className="text-xs text-[#6B7280] mt-1 flex items-center"><Truck className="w-3 h-3 mr-1" />{wh.address}</p> : null;
-                })()}
+                <label className="block text-sm font-semibold text-[#111827] mb-1">
+                  Revision {editingPO ? <span className="text-[11px] text-[#6B7280] font-normal">(manual override, e.g. A, B, R1)</span> : <span className="text-[11px] text-[#6B7280] font-normal">(optional)</span>}
+                </label>
+                <input
+                  type="text"
+                  value={formData.revision_label || ''}
+                  onChange={(e) => setFormData({ ...formData, revision_label: e.target.value })}
+                  className="input-field mono"
+                  placeholder="A"
+                  maxLength={8}
+                  data-testid="po-revision-input"
+                />
               </div>
+            </div>
+
+            {/* Row 3: Delivery Warehouse (full width) */}
+            <div>
+              <label className="block text-sm font-semibold text-[#111827] mb-1">Delivery Warehouse</label>
+              <Select value={formData.delivery_warehouse_id || undefined} onValueChange={(v) => setFormData({ ...formData, delivery_warehouse_id: v })}>
+                <SelectTrigger data-testid="po-delivery-warehouse-select"><SelectValue placeholder="Select warehouse" /></SelectTrigger>
+                <SelectContent>
+                  {warehouses.map((w) => <SelectItem key={w.id} value={w.id}>{w.code} - {w.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {formData.delivery_warehouse_id && (() => {
+                const wh = warehouses.find(w => w.id === formData.delivery_warehouse_id);
+                return wh?.address ? <p className="text-xs text-[#6B7280] mt-1 flex items-center"><Truck className="w-3 h-3 mr-1" />{wh.address}</p> : null;
+              })()}
             </div>
 
             {/* Order Lines */}
@@ -442,7 +460,7 @@ export default function PurchaseOrdersPage() {
                   <ShoppingCart className="w-8 h-8 mx-auto mb-2 text-[#9CA3AF]" /><p className="text-sm">No items added yet</p>
                 </div>
               ) : (
-                <div className="overflow-x-auto border border-[#E5E7EB] rounded-sm">
+                <div className="border border-[#E5E7EB] rounded-sm">
                   <table className="w-full text-xs" data-testid="po-lines-table">
                     <colgroup>
                       <col style={{ width: '20%' }} />

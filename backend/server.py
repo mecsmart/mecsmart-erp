@@ -520,6 +520,7 @@ class PurchaseOrderCreate(BaseModel):
     additional_charges: Optional[List[POAdditionalCharge]] = []
     notes: Optional[str] = ""
     terms_conditions: Optional[str] = None  # Overrides default PO T&C from company settings
+    revision_label: Optional[str] = None    # Manual revision label ("A", "1", "R01")
 
 class PurchaseOrderUpdate(BaseModel):
     supplier_id: Optional[str] = None
@@ -532,6 +533,7 @@ class PurchaseOrderUpdate(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
     terms_conditions: Optional[str] = None
+    revision_label: Optional[str] = None
 
 class GRNLineVerify(BaseModel):
     item_id: str
@@ -3082,6 +3084,7 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
         "status": "draft",
         "notes": po_data.notes,
         "terms_conditions": po_data.terms_conditions if po_data.terms_conditions is not None else None,
+        "revision_label": (po_data.revision_label or "").strip() or None,
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -3323,7 +3326,14 @@ async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, reques
         
         charges_with_tax = []
         charges_subtotal = 0
-        for charge in (po_data.additional_charges or existing_po.get("additional_charges", [])):
+        # Empty list "[]" MUST clear charges (was incorrectly falling back to existing
+        # charges via `or existing_po.get(...)`). Use explicit "is not None" check.
+        charges_source = (
+            po_data.additional_charges
+            if po_data.additional_charges is not None
+            else existing_po.get("additional_charges", [])
+        )
+        for charge in charges_source:
             c_data = charge.model_dump() if hasattr(charge, 'model_dump') else dict(charge)
             c_amount = c_data.get("amount", 0)
             c_gst_rate = c_data.get("gst_rate", 0)
@@ -3383,6 +3393,9 @@ async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, reques
     # Use hasattr-style explicit include so an empty string ("") is saved as "clear override".
     if po_data.terms_conditions is not None:
         update_data["terms_conditions"] = po_data.terms_conditions
+    # Manual revision label override (BOM-style). Blank string clears it, falling back to numeric revision.
+    if po_data.revision_label is not None:
+        update_data["revision_label"] = po_data.revision_label.strip() or None
     
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
