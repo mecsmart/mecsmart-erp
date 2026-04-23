@@ -4676,10 +4676,9 @@ async def bulk_subcontract(request: Request, data: dict = Body(...)):
     dc_doc = None
     if sc_type == "with_material" and sc_lines:
         dc_lines = [{"item_id": l["item_id"], "quantity": l["quantity"], "rate": l["rate"]} for l in sc_lines]
-        dc_count = await db.delivery_challans.count_documents({})
         dc_doc = {
             "id": str(uuid.uuid4()),
-            "dc_number": f"DC-{str(dc_count + 1).zfill(6)}",
+            "dc_number": await get_next_series_number("delivery_challan"),
             "subcontract_order_id": sc_doc["id"],
             "lines": dc_lines,
             "status": "draft",
@@ -5523,10 +5522,9 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
                     if sc_type == "with_material":
                         dc_lines = [{"item_id": m["item_id"], "quantity": m["quantity"], "rate": m.get("unit_cost", 0)} for m in sc_lines_data]
                         if dc_lines:
-                            dc_count = await db.delivery_challans.count_documents({})
                             dc_doc = {
                                 "id": str(uuid.uuid4()),
-                                "dc_number": f"DC-{str(dc_count + 1).zfill(6)}",
+                                "dc_number": await get_next_series_number("delivery_challan"),
                                 "subcontract_order_id": sc_doc["id"],
                                 "reference_wo_id": wo_id,
                                 "lines": dc_lines,
@@ -6710,6 +6708,7 @@ DEFAULT_NUMBER_SERIES = {
     "supplier_code":  {"prefix": "SUP",  "padding": 4, "next_number": 1, "label": "Vendor / Supplier Code", "reset_yearly": False, "group": "masters"},
     "customer_code":  {"prefix": "CUST", "padding": 4, "next_number": 1, "label": "Customer Code", "reset_yearly": False, "group": "masters"},
     "po_number":      {"prefix": "PO",   "padding": 6, "next_number": 1, "label": "Purchase Order", "reset_yearly": False, "group": "procurement"},
+    "delivery_challan":{"prefix": "DC",  "padding": 6, "next_number": 1, "label": "Delivery Challan", "reset_yearly": False, "group": "stores"},
 }
 # NOTE: 'sales_invoice' series removed — duplicated the CRM 'tax_invoice' series.
 #       The Tax Invoice flow is the single source of truth for invoice numbering now.
@@ -6725,19 +6724,46 @@ CRM_DEFAULT_NUMBER_SERIES = {
 }
 
 async def get_next_series_number(key: str) -> str:
-    """Atomically fetch and increment the next number for a series. Returns formatted string."""
-    default = DEFAULT_NUMBER_SERIES.get(key, {"prefix": "", "padding": 4, "next_number": 1})
+    """Atomically fetch and increment the next number for a series. Returns formatted string.
+
+    Honors the `reset_yearly` flag: when true, prepends the compact FY (e.g. `2627`)
+    between prefix and padded number and auto-resets the counter to 1 on FY rollover.
+    This is what the Settings → Number Series preview shows, so actual generated
+    numbers MUST match that preview.
+    """
+    default = DEFAULT_NUMBER_SERIES.get(key, {"prefix": "", "padding": 4, "next_number": 1, "reset_yearly": False})
     # Ensure the doc exists with defaults
     existing = await db.number_series.find_one({"key": key})
     if not existing:
-        await db.number_series.insert_one({"key": key, "prefix": default["prefix"], "padding": default["padding"], "next_number": default["next_number"]})
+        await db.number_series.insert_one({
+            "key": key,
+            "prefix": default.get("prefix", ""),
+            "padding": default.get("padding", 4),
+            "next_number": default.get("next_number", 1),
+            "reset_yearly": default.get("reset_yearly", False),
+        })
         existing = await db.number_series.find_one({"key": key})
-    current = existing.get("next_number", default["next_number"])
-    prefix = existing.get("prefix", default["prefix"])
-    padding = existing.get("padding", default["padding"])
+    prefix = existing.get("prefix", default.get("prefix", ""))
+    padding = int(existing.get("padding", default.get("padding", 4)))
+    current = int(existing.get("next_number", default.get("next_number", 1)))
+    reset_yearly = bool(existing.get("reset_yearly", default.get("reset_yearly", False)))
+    year_part = ""
+    if reset_yearly:
+        today = datetime.now(timezone.utc)
+        fy_start = today.year if today.month >= 4 else today.year - 1
+        fy_str = f"{str(fy_start)[-2:]}{str(fy_start + 1)[-2:]}"
+        stored_fy = existing.get("current_fy")
+        if stored_fy and stored_fy != fy_str:
+            # Actual FY rollover — reset counter to 1
+            current = 1
+            await db.number_series.update_one({"key": key}, {"$set": {"current_fy": fy_str, "next_number": 1}})
+        elif not stored_fy:
+            # First activation of reset_yearly — just stamp the FY, keep user's next_number
+            await db.number_series.update_one({"key": key}, {"$set": {"current_fy": fy_str}})
+        year_part = fy_str
     # Increment next_number for the next call
-    await db.number_series.update_one({"key": key}, {"$inc": {"next_number": 1}})
-    return f"{prefix}{str(current).zfill(padding)}"
+    await db.number_series.update_one({"key": key}, {"$set": {"next_number": current + 1}})
+    return f"{prefix}{year_part}{str(current).zfill(padding)}"
 
 class NumberSeriesUpdate(BaseModel):
     prefix: Optional[str] = None
@@ -8670,7 +8696,7 @@ async def create_manual_delivery_challan(data: ManualDCCreate, request: Request)
             )
 
     count = await db.delivery_challans.count_documents({})
-    dc_number = f"DC-{str(count + 1).zfill(6)}"
+    dc_number = await get_next_series_number("delivery_challan")
 
     dc_lines = []
     for line in data.lines:
@@ -8735,7 +8761,7 @@ async def create_delivery_challan(data: DCCreate, request: Request):
         raise HTTPException(status_code=400, detail="Order must be confirmed before sending materials")
     
     count = await db.delivery_challans.count_documents({})
-    dc_number = f"DC-{str(count + 1).zfill(6)}"
+    dc_number = await get_next_series_number("delivery_challan")
     
     skip_deduct = data.skip_stock_deduct or False
     
@@ -10134,9 +10160,13 @@ async def _get_next_number(doc_type: str) -> str:
         today = datetime.now(timezone.utc)
         fy_start = today.year if today.month >= 4 else today.year - 1
         fy_str = f"{str(fy_start)[-2:]}{str(fy_start + 1)[-2:]}"
-        if doc.get("current_fy") != fy_str:
+        stored_fy = doc.get("current_fy")
+        if stored_fy and stored_fy != fy_str:
             next_num = 1
             await db.number_series.update_one({"doc_type": doc_type}, {"$set": {"current_fy": fy_str, "next_number": 1}})
+        elif not stored_fy:
+            # First activation of reset_yearly — stamp the FY, keep user-configured next_number
+            await db.number_series.update_one({"doc_type": doc_type}, {"$set": {"current_fy": fy_str}})
         year_part = fy_str
     await db.number_series.update_one({"doc_type": doc_type}, {"$set": {"next_number": next_num + 1}})
     return f"{prefix}{year_part}{str(next_num).zfill(padding)}"
