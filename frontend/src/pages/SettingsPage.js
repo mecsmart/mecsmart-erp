@@ -32,6 +32,14 @@ export default function SettingsPage() {
   const [chargeForm, setChargeForm] = useState({ name: '', hsn_code: '', gst_rate: 18 });
   const [numberSeries, setNumberSeries] = useState([]);
   const [savingSeries, setSavingSeries] = useState({});
+  // Editable GST slabs
+  const [taxSlabs, setTaxSlabs] = useState([]);
+  const [newSlab, setNewSlab] = useState('');
+  // Units of Measure master
+  const [uoms, setUoms] = useState([]);
+  const [uomDialog, setUomDialog] = useState(false);
+  const [editingUom, setEditingUom] = useState(null);
+  const [uomForm, setUomForm] = useState({ code: '', name: '', description: '' });
   const fileInputRef = useRef(null);
   const isAdmin = user?.role === 'admin';
 
@@ -39,19 +47,89 @@ export default function SettingsPage() {
 
   const fetchData = async () => {
     try {
-      const [settingsRes, statesRes, chargesRes, seriesRes] = await Promise.all([
+      const [settingsRes, statesRes, chargesRes, seriesRes, slabsRes, uomsRes] = await Promise.all([
         api.get('/api/settings/company'),
         api.get('/api/settings/states'),
         api.get('/api/settings/po-charges'),
         api.get('/api/settings/number-series'),
+        api.get('/api/settings/gst-slabs'),
+        api.get('/api/settings/uoms'),
       ]);
       setSettings(settingsRes.data);
       setStates(statesRes.data);
       setChargeTypes(chargesRes.data);
       setNumberSeries(seriesRes.data || []);
+      setTaxSlabs(Array.isArray(slabsRes.data) ? slabsRes.data : []);
+      setUoms(Array.isArray(uomsRes.data) ? uomsRes.data : []);
     } catch (error) {
       console.error('Failed to fetch settings:', error);
     } finally { setLoading(false); }
+  };
+
+  const addTaxSlab = async () => {
+    const r = parseFloat(newSlab);
+    if (isNaN(r) || r < 0 || r > 100) { toast.error('Enter a rate between 0 and 100'); return; }
+    try {
+      await api.post('/api/settings/gst-slabs', { rate: r });
+      const { data } = await api.get('/api/settings/gst-slabs');
+      setTaxSlabs(data);
+      setNewSlab('');
+      toast.success(`GST ${r}% slab added`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to add slab');
+    }
+  };
+
+  const deleteTaxSlab = async (rate) => {
+    if (!window.confirm(`Remove ${rate}% slab?`)) return;
+    try {
+      await api.delete(`/api/settings/gst-slabs/${rate}`);
+      setTaxSlabs(prev => prev.filter(r => r !== rate));
+      toast.success(`GST ${rate}% slab removed`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to remove slab');
+    }
+  };
+
+  const openUomDialog = (u = null) => {
+    setEditingUom(u);
+    setUomForm(u ? { code: u.code || '', name: u.name || '', description: u.description || '' }
+                 : { code: '', name: '', description: '' });
+    setUomDialog(true);
+  };
+
+  const saveUom = async () => {
+    const payload = {
+      code: (uomForm.code || '').trim().toLowerCase(),
+      name: (uomForm.name || '').trim(),
+      description: (uomForm.description || '').trim(),
+    };
+    if (!payload.code || !payload.name) { toast.error('Code and Name are required'); return; }
+    try {
+      if (editingUom) {
+        await api.put(`/api/settings/uoms/${editingUom.id}`, payload);
+        toast.success(`UOM ${payload.code} updated`);
+      } else {
+        await api.post('/api/settings/uoms', payload);
+        toast.success(`UOM ${payload.code} created`);
+      }
+      setUomDialog(false);
+      const { data } = await api.get('/api/settings/uoms');
+      setUoms(data);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to save UOM');
+    }
+  };
+
+  const deleteUom = async (id, code) => {
+    if (!window.confirm(`Delete UOM '${code}'?`)) return;
+    try {
+      await api.delete(`/api/settings/uoms/${id}`);
+      setUoms(prev => prev.filter(u => u.id !== id));
+      toast.success(`UOM ${code} deleted`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to delete UOM');
+    }
   };
 
   const handleSave = async () => {
@@ -242,16 +320,124 @@ export default function SettingsPage() {
             </div>
           </div>
           <div className="card-flat p-6">
-            <h2 className="text-lg font-semibold font-[Chivo] text-[#1D3557] mb-2">GST Tax Slabs</h2>
-            <p className="text-sm text-[#4B5563] mb-4">Standard GST rates applicable on items</p>
-            <div className="flex space-x-3">
-              {[0, 5, 12, 18, 28].map(rate => (
-                <div key={rate} className="flex items-center justify-center w-16 h-16 rounded-sm border-2 border-[#1D3557] bg-[#F0F4F8]" data-testid={`gst-slab-${rate}`}>
+            <div className="flex items-start justify-between mb-2">
+              <div>
+                <h2 className="text-lg font-semibold font-[Chivo] text-[#1D3557]">GST Tax Slabs</h2>
+                <p className="text-sm text-[#4B5563]">Configured GST rates used across Items, POs, Invoices & Quotations.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3 items-center" data-testid="gst-slabs-list">
+              {(taxSlabs.length ? taxSlabs : [0,5,12,18,28]).map(rate => (
+                <div key={rate} className="relative group flex items-center justify-center w-20 h-16 rounded-sm border-2 border-[#1D3557] bg-[#F0F4F8]" data-testid={`gst-slab-${rate}`}>
                   <span className="font-mono font-bold text-lg text-[#1D3557]">{rate}%</span>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => deleteTaxSlab(rate)}
+                      className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-[#FDE8E8] text-[#9B1C1C] border border-[#9B1C1C] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs"
+                      title={`Remove ${rate}% slab`}
+                      data-testid={`gst-slab-delete-${rate}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               ))}
+              {isAdmin && (
+                <div className="flex items-center gap-2 ml-2">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={newSlab}
+                    onChange={e => setNewSlab(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTaxSlab(); } }}
+                    placeholder="e.g. 3"
+                    className="w-24 px-2 py-1 border border-[#D1D5DB] rounded-sm text-sm mono"
+                    data-testid="gst-slab-new-input"
+                  />
+                  <button
+                    type="button"
+                    onClick={addTaxSlab}
+                    className="btn-secondary flex items-center space-x-1 text-sm"
+                    data-testid="gst-slab-add-btn"
+                  >
+                    <Plus className="w-4 h-4" /><span>Add Slab</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
+
+          <div className="card-flat p-6" data-testid="uom-master-card">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h2 className="text-lg font-semibold font-[Chivo] text-[#1D3557]">Units of Measure</h2>
+                <p className="text-sm text-[#4B5563]">Global UOM master used by Items, BOM, POs & Invoices. Codes are case-insensitive.</p>
+              </div>
+              {isAdmin && (
+                <button onClick={() => openUomDialog()} className="btn-primary flex items-center space-x-2" data-testid="uom-add-btn">
+                  <Plus className="w-4 h-4" /><span>Add Unit</span>
+                </button>
+              )}
+            </div>
+            {uoms.length === 0 ? (
+              <div className="text-center py-6 text-[#4B5563] bg-[#F3F4F6] rounded-sm text-sm">No units defined yet.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full data-table" data-testid="uoms-table">
+                  <thead><tr><th className="w-24">Code</th><th>Name</th><th>Description</th><th className="w-24 text-right">Actions</th></tr></thead>
+                  <tbody>
+                    {uoms.map(u => (
+                      <tr key={u.id} data-testid={`uom-row-${u.code}`}>
+                        <td className="mono font-semibold">{u.code}</td>
+                        <td>{u.name}</td>
+                        <td className="text-[#6B7280]">{u.description || '-'}</td>
+                        <td>
+                          <div className="flex items-center justify-end space-x-2">
+                            {isAdmin && (<>
+                              <button onClick={() => openUomDialog(u)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit" data-testid={`uom-edit-${u.code}`}>
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => deleteUom(u.id, u.code)} className="p-1 text-[#9B1C1C] hover:text-[#DC2626]" title="Delete" data-testid={`uom-delete-${u.code}`}>
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>)}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <Dialog open={uomDialog} onOpenChange={setUomDialog}>
+            <DialogContent className="max-w-md">
+              <DialogHeader><DialogTitle className="font-[Chivo]">{editingUom ? 'Edit' : 'Add'} Unit of Measure</DialogTitle></DialogHeader>
+              <div className="space-y-4 mt-3">
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Code *</label>
+                  <input type="text" value={uomForm.code} onChange={e => setUomForm({...uomForm, code: e.target.value.toLowerCase()})} className="input-field mono" placeholder="e.g. kg" data-testid="uom-code-input" maxLength={12} />
+                  <p className="text-[11px] text-[#6B7280] mt-1">Short code (stored lowercased).</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Name *</label>
+                  <input type="text" value={uomForm.name} onChange={e => setUomForm({...uomForm, name: e.target.value})} className="input-field" placeholder="Kilogram" data-testid="uom-name-input" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Description</label>
+                  <input type="text" value={uomForm.description} onChange={e => setUomForm({...uomForm, description: e.target.value})} className="input-field" placeholder="(optional)" data-testid="uom-description-input" />
+                </div>
+                <div className="flex justify-end space-x-3 pt-3 border-t border-[#E5E7EB]">
+                  <button onClick={() => setUomDialog(false)} className="btn-secondary">Cancel</button>
+                  <button onClick={saveUom} className="btn-primary" disabled={!uomForm.code.trim() || !uomForm.name.trim()} data-testid="uom-save-btn">{editingUom ? 'Update' : 'Create'}</button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
           <div className="card-flat p-6">
             <h2 className="text-lg font-semibold font-[Chivo] text-[#1D3557] mb-2">Bank Details</h2>
             <p className="text-sm text-[#4B5563] mb-4">Printed on Proforma &amp; Tax Invoices (auto-injected into the &quot;Bank Details&quot; block of every invoice layout).</p>

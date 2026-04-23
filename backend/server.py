@@ -778,7 +778,23 @@ INDIAN_STATES = {
     "37": "Andhra Pradesh"
 }
 
-GST_SLABS = [0, 5, 12, 18, 28]
+GST_SLABS = [0, 5, 12, 18, 28]  # Seed values. Runtime values come from `tax_slabs` collection.
+DEFAULT_UOMS = [
+    {"code": "pcs", "name": "Pieces"},
+    {"code": "nos", "name": "Numbers"},
+    {"code": "kg",  "name": "Kilogram"},
+    {"code": "g",   "name": "Gram"},
+    {"code": "m",   "name": "Metre"},
+    {"code": "mm",  "name": "Millimetre"},
+    {"code": "cm",  "name": "Centimetre"},
+    {"code": "ltr", "name": "Litre"},
+    {"code": "ml",  "name": "Millilitre"},
+    {"code": "box", "name": "Box"},
+    {"code": "set", "name": "Set"},
+    {"code": "sheet","name": "Sheet"},
+    {"code": "roll","name": "Roll"},
+    {"code": "pkt", "name": "Packet"},
+]
 
 class CompanySettingsUpdate(BaseModel):
     company_name: Optional[str] = None
@@ -6690,8 +6706,134 @@ async def get_indian_states(request: Request):
 
 @settings_router.get("/gst-slabs")
 async def get_gst_slabs(request: Request):
+    """Return sorted list of configured GST slab percentages."""
     await get_current_user(request)
-    return GST_SLABS
+    rows = await db.tax_slabs.find({}, {"_id": 0}).to_list(200)
+    if not rows:
+        # Seed defaults on first read
+        default_docs = [{"id": str(uuid.uuid4()), "rate": float(r)} for r in GST_SLABS]
+        if default_docs:
+            await db.tax_slabs.insert_many(default_docs)
+        rows = default_docs
+    rates = sorted({float(r.get("rate", 0)) for r in rows})
+    return rates
+
+
+@settings_router.post("/gst-slabs")
+async def add_gst_slab(payload: dict, request: Request):
+    """Add a new GST slab (admin only)."""
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can edit tax slabs")
+    try:
+        rate = float(payload.get("rate"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Rate must be a number")
+    if rate < 0 or rate > 100:
+        raise HTTPException(status_code=400, detail="Rate must be between 0 and 100")
+    existing = await db.tax_slabs.find_one({"rate": rate})
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Slab {rate}% already exists")
+    doc = {"id": str(uuid.uuid4()), "rate": rate, "created_at": datetime.now(timezone.utc)}
+    await db.tax_slabs.insert_one(doc)
+    doc.pop("_id", None)
+    return {"rate": rate}
+
+
+@settings_router.delete("/gst-slabs/{rate}")
+async def delete_gst_slab(rate: float, request: Request):
+    """Remove a GST slab (admin only)."""
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can edit tax slabs")
+    result = await db.tax_slabs.delete_one({"rate": float(rate)})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Slab not found")
+    return {"deleted": rate}
+
+
+# ============================ UNITS OF MEASURE CRUD ============================
+@settings_router.get("/uoms")
+async def list_uoms(request: Request):
+    """List units of measure, seeding defaults on first read."""
+    await get_current_user(request)
+    rows = await db.uoms.find({}, {"_id": 0}).sort("code", 1).to_list(500)
+    if not rows:
+        seed = [
+            {"id": str(uuid.uuid4()), "code": u["code"], "name": u["name"], "description": ""}
+            for u in DEFAULT_UOMS
+        ]
+        if seed:
+            await db.uoms.insert_many(seed)
+        rows = seed
+    return rows
+
+
+@settings_router.post("/uoms", status_code=201)
+async def create_uom(payload: dict, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can manage units")
+    code = str(payload.get("code", "")).strip().lower()
+    name = str(payload.get("name", "")).strip()
+    if not code or not name:
+        raise HTTPException(status_code=400, detail="Both 'code' and 'name' are required")
+    exists = await db.uoms.find_one({"code": code})
+    if exists:
+        raise HTTPException(status_code=400, detail=f"UOM code '{code}' already exists")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "code": code,
+        "name": name,
+        "description": str(payload.get("description", "") or ""),
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.uoms.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@settings_router.put("/uoms/{uom_id}")
+async def update_uom(uom_id: str, payload: dict, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can manage units")
+    update = {}
+    if payload.get("code") is not None:
+        new_code = str(payload["code"]).strip().lower()
+        if not new_code:
+            raise HTTPException(status_code=400, detail="Code cannot be empty")
+        # Ensure code stays unique
+        dup = await db.uoms.find_one({"code": new_code, "id": {"$ne": uom_id}})
+        if dup:
+            raise HTTPException(status_code=400, detail=f"UOM code '{new_code}' already exists")
+        update["code"] = new_code
+    if payload.get("name") is not None:
+        name = str(payload["name"]).strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Name cannot be empty")
+        update["name"] = name
+    if payload.get("description") is not None:
+        update["description"] = str(payload.get("description") or "")
+    if not update:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    update["updated_at"] = datetime.now(timezone.utc)
+    result = await db.uoms.update_one({"id": uom_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="UOM not found")
+    doc = await db.uoms.find_one({"id": uom_id}, {"_id": 0})
+    return doc
+
+
+@settings_router.delete("/uoms/{uom_id}")
+async def delete_uom(uom_id: str, request: Request):
+    user = await get_current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can manage units")
+    result = await db.uoms.delete_one({"id": uom_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="UOM not found")
+    return {"deleted": uom_id}
 
 @settings_router.post("/migrate-addresses")
 async def migrate_addresses(request: Request):
