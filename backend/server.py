@@ -6736,6 +6736,10 @@ async def update_uom(uom_id: str, payload: dict, request: Request):
     user = await get_current_user(request)
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Only admin can manage units")
+    current = await db.uoms.find_one({"id": uom_id}, {"_id": 0})
+    if not current:
+        raise HTTPException(status_code=404, detail="UOM not found")
+    old_code = current.get("code", "")
     update = {}
     if payload.get("code") is not None:
         new_code = str(payload["code"]).strip().lower()
@@ -6759,7 +6763,57 @@ async def update_uom(uom_id: str, payload: dict, request: Request):
     result = await db.uoms.update_one({"id": uom_id}, {"$set": update})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="UOM not found")
+
+    # ---- Cascade code change to dependent documents ----
+    cascaded = {"items": 0, "purchase_orders": 0, "purchase_invoices": 0, "sales_orders": 0, "boms": 0}
+    new_code_val = update.get("code")
+    if new_code_val and new_code_val != old_code and old_code:
+        # 1) Items master (unit_of_measure)
+        r1 = await db.items.update_many(
+            {"unit_of_measure": old_code}, {"$set": {"unit_of_measure": new_code_val}}
+        )
+        cascaded["items"] = r1.modified_count
+
+        # 2) Purchase Orders — line_items[].uom (arrayFilters to update nested docs)
+        r2 = await db.purchase_orders.update_many(
+            {"line_items.uom": old_code},
+            {"$set": {"line_items.$[elem].uom": new_code_val}},
+            array_filters=[{"elem.uom": old_code}],
+        )
+        cascaded["purchase_orders"] = r2.modified_count
+
+        # 3) Purchase Invoices — lines[].uom
+        r3 = await db.purchase_invoices.update_many(
+            {"lines.uom": old_code},
+            {"$set": {"lines.$[elem].uom": new_code_val}},
+            array_filters=[{"elem.uom": old_code}],
+        )
+        cascaded["purchase_invoices"] = r3.modified_count
+
+        # 4) Sales Orders — lines[].uom (collection may have a different field name; ignore failures)
+        try:
+            r4 = await db.sales_orders.update_many(
+                {"lines.uom": old_code},
+                {"$set": {"lines.$[elem].uom": new_code_val}},
+                array_filters=[{"elem.uom": old_code}],
+            )
+            cascaded["sales_orders"] = r4.modified_count
+        except Exception:
+            pass
+
+        # 5) BOMs — components[].uom
+        try:
+            r5 = await db.boms.update_many(
+                {"components.uom": old_code},
+                {"$set": {"components.$[elem].uom": new_code_val}},
+                array_filters=[{"elem.uom": old_code}],
+            )
+            cascaded["boms"] = r5.modified_count
+        except Exception:
+            pass
+
     doc = await db.uoms.find_one({"id": uom_id}, {"_id": 0})
+    doc["cascaded"] = cascaded
     return doc
 
 

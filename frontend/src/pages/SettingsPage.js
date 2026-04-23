@@ -107,8 +107,14 @@ export default function SettingsPage() {
     if (!payload.code || !payload.name) { toast.error('Code and Name are required'); return; }
     try {
       if (editingUom) {
-        await api.put(`/api/settings/uoms/${editingUom.id}`, payload);
-        toast.success(`UOM ${payload.code} updated`);
+        const { data } = await api.put(`/api/settings/uoms/${editingUom.id}`, payload);
+        const c = data?.cascaded || {};
+        const totalCascaded = Object.values(c).reduce((s, v) => s + (Number(v) || 0), 0);
+        if (totalCascaded > 0) {
+          toast.success(`UOM ${payload.code} updated — cascaded to ${c.items || 0} item(s), ${c.purchase_orders || 0} PO(s), ${c.purchase_invoices || 0} PI(s).`);
+        } else {
+          toast.success(`UOM ${payload.code} updated`);
+        }
       } else {
         await api.post('/api/settings/uoms', payload);
         toast.success(`UOM ${payload.code} created`);
