@@ -6278,7 +6278,6 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
         "Level", "Parent Part Number", "Parent Name", "Revision", "Status",
         "Parent Routing Count", "Parent Routing Cost Total", "Parent Routings (Name:Cost)",
         "Component Part Number", "Component Name", "Quantity",
-        "Component Routing Count", "Component Routing Cost Total", "Component Routings (Name:Cost)",
         "Is Alternate", "Effectivity Date"
     ]
     header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
@@ -6364,7 +6363,6 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
                 parent_bom.get("revision", ""), parent_bom.get("status", ""),
                 p_count, p_total, p_str,
                 "", "", "",
-                0, 0.0, "",
                 "", eff_date
             ]
             for col, value in enumerate(data, 1):
@@ -6377,19 +6375,6 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
 
         for comp in components:
             comp_item = items_map.get(comp.get("item_id"), {})
-            # FIX: Component routings come from the child BOM's `parent_routings`
-            # (the LIVE source of truth). The cached `comp.routings` on the parent
-            # BOM doc is not auto-refreshed when the child BOM is edited, so it can
-            # show stale values after an update. Prefer live data; fall back to
-            # cached if no child BOM exists yet.
-            child_bom_for_routings = boms_by_parent.get(comp.get("item_id"))
-            live_routings = (
-                child_bom_for_routings.get("parent_routings", []) or []
-                if child_bom_for_routings
-                else comp.get("routings", []) or []
-            )
-            c_count, c_total, c_str = _routing_stats(live_routings)
-            _record_summary("component", live_routings)
             indent = "  " * level  # visual indentation in part number column for tree view
             data = [
                 level,
@@ -6399,7 +6384,6 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
                 p_count, p_total, p_str,
                 comp_item.get("part_number", ""), comp_item.get("name", ""),
                 comp.get("quantity", 0),
-                c_count, c_total, c_str,
                 "Yes" if comp.get("is_alternate") else "No",
                 eff_date
             ]
@@ -6436,16 +6420,16 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
             visited_parents = set()
             _walk(b, 0)
 
-    # Auto-size common columns
-    widths = [7, 28, 28, 10, 10, 14, 18, 32, 28, 28, 10, 14, 18, 32, 10, 14]
+    # Auto-size common columns (matches the 13 headers)
+    widths = [7, 28, 28, 10, 10, 14, 18, 32, 28, 28, 10, 10, 14]
     for idx, w in enumerate(widths, 1):
         col_letter = ws.cell(row=1, column=idx).column_letter
         ws.column_dimensions[col_letter].width = w
     ws.freeze_panes = "A2"
 
-    # ---------- Routings Summary Sheet ----------
+    # ---------- Routings Summary Sheet (parent-level only) ----------
     ws2 = wb.create_sheet("Routings Summary")
-    summary_headers = ["Scope", "Routing Name", "Occurrences", "Total Cost"]
+    summary_headers = ["Routing Name", "Occurrences", "Total Cost"]
     for col, h in enumerate(summary_headers, 1):
         cell = ws2.cell(row=1, column=col, value=h)
         cell.font = header_font
@@ -6453,13 +6437,14 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
         cell.alignment = Alignment(horizontal='center')
         cell.border = thin_border
     r = 2
-    # Sort: scope then by total_cost desc
-    for (scope, name), vals in sorted(routings_summary.items(), key=lambda kv: (kv[0][0], -kv[1]["total_cost"])):
-        for col, value in enumerate([scope, name, vals["occurrences"], vals["total_cost"]], 1):
+    # Only parent scope now — sort by total_cost desc
+    parent_entries = [(name, vals) for (scope, name), vals in routings_summary.items() if scope == "parent"]
+    for name, vals in sorted(parent_entries, key=lambda kv: -kv[1]["total_cost"]):
+        for col, value in enumerate([name, vals["occurrences"], vals["total_cost"]], 1):
             cell = ws2.cell(row=r, column=col, value=value)
             cell.border = thin_border
         r += 1
-    for idx, w in enumerate([12, 32, 14, 16], 1):
+    for idx, w in enumerate([32, 14, 16], 1):
         col_letter = ws2.cell(row=1, column=idx).column_letter
         ws2.column_dimensions[col_letter].width = w
     ws2.freeze_panes = "A2"
@@ -6477,24 +6462,46 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
 
 @bom_router.post("/import/excel")
 async def import_bom_excel(request: Request, file: UploadFile = File(...)):
-    """Import BOMs from Excel - groups by parent part number"""
+    """
+    Import BOMs from Excel — groups by parent part number.
+    Uses HEADER-NAME lookup (not column position) so any column order works
+    and users can safely delete columns they don't need.
+
+    Required headers:
+      - "Parent Part Number"
+      - "Component Part Number"
+      - "Quantity"
+
+    Optional headers:
+      - "Revision"               (default "A")
+      - "Status"                 (default "active")
+      - "Parent Routings (Name:Cost)"    # the ONLY routings column — applies to parent
+      - "Is Alternate"           ("Yes"/"No")
+      - "Effectivity Date"       (ISO yyyy-mm-dd; default today)
+
+    Component-level routings have been removed from the schema by design: ultimate
+    raw-material children usually have no operations of their own, and intermediate
+    sub-assemblies carry their routings via their OWN parent-BOM row. Keeping just
+    the parent routings eliminates duplicate / stale data and makes the template
+    much easier to author.
+    """
     user = await get_current_user(request)
     _require_access(user, ["admin", "production_manager"], module="bom", action="create")
     from openpyxl import load_workbook
-    
+
     content = await file.read()
     wb = load_workbook(io.BytesIO(content))
     ws = wb.active
-    
+
     results = {"created": 0, "updated": 0, "errors": []}
-    
+
     # Build items lookup
     items_by_pn = {}
     async for item in db.items.find({}, {"_id": 0}):
         items_by_pn[item.get("part_number", "")] = item
-    
+
     def parse_routings(s):
-        """Parse 'Name:Cost, Name:Cost' -> [{name, cost}]. Accepts plain 'Name' (cost=0)"""
+        """Parse 'Name:Cost, Name:Cost' -> [{name, cost}]. Plain 'Name' → cost=0."""
         out = []
         if not s:
             return out
@@ -6512,72 +6519,84 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
             else:
                 out.append({"name": entry, "cost": 0.0})
         return out
-    
-    # Group rows by parent part number
-    # New format: Parent PN, Parent Name, Rev, Status, Parent Routings, Comp PN, Comp Name, Qty, Comp Routings, Is Alt, Effectivity
+
+    # Read header row into a case-insensitive name→column-index map
+    headers = {}
+    for c_idx, cell in enumerate(ws[1], 1):
+        if cell.value:
+            headers[str(cell.value).strip().lower()] = c_idx
+
+    def col(row, *names):
+        for name in names:
+            key = name.lower()
+            if key in headers:
+                val = row[headers[key] - 1]
+                if val is not None and str(val).strip() != "":
+                    return val
+        return None
+
+    required = ["parent part number", "component part number", "quantity"]
+    missing = [h for h in required if h not in headers]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing required column(s): {', '.join(missing)}. "
+                   f"Tip: download a fresh template via BOM → Export to see the expected headers."
+        )
+
     bom_groups = {}
     for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-        if not row or not row[0]:
+        if not row:
             continue
-        parent_pn = str(row[0]).strip()
+        parent_pn = col(row, "Parent Part Number")
+        if not parent_pn:
+            continue
+        parent_pn = str(parent_pn).strip()
+
         if parent_pn not in bom_groups:
-            parent_routings_str = str(row[4]).strip() if len(row) > 4 and row[4] else ""
+            parent_routings_raw = col(row, "Parent Routings (Name:Cost)", "Parent Routings") or ""
             bom_groups[parent_pn] = {
-                "revision": str(row[2]).strip() if row[2] else "A",
-                "status": str(row[3]).strip() if row[3] else "active",
-                "parent_routings": parse_routings(parent_routings_str),
+                "revision": str(col(row, "Revision") or "A").strip(),
+                "status": str(col(row, "Status") or "active").strip(),
+                "parent_routings": parse_routings(parent_routings_raw),
                 "components": []
             }
-        
-        comp_pn = str(row[5]).strip() if len(row) > 5 and row[5] else (str(row[4]).strip() if len(row) > 4 and row[4] else None)
+
+        comp_pn = col(row, "Component Part Number")
         if not comp_pn:
             results["errors"].append(f"Row {row_num}: Missing component part number")
             continue
-        
-        # Detect old format (no Parent Routings column) vs new format
-        # New format: col 5 = Comp PN, col 8 = Comp Routings, col 9 = Is Alt
-        # Old format: col 4 = Comp PN, col 6 = Qty, col 7 = Is Alt
-        if len(row) > 8 and isinstance(row[8], str) and row[8] in ["Yes", "No", "yes", "no", "true", "false", "TRUE", "FALSE"]:
-            # New format
-            comp_routings_str = str(row[8]).strip() if row[8] else ""
-            qty = float(row[7]) if row[7] else 1
-            is_alt = str(row[9]).strip().lower() in ["yes", "true", "1"] if len(row) > 9 and row[9] else False
-        elif len(row) > 8:
-            # New format with routings
-            comp_routings_str = str(row[8]).strip() if row[8] else ""
-            qty = float(row[7]) if row[7] else 1
-            is_alt = str(row[9]).strip().lower() in ["yes", "true", "1"] if len(row) > 9 and row[9] else False
-        else:
-            # Old format fallback
-            comp_routings_str = ""
-            qty = float(row[6]) if len(row) > 6 and row[6] else 1
-            is_alt = str(row[7]).strip().lower() in ["yes", "true", "1"] if len(row) > 7 and row[7] else False
-        
-        comp_routings = parse_routings(comp_routings_str)
-        
+        comp_pn = str(comp_pn).strip()
+
+        try:
+            qty = float(col(row, "Quantity") or 1)
+        except (TypeError, ValueError):
+            qty = 1.0
+
+        is_alt_raw = col(row, "Is Alternate") or ""
+        is_alt = str(is_alt_raw).strip().lower() in ("yes", "true", "1")
+
         parent_item = items_by_pn.get(parent_pn)
         comp_item = items_by_pn.get(comp_pn)
-        
         if not parent_item:
             results["errors"].append(f"Row {row_num}: Parent '{parent_pn}' not found in items")
             continue
         if not comp_item:
             results["errors"].append(f"Row {row_num}: Component '{comp_pn}' not found in items")
             continue
-        
+
         bom_groups[parent_pn]["parent_item_id"] = parent_item["id"]
         bom_groups[parent_pn]["components"].append({
             "item_id": comp_item["id"],
             "quantity": qty,
             "is_alternate": is_alt,
-            "routings": comp_routings
         })
-    
+
     # Create or update BOMs
     for parent_pn, bom_data in bom_groups.items():
         if not bom_data.get("parent_item_id"):
             continue
-        
+
         existing = await db.boms.find_one({"parent_item_id": bom_data["parent_item_id"], "revision": bom_data["revision"]})
         if existing:
             await db.boms.update_one(
@@ -6605,7 +6624,7 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
             }
             await db.boms.insert_one(bom_doc)
             results["created"] += 1
-    
+
     return results
 
 @routings_router.get("/export/excel")
