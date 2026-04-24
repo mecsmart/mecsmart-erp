@@ -1133,7 +1133,9 @@ async def get_items(request: Request, category: Optional[str] = None, search: Op
             {"part_number": {"$regex": search, "$options": "i"}},
             {"name": {"$regex": search, "$options": "i"}}
         ]
-    items = await db.items.find(query, {"_id": 0}).to_list(1000)
+    # No practical hard cap — ERPs routinely carry thousands of SKUs, and the
+    # BOM / PO / SO / Quotation pickers load the full list then filter client-side.
+    items = await db.items.find(query, {"_id": 0}).to_list(50000)
     return items
 
 @items_router.get("/{item_id}")
