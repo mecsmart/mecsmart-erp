@@ -601,7 +601,7 @@ export default function ItemsPage() {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="input-field pl-10"
+                className="search-input"
                 placeholder="Search by part number or name..."
                 data-testid="items-search-input"
               />

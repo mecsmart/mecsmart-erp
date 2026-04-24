@@ -447,7 +447,7 @@ export default function ProductionPage() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search order #, product..."
-              className="input-field pl-9 text-sm"
+              className="search-input text-sm"
               data-testid="so-search-input"
             />
           </div>

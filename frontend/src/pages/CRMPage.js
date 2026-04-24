@@ -125,7 +125,7 @@ export default function CRMPage() {
         <div className="flex items-center gap-2">
           <div className="relative">
             <Search className="w-4 h-4 text-[#9CA3AF] absolute left-3 top-1/2 -translate-y-1/2" />
-            <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="input-field pl-9 w-64" data-testid="crm-search" />
+            <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="search-input w-64" data-testid="crm-search" />
           </div>
         </div>
       </div>

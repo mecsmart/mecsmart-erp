@@ -258,7 +258,7 @@ export default function PurchaseInvoicePage() {
         <div className="flex-1" />
         <div className="relative w-72">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-          <input type="text" value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="Search invoice, supplier..." className="input-field pl-9 text-sm" data-testid="invoice-search-input" />
+          <input type="text" value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="Search invoice, supplier..." className="search-input text-sm" data-testid="invoice-search-input" />
         </div>
       </div>
 
@@ -382,7 +382,7 @@ export default function PurchaseInvoicePage() {
                 <label className="block text-sm font-semibold text-[#111827] mb-2">Select GRN *</label>
                 <div className="relative mb-2">
                   <Search className="w-4 h-4 text-[#9CA3AF] absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input type="text" placeholder="Search by GRN #, PO #, JW order # or supplier name..." value={grnSearchQuery} onChange={(e) => setGrnSearchQuery(e.target.value)} className="input-field pl-9" data-testid="grn-search-input" />
+                  <input type="text" placeholder="Search by GRN #, PO #, JW order # or supplier name..." value={grnSearchQuery} onChange={(e) => setGrnSearchQuery(e.target.value)} className="search-input" data-testid="grn-search-input" />
                 </div>
                 {(() => {
                   const q = grnSearchQuery.trim().toLowerCase();

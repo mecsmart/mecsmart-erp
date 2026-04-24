@@ -215,6 +215,26 @@ details[open] > summary .details-chevron { transform: rotate(180deg); }
   @apply w-full border border-[#E5E7EB] rounded-sm px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#1D3557] focus:border-[#1D3557];
 }
 
+/* Dedicated search input used with a leading Search icon wrapper */
+.search-input {
+  @apply w-full border border-[#E5E7EB] rounded-sm text-sm focus:outline-none focus:ring-1 focus:ring-[#1D3557] focus:border-[#1D3557];
+  padding: 8px 12px 8px 38px;   /* left padding reserves space for the Search icon */
+}
+
+/* Globally hide spinner / up-down arrows on every numeric <input type="number">
+   across the app. Users have repeatedly asked for manual-entry only.
+   Form fields that explicitly need spinners can opt in via .allow-spinners. */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
+input[type=number] { -moz-appearance: textfield; }
+input[type=number].allow-spinners::-webkit-inner-spin-button,
+input[type=number].allow-spinners::-webkit-outer-spin-button {
+  -webkit-appearance: auto;
+}
+input[type=number].allow-spinners { -moz-appearance: auto; }
+
 /* Sidebar styles */
 .sidebar-link {
   @apply flex items-center space-x-3 px-3 py-2 text-sm text-[#9CA3AF] hover:text-white hover:bg-[#1F2937] rounded-sm mx-2 transition-colors;

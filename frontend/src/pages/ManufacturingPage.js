@@ -870,7 +870,7 @@ export default function ManufacturingPage() {
             <div className="flex items-center gap-2">
               <div className="relative w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-                <input type="text" value={moSearch} onChange={(e) => setMoSearch(e.target.value)} placeholder="Search MO, item..." className="input-field pl-9 text-sm" data-testid="mo-search-input" />
+                <input type="text" value={moSearch} onChange={(e) => setMoSearch(e.target.value)} placeholder="Search MO, item..." className="search-input text-sm" data-testid="mo-search-input" />
               </div>
             {canEdit && (
               <Dialog open={isWorkOrderDialogOpen} onOpenChange={setIsWorkOrderDialogOpen}>

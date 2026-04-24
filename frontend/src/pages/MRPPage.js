@@ -146,7 +146,7 @@ export default function MRPPage() {
       <div className="card-flat p-3">
         <div className="relative w-72">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-          <input type="text" value={mrpSearch} onChange={(e) => setMrpSearch(e.target.value)} placeholder="Search by part number or name..." className="input-field pl-9 text-sm" data-testid="mrp-search-input" />
+          <input type="text" value={mrpSearch} onChange={(e) => setMrpSearch(e.target.value)} placeholder="Search by part number or name..." className="search-input text-sm" data-testid="mrp-search-input" />
         </div>
       </div>
 

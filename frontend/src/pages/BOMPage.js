@@ -455,7 +455,7 @@ export default function BOMPage() {
 
   return (
     <div className="space-y-6" data-testid="bom-page">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between sticky top-0 z-30 bg-white py-3 border-b border-[#E5E7EB] -mx-6 px-6">
         <div>
           <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Bill of Materials</h1>
           <p className="text-sm text-[#4B5563]">Manage product structures and component relationships</p>
@@ -770,6 +770,12 @@ export default function BOMPage() {
                       })}
                     </div>
                   )}
+                  {/* Bottom "Add Component" button — easier to reach when the list grows */}
+                  <div className="flex justify-center pt-3">
+                    <button type="button" onClick={addComponent} className="btn-secondary text-xs flex items-center space-x-1" data-testid="add-component-btn-bottom">
+                      <Plus className="w-3 h-3" /><span>Add Component</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
@@ -815,7 +821,7 @@ export default function BOMPage() {
               value={bomSearch}
               onChange={(e) => setBomSearch(e.target.value)}
               placeholder="Search BOM by part number or name..."
-              className="input-field pl-9 text-sm"
+              className="search-input text-sm"
               data-testid="bom-search-input"
             />
           </div>

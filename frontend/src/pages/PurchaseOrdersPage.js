@@ -266,7 +266,7 @@ export default function PurchaseOrdersPage() {
           <div className="flex-1" />
           <div className="relative w-72">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-            <input type="text" value={poSearch} onChange={(e) => setPoSearch(e.target.value)} placeholder="Search PO, supplier, item..." className="input-field pl-9 text-sm" data-testid="po-search-input" />
+            <input type="text" value={poSearch} onChange={(e) => setPoSearch(e.target.value)} placeholder="Search PO, supplier, item..." className="search-input text-sm" data-testid="po-search-input" />
           </div>
         </div>
       </div>

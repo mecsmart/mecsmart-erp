@@ -327,7 +327,7 @@ export default function InventoryPage() {
           <div className="card-flat p-3">
             <div className="relative w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-              <input type="text" value={stockSearch} onChange={(e) => setStockSearch(e.target.value)} placeholder="Search by part number or name..." className="input-field pl-9 text-sm" data-testid="stock-search-input" />
+              <input type="text" value={stockSearch} onChange={(e) => setStockSearch(e.target.value)} placeholder="Search by part number or name..." className="search-input text-sm" data-testid="stock-search-input" />
             </div>
           </div>
 

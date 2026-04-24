@@ -658,7 +658,7 @@ export default function WarehousesPage() {
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative w-72">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-                <input type="text" value={storesStockSearch} onChange={(e) => setStoresStockSearch(e.target.value)} placeholder="Search by part number or name..." className="input-field pl-9 text-sm" data-testid="stores-stock-search" />
+                <input type="text" value={storesStockSearch} onChange={(e) => setStoresStockSearch(e.target.value)} placeholder="Search by part number or name..." className="search-input text-sm" data-testid="stores-stock-search" />
               </div>
               <select
                 value={storesStockCategory}
@@ -1217,7 +1217,7 @@ export default function WarehousesPage() {
           <div className="card-flat p-3 mb-2">
             <div className="relative w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-              <input type="text" value={plSearch} onChange={(e) => setPlSearch(e.target.value)} placeholder="Search by PL #, invoice, customer..." className="input-field pl-9 text-sm" data-testid="stores-pl-search" />
+              <input type="text" value={plSearch} onChange={(e) => setPlSearch(e.target.value)} placeholder="Search by PL #, invoice, customer..." className="search-input text-sm" data-testid="stores-pl-search" />
             </div>
           </div>
           <PackingListsPanel search={plSearch} canEdit={true} />
