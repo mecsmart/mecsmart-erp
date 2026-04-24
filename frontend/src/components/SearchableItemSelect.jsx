@@ -39,7 +39,7 @@ export const SearchableItemSelect = ({
     if (!query.trim()) return false; // Don't flood with all items on focus — wait for keystroke
     const q = query.toLowerCase();
     return (i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q);
-  }).slice(0, 100);
+  }).slice(0, 200);
 
   useEffect(() => {
     const handler = (e) => {

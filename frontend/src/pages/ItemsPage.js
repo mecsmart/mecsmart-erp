@@ -35,6 +35,7 @@ export default function ItemsPage() {
   const [items, setItems] = useState([]);
   const [itemGroups, setItemGroups] = useState([]);
   const [units, setUnits] = useState(FALLBACK_UNITS);
+  const [taxSlabs, setTaxSlabs] = useState([0, 5, 12, 18, 28]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -82,6 +83,14 @@ export default function ItemsPage() {
         }
       } catch (e) {
         console.warn('Failed to fetch UOM master, using fallback:', e);
+      }
+      try {
+        const { data } = await api.get('/api/settings/gst-slabs');
+        if (Array.isArray(data) && data.length) {
+          setTaxSlabs(data.map(r => Number(r)).sort((a, b) => a - b));
+        }
+      } catch (e) {
+        console.warn('Failed to fetch GST slabs, using fallback:', e);
       }
     })();
   }, []);
@@ -559,11 +568,9 @@ export default function ItemsPage() {
                     >
                       <SelectTrigger data-testid="item-gst-rate-select" className={groupLocksHsn && selectedGroup?.default_gst_rate != null ? 'bg-[#F3F4F6] cursor-not-allowed' : ''}><SelectValue placeholder="Select rate" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="0">0%</SelectItem>
-                        <SelectItem value="5">5%</SelectItem>
-                        <SelectItem value="12">12%</SelectItem>
-                        <SelectItem value="18">18%</SelectItem>
-                        <SelectItem value="28">28%</SelectItem>
+                        {taxSlabs.map(r => (
+                          <SelectItem key={r} value={String(r)}>{r}%</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>

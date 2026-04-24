@@ -6033,7 +6033,7 @@ async def export_items_excel(request: Request, category: Optional[str] = None):
         cat_label_map = {"raw_material": "Raw Materials", "component": "Parts", "sub_assembly": "Sub-Assemblies", "finished_good": "Finished Goods"}
         ws.title = cat_label_map.get(category, "Items Master") if category and category != "all" else "Items Master"
 
-        headers = ["Part Number", "Name", "Description", "Category", "Group", "UOM", "Purchase Cost", "Lead Time (Days)", "Safety Stock", "Current Stock", "Reorder Point", "HSN Code", "GST Rate (%)"]
+        headers = ["Part Number", "Name", "Description", "Category", "Group", "UOM", "Purchase Cost", "Sales Price", "Lead Time (Days)", "Safety Stock", "Current Stock", "Reorder Point", "HSN Code", "GST Rate (%)"]
         header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
         header_font = Font(bold=True, color="FFFFFF", size=11)
         thin_border = Border(
@@ -6076,6 +6076,7 @@ async def export_items_excel(request: Request, category: Optional[str] = None):
                 _safe_str(group_map.get(item.get("group_id"), "")),
                 _safe_str(item.get("unit_of_measure", "")),
                 _safe_num(item.get("purchase_price") or item.get("unit_cost"), 0),
+                _safe_num(item.get("sale_price") or item.get("sales_price") or item.get("standard_price"), 0),
                 _safe_num(item.get("lead_time_days"), 0),
                 _safe_num(item.get("safety_stock"), 0),
                 _safe_num(item.get("current_stock"), 0),
@@ -6142,6 +6143,7 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
         "Part Number": "part_number", "Name": "name", "Description": "description",
         "Category": "category", "Group": "group_name", "UOM": "unit_of_measure",
         "Purchase Cost": "purchase_price", "Unit Cost": "unit_cost",
+        "Sales Price": "sale_price",
         "Lead Time (Days)": "lead_time_days", "Safety Stock": "safety_stock",
         "Current Stock": "current_stock", "Reorder Point": "reorder_point",
         "HSN Code": "hsn_code", "GST Rate (%)": "gst_rate"
@@ -6168,7 +6170,7 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
                     if field == "group_name":
                         group_name_raw = str(val).strip() if val else None
                         continue
-                    if field in ["unit_cost", "purchase_price", "gst_rate"]:
+                    if field in ["unit_cost", "purchase_price", "sale_price", "gst_rate"]:
                         val = float(val) if val else 0
                     elif field in ["lead_time_days", "safety_stock", "current_stock", "reorder_point"]:
                         val = int(val) if val else 0

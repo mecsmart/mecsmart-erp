@@ -502,7 +502,6 @@ export default function BOMPage() {
                         items={items}
                         value={formData.parent_item_id}
                         onChange={(v) => setFormData({ ...formData, parent_item_id: v })}
-                        filter={(i) => ['sub_assembly', 'finished_good', 'component'].includes(i.category)}
                         placeholder={items.length === 0 ? 'Items still loading…' : 'Type part number or name to search…'}
                         testId="bom-parent-item-select"
                         disabled={items.length === 0}

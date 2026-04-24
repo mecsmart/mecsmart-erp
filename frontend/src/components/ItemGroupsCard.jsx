@@ -16,6 +16,18 @@ export function ItemGroupsCard({ isAdmin }) {
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState({ name: '', parent_category: '', default_hsn_code: '', default_gst_rate: '', description: '' });
   const [deleting, setDeleting] = useState(null);
+  const [taxSlabs, setTaxSlabs] = useState([0, 5, 12, 18, 28]);
+
+  const fetchSlabs = async () => {
+    try {
+      const { data } = await api.get('/api/settings/gst-slabs');
+      if (Array.isArray(data) && data.length) {
+        setTaxSlabs(data.map(r => Number(r)).sort((a, b) => a - b));
+      }
+    } catch (e) {
+      // Fallback to defaults; non-blocking.
+    }
+  };
 
   const fetchGroups = async () => {
     setLoading(true);
@@ -28,7 +40,7 @@ export function ItemGroupsCard({ isAdmin }) {
       setLoading(false);
     }
   };
-  useEffect(() => { fetchGroups(); }, []);
+  useEffect(() => { fetchGroups(); fetchSlabs(); }, []);
 
   const resetDraft = () => setDraft({ name: '', parent_category: '', default_hsn_code: '', default_gst_rate: '', description: '' });
 
@@ -139,11 +151,9 @@ export function ItemGroupsCard({ isAdmin }) {
                 data-testid="ig-gst-select"
               >
                 <option value="">(no default)</option>
-                <option value="0">0%</option>
-                <option value="5">5%</option>
-                <option value="12">12%</option>
-                <option value="18">18%</option>
-                <option value="28">28%</option>
+                {taxSlabs.map(r => (
+                  <option key={r} value={String(r)}>{r}%</option>
+                ))}
               </select>
             </div>
             <div className="col-span-2 flex gap-2">
