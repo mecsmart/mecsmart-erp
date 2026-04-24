@@ -133,10 +133,13 @@ export function AuthProvider({ children }) {
   };
 
   // ============================================================================
-  // IDLE LOGOUT — auto-logs out after N minutes of inactivity.
-  // Resets on any mousemove / keydown / scroll / click / touchstart.
-  // ============================================================================
-  const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+  // IDLE LOGOUT — auto-logs out after IDLE_TIMEOUT_MS of NO user interaction.
+  // Timer resets on any of: mousemove, mousedown, keydown, scroll, click, touchstart,
+  // input, focus, visibilitychange — so typing into forms, scrolling a long list,
+  // or even interacting with modal dialogs keeps the session alive. Listeners are
+  // attached to `document` in the capture phase to catch events regardless of
+  // stopPropagation elsewhere in the tree.
+  const IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
   useEffect(() => {
     if (!user) return; // Only run when authenticated
 
@@ -147,23 +150,23 @@ export function AuthProvider({ children }) {
       } catch { /* noop */ }
       setUser(false);
       setPermissions({});
-      // Surface a clear notice so the user knows WHY they were logged out
       try {
         const { toast } = await import('sonner');
-        toast.warning('Session timed out after 10 minutes of inactivity. Please sign in again.', { duration: 6000 });
+        toast.warning('Session timed out after 15 minutes of inactivity. Please sign in again.', { duration: 6000 });
       } catch { /* noop */ }
     };
     const resetTimer = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(idleLogout, IDLE_TIMEOUT_MS);
     };
-    const events = ['mousemove', 'keydown', 'scroll', 'click', 'touchstart'];
-    events.forEach(evt => window.addEventListener(evt, resetTimer, { passive: true }));
+    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'click', 'touchstart', 'input', 'focus', 'visibilitychange'];
+    // Capture-phase on document so stopPropagation inside portals/modals can't block reset
+    events.forEach(evt => document.addEventListener(evt, resetTimer, { passive: true, capture: true }));
     resetTimer();
 
     return () => {
       if (timer) clearTimeout(timer);
-      events.forEach(evt => window.removeEventListener(evt, resetTimer));
+      events.forEach(evt => document.removeEventListener(evt, resetTimer, { capture: true }));
     };
   }, [user]);
 

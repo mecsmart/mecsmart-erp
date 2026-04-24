@@ -61,12 +61,25 @@ export default function ItemsPage() {
     gst_rate: 18,
   });
 
-  const canEdit = ['admin', 'production_manager', 'inventory_manager'].includes(user?.role);
-  const canDelete = user?.role === 'admin';
+  const canEdit = user?.role === 'admin' || (user?.permissions?.items || []).includes('create') || (user?.permissions?.items || []).includes('edit');
+  const canDelete = user?.role === 'admin' || (user?.permissions?.items || []).includes('delete');
+
+  // Debounce search input so fast typing doesn't fire /api/items on every keystroke
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Render pagination — avoid laying out thousands of rows at once.
+  const PAGE_SIZE = 100;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [items, debouncedSearch, categoryFilter, groupFilter]);
 
   useEffect(() => {
     fetchItems();
-  }, [search, categoryFilter, groupFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, categoryFilter, groupFilter]);
 
   useEffect(() => {
     (async () => {
@@ -98,7 +111,7 @@ export default function ItemsPage() {
   const fetchItems = async () => {
     try {
       const params = new URLSearchParams();
-      if (search) params.append('search', search);
+      if (debouncedSearch) params.append('search', debouncedSearch);
       if (categoryFilter) params.append('category', categoryFilter);
       if (groupFilter) params.append('group_id', groupFilter);
       
@@ -676,7 +689,7 @@ export default function ItemsPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => {
+                {items.slice(0, visibleCount).map((item) => {
                   const itemGroup = itemGroups.find(g => g.id === item.group_id);
                   return (
                   <tr key={item.id} className={isLowStock(item) ? 'bg-[#FDE8E8]/30' : ''} data-testid={`item-row-${item.part_number}`}>
@@ -733,6 +746,15 @@ export default function ItemsPage() {
                 })}
               </tbody>
             </table>
+            {items.length > visibleCount && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-[#E5E7EB] bg-[#F9FAFB]">
+                <span className="text-xs text-[#6B7280]">Showing {visibleCount} of {items.length} items</span>
+                <div className="flex gap-2">
+                  <button onClick={() => setVisibleCount(c => Math.min(c + PAGE_SIZE, items.length))} className="btn-secondary text-xs" data-testid="items-load-more">Show {Math.min(PAGE_SIZE, items.length - visibleCount)} more</button>
+                  <button onClick={() => setVisibleCount(items.length)} className="btn-secondary text-xs" data-testid="items-load-all">Show all</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

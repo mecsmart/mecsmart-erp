@@ -6377,8 +6377,19 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
 
         for comp in components:
             comp_item = items_map.get(comp.get("item_id"), {})
-            c_count, c_total, c_str = _routing_stats(comp.get("routings", []))
-            _record_summary("component", comp.get("routings", []))
+            # FIX: Component routings come from the child BOM's `parent_routings`
+            # (the LIVE source of truth). The cached `comp.routings` on the parent
+            # BOM doc is not auto-refreshed when the child BOM is edited, so it can
+            # show stale values after an update. Prefer live data; fall back to
+            # cached if no child BOM exists yet.
+            child_bom_for_routings = boms_by_parent.get(comp.get("item_id"))
+            live_routings = (
+                child_bom_for_routings.get("parent_routings", []) or []
+                if child_bom_for_routings
+                else comp.get("routings", []) or []
+            )
+            c_count, c_total, c_str = _routing_stats(live_routings)
+            _record_summary("component", live_routings)
             indent = "  " * level  # visual indentation in part number column for tree view
             data = [
                 level,
