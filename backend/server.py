@@ -2107,7 +2107,7 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
         po_qty = 0
         if item_id:
             pos = await db.purchase_orders.find(
-                {"status": {"$in": ["draft", "approved", "sent", "confirmed"]},
+                {"status": {"$in": ["draft", "approved", "sent", "confirmed", "partial"]},
                  "$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]},
                 {"_id": 0, "lines": 1, "items": 1, "po_number": 1}
             ).to_list(100)
@@ -3128,7 +3128,7 @@ async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
         # Check if existing non-cancelled POs already cover this item
         existing_po_qty = 0
         existing_pos = await db.purchase_orders.find(
-            {"status": {"$nin": ["cancelled", "received"]},
+            {"status": {"$nin": ["cancelled", "received", "short_closed"]},
              "$or": [{"lines.item_id": item_id}, {"items.item_id": item_id}]},
             {"_id": 0, "lines": 1, "items": 1}
         ).to_list(100)
@@ -3150,8 +3150,13 @@ async def create_po_from_mrp(data: MRPCreatePORequest, request: Request):
         # Use the full user-requested qty (user already sees suggested amount and confirmed it)
         final_qty = max(int(qty), 1)
         
+        # Resolve description: client-provided override > item.description > item name
+        client_desc = entry.get("description") if isinstance(entry, dict) else None
+        line_desc = (client_desc if client_desc not in (None, "") else (item.get("description") or item.get("name") or ""))
+        
         lines.append({
             "item_id": item_id,
+            "description": line_desc,
             "quantity": final_qty,
             "unit_price": price,
             "hsn_code": item.get("hsn_code", ""),
@@ -3427,6 +3432,36 @@ async def cancel_purchase_order(po_id: str, request: Request):
     )
     
     return {"message": f"Purchase Order {po.get('po_number')} cancelled successfully"}
+
+
+@purchase_orders_router.post("/{po_id}/short-close")
+async def short_close_purchase_order(po_id: str, request: Request, data: dict = Body(default={})):
+    """Manually short-close a PO. Used when supplier denies further supply.
+    Sets status='short_closed' so the un-received qty no longer counts toward
+    'PO ordered qty' in MRP — letting users place fresh POs for the shortage.
+    Allowed only on draft/approved/sent/partial POs."""
+    user = await get_current_user(request)
+    _require_access(user, ["admin", "production_manager"], module="purchase_orders", action="edit")
+    po = await db.purchase_orders.find_one({"id": po_id})
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    
+    if po.get("status") in ["received", "cancelled", "short_closed"]:
+        raise HTTPException(status_code=400, detail=f"Cannot short-close a {po['status']} PO")
+    
+    reason = (data.get("reason") or "").strip() if isinstance(data, dict) else ""
+    
+    await db.purchase_orders.update_one(
+        {"id": po_id},
+        {"$set": {
+            "status": "short_closed",
+            "short_closed_at": datetime.now(timezone.utc),
+            "short_closed_by": user["id"],
+            "short_close_reason": reason,
+        }}
+    )
+    
+    return {"message": f"Purchase Order {po.get('po_number')} short-closed successfully"}
 
 
 @purchase_orders_router.post("/{po_id}/receive")
@@ -3790,22 +3825,44 @@ async def get_pending_grn_pos(request: Request):
 
 @grn_router.post("", status_code=201)
 async def create_grn(grn_data: GRNCreate, request: Request):
-    """Create GRN - verify material, price, update inventory"""
+    """Create GRN - verify material, price, update inventory.
+    Supports partial receipts: cumulatively updates each PO line's
+    received_quantity. PO status becomes 'partial' until every line is fully
+    received, then flips to 'received'."""
     user = await get_current_user(request)
     _require_access(user, ["admin", "inventory_manager"], module="stores", action="create")
     po = await db.purchase_orders.find_one({"id": grn_data.po_id})
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
-    if po.get("status") == "received":
-        raise HTTPException(status_code=400, detail="GRN already completed for this PO")
+    if po.get("status") in ["received", "short_closed", "cancelled"]:
+        raise HTTPException(status_code=400, detail=f"Cannot create GRN for a {po.get('status')} PO")
     
     # Generate GRN number
     count = await db.grn.count_documents({})
     grn_number = f"GRN-{str(count + 1).zfill(6)}"
     
+    # Build a quick lookup of incoming receive qty per item
+    incoming = {}
+    for ln in grn_data.lines:
+        if (ln.received_quantity or 0) > 0:
+            incoming[ln.item_id] = incoming.get(ln.item_id, 0) + float(ln.received_quantity)
+    
+    # Prepare updated PO lines (cumulative received_quantity per line)
+    updated_po_lines = []
+    for po_line in po.get("lines", []):
+        prev_recv = float(po_line.get("received_quantity", 0) or 0)
+        ord_qty = float(po_line.get("quantity", 0) or 0)
+        add = float(incoming.get(po_line.get("item_id"), 0))
+        new_recv = prev_recv + add
+        # cap at ordered qty (over-receipt is recorded but stored qty is capped to keep MRP math clean)
+        new_recv_capped = min(new_recv, ord_qty) if ord_qty > 0 else new_recv
+        updated_po_lines.append({**po_line, "received_quantity": new_recv_capped})
+    
     # Process each line - update inventory with verified quantities
     grn_lines = []
     for grn_line in grn_data.lines:
+        if (grn_line.received_quantity or 0) <= 0:
+            continue  # skip zero-qty lines (partial receipt: user left this line for next GRN)
         item = await db.items.find_one({"id": grn_line.item_id})
         if not item:
             continue
@@ -3843,6 +3900,9 @@ async def create_grn(grn_data: GRNCreate, request: Request):
         await db.inventory_transactions.insert_one(tx_doc)
         await db.items.update_one({"id": grn_line.item_id}, {"$set": {"current_stock": new_stock}})
     
+    if not grn_lines:
+        raise HTTPException(status_code=400, detail="No lines with received quantity > 0")
+    
     grn_doc = {
         "id": str(uuid.uuid4()),
         "grn_number": grn_number,
@@ -3861,20 +3921,32 @@ async def create_grn(grn_data: GRNCreate, request: Request):
     await db.grn.insert_one(grn_doc)
     grn_doc.pop("_id", None)
     
-    # Update PO status to received
-    await db.purchase_orders.update_one(
-        {"id": grn_data.po_id},
-        {"$set": {
-            "status": "received",
-            "received_at": datetime.now(timezone.utc),
-            "received_by": user["id"],
-            "grn_number": grn_number
-        }}
-    )
+    # Decide new PO status: 'received' iff every line is fully received, else 'partial'
+    fully_received = all(
+        float(pl.get("received_quantity", 0) or 0) >= float(pl.get("quantity", 0) or 0)
+        for pl in updated_po_lines
+    ) and len(updated_po_lines) > 0
+    new_status = "received" if fully_received else "partial"
     
-    # If this PO is linked to SC order(s), mark SC as completed and complete linked MOs
-    sc_order_ids = po.get("reference_sc_order_ids", [])
-    if not sc_order_ids and po.get("reference_sc_order_id"):
+    grn_numbers_history = list(po.get("grn_numbers", []) or [])
+    if grn_number not in grn_numbers_history:
+        grn_numbers_history.append(grn_number)
+    
+    po_update = {
+        "status": new_status,
+        "lines": updated_po_lines,
+        "grn_numbers": grn_numbers_history,
+        "grn_number": grn_number,  # latest GRN number (kept for backward compat)
+    }
+    if fully_received:
+        po_update["received_at"] = datetime.now(timezone.utc)
+        po_update["received_by"] = user["id"]
+    
+    await db.purchase_orders.update_one({"id": grn_data.po_id}, {"$set": po_update})
+    
+    # SC linkage logic only fires when the PO is fully received.
+    sc_order_ids = po.get("reference_sc_order_ids", []) if fully_received else []
+    if not sc_order_ids and po.get("reference_sc_order_id") and fully_received:
         sc_order_ids = [po["reference_sc_order_id"]]
     
     for sc_id in sc_order_ids:

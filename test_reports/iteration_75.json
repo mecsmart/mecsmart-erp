@@ -1,0 +1,122 @@
+{
+  "summary": "Iteration 75 testing complete. All backend tests (18/18) passed. All frontend features verified: (1) Partial GRN flow working - PO status transitions correctly from sent→partial→received, (2) Short-close PO endpoint and UI working with Lock icon button, dialog with reason textarea, and status badge, (3) MRP-to-PO description field present with italic/dashed styling and pre-filled from item.description, (4) GRN dialog shows updated headers (Ordered, Already Recd, Pending, Recd Now) for partial receipt support, (5) Partial badge visible in pending POs for GRN table.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "MRP PO Dialog", "issues": ["Console warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent} - accessibility improvement needed"]},
+      {"screen": "Short-Close Dialog", "issues": ["Same DialogContent accessibility warning"]},
+      {"screen": "GRN Dialog", "issues": ["Same DialogContent accessibility warning"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_75.py",
+    "/app/test_reports/pytest/pytest_iteration_75.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Add aria-describedby to DialogContent components for accessibility compliance"
+  ],
+  "critical_code_review_comments": [
+    "Partial GRN logic correctly implemented: create_grn cumulatively updates line.received_quantity and sets PO status to 'partial' until all lines fully received (lines 3826-3945)",
+    "Short-close endpoint correctly validates status and sets short_closed_at, short_close_reason (lines 3437-3464)",
+    "MRP demand calculation correctly includes 'partial' status in existing PO check (line 2110)",
+    "from-mrp endpoint correctly excludes 'short_closed' from existing PO check (line 3131)",
+    "from-mrp correctly populates description from item.description or item.name fallback (lines 3153-3155)",
+    "MRPPage.js correctly shows description input with italic/dashed styling (lines 495-502)",
+    "WarehousesPage.js GRN dialog shows updated headers: Ordered, Already Recd, Pending, Recd Now (lines 1165-1168)",
+    "PurchaseOrdersPage.js has short-close button with Lock icon for eligible POs (lines 378-383)",
+    "Status filter includes 'Short Closed' option (line 20)"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_75.py"
+  ],
+  "success_rate": {
+    "backend": "100% (18 passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created multiple test POs during backend testing for partial GRN and short-close scenarios",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 75 features verified: (1) Partial GRN flow - create GRN with partial qty, PO becomes 'partial', appears in pending-pos list, second GRN completes it to 'received'. (2) Short-close PO - button with Lock icon on draft/approved/sent/partial POs, dialog with optional reason, status becomes 'short_closed'. (3) MRP description field - each line in Create PO dialog has italic/dashed description input pre-filled from item.description. (4) GRN dialog headers updated for partial receipt: Ordered, Already Recd, Pending, Recd Now. (5) Partial badge shown in pending POs for GRN table.",
+  "features_tested": {
+    "partial_grn_flow": {
+      "status": "PASSED",
+      "tests": [
+        "POST /api/grn with partial qty creates GRN and sets PO status to 'partial'",
+        "PO line.received_quantity updated cumulatively",
+        "Partial PO appears in GET /api/grn/pending-pos",
+        "Second GRN for remaining qty flips PO to 'received'",
+        "GRN rejected for received/cancelled/short_closed POs (400)",
+        "GRN rejected when no lines have received_quantity > 0 (400)"
+      ]
+    },
+    "short_close_po": {
+      "status": "PASSED",
+      "tests": [
+        "POST /api/purchase-orders/{po_id}/short-close works with reason",
+        "PO status becomes 'short_closed' with short_close_reason and short_closed_at",
+        "Short-close rejected for already short_closed/cancelled/received POs (400)",
+        "UI: Lock icon button visible for draft/approved/sent/partial POs",
+        "UI: Dialog with reason textarea and confirm button",
+        "UI: Status filter includes 'Short Closed' option"
+      ]
+    },
+    "mrp_partial_po_calc": {
+      "status": "PASSED",
+      "tests": [
+        "MRP demand calculation includes 'partial' status in existing PO check",
+        "Partial PO's pending qty counted in po_ordered_qty"
+      ]
+    },
+    "from_mrp_after_short_close": {
+      "status": "PASSED",
+      "tests": [
+        "After short-close, un-received qty doesn't block new PO creation",
+        "from-mrp excludes 'short_closed' from existing PO check"
+      ]
+    },
+    "from_mrp_description": {
+      "status": "PASSED",
+      "tests": [
+        "POST /api/purchase-orders/from-mrp populates description from item.description",
+        "Falls back to item.name if no description",
+        "Explicit description override in payload is preserved"
+      ]
+    },
+    "mrp_po_dialog_description": {
+      "status": "PASSED",
+      "tests": [
+        "Description input field present below part number (data-testid='mrp-po-line-description-{idx}')",
+        "Field has italic, dashed-border styling",
+        "Pre-filled with item.description or item.name"
+      ]
+    },
+    "grn_dialog_partial_headers": {
+      "status": "PASSED",
+      "tests": [
+        "GRN dialog shows headers: Ordered, Already Recd, Pending, Recd Now",
+        "Lines fully received are filtered out",
+        "Pending column shows remaining qty",
+        "Recd Now input pre-fills with pending qty"
+      ]
+    },
+    "pending_po_partial_badge": {
+      "status": "PASSED",
+      "tests": [
+        "Partial POs show 'Partial' badge in pending POs for GRN table",
+        "Badge has data-testid='pending-po-partial-{po_id}'"
+      ]
+    }
+  },
+  "backend_tests_summary": {
+    "total": 18,
+    "passed": 18,
+    "skipped": 0,
+    "failed": 0
+  }
+}

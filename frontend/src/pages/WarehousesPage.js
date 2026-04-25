@@ -261,22 +261,34 @@ export default function WarehousesPage() {
   // GRN Functions
   const openGRNDialog = (po) => {
     setSelectedPO(po);
+    // For partial PO support: each line shows remaining (pending) qty.
+    // Lines fully received are filtered out. User can enter what supplier delivered
+    // this round; backend cumulatively tracks line.received_quantity on the PO.
+    const pendingLines = (po.lines || []).map(line => {
+      const ordered = Number(line.quantity || 0);
+      const alreadyReceived = Number(line.received_quantity || 0);
+      const pending = Math.max(0, ordered - alreadyReceived);
+      return {
+        item_id: line.item_id,
+        item_name: line.item?.name || '',
+        item_part_number: line.item?.part_number || '',
+        ordered_quantity: ordered,
+        already_received: alreadyReceived,
+        po_quantity: pending,            // qty STILL pending for this GRN dialog
+        received_quantity: pending,      // pre-fill with full pending qty (editable)
+        po_price: line.unit_price,
+        verified_price: line.unit_price,
+        uom: line.uom || 'pcs',
+        hsn_code: line.hsn_code || '',
+      };
+    }).filter(l => l.po_quantity > 0);  // hide already fulfilled lines
+
     setGrnForm({
       supplier_invoice_no: '',
       supplier_invoice_date: '',
       warehouse_id: po.delivery_warehouse_id || '',
       notes: '',
-      lines: (po.lines || []).map(line => ({
-        item_id: line.item_id,
-        item_name: line.item?.name || '',
-        item_part_number: line.item?.part_number || '',
-        po_quantity: line.quantity,
-        received_quantity: line.quantity,
-        po_price: line.unit_price,
-        verified_price: line.unit_price,
-        uom: line.uom || 'pcs',
-        hsn_code: line.hsn_code || '',
-      })),
+      lines: pendingLines,
     });
     setGrnDialogOpen(true);
   };
@@ -302,12 +314,13 @@ export default function WarehousesPage() {
       supplier_invoice_date: grnForm.supplier_invoice_date ? new Date(grnForm.supplier_invoice_date).toISOString() : null,
       warehouse_id: grnForm.warehouse_id,
       notes: grnForm.notes,
-      lines: grnForm.lines.map(l => ({
+      lines: grnForm.lines.filter(l => (l.received_quantity || 0) > 0).map(l => ({
         item_id: l.item_id,
         received_quantity: l.received_quantity,
         verified_price: l.verified_price,
       })),
     };
+    if (payload.lines.length === 0) { toast.error('Enter received quantity on at least one line'); return; }
     setConfirmGrnModal({
       open: true,
       kind: 'po',
@@ -930,7 +943,12 @@ export default function WarehousesPage() {
                   <tbody>
                     {pendingPOs.map(po => (
                       <tr key={po.id} data-testid={`pending-grn-row-${po.id}`}>
-                        <td className="mono font-medium">{po.po_number}</td>
+                        <td className="mono font-medium">
+                          {po.po_number}
+                          {po.status === 'partial' && (
+                            <span className="ml-2 status-badge bg-[#FDF6B2] text-[#723B13]" data-testid={`pending-po-partial-${po.id}`}>Partial</span>
+                          )}
+                        </td>
                         <td>
                           <span className="mono text-xs">{po.supplier?.code}</span>
                           <p className="text-sm">{po.supplier?.name}</p>
@@ -1144,8 +1162,10 @@ export default function WarehousesPage() {
                           <tr className="bg-[#1D3557] text-white text-xs">
                             <th className="text-left p-2">Item</th>
                             <th className="text-left p-2">HSN</th>
-                            <th className="text-right p-2">{selectedJW ? 'Ordered' : 'PO Qty'}</th>
-                            <th className="text-right p-2">Recd Qty</th>
+                            <th className="text-right p-2">{selectedJW ? 'Ordered' : 'Ordered'}</th>
+                            <th className="text-right p-2">Already Recd</th>
+                            <th className="text-right p-2">Pending</th>
+                            <th className="text-right p-2">Recd Now</th>
                             <th className="text-left p-2">UOM</th>
                             <th className="text-right p-2">{selectedJW ? 'SC Price' : 'PO Price'}</th>
                             <th className="text-right p-2">Cost/Unit</th>
@@ -1164,9 +1184,11 @@ export default function WarehousesPage() {
                                   <p className="text-[#6B7280] text-xs">{line.item_name}</p>
                                 </td>
                                 <td className="p-2 mono text-xs">{line.hsn_code || '-'}</td>
-                                <td className="p-2 text-right mono">{line.po_quantity}</td>
+                                <td className="p-2 text-right mono">{line.ordered_quantity != null ? line.ordered_quantity : line.po_quantity}</td>
+                                <td className="p-2 text-right mono text-[#6B7280]">{line.already_received != null ? line.already_received : 0}</td>
+                                <td className="p-2 text-right mono font-semibold text-[#723B13]">{line.po_quantity}</td>
                                 <td className="p-2">
-                                  <input type="number" min="0" step="any" value={line.received_quantity} onChange={(e) => updateGRNLine(i, 'received_quantity', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono w-20 text-right" data-testid={`grn-received-qty-${i}`} />
+                                  <input type="number" min="0" max={line.po_quantity} step="any" value={line.received_quantity} onChange={(e) => updateGRNLine(i, 'received_quantity', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono w-20 text-right" data-testid={`grn-received-qty-${i}`} />
                                 </td>
                                 <td className="p-2 mono text-xs">{line.uom}</td>
                                 <td className="p-2 text-right mono">{formatCurrency(line.po_price)}</td>
@@ -1187,7 +1209,7 @@ export default function WarehousesPage() {
                             );
                           })}
                           <tr className="bg-[#F3F4F6] font-semibold">
-                            <td className="p-2 text-right text-sm" colSpan={6}>Grand Total</td>
+                            <td className="p-2 text-right text-sm" colSpan={9}>Grand Total</td>
                             <td className="p-2 text-right mono text-sm">{formatCurrency(grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0) * (l.verified_price || 0), 0))}</td>
                             <td></td>
                           </tr>

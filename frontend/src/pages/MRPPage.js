@@ -63,6 +63,7 @@ export default function MRPPage() {
           item_id: itemId,
           part_number: item.item?.part_number || '',
           name: item.item?.name || '',
+          description: item.item?.description || item.item?.name || '',
           hsn_code: item.item?.hsn_code || '',
           uom: item.item?.unit_of_measure || 'pcs',
           quantity: parseFloat((item.suggested_quantity || 1).toFixed(2)),
@@ -87,6 +88,7 @@ export default function MRPPage() {
           item_id: s.item?.id,
           part_number: s.item?.part_number || '',
           name: s.item?.name || '',
+          description: s.item?.description || s.item?.name || '',
           hsn_code: s.item?.hsn_code || '',
           uom: s.item?.unit_of_measure || 'pcs',
           quantity: parseFloat((s.suggested_quantity || 1).toFixed(2)),
@@ -107,6 +109,7 @@ export default function MRPPage() {
           item_id: itemId,
           part_number: d.item?.part_number || '',
           name: d.item?.name || '',
+          description: d.item?.description || d.item?.name || '',
           hsn_code: d.item?.hsn_code || '',
           uom: d.item?.unit_of_measure || 'pcs',
           quantity: parseFloat((d.net_requirement || 1).toFixed(2)),
@@ -139,6 +142,7 @@ export default function MRPPage() {
     try {
       const payload = Object.values(selectedItems).map(i => ({
         item_id: i.item_id,
+        description: i.description || '',
         quantity: parseFloat(i.quantity) || 1,
         unit_price: parseFloat(i.unit_price) || 0,
       }));
@@ -268,6 +272,7 @@ export default function MRPPage() {
                               eligible.forEach(d => {
                                 next[d.item?.id] = next[d.item?.id] || {
                                   item_id: d.item?.id, part_number: d.item?.part_number || '', name: d.item?.name || '',
+                                  description: d.item?.description || d.item?.name || '',
                                   hsn_code: d.item?.hsn_code || '', uom: d.item?.unit_of_measure || 'pcs',
                                   quantity: parseFloat((d.net_requirement || 1).toFixed(2)),
                                   unit_price: parseFloat((d.item?.unit_cost || 0).toFixed(2)),
@@ -487,6 +492,14 @@ export default function MRPPage() {
                             <div className="px-1">
                               <div className="mono text-[12px] font-semibold text-[#1D3557]">{entry.part_number || '-'}</div>
                               <div className="text-[11px] text-[#4B5563]">{entry.name}</div>
+                              <input
+                                type="text"
+                                value={entry.description || ''}
+                                onChange={(e) => updateDialogField(itemId, 'description', e.target.value)}
+                                placeholder="Description (printed on PO)"
+                                className="mt-1 w-full px-2 py-0.5 border border-dashed border-[#D1D5DB] rounded-sm text-[11px] italic bg-transparent focus:bg-white focus:border-[#1D3557] focus:border-solid focus:outline-none"
+                                data-testid={`mrp-po-line-description-${idx}`}
+                              />
                             </div>
                           </td>
                           <td>

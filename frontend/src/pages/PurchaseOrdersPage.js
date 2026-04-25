@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
   Plus, ShoppingCart, FileText, Filter, X, CheckCircle2, Send, 
-  Edit2, History, ChevronDown, ChevronUp, Trash2, Printer, XCircle, Search, Truck
+  Edit2, History, ChevronDown, ChevronUp, Trash2, Printer, XCircle, Search, Truck, Lock
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -17,6 +17,7 @@ const statusOptions = [
   { value: 'sent', label: 'Sent' },
   { value: 'partial', label: 'Partial' },
   { value: 'received', label: 'GRN Done' },
+  { value: 'short_closed', label: 'Short Closed' },
   { value: 'cancelled', label: 'Cancelled' },
 ];
 
@@ -214,12 +215,14 @@ export default function PurchaseOrdersPage() {
       case 'sent': return 'bg-[#E1EFFE] text-[#1E429F]';
       case 'partial': return 'bg-[#FDF6B2] text-[#723B13]';
       case 'received': return 'bg-[#DEF7EC] text-[#03543F]';
+      case 'short_closed': return 'bg-[#E5E7EB] text-[#374151]';
       case 'cancelled': return 'bg-[#FDE8E8] text-[#9B1C1C]';
       default: return 'bg-[#F3F4F6] text-[#4B5563]';
     }
   };
 
   const [printPO, setPrintPO] = useState(null);
+  const [shortCloseDialog, setShortCloseDialog] = useState({ open: false, po: null, reason: '' });
 
   const handleCancelPO = async (po) => {
     if (!window.confirm(`Cancel ${po.po_number}? This action cannot be undone.`)) return;
@@ -227,6 +230,18 @@ export default function PurchaseOrdersPage() {
       await api.post(`/api/purchase-orders/${po.id}/cancel`);
       fetchData();
     } catch (e) { alert(e.response?.data?.detail || 'Failed to cancel PO'); }
+  };
+
+  const handleShortClosePO = async () => {
+    const po = shortCloseDialog.po;
+    if (!po) return;
+    try {
+      await api.post(`/api/purchase-orders/${po.id}/short-close`, { reason: shortCloseDialog.reason });
+      setShortCloseDialog({ open: false, po: null, reason: '' });
+      fetchData();
+    } catch (e) {
+      alert(e.response?.data?.detail || 'Failed to short-close PO');
+    }
   };
 
   return (
@@ -329,14 +344,14 @@ export default function PurchaseOrdersPage() {
                     </td>
                     <td className="text-right mono font-semibold">{formatCurrency(po.total_amount || 0)}</td>
                     <td>
-                      <span className={`status-badge ${getStatusColor(po.status)}`}>{po.status === 'received' ? 'GRN Done' : po.status}</span>
+                      <span className={`status-badge ${getStatusColor(po.status)}`}>{po.status === 'received' ? 'GRN Done' : po.status === 'short_closed' ? 'Short Closed' : po.status}</span>
                     </td>
                     <td className="text-sm text-[#4B5563]">
                       {po.expected_date ? new Date(po.expected_date).toLocaleDateString() : '-'}
                     </td>
                     <td>
                       <div className="flex items-center space-x-1">
-                        {po.status !== 'received' && po.status !== 'cancelled' && canEdit && (
+                        {po.status !== 'received' && po.status !== 'cancelled' && po.status !== 'short_closed' && canEdit && (
                           <button onClick={() => openEditDialog(po)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit PO" data-testid={`edit-po-${po.id}`}>
                             <Edit2 className="w-4 h-4" />
                           </button>
@@ -360,7 +375,13 @@ export default function PurchaseOrdersPage() {
                         <button onClick={() => setPrintPO(po)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Print PO" data-testid={`print-po-${po.id}`}>
                           <Printer className="w-4 h-4" />
                         </button>
-                        {po.status !== 'received' && po.status !== 'cancelled' && canEdit && (
+                        {/* Short-close: only for active POs that haven't been fully received/cancelled */}
+                        {['draft', 'approved', 'sent', 'partial'].includes(po.status) && canEdit && (
+                          <button onClick={() => setShortCloseDialog({ open: true, po, reason: '' })} className="p-1 text-[#4B5563] hover:text-[#723B13]" title="Short-close PO (release pending qty back to MRP)" data-testid={`short-close-po-${po.id}`}>
+                            <Lock className="w-4 h-4" />
+                          </button>
+                        )}
+                        {po.status !== 'received' && po.status !== 'cancelled' && po.status !== 'short_closed' && canEdit && (
                           <button onClick={() => handleCancelPO(po)} className="p-1 text-[#4B5563] hover:text-[#9B1C1C]" title="Cancel PO" data-testid={`cancel-po-${po.id}`}>
                             <XCircle className="w-4 h-4" />
                           </button>
@@ -714,6 +735,44 @@ export default function PurchaseOrdersPage() {
 
       {/* PO Print Dialog */}
       <POPrintDialog po={printPO} open={!!printPO} onClose={() => setPrintPO(null)} />
+
+      {/* Short-Close Dialog */}
+      <Dialog open={shortCloseDialog.open} onOpenChange={(open) => { if (!open) setShortCloseDialog({ open: false, po: null, reason: '' }); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-[Chivo] flex items-center gap-2">
+              <Lock className="w-5 h-5 text-[#723B13]" />
+              Short-Close PO
+            </DialogTitle>
+          </DialogHeader>
+          {shortCloseDialog.po && (
+            <div className="space-y-3 mt-2" data-testid="short-close-dialog">
+              <div className="bg-[#FDF6B2] border border-[#F0C674] rounded-sm p-3 text-xs text-[#723B13]">
+                <p className="font-semibold mb-1">{shortCloseDialog.po.po_number} — {shortCloseDialog.po.supplier?.name || ''}</p>
+                <p>This will mark the PO as <span className="font-semibold">Short Closed</span>. Any un-received quantity will be released so MRP suggests fresh POs for the shortage.</p>
+                <p className="mt-1">No further GRN can be created against this PO.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-[#111827] mb-1">Reason (optional)</label>
+                <textarea
+                  value={shortCloseDialog.reason}
+                  onChange={(e) => setShortCloseDialog({ ...shortCloseDialog, reason: e.target.value })}
+                  placeholder="e.g. supplier denied to supply remaining qty"
+                  className="input-field w-full text-xs"
+                  rows={3}
+                  data-testid="short-close-reason"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#E5E7EB]">
+                <button type="button" className="btn-secondary" onClick={() => setShortCloseDialog({ open: false, po: null, reason: '' })}>Cancel</button>
+                <button type="button" className="btn-primary flex items-center gap-2" onClick={handleShortClosePO} data-testid="confirm-short-close-btn">
+                  <Lock className="w-4 h-4" /> Short-Close PO
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
