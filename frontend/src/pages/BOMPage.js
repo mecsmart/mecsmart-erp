@@ -47,6 +47,9 @@ export default function BOMPage() {
   const [viewBom, setViewBom] = useState(null);
   const [bomExplosion, setBomExplosion] = useState(null);
   const [expandedItems, setExpandedItems] = useState({});
+  // Top-level BOM panels: collapsed by default for ALL parent categories (FG, SG, CP, RM).
+  // Stores `true` for explicitly-EXPANDED panels; missing key === collapsed.
+  const [expandedBomPanels, setExpandedBomPanels] = useState({});
   const [allExplosions, setAllExplosions] = useState({});
   const [bomSearch, setBomSearch] = useState('');
   
@@ -954,9 +957,11 @@ export default function BOMPage() {
                 
                 return (
                   <div key={pid} className="border border-[#D1D5DB] rounded-sm overflow-hidden" data-testid={`bom-tree-${pid}`}>
-                    {/* Top-level header row — color by parent category */}
+                    {/* Top-level header row — color by parent category. Clicking the header
+                        toggles the explosion table below. ALL panels (FG, SG, CP, RM) are
+                        collapsed by default to keep the list scannable on big BOM catalogs. */}
                     <div
-                      className="flex items-center justify-between px-4 py-3 text-white"
+                      className="flex items-center justify-between px-4 py-3 text-white cursor-pointer select-none"
                       style={{
                         backgroundColor:
                           parentItem?.category === 'finished_good' ? 'rgba(29, 53, 87, 0.95)' :     // Navy
@@ -965,29 +970,33 @@ export default function BOMPage() {
                           parentItem?.category === 'raw_material' ? 'rgba(37, 99, 235, 0.85)' :     // Blue
                           'rgba(75, 85, 99, 0.85)',                                                  // Gray fallback
                       }}
+                      onClick={() => setExpandedBomPanels(p => ({ ...p, [pid]: !p[pid] }))}
+                      data-testid={`bom-panel-toggle-${pid}`}
                     >
                       <div className="flex items-center gap-3">
+                        {expandedBomPanels[pid] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                         <span className="text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded">{catLabel(parentItem?.category)}</span>
                         <span className="mono font-bold text-sm">{parentItem?.part_number || '-'}</span>
                         <span className="font-medium">{parentItem?.name || '-'}</span>
                         {activeBom && <span className="text-xs bg-white/15 px-2 py-0.5 rounded">Rev {activeBom.revision} - {activeBom.status}</span>}
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                         {canSeeCosts && explosion?.fg_process_cost_per_unit > 0 && (
                           <span className="text-[11px] bg-[#FDF6B2] text-[#723B13] px-2 py-0.5 rounded mono font-medium" title="FG Parent Process Cost per unit">FG Process: {formatCurrency(explosion.fg_process_cost_per_unit)}</span>
                         )}
                         {canSeeCosts && <span className="mono text-sm font-bold">Total: {formatCurrency(totalCost)}</span>}
-                        {activeBom && <button onClick={() => { fetchBomExplosion(activeBom.id); }} className="p-1 hover:bg-white/20 rounded" title="Refresh Costs (re-pull from BOM)" data-testid={`refresh-bom-${pid}`}><RefreshCw className="w-4 h-4" /></button>}
-                        {explosion && <button onClick={() => printBomExplosion(parentItem, explosion.explosion, totalCost, activeBom, explosion.fg_process_cost_per_unit || 0, explosion.components_cost || 0)} className="p-1 hover:bg-white/20 rounded" title="Print BOM" data-testid={`print-bom-${pid}`}><Printer className="w-4 h-4" /></button>}
-                        {activeBom && <button onClick={() => handleBomExport(activeBom.id)} className="p-1 hover:bg-white/20 rounded" title="Export this BOM" data-testid={`export-bom-${pid}`}><Download className="w-4 h-4" /></button>}
-                        <button onClick={() => handleView(activeBom)} className="p-1 hover:bg-white/20 rounded" title="View"><Eye className="w-4 h-4" /></button>
-                        {canEdit && <button onClick={() => handleEdit(activeBom)} className="p-1 hover:bg-white/20 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>}
-                        {canEdit && <button onClick={() => handleRevise(activeBom)} className="p-1 hover:bg-white/20 rounded" title="Revise"><GitBranch className="w-4 h-4" /></button>}
-                        {user?.role === 'admin' && <button onClick={() => handleDelete(activeBom)} className="p-1 hover:bg-white/20 rounded" title="Delete"><Trash2 className="w-4 h-4" /></button>}
+                        {activeBom && <button onClick={(e) => { e.stopPropagation(); fetchBomExplosion(activeBom.id); }} className="p-1 hover:bg-white/20 rounded" title="Refresh Costs (re-pull from BOM)" data-testid={`refresh-bom-${pid}`}><RefreshCw className="w-4 h-4" /></button>}
+                        {explosion && <button onClick={(e) => { e.stopPropagation(); printBomExplosion(parentItem, explosion.explosion, totalCost, activeBom, explosion.fg_process_cost_per_unit || 0, explosion.components_cost || 0); }} className="p-1 hover:bg-white/20 rounded" title="Print BOM" data-testid={`print-bom-${pid}`}><Printer className="w-4 h-4" /></button>}
+                        {activeBom && <button onClick={(e) => { e.stopPropagation(); handleBomExport(activeBom.id); }} className="p-1 hover:bg-white/20 rounded" title="Export this BOM" data-testid={`export-bom-${pid}`}><Download className="w-4 h-4" /></button>}
+                        <button onClick={(e) => { e.stopPropagation(); handleView(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="View"><Eye className="w-4 h-4" /></button>
+                        {canEdit && <button onClick={(e) => { e.stopPropagation(); handleEdit(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>}
+                        {canEdit && <button onClick={(e) => { e.stopPropagation(); handleRevise(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="Revise"><GitBranch className="w-4 h-4" /></button>}
+                        {user?.role === 'admin' && <button onClick={(e) => { e.stopPropagation(); handleDelete(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="Delete"><Trash2 className="w-4 h-4" /></button>}
                       </div>
                     </div>
                     
-                    {/* Explosion Table */}
+                    {/* Explosion Table — rendered only when panel is expanded */}
+                    {expandedBomPanels[pid] && (
                     <div className="sticky-header-scroll">
                     <table className="w-full text-sm">
                       <thead>
@@ -1062,9 +1071,10 @@ export default function BOMPage() {
                       </tbody>
                     </table>
                     </div>
+                    )}
                     
                     {/* Other revisions */}
-                    {group.boms.length > 1 && (
+                    {expandedBomPanels[pid] && group.boms.length > 1 && (
                       <div className="px-4 py-2 bg-[#F9FAFB] border-t text-xs text-[#6B7280] flex items-center gap-2">
                         <span>Other revisions:</span>
                         {group.boms.filter(b => b.id !== activeBom?.id).map(b => (

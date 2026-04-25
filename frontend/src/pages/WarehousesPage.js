@@ -40,6 +40,8 @@ export default function WarehousesPage() {
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'stock');
   const [storesStockSearch, setStoresStockSearch] = useState('');
   const [storesStockCategory, setStoresStockCategory] = useState('');
+  const [storesStockGroup, setStoresStockGroup] = useState('');
+  const [itemGroups, setItemGroups] = useState([]);
   const [plSearch, setPlSearch] = useState('');
   const [inventory, setInventory] = useState([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
@@ -146,7 +148,7 @@ export default function WarehousesPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [warehousesRes, transfersRes, itemsRes, grnRes, pendingRes, inventoryRes, jwRes, suppliersRes] = await Promise.all([
+      const [warehousesRes, transfersRes, itemsRes, grnRes, pendingRes, inventoryRes, jwRes, suppliersRes, groupsRes] = await Promise.all([
         api.get('/api/warehouses'),
         api.get('/api/warehouses/transfers/history'),
         api.get('/api/items'),
@@ -155,6 +157,7 @@ export default function WarehousesPage() {
         api.get('/api/inventory'),
         api.get('/api/job-work/orders').catch(() => ({ data: [] })),
         api.get('/api/suppliers').catch(() => ({ data: [] })),
+        api.get('/api/item-groups').catch(() => ({ data: [] })),
       ]);
       setWarehouses(warehousesRes.data);
       setTransfers(transfersRes.data);
@@ -163,6 +166,7 @@ export default function WarehousesPage() {
       setPendingPOs(pendingRes.data);
       setInventory(inventoryRes.data);
       setSuppliers(suppliersRes.data || []);
+      setItemGroups(groupsRes.data || []);
       // Filter JW orders that are in_progress with DC sent (pending GRN receive)
       const pendingJW = (jwRes.data || []).filter(jw => 
         jw.status === 'in_progress' && jw.job_work_parts?.length > 0 && (
@@ -685,8 +689,21 @@ export default function WarehousesPage() {
                 <option value="sub_assembly">Sub-Assembly</option>
                 <option value="finished_good">Finished Good</option>
               </select>
-              {storesStockCategory && (
-                <button onClick={() => setStoresStockCategory('')} className="btn-secondary flex items-center space-x-1 text-sm">
+              <select
+                value={storesStockGroup}
+                onChange={(e) => setStoresStockGroup(e.target.value)}
+                className="input-field text-sm w-56 h-10"
+                data-testid="stores-stock-group-filter"
+              >
+                <option value="">All Groups</option>
+                {itemGroups.map(g => (
+                  <option key={g.id || g._id || g.code} value={g.id || g._id || g.code}>
+                    {g.code ? `${g.code} — ${g.name}` : g.name}
+                  </option>
+                ))}
+              </select>
+              {(storesStockCategory || storesStockGroup) && (
+                <button onClick={() => { setStoresStockCategory(''); setStoresStockGroup(''); }} className="btn-secondary flex items-center space-x-1 text-sm">
                   <X className="w-4 h-4" /><span>Clear</span>
                 </button>
               )}
@@ -710,6 +727,7 @@ export default function WarehousesPage() {
                   <tbody>
                     {inventory.filter(item => {
                       if (storesStockCategory && item.category !== storesStockCategory) return false;
+                      if (storesStockGroup && item.group_id !== storesStockGroup) return false;
                       if (!storesStockSearch.trim()) return true;
                       const q = storesStockSearch.toLowerCase();
                       return item.part_number?.toLowerCase().includes(q) || item.name?.toLowerCase().includes(q);

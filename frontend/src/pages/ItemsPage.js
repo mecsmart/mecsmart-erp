@@ -31,7 +31,7 @@ const categories = [
 const FALLBACK_UNITS = ['pcs', 'kg', 'meter', 'sheet', 'kit', 'liter', 'set'];
 
 export default function ItemsPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { formatCurrency, currencySymbol } = useCompanySettings();
   const [items, setItems] = useState([]);
   const [itemGroups, setItemGroups] = useState([]);
@@ -62,8 +62,12 @@ export default function ItemsPage() {
     gst_rate: 18,
   });
 
-  const canEdit = user?.role === 'admin' || (user?.permissions?.items || []).includes('create') || (user?.permissions?.items || []).includes('edit');
-  const canDelete = user?.role === 'admin' || (user?.permissions?.items || []).includes('delete');
+  const canEdit = user?.role === 'admin'
+    || hasPermission('items', 'create')
+    || hasPermission('items', 'edit')
+    || hasPermission('inventory', 'create')
+    || hasPermission('inventory', 'edit');
+  const canDelete = user?.role === 'admin' || hasPermission('items', 'delete');
 
   // Debounce search input so fast typing doesn't fire /api/items on every keystroke
   const [debouncedSearch, setDebouncedSearch] = useState('');

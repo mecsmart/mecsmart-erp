@@ -1,0 +1,99 @@
+{
+  "summary": "Iteration 77 testing complete. All three fixes verified: (1) BOM page - ALL 222 panels collapsed by default with ChevronRight icons, explosion tables only render on click, action buttons don't toggle panel (e.stopPropagation working). (2) Inventory page - Group filter dropdown working, Edit pencil navigates to /items?action=edit&id=..., Create Item button navigates to /items?action=new, both auto-open dialogs. (3) Warehouses Stock tab - Group filter working, filtering by Motors shows only MOTOR-TEST-01 item with group_id='40393f54-c45b-4cbc-bc14-bc11fffc7ed0'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "ItemsPage/InventoryPage Dialogs", "issues": ["Console warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent} - accessibility improvement needed (minor)"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_77.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "BOMPage.js (line 50-52): expandedBomPanels state correctly initialized as empty object - all panels collapsed by default",
+    "BOMPage.js (line 973): onClick handler on panel header toggles expandedBomPanels[pid]",
+    "BOMPage.js (line 983): Action buttons use onClick={(e) => e.stopPropagation()} to prevent panel toggle",
+    "BOMPage.js (line 998-1074): Explosion table wrapped in {expandedBomPanels[pid] && (...)} - only renders when expanded",
+    "BOMPage.js (line 1077-1086): 'Other revisions' block also gated by expandedBomPanels[pid]",
+    "InventoryPage.js (lines 38-39): itemGroups and groupFilter state added for Group filter",
+    "InventoryPage.js (lines 68-75): canCreateItem and canEditItem use hasPermission() from AuthContext, accepting EITHER items.* OR inventory.* perms",
+    "InventoryPage.js (lines 360-373): Group filter dropdown with data-testid='inventory-group-filter'",
+    "InventoryPage.js (line 415): Filter applies item.group_id (NOT item_group_id)",
+    "WarehousesPage.js (lines 41-44): storesStockGroup and itemGroups state added",
+    "WarehousesPage.js (lines 692-704): Group filter dropdown with data-testid='stores-stock-group-filter'",
+    "WarehousesPage.js (line 730): Filter applies item.group_id correctly"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only testing)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None - used existing seed data (222 BOMs, 558 items, 3 item groups: Bearings, Motors, V-Belts)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 77 features verified: (1) BOM panel collapse - ALL 222 panels collapsed by default, ChevronRight icons visible, explosion tables only render on header click, action buttons (Refresh, Print, Export, Edit, View, Delete) don't toggle panel due to e.stopPropagation(). (2) Inventory page - Group filter with 4 options (All Groups, Bearings, Motors, V-Belts), Edit pencil (558 buttons) navigates to /items?action=edit&id=..., Create Item button navigates to /items?action=new. (3) Warehouses Stock tab - Group filter working, MOTOR-TEST-01 item has group_id='40393f54-c45b-4cbc-bc14-bc11fffc7ed0' (Motors group).",
+  "features_tested": {
+    "bom_panel_collapse_fix": {
+      "status": "PASSED",
+      "tests": [
+        "222 BOM panels found - ALL collapsed by default",
+        "222 ChevronRight icons (collapsed), 0 ChevronDown icons (expanded)",
+        "Explosion tables not rendered until panel header clicked",
+        "Panel toggle on header click working correctly",
+        "Action buttons (Refresh, Print, Export, Edit, View, Delete) don't toggle panel - e.stopPropagation() working",
+        "'Other revisions' block also gated by expandedBomPanels[pid]"
+      ]
+    },
+    "inventory_group_filter": {
+      "status": "PASSED",
+      "tests": [
+        "Group filter dropdown found (data-testid='inventory-group-filter')",
+        "4 options available: All Groups, Bearings, Motors, V-Belts",
+        "Selecting Motors filters to show only MOTOR-TEST-01",
+        "Clear button resets all filters (search, category, group, low-stock)"
+      ]
+    },
+    "inventory_edit_pencil": {
+      "status": "PASSED",
+      "tests": [
+        "558 edit pencil buttons found (data-testid='edit-item-{part_number}')",
+        "Click navigates to /items?action=edit&id={item.id}",
+        "Edit Item dialog auto-opens with data pre-filled"
+      ]
+    },
+    "inventory_create_item_button": {
+      "status": "PASSED",
+      "tests": [
+        "Create Item button found (data-testid='inventory-create-item-btn')",
+        "Click navigates to /items?action=new",
+        "Add New Item dialog auto-opens"
+      ]
+    },
+    "warehouses_stock_group_filter": {
+      "status": "PASSED",
+      "tests": [
+        "Group filter dropdown found (data-testid='stores-stock-group-filter')",
+        "4 options available: All Groups, Bearings, Motors, V-Belts",
+        "Selecting Motors filters to show only MOTOR-TEST-01",
+        "MOTOR-TEST-01 row visible after filtering (data-testid='stores-stock-row-MOTOR-TEST-01')",
+        "Clear button resets both Category and Group filters"
+      ]
+    },
+    "permission_gating": {
+      "status": "CODE_REVIEW_VERIFIED",
+      "notes": [
+        "canCreateItem uses hasPermission('items', 'create') OR hasPermission('inventory', 'create')",
+        "canEditItem uses hasPermission('items', 'edit') OR hasPermission('items', 'create') OR hasPermission('inventory', 'edit') OR hasPermission('inventory', 'create')",
+        "Admin user (admin@erp.com) sees all buttons as expected",
+        "Non-admin user with inventory.edit permission should also see Edit pencil (not tested with actual low-privilege user)"
+      ]
+    }
+  }
+}

@@ -26,7 +26,7 @@ const transactionTypes = [
 ];
 
 export default function InventoryPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { formatCurrency } = useCompanySettings();
   const navigate = useNavigate();
   const [inventory, setInventory] = useState([]);
@@ -35,6 +35,8 @@ export default function InventoryPage() {
   const [stockByItem, setStockByItem] = useState({});
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('stock');
+  const [itemGroups, setItemGroups] = useState([]);
+  const [groupFilter, setGroupFilter] = useState('');
 
   // Deep-link: sidebar "Configuration" now has its own route, keep only stock/transactions here
   useEffect(() => {
@@ -58,10 +60,19 @@ export default function InventoryPage() {
   });
 
   const canCreate = ['admin', 'inventory_manager', 'production_manager'].includes(user?.role);
-  // Item master rights — same gating as ItemsPage. Allows users with explicit
-  // items.create / items.edit perms to manage items right from Inventory page.
-  const canCreateItem = user?.role === 'admin' || (user?.permissions?.items || []).includes('create');
-  const canEditItem = user?.role === 'admin' || (user?.permissions?.items || []).includes('edit') || (user?.permissions?.items || []).includes('create');
+  // Item master rights — same gating pattern as PurchaseOrdersPage. Uses live
+  // permissions state from AuthContext (hasPermission) so that custom roles
+  // granted items.* OR inventory.* see these actions immediately. Granting
+  // "Inventory" edit/create rights also unlocks item-master shortcuts here,
+  // because users naturally expect "edit stock = edit item".
+  const canCreateItem = user?.role === 'admin'
+    || hasPermission('items', 'create')
+    || hasPermission('inventory', 'create');
+  const canEditItem = user?.role === 'admin'
+    || hasPermission('items', 'edit')
+    || hasPermission('items', 'create')
+    || hasPermission('inventory', 'edit')
+    || hasPermission('inventory', 'create');
 
   useEffect(() => {
     fetchData();
@@ -74,16 +85,18 @@ export default function InventoryPage() {
       if (showLowStock) params.append('low_stock', 'true');
       if (categoryFilter) params.append('category', categoryFilter);
       
-      const [inventoryRes, transactionsRes, warehousesRes, stockByItemRes] = await Promise.all([
+      const [inventoryRes, transactionsRes, warehousesRes, stockByItemRes, groupsRes] = await Promise.all([
         api.get(`/api/inventory?${params.toString()}`),
         api.get('/api/inventory/transactions?limit=50'),
         api.get('/api/warehouses'),
         api.get('/api/warehouses/stock/by-item'),
+        api.get('/api/item-groups').catch(() => ({ data: [] })),
       ]);
       setInventory(inventoryRes.data);
       setTransactions(transactionsRes.data);
       setWarehouses(warehousesRes.data || []);
       setStockByItem(stockByItemRes.data || {});
+      setItemGroups(groupsRes.data || []);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -310,6 +323,17 @@ export default function InventoryPage() {
           {/* Filters */}
           <div className="card-flat p-4 mb-4">
             <div className="flex flex-wrap items-center gap-4">
+              <div className="relative w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+                <input
+                  type="text"
+                  value={stockSearch}
+                  onChange={(e) => setStockSearch(e.target.value)}
+                  placeholder="Search by part number or name…"
+                  className="search-input text-sm"
+                  data-testid="inventory-stock-search"
+                />
+              </div>
               <label className="flex items-center space-x-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -333,22 +357,29 @@ export default function InventoryPage() {
                   <SelectItem value="finished_good">Finished Good</SelectItem>
                 </SelectContent>
               </Select>
-              {(showLowStock || categoryFilter) && (
+              <Select value={groupFilter || undefined} onValueChange={(v) => setGroupFilter(v === 'all' ? '' : v)}>
+                <SelectTrigger className="w-56" data-testid="inventory-group-filter">
+                  <Filter className="w-4 h-4 mr-2" />
+                  <SelectValue placeholder="All Groups" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Groups</SelectItem>
+                  {itemGroups.map(g => (
+                    <SelectItem key={g.id || g._id || g.code} value={g.id || g._id || g.code}>
+                      {g.code ? `${g.code} — ${g.name}` : g.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {(showLowStock || categoryFilter || groupFilter || stockSearch) && (
                 <button 
-                  onClick={() => { setShowLowStock(false); setCategoryFilter(''); }} 
+                  onClick={() => { setShowLowStock(false); setCategoryFilter(''); setGroupFilter(''); setStockSearch(''); }} 
                   className="btn-secondary flex items-center space-x-1"
                 >
                   <X className="w-4 h-4" />
                   <span>Clear</span>
                 </button>
               )}
-            </div>
-          </div>
-
-          <div className="card-flat p-3">
-            <div className="relative w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-              <input type="text" value={stockSearch} onChange={(e) => setStockSearch(e.target.value)} placeholder="Search by part number or name..." className="search-input text-sm" data-testid="stock-search-input" />
             </div>
           </div>
 
@@ -381,6 +412,7 @@ export default function InventoryPage() {
                   </thead>
                   <tbody>
                     {inventory.filter(item => {
+                      if (groupFilter && item.group_id !== groupFilter) return false;
                       if (!stockSearch.trim()) return true;
                       const q = stockSearch.toLowerCase();
                       return item.part_number?.toLowerCase().includes(q) || item.name?.toLowerCase().includes(q);
