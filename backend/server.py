@@ -4357,11 +4357,20 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             item_routing = await db.routings.find_one({"item_id": item_id, "status": "active"})
         
         if not item_routing:
-            # For main MO, we must have a routing
-            if is_main:
+            # Routing now lives inside BOM.parent_routings — allow MO creation when
+            # the item's BOM has at least one routing entry.
+            item_bom_check = await db.boms.find_one(
+                {"parent_item_id": item_id, "status": "active"},
+                {"_id": 0, "parent_routings": 1}
+            )
+            if item_bom_check and (item_bom_check.get("parent_routings") or []):
+                item_routing = {"id": None, "name": "BOM Routing"}
+            elif is_main:
+                # Main MO requires a routing source — neither legacy collection nor BOM has one
                 return None
-            # For child MOs, create without routing (operations come from BOM)
-            item_routing = {"id": None, "name": "No Routing"}
+            else:
+                # For child MOs, create without routing (operations come from BOM)
+                item_routing = {"id": None, "name": "No Routing"}
         
         item_doc = await db.items.find_one({"id": item_id})
         if not item_doc:
@@ -4487,9 +4496,15 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             # Create MO only for shortage qty (required - free stock)
             shortage_qty = child_qty - int(free_stock)
             
-            # Create work orders for any item that has a routing (can be manufactured)
+            # Create work orders for any item that can be manufactured — either has a
+            # legacy routings doc OR its own BOM defines parent_routings.
             child_routing = await db.routings.find_one({"item_id": child_item_id, "status": "active"})
-            if child_routing:
+            child_own_bom = await db.boms.find_one(
+                {"parent_item_id": child_item_id, "status": "active"},
+                {"_id": 0, "parent_routings": 1}
+            )
+            has_routing_source = bool(child_routing) or bool(child_own_bom and child_own_bom.get("parent_routings"))
+            if has_routing_source:
                 child_wo = await create_wo_for_item(child_item_id, shortage_qty, parent_wo_id)
                 if child_wo:
                     created_work_orders.append(child_wo)

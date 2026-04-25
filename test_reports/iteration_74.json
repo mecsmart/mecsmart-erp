@@ -1,0 +1,112 @@
+{
+  "summary": "Iteration 74 P0 fixes testing complete. All 5 reported issues verified fixed: (1) SO->MO creation now works correctly with BOM.parent_routings fallback - created 4 MOs with operations populated, (2) POST /api/purchase-orders/from-mrp endpoint working correctly, (3) MRP decimals limited to 2 digits, (4) MRP-to-PO dialog uses SearchableSelect for supplier with typeahead search, (5) MRP dialog has po-lines-compact styling matching manual PO page.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "MRP PO Dialog", "issues": ["Console warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent} - accessibility improvement needed"]},
+      {"screen": "Manufacturing MO Dialog", "issues": ["Same DialogContent accessibility warning"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_74.py",
+    "/app/test_reports/pytest/pytest_iteration_74.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Add aria-describedby to DialogContent components for accessibility compliance"
+  ],
+  "critical_code_review_comments": [
+    "SO->MO fix correctly implemented: create_wo_for_item now falls back to BOM.parent_routings when db.routings has no doc (lines 4359-4373)",
+    "Both main MO and child MOs correctly get operations from BOM.parent_routings (lines 4394-4412)",
+    "MRPPage.js fmtQty helper correctly rounds to 2 decimals and strips trailing zeros (lines 10-15)",
+    "MRP PO dialog uses SearchableSelect component for supplier (line 415-424)",
+    "Dialog is wide (max-w-5xl = 1024px) with po-lines-compact CSS class (lines 434-458)",
+    "Line item editor has editable Qty/Rate/HSN/UOM/GST fields with remove button per line"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_74.py"
+  ],
+  "success_rate": {
+    "backend": "100% (9 passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created MO-000269 through MO-000272 from SO-000237 during backend testing, MO-000273 from SO-000238 during frontend testing",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "P0 fixes verified: (1) SO->MO creation with BOM.parent_routings fallback working - test with any confirmed/planned SO that has balance qty > 0, (2) MRP page has checkbox column in Material Demand tab with Create PO banner, (3) MRP-to-PO dialog uses SearchableSelect for supplier (data-testid='mrp-po-supplier-select'), (4) All MRP numeric values show max 2 decimals via fmtQty helper, (5) MRP dialog has po-lines-compact styling with proper column widths. Test MOs created: MO-000269 (main) with children MO-000270, MO-000271, MO-000272.",
+  "features_tested": {
+    "so_to_mo_creation": {
+      "status": "PASSED",
+      "tests": [
+        "POST /api/work-orders with SO-000237 created 4 MOs (1 main + 3 children)",
+        "Main MO has operations_status populated from BOM.parent_routings",
+        "Child MOs also have operations from their own BOM.parent_routings",
+        "Response message shows 'Created 4 work order(s)' (NOT zero)"
+      ]
+    },
+    "purchase_order_from_mrp": {
+      "status": "PASSED",
+      "tests": [
+        "POST /api/purchase-orders/from-mrp creates PO with po_number and total_amount",
+        "Validates supplier_id (returns 404 for invalid)",
+        "Skips items already covered by existing POs"
+      ]
+    },
+    "mrp_decimal_formatting": {
+      "status": "PASSED",
+      "tests": [
+        "Material Demand tab shows max 2 decimals for Gross Req, On Hand, Net Req, Safety Stock",
+        "Suggestions tab shows max 2 decimals for Current Stock, Suggested Qty",
+        "fmtQty helper rounds to 2 decimals and strips trailing zeros"
+      ]
+    },
+    "mrp_demand_checkbox_column": {
+      "status": "PASSED",
+      "tests": [
+        "Material Demand tab has checkbox column with select-all (data-testid='select-all-demand')",
+        "Row checkboxes enabled for items with net_requirement > 0 and po_status != po_sent",
+        "Create PO banner appears when items selected (data-testid='demand-selected-banner')",
+        "Create PO button (data-testid='create-po-from-demand-btn') opens dialog"
+      ]
+    },
+    "mrp_po_dialog_searchable_select": {
+      "status": "PASSED",
+      "tests": [
+        "Supplier field uses SearchableSelect component (data-testid='mrp-po-supplier-select')",
+        "SearchableSelect is an input element (not static dropdown)",
+        "Typing 'steel' filters to show matching suppliers",
+        "Dialog is wide (1024px, max-w-5xl)"
+      ]
+    },
+    "mrp_po_dialog_styling": {
+      "status": "PASSED",
+      "tests": [
+        "Line items table has po-lines-compact CSS class",
+        "Column widths: Part No 40%, HSN 10%, Qty 10%, UOM 8%, Rate 12%, GST 8%, Total 9%, X 3%",
+        "Number input spinners hidden via CSS",
+        "Editable fields: Qty, Rate, HSN, UOM, GST",
+        "Remove (X) button per line works"
+      ]
+    },
+    "manufacturing_page_mo_creation": {
+      "status": "PASSED",
+      "tests": [
+        "Create Manufacturing Order dialog opens",
+        "Sales Order SearchableSelect shows eligible SOs with balance info",
+        "MO list shows created MOs (MO-000269 through MO-000273)",
+        "Child MOs shown with tree structure (└→ prefix)"
+      ]
+    }
+  },
+  "backend_tests_summary": {
+    "total": 9,
+    "passed": 9,
+    "skipped": 0,
+    "failed": 0
+  }
+}
