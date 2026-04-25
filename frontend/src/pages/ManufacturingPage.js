@@ -1052,13 +1052,41 @@ export default function ManufacturingPage() {
             ) : (
               <div className="p-4 space-y-3">
                 {(() => {
-                  const parentMOs = filteredWorkOrders.filter(wo => !wo.parent_wo_id);
-                  const childOnlyMOs = filteredWorkOrders.filter(wo => wo.parent_wo_id && !parentMOs.some(p => p.id === wo.parent_wo_id));
+                  // ROOT-ONLY rendering with hard dedup. Walk every filtered WO up
+                  // through its ancestors (using the FULL workOrders list) until we
+                  // hit a true root (parent_wo_id == null OR parent missing).
+                  // Render each unique root exactly once; renderMORow recursively
+                  // walks down — guaranteed no duplicate top-level for a child MO.
+                  const woById = new Map(workOrders.map(w => [w.id, w]));
+                  const rootIdsOrder = [];
+                  const rootIdSet = new Set();
+                  for (const wo of filteredWorkOrders) {
+                    let cursor = wo;
+                    const visited = new Set();
+                    while (cursor && cursor.parent_wo_id && !visited.has(cursor.id)) {
+                      visited.add(cursor.id);
+                      const parent = woById.get(cursor.parent_wo_id);
+                      if (!parent) break;
+                      cursor = parent;
+                    }
+                    const rootId = cursor?.id;
+                    if (rootId && !rootIdSet.has(rootId)) {
+                      rootIdSet.add(rootId);
+                      rootIdsOrder.push(rootId);
+                    }
+                  }
+                  const rootMOs = rootIdsOrder.map(id => woById.get(id)).filter(Boolean);
                   const getChildMOs = (pid) => workOrders.filter(wo => wo.parent_wo_id === pid);
                   const getCatLabel = (wo) => { const cat = wo.item?.category || items.find(i => i.id === wo.item_id)?.category; return cat === 'finished_good' ? 'FG' : cat === 'sub_assembly' ? 'SA' : 'PART'; };
                   const getCatColor = (wo) => { const cat = wo.item?.category || items.find(i => i.id === wo.item_id)?.category; return cat === 'finished_good' ? '#1D3557' : cat === 'sub_assembly' ? '#1E429F' : '#723B13'; };
 
+                  // Per-render set to guarantee a WO is rendered at most ONCE inside
+                  // a given <details> tree (defends against any malformed parent chain).
+                  let renderedIds = new Set();
+
                   const renderMORow = (wo, depth = 0) => {
+                    if (!wo || renderedIds.has(wo.id)) return null;
+                    renderedIds.add(wo.id);
                     const progress = getWOProgress(wo);
                     const progressColor = getProgressColor(progress);
                     const ops = wo.operations_status || [];
@@ -1158,7 +1186,9 @@ export default function ManufacturingPage() {
 
                   return (
                     <>
-                    {[...parentMOs, ...childOnlyMOs].map(parentMO => {
+                    {rootMOs.map(parentMO => {
+                    // Reset per-tree dedup so each <details> renders its own subtree fully
+                    renderedIds = new Set();
                     const parentItem = parentMO.item || items.find(i => i.id === parentMO.item_id);
                     const children = getChildMOs(parentMO.id);
                     const catColor = getCatColor(parentMO);

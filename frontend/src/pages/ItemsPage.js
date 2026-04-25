@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
@@ -107,6 +108,29 @@ export default function ItemsPage() {
       }
     })();
   }, []);
+
+  // Deep-link: open create dialog (?action=new) or edit dialog (?action=edit&id=...)
+  // Used by InventoryPage to delegate item create/edit here without forking the form.
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const action = params.get('action');
+    const id = params.get('id');
+    if (action === 'new' && canEdit) {
+      resetForm();
+      setEditingItem(null);
+      setIsDialogOpen(true);
+      navigate('/items', { replace: true });
+    } else if (action === 'edit' && id && canEdit && items.length > 0) {
+      const target = items.find(it => it.id === id);
+      if (target) {
+        handleEdit(target);
+        navigate('/items', { replace: true });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, items.length]);
 
   const fetchItems = async () => {
     try {

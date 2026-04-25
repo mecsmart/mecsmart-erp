@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
@@ -11,7 +12,8 @@ import {
   AlertTriangle,
   Filter,
   X,
-  Search
+  Search,
+  Edit2
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -26,6 +28,7 @@ const transactionTypes = [
 export default function InventoryPage() {
   const { user } = useAuth();
   const { formatCurrency } = useCompanySettings();
+  const navigate = useNavigate();
   const [inventory, setInventory] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -55,6 +58,10 @@ export default function InventoryPage() {
   });
 
   const canCreate = ['admin', 'inventory_manager', 'production_manager'].includes(user?.role);
+  // Item master rights — same gating as ItemsPage. Allows users with explicit
+  // items.create / items.edit perms to manage items right from Inventory page.
+  const canCreateItem = user?.role === 'admin' || (user?.permissions?.items || []).includes('create');
+  const canEditItem = user?.role === 'admin' || (user?.permissions?.items || []).includes('edit') || (user?.permissions?.items || []).includes('create');
 
   useEffect(() => {
     fetchData();
@@ -130,6 +137,19 @@ export default function InventoryPage() {
           <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Inventory Management</h1>
           <p className="text-sm text-[#4B5563]">Track stock levels and inventory transactions</p>
         </div>
+        <div className="flex items-center gap-2">
+        {canCreateItem && (
+          <button
+            type="button"
+            onClick={() => navigate('/items?action=new')}
+            className="btn-secondary flex items-center space-x-2"
+            data-testid="inventory-create-item-btn"
+            title="Add a new item to the master"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Create Item</span>
+          </button>
+        )}
         {canCreate && (
           <Dialog open={isTransactionDialogOpen} onOpenChange={setIsTransactionDialogOpen}>
             <DialogTrigger asChild>
@@ -233,6 +253,7 @@ export default function InventoryPage() {
             </DialogContent>
           </Dialog>
         )}
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -355,6 +376,7 @@ export default function InventoryPage() {
                       <th className="text-right">Reorder Point</th>
                       <th className="text-right">Unit Cost</th>
                       <th className="text-right">Value</th>
+                      {canEditItem && <th className="text-center">Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -402,6 +424,19 @@ export default function InventoryPage() {
                         <td className="text-right mono">{item.reorder_point}</td>
                         <td className="text-right mono">{formatCurrency(item.unit_cost)}</td>
                         <td className="text-right mono">{formatCurrency(item.current_stock * item.unit_cost)}</td>
+                        {canEditItem && (
+                          <td className="text-center">
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/items?action=edit&id=${item.id}`)}
+                              className="p-1 text-[#4B5563] hover:text-[#1D3557]"
+                              title="Edit item master"
+                              data-testid={`edit-item-${item.part_number}`}
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
