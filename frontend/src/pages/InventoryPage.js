@@ -37,6 +37,7 @@ export default function InventoryPage() {
   const [activeTab, setActiveTab] = useState('stock');
   const [itemGroups, setItemGroups] = useState([]);
   const [groupFilter, setGroupFilter] = useState('');
+  const [taxSlabs, setTaxSlabs] = useState([0, 5, 12, 18, 28]);
 
   // Deep-link: sidebar "Configuration" now has its own route, keep only stock/transactions here
   useEffect(() => {
@@ -59,17 +60,24 @@ export default function InventoryPage() {
     notes: '',
   });
 
-  // Inline stock-edit dialog. Edits ONLY stock-relevant fields so a user with
-  // inventory.edit (no items.edit) can manage stock thresholds without leaving
-  // this page or hitting a 403 at save time. Master attributes (name, category,
-  // HSN, price etc.) still require items.edit and are handled on /items.
+  // Inline stock-edit dialog. Edits stock thresholds + (if items.edit) master
+  // fields like name/group/HSN/GST/prices — mirrors the full /items form so the
+  // user never has to leave the Inventory page. Backend whitelist enforces the
+  // permission tiers regardless of what the client sends.
   const [stockEditDialog, setStockEditDialog] = useState({ open: false, item: null });
   const [stockEditForm, setStockEditForm] = useState({
+    // Stock tier
     safety_stock: 0,
     reorder_point: 0,
     lead_time_days: 0,
-    unit_cost: 0,
     current_stock: 0,
+    // Master tier (only sent when canEditItemMaster)
+    name: '',
+    group_id: '',
+    hsn_code: '',
+    gst_rate: 18,
+    purchase_price: 0,
+    sale_price: 0,
   });
   const [stockEditSaving, setStockEditSaving] = useState(false);
 
@@ -79,8 +87,13 @@ export default function InventoryPage() {
       safety_stock: Number(item.safety_stock || 0),
       reorder_point: Number(item.reorder_point || 0),
       lead_time_days: Number(item.lead_time_days || 0),
-      unit_cost: Number(item.unit_cost || 0),
       current_stock: Number(item.current_stock || 0),
+      name: item.name || '',
+      group_id: item.group_id || '',
+      hsn_code: item.hsn_code || '',
+      gst_rate: item.gst_rate != null ? Number(item.gst_rate) : 18,
+      purchase_price: Number(item.purchase_price || 0),
+      sale_price: Number(item.sale_price || 0),
     });
   };
 
@@ -89,7 +102,27 @@ export default function InventoryPage() {
     if (!item) return;
     setStockEditSaving(true);
     try {
-      await api.put(`/api/inventory/items/${item.id}/stock-fields`, stockEditForm);
+      // Always send stock fields. Send master fields only if user can edit them
+      // (defence-in-depth — backend would silently drop them anyway).
+      const payload = {
+        safety_stock: stockEditForm.safety_stock,
+        reorder_point: stockEditForm.reorder_point,
+        lead_time_days: stockEditForm.lead_time_days,
+        current_stock: stockEditForm.current_stock,
+      };
+      if (canEditItemMaster) {
+        payload.name = stockEditForm.name;
+        payload.group_id = stockEditForm.group_id || null;
+        payload.hsn_code = stockEditForm.hsn_code;
+        payload.gst_rate = stockEditForm.gst_rate;
+        // For raw materials, purchase_price drives unit_cost. For other
+        // categories, unit cost is BOM-rolled-up — only sale_price is editable.
+        if (item.category === 'raw_material') {
+          payload.purchase_price = stockEditForm.purchase_price;
+        }
+        payload.sale_price = stockEditForm.sale_price;
+      }
+      await api.put(`/api/inventory/items/${item.id}/stock-fields`, payload);
       setStockEditDialog({ open: false, item: null });
       fetchData();
     } catch (e) {
@@ -110,6 +143,12 @@ export default function InventoryPage() {
     || hasPermission('items', 'create')
     || hasPermission('inventory', 'edit')
     || hasPermission('inventory', 'create');
+  // Stricter tier — controls visibility of master fields (name, HSN, GST,
+  // group, purchase/sale price) inside the inline dialog. Aligns with backend
+  // PUT /api/inventory/items/{id}/stock-fields permission gate.
+  const canEditItemMaster = user?.role === 'admin'
+    || hasPermission('items', 'edit')
+    || hasPermission('items', 'create');
 
   useEffect(() => {
     fetchData();
@@ -122,18 +161,21 @@ export default function InventoryPage() {
       if (showLowStock) params.append('low_stock', 'true');
       if (categoryFilter) params.append('category', categoryFilter);
       
-      const [inventoryRes, transactionsRes, warehousesRes, stockByItemRes, groupsRes] = await Promise.all([
+      const [inventoryRes, transactionsRes, warehousesRes, stockByItemRes, groupsRes, gstRes] = await Promise.all([
         api.get(`/api/inventory?${params.toString()}`),
         api.get('/api/inventory/transactions?limit=50'),
         api.get('/api/warehouses'),
         api.get('/api/warehouses/stock/by-item'),
         api.get('/api/item-groups').catch(() => ({ data: [] })),
+        api.get('/api/settings/gst-slabs').catch(() => ({ data: [] })),
       ]);
       setInventory(inventoryRes.data);
       setTransactions(transactionsRes.data);
       setWarehouses(warehousesRes.data || []);
       setStockByItem(stockByItemRes.data || {});
       setItemGroups(groupsRes.data || []);
+      const slabs = Array.isArray(gstRes.data) && gstRes.data.length ? gstRes.data : [0, 5, 12, 18, 28];
+      setTaxSlabs(slabs);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -592,79 +634,182 @@ export default function InventoryPage() {
       </Tabs>
 
       {/* Inline Stock Edit Dialog — keeps the user on Inventory page.
-          Edits ONLY stock-relevant fields. Master attributes (name, HSN, GST,
-          category) require the dedicated /items page. */}
+          Stock fields shown to anyone with edit rights. Master fields
+          (name/group/HSN/GST/prices) appear only when items.edit is granted.
+          Price field set differs by category: RM = purchase + sale; others =
+          sale only (unit cost rolls up from BOM for FG/SA/Component). */}
       <Dialog open={stockEditDialog.open} onOpenChange={(open) => { if (!open) setStockEditDialog({ open: false, item: null }); }}>
-        <DialogContent className="max-w-lg" data-testid="inventory-stock-edit-dialog">
+        <DialogContent className="max-w-2xl" data-testid="inventory-stock-edit-dialog">
           <DialogHeader>
-            <DialogTitle className="font-[Chivo]">Edit Stock — {stockEditDialog.item?.part_number}</DialogTitle>
+            <DialogTitle className="font-[Chivo]">Edit Item — {stockEditDialog.item?.part_number}</DialogTitle>
           </DialogHeader>
-          {stockEditDialog.item && (
-            <div className="space-y-4 mt-2">
-              <div className="bg-[#F3F4F6] border border-[#E5E7EB] rounded-sm p-3 text-xs space-y-0.5">
-                <div className="flex justify-between"><span className="text-[#6B7280]">Item:</span><span className="font-medium">{stockEditDialog.item.name}</span></div>
-                <div className="flex justify-between"><span className="text-[#6B7280]">Category:</span><span className="font-medium">{stockEditDialog.item.category?.replace('_', ' ')}</span></div>
-                <div className="flex justify-between"><span className="text-[#6B7280]">UoM:</span><span className="font-medium">{stockEditDialog.item.unit_of_measure}</span></div>
+          {stockEditDialog.item && (() => {
+            const it = stockEditDialog.item;
+            const isRM = it.category === 'raw_material';
+            const filteredGroups = itemGroups.filter(g => !g.parent_category || g.parent_category === it.category);
+            const selectedGroup = itemGroups.find(g => g.id === stockEditForm.group_id);
+            const groupLocksHsn = !!(selectedGroup && (selectedGroup.default_hsn_code || selectedGroup.default_gst_rate != null));
+            return (
+              <div className="space-y-4 mt-2">
+                <div className="bg-[#F3F4F6] border border-[#E5E7EB] rounded-sm p-3 text-xs grid grid-cols-3 gap-2">
+                  <div><span className="text-[#6B7280]">Part No:</span> <span className="font-medium mono">{it.part_number}</span></div>
+                  <div><span className="text-[#6B7280]">Category:</span> <span className="font-medium capitalize">{it.category?.replace('_', ' ')}</span></div>
+                  <div><span className="text-[#6B7280]">UoM:</span> <span className="font-medium">{it.unit_of_measure}</span></div>
+                </div>
+
+                {/* Master fields — only when items.edit */}
+                {canEditItemMaster && (
+                  <div className="border border-[#E5E7EB] rounded-sm p-3 space-y-3 bg-[#F9FAFB]" data-testid="stock-edit-master-section">
+                    <div className="text-[11px] font-semibold text-[#1D3557] uppercase tracking-wide">Item Master (requires Items edit permission)</div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#111827] mb-1">Name *</label>
+                      <input type="text"
+                        value={stockEditForm.name}
+                        onChange={(e) => setStockEditForm({ ...stockEditForm, name: e.target.value })}
+                        className="input-field"
+                        data-testid="stock-edit-name" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-[#111827] mb-1">Item Group</label>
+                        <Select
+                          value={stockEditForm.group_id || '__none__'}
+                          onValueChange={(v) => setStockEditForm({ ...stockEditForm, group_id: v === '__none__' ? '' : v })}
+                        >
+                          <SelectTrigger data-testid="stock-edit-group"><SelectValue placeholder="No group" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">(No group)</SelectItem>
+                            {filteredGroups.map(g => (
+                              <SelectItem key={g.id} value={g.id}>
+                                {g.name}{g.default_hsn_code ? ` · HSN ${g.default_hsn_code}` : ''}{g.default_gst_rate != null ? ` · ${g.default_gst_rate}%` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-[#111827] mb-1">
+                          HSN Code{groupLocksHsn && selectedGroup?.default_hsn_code && <span className="text-[10px] text-[#1E429F] ml-1">(from group)</span>}
+                        </label>
+                        <input type="text"
+                          value={groupLocksHsn && selectedGroup?.default_hsn_code ? selectedGroup.default_hsn_code : stockEditForm.hsn_code}
+                          onChange={(e) => setStockEditForm({ ...stockEditForm, hsn_code: e.target.value })}
+                          disabled={!!(groupLocksHsn && selectedGroup?.default_hsn_code)}
+                          className={`input-field mono ${groupLocksHsn && selectedGroup?.default_hsn_code ? 'bg-[#F3F4F6] cursor-not-allowed' : ''}`}
+                          data-testid="stock-edit-hsn" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-[#111827] mb-1">
+                          GST Rate (%){groupLocksHsn && selectedGroup?.default_gst_rate != null && <span className="text-[10px] text-[#1E429F] ml-1">(from group)</span>}
+                        </label>
+                        <Select
+                          value={String(groupLocksHsn && selectedGroup?.default_gst_rate != null ? selectedGroup.default_gst_rate : stockEditForm.gst_rate)}
+                          onValueChange={(v) => setStockEditForm({ ...stockEditForm, gst_rate: parseFloat(v) })}
+                          disabled={!!(groupLocksHsn && selectedGroup?.default_gst_rate != null)}
+                        >
+                          <SelectTrigger data-testid="stock-edit-gst" className={groupLocksHsn && selectedGroup?.default_gst_rate != null ? 'bg-[#F3F4F6] cursor-not-allowed' : ''}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {taxSlabs.map(r => (<SelectItem key={r} value={String(r)}>{r}%</SelectItem>))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {isRM ? (
+                        <>
+                          <div>
+                            <label className="block text-xs font-semibold text-[#111827] mb-1">Purchase Price</label>
+                            <input type="number" step="0.01" min="0"
+                              value={stockEditForm.purchase_price}
+                              onChange={(e) => setStockEditForm({ ...stockEditForm, purchase_price: parseFloat(e.target.value) || 0 })}
+                              className="input-field mono"
+                              data-testid="stock-edit-purchase-price" />
+                            <p className="text-[10px] text-[#6B7280] mt-0.5">Auto-updates from latest PO</p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-[#111827] mb-1">Sale Price</label>
+                            <input type="number" step="0.01" min="0"
+                              value={stockEditForm.sale_price}
+                              onChange={(e) => setStockEditForm({ ...stockEditForm, sale_price: parseFloat(e.target.value) || 0 })}
+                              className="input-field mono"
+                              data-testid="stock-edit-sale-price" />
+                          </div>
+                        </>
+                      ) : (
+                        <div className="col-span-2">
+                          <label className="block text-xs font-semibold text-[#111827] mb-1">Sale Price</label>
+                          <input type="number" step="0.01" min="0"
+                            value={stockEditForm.sale_price}
+                            onChange={(e) => setStockEditForm({ ...stockEditForm, sale_price: parseFloat(e.target.value) || 0 })}
+                            className="input-field mono"
+                            data-testid="stock-edit-sale-price" />
+                          <p className="text-[10px] text-[#6B7280] mt-0.5">Unit cost is rolled up from BOM for {it.category?.replace('_', ' ')}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Stock fields — always editable for users with stock or master rights */}
+                <div className="border border-[#E5E7EB] rounded-sm p-3 space-y-3">
+                  <div className="text-[11px] font-semibold text-[#1D3557] uppercase tracking-wide">Stock Levels</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#111827] mb-1">Current Stock</label>
+                      <input type="number" step="any" min="0"
+                        value={stockEditForm.current_stock}
+                        onChange={(e) => setStockEditForm({ ...stockEditForm, current_stock: parseFloat(e.target.value) || 0 })}
+                        className="input-field mono"
+                        data-testid="stock-edit-current-stock" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#111827] mb-1">Safety Stock</label>
+                      <input type="number" step="any" min="0"
+                        value={stockEditForm.safety_stock}
+                        onChange={(e) => setStockEditForm({ ...stockEditForm, safety_stock: parseFloat(e.target.value) || 0 })}
+                        className="input-field mono"
+                        data-testid="stock-edit-safety-stock" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#111827] mb-1">Reorder Point</label>
+                      <input type="number" step="any" min="0"
+                        value={stockEditForm.reorder_point}
+                        onChange={(e) => setStockEditForm({ ...stockEditForm, reorder_point: parseFloat(e.target.value) || 0 })}
+                        className="input-field mono"
+                        data-testid="stock-edit-reorder-point" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#111827] mb-1">Lead Time (days)</label>
+                      <input type="number" step="1" min="0"
+                        value={stockEditForm.lead_time_days}
+                        onChange={(e) => setStockEditForm({ ...stockEditForm, lead_time_days: parseInt(e.target.value) || 0 })}
+                        className="input-field mono"
+                        data-testid="stock-edit-lead-time" />
+                    </div>
+                  </div>
+                </div>
+
+                {!canEditItemMaster && (
+                  <p className="text-[11px] text-[#6B7280] italic">
+                    Need to change name, HSN, GST or prices? Open this item from the
+                    <button type="button" onClick={() => navigate(`/items?action=edit&id=${it.id}`)} className="text-[#1D3557] underline hover:text-[#1E429F] ml-1">Items &amp; Parts</button> page.
+                  </p>
+                )}
+                <div className="flex justify-end gap-2 pt-3 border-t border-[#E5E7EB]">
+                  <button type="button" className="btn-secondary" onClick={() => setStockEditDialog({ open: false, item: null })}>Cancel</button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={handleStockEditSave}
+                    disabled={stockEditSaving}
+                    data-testid="stock-edit-save-btn"
+                  >
+                    {stockEditSaving ? 'Saving…' : 'Save Changes'}
+                  </button>
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-[#111827] mb-1">Current Stock</label>
-                  <input type="number" step="any" min="0"
-                    value={stockEditForm.current_stock}
-                    onChange={(e) => setStockEditForm({ ...stockEditForm, current_stock: parseFloat(e.target.value) || 0 })}
-                    className="input-field mono"
-                    data-testid="stock-edit-current-stock" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#111827] mb-1">Safety Stock</label>
-                  <input type="number" step="any" min="0"
-                    value={stockEditForm.safety_stock}
-                    onChange={(e) => setStockEditForm({ ...stockEditForm, safety_stock: parseFloat(e.target.value) || 0 })}
-                    className="input-field mono"
-                    data-testid="stock-edit-safety-stock" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#111827] mb-1">Reorder Point</label>
-                  <input type="number" step="any" min="0"
-                    value={stockEditForm.reorder_point}
-                    onChange={(e) => setStockEditForm({ ...stockEditForm, reorder_point: parseFloat(e.target.value) || 0 })}
-                    className="input-field mono"
-                    data-testid="stock-edit-reorder-point" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#111827] mb-1">Lead Time (days)</label>
-                  <input type="number" step="1" min="0"
-                    value={stockEditForm.lead_time_days}
-                    onChange={(e) => setStockEditForm({ ...stockEditForm, lead_time_days: parseInt(e.target.value) || 0 })}
-                    className="input-field mono"
-                    data-testid="stock-edit-lead-time" />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-xs font-semibold text-[#111827] mb-1">Unit Cost ({formatCurrency(0).replace(/[\d.\s,]/g, '') || '₹'})</label>
-                  <input type="number" step="0.01" min="0"
-                    value={stockEditForm.unit_cost}
-                    onChange={(e) => setStockEditForm({ ...stockEditForm, unit_cost: parseFloat(e.target.value) || 0 })}
-                    className="input-field mono"
-                    data-testid="stock-edit-unit-cost" />
-                </div>
-              </div>
-              <p className="text-[11px] text-[#6B7280] italic">
-                Need to change name, category, HSN or GST? Open this item from the <button type="button" onClick={() => navigate(`/items?action=edit&id=${stockEditDialog.item.id}`)} className="text-[#1D3557] underline hover:text-[#1E429F]">Items &amp; Parts</button> page.
-              </p>
-              <div className="flex justify-end gap-2 pt-3 border-t border-[#E5E7EB]">
-                <button type="button" className="btn-secondary" onClick={() => setStockEditDialog({ open: false, item: null })}>Cancel</button>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={handleStockEditSave}
-                  disabled={stockEditSaving}
-                  data-testid="stock-edit-save-btn"
-                >
-                  {stockEditSaving ? 'Saving…' : 'Save Stock Changes'}
-                </button>
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>

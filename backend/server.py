@@ -2321,37 +2321,58 @@ async def get_inventory(request: Request, category: Optional[str] = None, low_st
 
 @inventory_router.put("/items/{item_id}/stock-fields")
 async def update_stock_fields(item_id: str, request: Request, data: dict = Body(default={})):
-    """Update only stock-relevant fields of an item.
-    Allowed for users with EITHER items.edit OR inventory.edit (semantic
-    overlap: stock thresholds are an inventory concern). Master fields like
-    name/HSN/GST/category are NOT touched here — those still go through
-    PUT /api/items/{id}."""
+    """Update stock-relevant + (optionally) master fields of an item.
+    Permission tiers:
+      - STOCK fields (current_stock, safety_stock, reorder_point, lead_time_days, unit_cost)
+        accept items.* OR inventory.* (semantic overlap: thresholds are inventory).
+      - MASTER fields (name, group_id, hsn_code, gst_rate, purchase_price, sale_price)
+        require items.edit / items.create (or admin). If a non-eligible user sends
+        them, those keys are silently dropped — stock fields still apply.
+      For raw_material category, purchase_price changes auto-sync unit_cost (mirrors
+      the full /items form's behaviour) so BOM rollups stay consistent."""
     user = await get_current_user(request)
     perms = (user.get("permissions") or {})
     is_admin = user.get("role") == "admin"
     items_perms = perms.get("items") or []
     inv_perms = perms.get("inventory") or []
-    allowed = is_admin \
+    can_edit_stock = is_admin \
         or "edit" in items_perms or "create" in items_perms \
         or "edit" in inv_perms or "create" in inv_perms
-    if not allowed:
+    can_edit_master = is_admin \
+        or "edit" in items_perms or "create" in items_perms
+    if not can_edit_stock:
         raise HTTPException(status_code=403, detail="Not authorized to edit stock fields")
     
     item = await db.items.find_one({"id": item_id})
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     
-    # Whitelist only the stock-relevant fields. Anything else from the payload
-    # is silently ignored, so a compromised client can't escalate to mutating
-    # name / HSN / GST / category through this endpoint.
-    allowed_fields = ["safety_stock", "reorder_point", "lead_time_days", "unit_cost", "current_stock"]
+    # Stock-tier whitelist (allowed if can_edit_stock)
+    stock_fields = ["safety_stock", "reorder_point", "lead_time_days", "unit_cost", "current_stock"]
+    # Master-tier whitelist (only applied if can_edit_master)
+    master_fields = ["name", "group_id", "hsn_code", "gst_rate", "purchase_price", "sale_price"]
     update = {}
-    for f in allowed_fields:
+    for f in stock_fields:
         if f in data and data[f] is not None:
             try:
                 update[f] = float(data[f]) if f in ("unit_cost", "safety_stock", "reorder_point", "current_stock") else int(data[f])
             except (TypeError, ValueError):
                 continue
+    if can_edit_master:
+        for f in master_fields:
+            if f in data and data[f] is not None:
+                v = data[f]
+                if f in ("gst_rate", "purchase_price", "sale_price"):
+                    try: v = float(v)
+                    except (TypeError, ValueError): continue
+                # Validate name not empty
+                if f == "name" and not str(v).strip():
+                    continue
+                update[f] = v
+        # Keep unit_cost in sync with purchase_price for raw materials —
+        # mirrors the behaviour in the full Items page form.
+        if "purchase_price" in update and item.get("category") == "raw_material":
+            update["unit_cost"] = float(update["purchase_price"])
     
     if not update:
         raise HTTPException(status_code=400, detail="No valid stock fields provided")
