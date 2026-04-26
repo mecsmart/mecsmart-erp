@@ -59,15 +59,52 @@ export default function InventoryPage() {
     notes: '',
   });
 
+  // Inline stock-edit dialog. Edits ONLY stock-relevant fields so a user with
+  // inventory.edit (no items.edit) can manage stock thresholds without leaving
+  // this page or hitting a 403 at save time. Master attributes (name, category,
+  // HSN, price etc.) still require items.edit and are handled on /items.
+  const [stockEditDialog, setStockEditDialog] = useState({ open: false, item: null });
+  const [stockEditForm, setStockEditForm] = useState({
+    safety_stock: 0,
+    reorder_point: 0,
+    lead_time_days: 0,
+    unit_cost: 0,
+    current_stock: 0,
+  });
+  const [stockEditSaving, setStockEditSaving] = useState(false);
+
+  const openStockEdit = (item) => {
+    setStockEditDialog({ open: true, item });
+    setStockEditForm({
+      safety_stock: Number(item.safety_stock || 0),
+      reorder_point: Number(item.reorder_point || 0),
+      lead_time_days: Number(item.lead_time_days || 0),
+      unit_cost: Number(item.unit_cost || 0),
+      current_stock: Number(item.current_stock || 0),
+    });
+  };
+
+  const handleStockEditSave = async () => {
+    const item = stockEditDialog.item;
+    if (!item) return;
+    setStockEditSaving(true);
+    try {
+      await api.put(`/api/inventory/items/${item.id}/stock-fields`, stockEditForm);
+      setStockEditDialog({ open: false, item: null });
+      fetchData();
+    } catch (e) {
+      alert(e.response?.data?.detail || 'Failed to save stock changes');
+    } finally {
+      setStockEditSaving(false);
+    }
+  };
+
   const canCreate = ['admin', 'inventory_manager', 'production_manager'].includes(user?.role);
-  // Item master rights — same gating pattern as PurchaseOrdersPage. Uses live
-  // permissions state from AuthContext (hasPermission) so that custom roles
-  // granted items.* OR inventory.* see these actions immediately. Granting
-  // "Inventory" edit/create rights also unlocks item-master shortcuts here,
-  // because users naturally expect "edit stock = edit item".
-  const canCreateItem = user?.role === 'admin'
-    || hasPermission('items', 'create')
-    || hasPermission('inventory', 'create');
+  // Item master rights — `Create Item` requires the FULL item.create perm
+  // (a fresh item record demands every field). `Edit` (inline stock fields
+  // only) accepts items.edit / items.create OR inventory.edit / inventory.create
+  // because stock thresholds are an inventory concern.
+  const canCreateItem = user?.role === 'admin' || hasPermission('items', 'create');
   const canEditItem = user?.role === 'admin'
     || hasPermission('items', 'edit')
     || hasPermission('items', 'create')
@@ -415,7 +452,16 @@ export default function InventoryPage() {
                       if (groupFilter && item.group_id !== groupFilter) return false;
                       if (!stockSearch.trim()) return true;
                       const q = stockSearch.toLowerCase();
-                      return item.part_number?.toLowerCase().includes(q) || item.name?.toLowerCase().includes(q);
+                      const grp = itemGroups.find(g => g.id === item.group_id);
+                      return [
+                        item.part_number,
+                        item.name,
+                        item.description,
+                        item.hsn_code,
+                        item.category,
+                        grp?.name,
+                        grp?.code,
+                      ].some(v => v && String(v).toLowerCase().includes(q));
                     }).map((item) => (
                       <tr key={item.id} className={isLowStock(item) ? 'bg-[#FDE8E8]/30' : ''} data-testid={`inventory-row-${item.part_number}`}>
                         <td className="mono font-medium">{item.part_number}</td>
@@ -460,9 +506,9 @@ export default function InventoryPage() {
                           <td className="text-center">
                             <button
                               type="button"
-                              onClick={() => navigate(`/items?action=edit&id=${item.id}`)}
+                              onClick={() => openStockEdit(item)}
                               className="p-1 text-[#4B5563] hover:text-[#1D3557]"
-                              title="Edit item master"
+                              title="Edit stock thresholds (safety/reorder/cost)"
                               data-testid={`edit-item-${item.part_number}`}
                             >
                               <Edit2 className="w-4 h-4" />
@@ -544,6 +590,83 @@ export default function InventoryPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Inline Stock Edit Dialog — keeps the user on Inventory page.
+          Edits ONLY stock-relevant fields. Master attributes (name, HSN, GST,
+          category) require the dedicated /items page. */}
+      <Dialog open={stockEditDialog.open} onOpenChange={(open) => { if (!open) setStockEditDialog({ open: false, item: null }); }}>
+        <DialogContent className="max-w-lg" data-testid="inventory-stock-edit-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-[Chivo]">Edit Stock — {stockEditDialog.item?.part_number}</DialogTitle>
+          </DialogHeader>
+          {stockEditDialog.item && (
+            <div className="space-y-4 mt-2">
+              <div className="bg-[#F3F4F6] border border-[#E5E7EB] rounded-sm p-3 text-xs space-y-0.5">
+                <div className="flex justify-between"><span className="text-[#6B7280]">Item:</span><span className="font-medium">{stockEditDialog.item.name}</span></div>
+                <div className="flex justify-between"><span className="text-[#6B7280]">Category:</span><span className="font-medium">{stockEditDialog.item.category?.replace('_', ' ')}</span></div>
+                <div className="flex justify-between"><span className="text-[#6B7280]">UoM:</span><span className="font-medium">{stockEditDialog.item.unit_of_measure}</span></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[#111827] mb-1">Current Stock</label>
+                  <input type="number" step="any" min="0"
+                    value={stockEditForm.current_stock}
+                    onChange={(e) => setStockEditForm({ ...stockEditForm, current_stock: parseFloat(e.target.value) || 0 })}
+                    className="input-field mono"
+                    data-testid="stock-edit-current-stock" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#111827] mb-1">Safety Stock</label>
+                  <input type="number" step="any" min="0"
+                    value={stockEditForm.safety_stock}
+                    onChange={(e) => setStockEditForm({ ...stockEditForm, safety_stock: parseFloat(e.target.value) || 0 })}
+                    className="input-field mono"
+                    data-testid="stock-edit-safety-stock" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#111827] mb-1">Reorder Point</label>
+                  <input type="number" step="any" min="0"
+                    value={stockEditForm.reorder_point}
+                    onChange={(e) => setStockEditForm({ ...stockEditForm, reorder_point: parseFloat(e.target.value) || 0 })}
+                    className="input-field mono"
+                    data-testid="stock-edit-reorder-point" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#111827] mb-1">Lead Time (days)</label>
+                  <input type="number" step="1" min="0"
+                    value={stockEditForm.lead_time_days}
+                    onChange={(e) => setStockEditForm({ ...stockEditForm, lead_time_days: parseInt(e.target.value) || 0 })}
+                    className="input-field mono"
+                    data-testid="stock-edit-lead-time" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-semibold text-[#111827] mb-1">Unit Cost ({formatCurrency(0).replace(/[\d.\s,]/g, '') || '₹'})</label>
+                  <input type="number" step="0.01" min="0"
+                    value={stockEditForm.unit_cost}
+                    onChange={(e) => setStockEditForm({ ...stockEditForm, unit_cost: parseFloat(e.target.value) || 0 })}
+                    className="input-field mono"
+                    data-testid="stock-edit-unit-cost" />
+                </div>
+              </div>
+              <p className="text-[11px] text-[#6B7280] italic">
+                Need to change name, category, HSN or GST? Open this item from the <button type="button" onClick={() => navigate(`/items?action=edit&id=${stockEditDialog.item.id}`)} className="text-[#1D3557] underline hover:text-[#1E429F]">Items &amp; Parts</button> page.
+              </p>
+              <div className="flex justify-end gap-2 pt-3 border-t border-[#E5E7EB]">
+                <button type="button" className="btn-secondary" onClick={() => setStockEditDialog({ open: false, item: null })}>Cancel</button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleStockEditSave}
+                  disabled={stockEditSaving}
+                  data-testid="stock-edit-save-btn"
+                >
+                  {stockEditSaving ? 'Saving…' : 'Save Stock Changes'}
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

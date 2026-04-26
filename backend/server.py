@@ -2315,8 +2315,74 @@ async def get_inventory(request: Request, category: Optional[str] = None, low_st
     if low_stock:
         query["$expr"] = {"$lte": ["$current_stock", "$reorder_point"]}
     
-    items = await db.items.find(query, {"_id": 0}).to_list(1000)
+    items = await db.items.find(query, {"_id": 0}).to_list(50000)
     return items
+
+
+@inventory_router.put("/items/{item_id}/stock-fields")
+async def update_stock_fields(item_id: str, request: Request, data: dict = Body(default={})):
+    """Update only stock-relevant fields of an item.
+    Allowed for users with EITHER items.edit OR inventory.edit (semantic
+    overlap: stock thresholds are an inventory concern). Master fields like
+    name/HSN/GST/category are NOT touched here — those still go through
+    PUT /api/items/{id}."""
+    user = await get_current_user(request)
+    perms = (user.get("permissions") or {})
+    is_admin = user.get("role") == "admin"
+    items_perms = perms.get("items") or []
+    inv_perms = perms.get("inventory") or []
+    allowed = is_admin \
+        or "edit" in items_perms or "create" in items_perms \
+        or "edit" in inv_perms or "create" in inv_perms
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Not authorized to edit stock fields")
+    
+    item = await db.items.find_one({"id": item_id})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    # Whitelist only the stock-relevant fields. Anything else from the payload
+    # is silently ignored, so a compromised client can't escalate to mutating
+    # name / HSN / GST / category through this endpoint.
+    allowed_fields = ["safety_stock", "reorder_point", "lead_time_days", "unit_cost", "current_stock"]
+    update = {}
+    for f in allowed_fields:
+        if f in data and data[f] is not None:
+            try:
+                update[f] = float(data[f]) if f in ("unit_cost", "safety_stock", "reorder_point", "current_stock") else int(data[f])
+            except (TypeError, ValueError):
+                continue
+    
+    if not update:
+        raise HTTPException(status_code=400, detail="No valid stock fields provided")
+    
+    update["updated_at"] = datetime.now(timezone.utc)
+    
+    # If current_stock is changed, also log an inventory transaction so the
+    # audit trail is preserved.
+    new_current = update.get("current_stock")
+    if new_current is not None and float(new_current) != float(item.get("current_stock", 0) or 0):
+        delta = float(new_current) - float(item.get("current_stock", 0) or 0)
+        tx_doc = {
+            "id": str(uuid.uuid4()),
+            "item_id": item_id,
+            "transaction_type": "adjust",
+            "quantity": delta,
+            "reference_type": "stock_edit",
+            "reference_id": item_id,
+            "previous_stock": float(item.get("current_stock", 0) or 0),
+            "new_stock": float(new_current),
+            "notes": f"Stock adjusted via Inventory edit dialog by {user.get('email', user.get('id'))}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"],
+        }
+        await db.inventory_transactions.insert_one(tx_doc)
+    
+    await db.items.update_one({"id": item_id}, {"$set": update})
+    
+    updated = await db.items.find_one({"id": item_id}, {"_id": 0})
+    return updated
+
 
 @inventory_router.get("/transactions")
 async def get_inventory_transactions(request: Request, item_id: Optional[str] = None, limit: int = 100):

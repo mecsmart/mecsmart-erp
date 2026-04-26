@@ -7,11 +7,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { SearchableSelect } from '../components/SearchableSelect';
 
-// Round to 2 decimals; strips trailing zeros (e.g. 5 → 5, 5.20 → 5.2, 5.234 → 5.23)
+// Round to 2 decimals; ALWAYS shows 2-decimal precision (e.g. 5 → "5.00",
+// 5.20 → "5.20", 5.234 → "5.23"). Decimals are critical in MRP/PO so users
+// can see exact qty/cost values rather than apparent integers.
 const fmtQty = (v) => {
   const n = Number(v || 0);
-  if (!Number.isFinite(n)) return '0';
-  return parseFloat(n.toFixed(2)).toString();
+  if (!Number.isFinite(n)) return '0.00';
+  return n.toFixed(2);
 };
 
 export default function MRPPage() {

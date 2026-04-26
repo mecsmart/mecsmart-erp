@@ -730,7 +730,16 @@ export default function WarehousesPage() {
                       if (storesStockGroup && item.group_id !== storesStockGroup) return false;
                       if (!storesStockSearch.trim()) return true;
                       const q = storesStockSearch.toLowerCase();
-                      return item.part_number?.toLowerCase().includes(q) || item.name?.toLowerCase().includes(q);
+                      const grp = itemGroups.find(g => g.id === item.group_id);
+                      return [
+                        item.part_number,
+                        item.name,
+                        item.description,
+                        item.hsn_code,
+                        item.category,
+                        grp?.name,
+                        grp?.code,
+                      ].some(v => v && String(v).toLowerCase().includes(q));
                     }).map(item => {
                       const isLow = item.current_stock <= (item.reorder_point || item.safety_stock || 0);
                       return (
