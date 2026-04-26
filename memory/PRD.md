@@ -20,6 +20,12 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-02-26** — **Header spacing + PO line text + Dashboard wiring (P0 batch):**
+  1. **Tighter page chrome:** Layout main padding `p-4 lg:p-6` → `p-3 lg:p-4`. BOM page `space-y-6` → `space-y-3`, sticky header `py-3` → `py-2`, h1 `text-2xl` → `text-xl`, description `text-sm` → `text-xs`, filter card `p-4` → `px-3 py-2`. Same compact pattern for Dashboard. Result: ~30% less vertical chrome — much more BOM detail above the fold.
+  2. **Stores Stock filters single-row layout:** Search (w-64), Category (w-44), Group (w-48), all h-9, no wrapping at 1920px viewport. Clear button now resets search too.
+  3. **PO line items readability:** PO dialog widened from `max-w-5xl` → `max-w-7xl`. Line table text bumped from 12px → 14px (cells) / 13px (headers); cell padding 4-6px → 6-8px. Same applied to MRP→PO dialog. Description input bumped to 13px italic.
+  4. **Dashboard quick actions fixed:** Replaced broken `<a href>` to non-existent routes (`/items/new` etc.) with `react-router navigate('/items?action=new')`. New deep-link handlers added on `BOMPage` (?action=new opens Create BOM) and `ProductionPage` (?action=new opens Create Sales Order). InventoryPage handles `?lowStock=1`. Quick Actions now permission-gated via `hasPermission(module, 'create')`.
+  5. **Dashboard KPI cards clickable:** Total Items → /items, Active BOMs → /bom, Pending Orders → /production, Low Stock → /inventory?lowStock=1 (auto-toggles low-stock checkbox).
 - **2026-02-25** — **Inline master-field editing on Inventory page (P0 batch):**
   1. **Master fields gated by `items.edit`:** Inventory inline edit dialog now also exposes Name, Group, HSN, GST%, and price fields when the user has `items.edit` / `items.create`. Without those perms, only stock fields show. Backend whitelist enforces the same tiers — master keys are silently dropped if the user lacks `items.*`.
   2. **Category-aware price fields:** Raw Material → Purchase Price + Sale Price (purchase_price auto-syncs `unit_cost` to keep BOM rollups consistent). FG / SA / Component → Sale Price only, with a note that unit cost rolls up from BOM.
