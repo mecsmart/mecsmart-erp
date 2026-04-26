@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
@@ -52,6 +53,19 @@ export default function ProductionPage() {
   });
 
   const canEdit = ['admin', 'production_manager'].includes(user?.role);
+
+  // Deep-link: dashboard quick action sends ?action=new to open Create dialog.
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('action') === 'new' && canEdit) {
+      setEditingOrder(null);
+      setIsDialogOpen(true);
+      navigate('/production', { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
   useEffect(() => {
     fetchData();

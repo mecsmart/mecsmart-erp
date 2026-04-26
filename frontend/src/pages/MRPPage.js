@@ -411,7 +411,7 @@ export default function MRPPage() {
 
       {/* Create PO Dialog — wide, line-item editor styled like manual PO page */}
       <Dialog open={poDialogOpen} onOpenChange={setPODialogOpen}>
-        <DialogContent className="max-w-5xl">
+        <DialogContent className="max-w-7xl">
           <DialogHeader>
             <DialogTitle className="font-[Chivo]">Create Purchase Order from MRP</DialogTitle>
           </DialogHeader>
@@ -438,12 +438,13 @@ export default function MRPPage() {
               </div>
             ) : (
               <div className="border border-[#E5E7EB] rounded-sm">
-                <table className="w-full text-xs po-lines-compact" data-testid="mrp-po-lines-table">
+                <table className="w-full text-sm po-lines-compact" data-testid="mrp-po-lines-table">
                   <style>{`
-                    .po-lines-compact td { padding: 4px 6px; vertical-align: middle; }
+                    .po-lines-compact td { padding: 6px 8px; vertical-align: middle; }
+                    .po-lines-compact th { padding: 8px 8px; font-size: 13px; }
                     .po-lines-compact .cell-input {
-                      width: 100%; padding: 3px 6px; border: 1px solid transparent;
-                      border-radius: 2px; background: transparent; font-size: 12px;
+                      width: 100%; padding: 5px 8px; border: 1px solid transparent;
+                      border-radius: 2px; background: transparent; font-size: 14px;
                       font-family: 'Courier New', monospace; outline: none;
                     }
                     .po-lines-compact .cell-input:hover { border-color: #D1D5DB; background: #fff; }
@@ -455,9 +456,9 @@ export default function MRPPage() {
                     }
                     .po-lines-compact input[type=number] { -moz-appearance: textfield; }
                     .po-lines-compact .gst-select {
-                      width: 100%; height: 22px; padding: 0 4px;
+                      width: 100%; height: 26px; padding: 0 6px;
                       border: 1px solid transparent; border-radius: 2px;
-                      background: transparent; font-size: 12px; font-family: 'Courier New', monospace;
+                      background: transparent; font-size: 14px; font-family: 'Courier New', monospace;
                     }
                     .po-lines-compact .gst-select:hover { border-color: #D1D5DB; background: #fff; }
                     .po-lines-compact tr { border-bottom: 1px solid #E5E7EB; }

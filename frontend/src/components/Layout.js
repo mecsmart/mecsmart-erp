@@ -468,7 +468,7 @@ export default function Layout() {
           </div>
         </header>
 
-        <main className="p-4 lg:p-6" data-testid="main-content">
+        <main className="p-3 lg:p-4" data-testid="main-content">
           <Outlet />
         </main>
       </div>

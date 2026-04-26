@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import { api, useAuth } from '../context/AuthContext';
 import { 
   Package, 
   FileStack, 
@@ -9,10 +10,11 @@ import {
   Factory,
   ShoppingCart,
   ArrowUpRight,
-  ArrowDownRight
 } from 'lucide-react';
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
+  const { user, hasPermission } = useAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -31,6 +33,10 @@ export default function DashboardPage() {
     }
   };
 
+  // Permission-aware quick action helpers — uses live `hasPermission` so that
+  // custom roles only see actions they actually have create rights for.
+  const canCreate = (mod) => user?.role === 'admin' || hasPermission(mod, 'create');
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -40,15 +46,20 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6" data-testid="dashboard-page">
+    <div className="space-y-3" data-testid="dashboard-page">
       <div>
-        <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Dashboard</h1>
-        <p className="text-sm text-[#4B5563]">Overview of your manufacturing operations</p>
+        <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Dashboard</h1>
+        <p className="text-xs text-[#4B5563]">Overview of your manufacturing operations</p>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="kpi-card" data-testid="kpi-total-items">
+      {/* KPI Cards — clickable, navigate to the relevant module */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <button
+          type="button"
+          onClick={() => navigate('/items')}
+          className="kpi-card text-left hover:shadow-md hover:border-[#1D3557] transition-all cursor-pointer"
+          data-testid="kpi-total-items"
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="kpi-label">Total Items</p>
@@ -58,9 +69,14 @@ export default function DashboardPage() {
               <Package className="w-6 h-6 text-[#1E429F]" />
             </div>
           </div>
-        </div>
+        </button>
 
-        <div className="kpi-card" data-testid="kpi-active-boms">
+        <button
+          type="button"
+          onClick={() => navigate('/bom')}
+          className="kpi-card text-left hover:shadow-md hover:border-[#1D3557] transition-all cursor-pointer"
+          data-testid="kpi-active-boms"
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="kpi-label">Active BOMs</p>
@@ -70,9 +86,14 @@ export default function DashboardPage() {
               <FileStack className="w-6 h-6 text-[#03543F]" />
             </div>
           </div>
-        </div>
+        </button>
 
-        <div className="kpi-card" data-testid="kpi-pending-orders">
+        <button
+          type="button"
+          onClick={() => navigate('/production')}
+          className="kpi-card text-left hover:shadow-md hover:border-[#1D3557] transition-all cursor-pointer"
+          data-testid="kpi-pending-orders"
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="kpi-label">Pending Orders</p>
@@ -82,9 +103,14 @@ export default function DashboardPage() {
               <Factory className="w-6 h-6 text-[#723B13]" />
             </div>
           </div>
-        </div>
+        </button>
 
-        <div className="kpi-card" data-testid="kpi-low-stock">
+        <button
+          type="button"
+          onClick={() => navigate('/inventory?lowStock=1')}
+          className="kpi-card text-left hover:shadow-md hover:border-[#9B1C1C] transition-all cursor-pointer"
+          data-testid="kpi-low-stock"
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="kpi-label">Low Stock Alerts</p>
@@ -94,24 +120,24 @@ export default function DashboardPage() {
               <AlertTriangle className="w-6 h-6 text-[#9B1C1C]" />
             </div>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* Second Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         {/* Inventory Breakdown */}
-        <div className="card-flat p-5">
-          <h3 className="text-lg font-semibold font-[Chivo] text-[#111827] mb-4">Inventory Breakdown</h3>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between py-2 border-b border-[#E5E7EB]">
+        <div className="card-flat p-4">
+          <h3 className="text-base font-semibold font-[Chivo] text-[#111827] mb-3">Inventory Breakdown</h3>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between py-1.5 border-b border-[#E5E7EB]">
               <span className="text-sm text-[#4B5563]">Raw Materials</span>
               <span className="mono text-sm font-medium text-[#111827]">{stats?.inventory?.raw_materials || 0}</span>
             </div>
-            <div className="flex items-center justify-between py-2 border-b border-[#E5E7EB]">
+            <div className="flex items-center justify-between py-1.5 border-b border-[#E5E7EB]">
               <span className="text-sm text-[#4B5563]">Components</span>
               <span className="mono text-sm font-medium text-[#111827]">{stats?.inventory?.components || 0}</span>
             </div>
-            <div className="flex items-center justify-between py-2">
+            <div className="flex items-center justify-between py-1.5">
               <span className="text-sm text-[#4B5563]">Finished Goods</span>
               <span className="mono text-sm font-medium text-[#111827]">{stats?.inventory?.finished_goods || 0}</span>
             </div>
@@ -119,54 +145,40 @@ export default function DashboardPage() {
         </div>
 
         {/* Quality Metrics */}
-        <div className="card-flat p-5">
-          <h3 className="text-lg font-semibold font-[Chivo] text-[#111827] mb-4">Quality Metrics (30 Days)</h3>
-          <div className="flex items-center justify-center mb-4">
-            <div className="relative w-32 h-32">
-              <svg className="w-32 h-32 transform -rotate-90">
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  stroke="#E5E7EB"
-                  strokeWidth="12"
-                  fill="none"
-                />
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  stroke="#31C48D"
-                  strokeWidth="12"
-                  fill="none"
-                  strokeDasharray={`${(stats?.quality?.pass_rate || 0) * 3.52} 352`}
-                />
+        <div className="card-flat p-4">
+          <h3 className="text-base font-semibold font-[Chivo] text-[#111827] mb-3">Quality Metrics (30 Days)</h3>
+          <div className="flex items-center justify-center mb-3">
+            <div className="relative w-28 h-28">
+              <svg className="w-28 h-28 transform -rotate-90">
+                <circle cx="56" cy="56" r="48" stroke="#E5E7EB" strokeWidth="10" fill="none" />
+                <circle cx="56" cy="56" r="48" stroke="#31C48D" strokeWidth="10" fill="none"
+                  strokeDasharray={`${(stats?.quality?.pass_rate || 0) * 3.02} 302`} />
               </svg>
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-2xl font-bold mono text-[#111827]">{stats?.quality?.pass_rate || 0}%</span>
+                <span className="text-xl font-bold mono text-[#111827]">{stats?.quality?.pass_rate || 0}%</span>
               </div>
             </div>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
             <div>
-              <p className="text-xl font-bold mono text-[#03543F]">{stats?.quality?.passed || 0}</p>
+              <p className="text-lg font-bold mono text-[#03543F]">{stats?.quality?.passed || 0}</p>
               <p className="text-xs text-[#4B5563]">Passed</p>
             </div>
             <div>
-              <p className="text-xl font-bold mono text-[#9B1C1C]">{stats?.quality?.failed || 0}</p>
+              <p className="text-lg font-bold mono text-[#9B1C1C]">{stats?.quality?.failed || 0}</p>
               <p className="text-xs text-[#4B5563]">Failed</p>
             </div>
             <div>
-              <p className="text-xl font-bold mono text-[#723B13]">{stats?.quality?.conditional || 0}</p>
+              <p className="text-lg font-bold mono text-[#723B13]">{stats?.quality?.conditional || 0}</p>
               <p className="text-xs text-[#4B5563]">Conditional</p>
             </div>
           </div>
         </div>
 
         {/* Production Status */}
-        <div className="card-flat p-5">
-          <h3 className="text-lg font-semibold font-[Chivo] text-[#111827] mb-4">Sales Order Status</h3>
-          <div className="space-y-4">
+        <div className="card-flat p-4">
+          <h3 className="text-base font-semibold font-[Chivo] text-[#111827] mb-3">Sales Order Status</h3>
+          <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <ClipboardCheck className="w-5 h-5 text-[#457B9D]" />
@@ -192,26 +204,57 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Quick Actions */}
-      <div className="card-flat p-5">
-        <h3 className="text-lg font-semibold font-[Chivo] text-[#111827] mb-4">Quick Actions</h3>
+      {/* Quick Actions — uses react-router navigate (was broken <a href>) and
+          deep-link query params so each action lands directly on the
+          create dialog of the target page. Items / BOM / Production buttons
+          are gated by their respective module create permission. */}
+      <div className="card-flat p-4">
+        <h3 className="text-base font-semibold font-[Chivo] text-[#111827] mb-3">Quick Actions</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <a href="/items/new" className="flex items-center justify-between p-3 border border-[#E5E7EB] rounded-sm hover:bg-[#F3F4F6] transition-colors">
-            <span className="text-sm font-medium text-[#111827]">New Item</span>
-            <ArrowUpRight className="w-4 h-4 text-[#4B5563]" />
-          </a>
-          <a href="/bom/new" className="flex items-center justify-between p-3 border border-[#E5E7EB] rounded-sm hover:bg-[#F3F4F6] transition-colors">
-            <span className="text-sm font-medium text-[#111827]">New BOM</span>
-            <ArrowUpRight className="w-4 h-4 text-[#4B5563]" />
-          </a>
-          <a href="/production/new" className="flex items-center justify-between p-3 border border-[#E5E7EB] rounded-sm hover:bg-[#F3F4F6] transition-colors">
-            <span className="text-sm font-medium text-[#111827]">New Order</span>
-            <ArrowUpRight className="w-4 h-4 text-[#4B5563]" />
-          </a>
-          <a href="/quality/inspect" className="flex items-center justify-between p-3 border border-[#E5E7EB] rounded-sm hover:bg-[#F3F4F6] transition-colors">
-            <span className="text-sm font-medium text-[#111827]">New Inspection</span>
-            <ArrowUpRight className="w-4 h-4 text-[#4B5563]" />
-          </a>
+          {canCreate('items') && (
+            <button
+              type="button"
+              onClick={() => navigate('/items?action=new')}
+              className="flex items-center justify-between p-3 border border-[#E5E7EB] rounded-sm hover:bg-[#F3F4F6] hover:border-[#1D3557] transition-colors text-left"
+              data-testid="quick-action-new-item"
+            >
+              <span className="text-sm font-medium text-[#111827]">New Item</span>
+              <ArrowUpRight className="w-4 h-4 text-[#4B5563]" />
+            </button>
+          )}
+          {canCreate('bom') && (
+            <button
+              type="button"
+              onClick={() => navigate('/bom?action=new')}
+              className="flex items-center justify-between p-3 border border-[#E5E7EB] rounded-sm hover:bg-[#F3F4F6] hover:border-[#1D3557] transition-colors text-left"
+              data-testid="quick-action-new-bom"
+            >
+              <span className="text-sm font-medium text-[#111827]">New BOM</span>
+              <ArrowUpRight className="w-4 h-4 text-[#4B5563]" />
+            </button>
+          )}
+          {canCreate('production') && (
+            <button
+              type="button"
+              onClick={() => navigate('/production?action=new')}
+              className="flex items-center justify-between p-3 border border-[#E5E7EB] rounded-sm hover:bg-[#F3F4F6] hover:border-[#1D3557] transition-colors text-left"
+              data-testid="quick-action-new-order"
+            >
+              <span className="text-sm font-medium text-[#111827]">New Sales Order</span>
+              <ArrowUpRight className="w-4 h-4 text-[#4B5563]" />
+            </button>
+          )}
+          {canCreate('quality') && (
+            <button
+              type="button"
+              onClick={() => navigate('/quality?action=new')}
+              className="flex items-center justify-between p-3 border border-[#E5E7EB] rounded-sm hover:bg-[#F3F4F6] hover:border-[#1D3557] transition-colors text-left"
+              data-testid="quick-action-new-inspection"
+            >
+              <span className="text-sm font-medium text-[#111827]">New Inspection</span>
+              <ArrowUpRight className="w-4 h-4 text-[#4B5563]" />
+            </button>
+          )}
         </div>
       </div>
     </div>

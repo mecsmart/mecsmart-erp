@@ -398,7 +398,7 @@ export default function PurchaseOrdersPage() {
 
       {/* Create / Edit PO Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={(open) => { if (!open) { resetForm(); } setIsDialogOpen(open); }}>
-        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
+        <DialogContent className="max-w-7xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-[Chivo]">
               {editingPO ? `Edit ${editingPO.po_number}${editingPO.status !== 'draft' ? ' (New Revision)' : ''}` : 'Create Purchase Order'}
@@ -482,16 +482,17 @@ export default function PurchaseOrdersPage() {
                 </div>
               ) : (
                 <div className="border border-[#E5E7EB] rounded-sm">
-                  <table className="w-full text-xs po-lines-compact" data-testid="po-lines-table">
+                  <table className="w-full text-sm po-lines-compact" data-testid="po-lines-table">
                     <style>{`
-                      .po-lines-compact td { padding: 4px 6px; vertical-align: middle; }
+                      .po-lines-compact td { padding: 6px 8px; vertical-align: middle; }
+                      .po-lines-compact th { padding: 8px 8px; font-size: 13px; }
                       .po-lines-compact .cell-input {
                         width: 100%;
-                        padding: 3px 6px;
+                        padding: 5px 8px;
                         border: 1px solid transparent;
                         border-radius: 2px;
                         background: transparent;
-                        font-size: 12px;
+                        font-size: 14px;
                         font-family: 'Courier New', monospace;
                         outline: none;
                       }
@@ -505,23 +506,23 @@ export default function PurchaseOrdersPage() {
                       }
                       .po-lines-compact input[type=number] { -moz-appearance: textfield; }
                       .po-lines-compact .disc-toggle {
-                        width: 20px; height: 22px; font-size: 11px; font-weight: 600;
+                        width: 22px; height: 26px; font-size: 12px; font-weight: 600;
                         border: 1px solid #D1D5DB; background: #F3F4F6; color: #1D3557;
                         border-radius: 2px; cursor: pointer; flex-shrink: 0;
                       }
                       .po-lines-compact .disc-toggle:hover { background: #E5E7EB; }
                       .po-lines-compact .gst-select {
-                        width: 100%; height: 22px; padding: 0 4px;
+                        width: 100%; height: 26px; padding: 0 6px;
                         border: 1px solid transparent; border-radius: 2px;
-                        background: transparent; font-size: 12px; font-family: 'Courier New', monospace;
+                        background: transparent; font-size: 14px; font-family: 'Courier New', monospace;
                       }
                       .po-lines-compact .gst-select:hover { border-color: #D1D5DB; background: #fff; }
                       .po-lines-compact tr { border-bottom: 1px solid #E5E7EB; }
                       .po-lines-compact tr:last-child { border-bottom: none; }
                       .po-lines-compact .desc-input {
-                        width: 100%; padding: 2px 6px; margin-top: 2px;
+                        width: 100%; padding: 3px 8px; margin-top: 3px;
                         border: 1px dashed #D1D5DB; border-radius: 2px;
-                        font-size: 11px; font-style: italic; background: transparent;
+                        font-size: 13px; font-style: italic; background: transparent;
                       }
                       .po-lines-compact .desc-input:focus { border-style: solid; border-color: #1D3557; background: #fff; outline: none; }
                     `}</style>

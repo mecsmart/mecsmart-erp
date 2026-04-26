@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
@@ -52,6 +53,19 @@ export default function BOMPage() {
   const [expandedBomPanels, setExpandedBomPanels] = useState({});
   const [allExplosions, setAllExplosions] = useState({});
   const [bomSearch, setBomSearch] = useState('');
+
+  // Deep-link: dashboard quick action sends ?action=new to open Create dialog.
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('action') === 'new' && (user?.role === 'admin' || (user?.permissions?.bom || []).includes('create'))) {
+      setEditingBom(null);
+      setIsDialogOpen(true);
+      navigate('/bom', { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
   
   const [formData, setFormData] = useState({
     parent_item_id: '',
@@ -457,11 +471,11 @@ export default function BOMPage() {
   };
 
   return (
-    <div className="space-y-6" data-testid="bom-page">
-      <div className="flex items-center justify-between sticky top-0 z-30 bg-white py-3 border-b border-[#E5E7EB] -mx-6 px-6">
+    <div className="space-y-3" data-testid="bom-page">
+      <div className="flex items-center justify-between sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
         <div>
-          <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Bill of Materials</h1>
-          <p className="text-sm text-[#4B5563]">Manage product structures and component relationships</p>
+          <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Bill of Materials</h1>
+          <p className="text-xs text-[#4B5563]">Manage product structures and component relationships</p>
         </div>
         <div className="flex items-center space-x-2">
           <button onClick={handleBomExport} className="btn-secondary flex items-center space-x-1 text-sm" data-testid="export-bom-btn">
@@ -797,8 +811,8 @@ export default function BOMPage() {
       </div>
 
       {/* Status Filter & Search */}
-      <div className="card-flat p-4">
-        <div className="flex items-center gap-4">
+      <div className="card-flat px-3 py-2">
+        <div className="flex items-center gap-3">
           <Select value={statusFilter || 'all'} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
             <SelectTrigger className="w-48" data-testid="bom-status-filter">
               <SelectValue placeholder="All Statuses" />

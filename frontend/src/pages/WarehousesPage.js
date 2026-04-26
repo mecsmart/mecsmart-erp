@@ -671,16 +671,16 @@ export default function WarehousesPage() {
 
         {/* Stock Tab - Inventory Overview */}
         <TabsContent value="stock" className="mt-4">
-          <div className="card-flat p-3 mb-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="relative w-72">
+          <div className="card-flat p-2 mb-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-                <input type="text" value={storesStockSearch} onChange={(e) => setStoresStockSearch(e.target.value)} placeholder="Search by part number or name..." className="search-input text-sm" data-testid="stores-stock-search" />
+                <input type="text" value={storesStockSearch} onChange={(e) => setStoresStockSearch(e.target.value)} placeholder="Search by part number or name..." className="search-input text-sm h-9" data-testid="stores-stock-search" />
               </div>
               <select
                 value={storesStockCategory}
                 onChange={(e) => setStoresStockCategory(e.target.value)}
-                className="input-field text-sm w-48 h-10"
+                className="input-field text-sm w-44 h-9"
                 data-testid="stores-stock-category-filter"
               >
                 <option value="">All Categories</option>
@@ -692,7 +692,7 @@ export default function WarehousesPage() {
               <select
                 value={storesStockGroup}
                 onChange={(e) => setStoresStockGroup(e.target.value)}
-                className="input-field text-sm w-56 h-10"
+                className="input-field text-sm w-48 h-9"
                 data-testid="stores-stock-group-filter"
               >
                 <option value="">All Groups</option>
@@ -702,8 +702,8 @@ export default function WarehousesPage() {
                   </option>
                 ))}
               </select>
-              {(storesStockCategory || storesStockGroup) && (
-                <button onClick={() => { setStoresStockCategory(''); setStoresStockGroup(''); }} className="btn-secondary flex items-center space-x-1 text-sm">
+              {(storesStockCategory || storesStockGroup || storesStockSearch) && (
+                <button onClick={() => { setStoresStockCategory(''); setStoresStockGroup(''); setStoresStockSearch(''); }} className="btn-secondary flex items-center space-x-1 text-sm h-9">
                   <X className="w-4 h-4" /><span>Clear</span>
                 </button>
               )}

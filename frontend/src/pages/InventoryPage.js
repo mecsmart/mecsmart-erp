@@ -46,6 +46,10 @@ export default function InventoryPage() {
     if (tab && ['stock', 'transactions'].includes(tab)) {
       setActiveTab(tab);
     }
+    // Dashboard "Low Stock" KPI deep-link auto-toggles the low-stock filter.
+    if (params.get('lowStock') === '1') {
+      setShowLowStock(true);
+    }
   }, []);
   const [showLowStock, setShowLowStock] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
