@@ -20,6 +20,9 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-02-28** — **Resize handle visibility + comfortable table padding (UX):**
+  1. **Visible resize grip:** `.col-resizer` now shows a subtle 1px vertical bar between columns (gray #D1D5DB by default, navy #1D3557 on hover/drag). Hit area widened from 6px → 10px so the handle is easier to grab without precise targeting.
+  2. **Comfortable padding everywhere:** `.data-table th` and `td` bumped from `py-2 px-3` → `py-2.5 px-4`. Layout main padding `p-3 lg:p-4` → `p-4 lg:p-5`. TD row heights now ~45px (was ~36px) — much more breathing room for scanning long lists.
 - **2026-02-28** — **Resize drag no longer triggers sort (P0):**
   - Root cause: the resize handle is a child of the `<th>`. After mouse-down on the handle and mouse-up, the browser fires a synthetic `click` event that bubbles to the `<th>`'s `onClick` (sort handler). `stopPropagation()` on `mousedown` doesn't stop the synthetic click.
   - Fix: `useResizableColumns` now (a) attaches a `click` listener on the handle that calls `stopPropagation + preventDefault`, and (b) installs a CAPTURE-phase `click` listener on the `<th>` that swallows clicks for ~0 ticks after a drag (tracked via `didResize` flag).

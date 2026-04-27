@@ -100,9 +100,10 @@ code, .mono {
   background: var(--text-tertiary);
 }
 
-/* Data table styles */
+/* Data table styles — comfortable padding so users can scan rows without
+   feeling cramped. Headers carry a touch more vertical room than cells. */
 .data-table th {
-  @apply bg-[#F3F4F6] text-[#4B5563] text-xs font-semibold uppercase tracking-wider py-2 px-3 border-b border-[#E5E7EB];
+  @apply bg-[#F3F4F6] text-[#4B5563] text-xs font-semibold uppercase tracking-wider py-2.5 px-4 border-b border-[#E5E7EB];
   position: relative;
 }
 
@@ -122,18 +123,31 @@ code, .mono {
 }
 .data-table th.sortable.sorted .sort-chevron { opacity: 1; color: #1D3557; }
 
-/* Column resizer — small grip on the right edge. Drag to resize. */
+/* Column resizer — wider hit area (10px) with a subtle 1px center bar so
+   users can spot and grab it easily. Brightens on hover and during drag.
+   The hit area is intentionally wider than the visible bar to make precise
+   targeting unnecessary. */
 .data-table th .col-resizer {
   position: absolute;
-  top: 0; right: 0; bottom: 0;
-  width: 6px;
+  top: 4px;
+  right: 0;
+  bottom: 4px;
+  width: 10px;
   cursor: col-resize;
   user-select: none;
   background: transparent;
   z-index: 25;
+  /* The visible 1px bar sits in the middle of the hit area. */
+  background-image: linear-gradient(to right, transparent 4px, #D1D5DB 4px, #D1D5DB 5px, transparent 5px);
+  transition: background-image 120ms ease, background-color 120ms ease;
 }
-.data-table th .col-resizer:hover,
-.data-table th .col-resizer.resizing { background: #1D3557; opacity: 0.5; }
+.data-table th .col-resizer:hover {
+  background-image: linear-gradient(to right, transparent 3px, #1D3557 3px, #1D3557 6px, transparent 6px);
+}
+.data-table th .col-resizer.resizing {
+  background-color: rgba(29, 53, 87, 0.12);
+  background-image: linear-gradient(to right, transparent 3px, #1D3557 3px, #1D3557 6px, transparent 6px);
+}
 
 /* Sticky-header wrapper: use on the overflow container that wraps the table.
    Using max-height instead of a hard height lets small tables shrink naturally. */
@@ -160,7 +174,7 @@ details > summary .details-chevron { transition: transform 180ms ease; }
 details[open] > summary .details-chevron { transform: rotate(180deg); }
 
 .data-table td {
-  @apply py-2 px-3 text-sm text-[#111827] border-b border-[#E5E7EB];
+  @apply py-2.5 px-4 text-sm text-[#111827] border-b border-[#E5E7EB];
 }
 
 .data-table tr:hover {
