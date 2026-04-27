@@ -411,7 +411,7 @@ export default function ItemsPage() {
                 <span>Add Item</span>
               </button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="font-[Chivo]">{editingItem ? 'Edit Item' : 'Add New Item'}</DialogTitle>
               </DialogHeader>

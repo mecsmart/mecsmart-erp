@@ -411,7 +411,7 @@ export default function MRPPage() {
 
       {/* Create PO Dialog — wide, line-item editor styled like manual PO page */}
       <Dialog open={poDialogOpen} onOpenChange={setPODialogOpen}>
-        <DialogContent className="max-w-7xl">
+        <DialogContent className="max-w-7xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-[Chivo]">Create Purchase Order from MRP</DialogTitle>
           </DialogHeader>
@@ -437,70 +437,37 @@ export default function MRPPage() {
                 No items selected
               </div>
             ) : (
-              <div className="border border-[#E5E7EB] rounded-sm">
-                <table className="w-full text-sm po-lines-compact" data-testid="mrp-po-lines-table">
-                  <style>{`
-                    .po-lines-compact td { padding: 6px 8px; vertical-align: middle; }
-                    .po-lines-compact th { padding: 8px 8px; font-size: 13px; }
-                    .po-lines-compact .cell-input {
-                      width: 100%; padding: 5px 8px; border: 1px solid transparent;
-                      border-radius: 2px; background: transparent; font-size: 14px;
-                      font-family: 'Courier New', monospace; outline: none;
-                    }
-                    .po-lines-compact .cell-input:hover { border-color: #D1D5DB; background: #fff; }
-                    .po-lines-compact .cell-input:focus { border-color: #1D3557; background: #fff; }
-                    .po-lines-compact .cell-input.num { text-align: right; }
-                    .po-lines-compact input[type=number]::-webkit-outer-spin-button,
-                    .po-lines-compact input[type=number]::-webkit-inner-spin-button {
-                      -webkit-appearance: none; margin: 0;
-                    }
-                    .po-lines-compact input[type=number] { -moz-appearance: textfield; }
-                    .po-lines-compact .gst-select {
-                      width: 100%; height: 26px; padding: 0 6px;
-                      border: 1px solid transparent; border-radius: 2px;
-                      background: transparent; font-size: 14px; font-family: 'Courier New', monospace;
-                    }
-                    .po-lines-compact .gst-select:hover { border-color: #D1D5DB; background: #fff; }
-                    .po-lines-compact tr { border-bottom: 1px solid #E5E7EB; }
-                    .po-lines-compact tr:last-child { border-bottom: none; }
-                  `}</style>
-                  <colgroup>
-                    <col style={{ width: '40%' }} />
-                    <col style={{ width: '10%' }} />
-                    <col style={{ width: '10%' }} />
-                    <col style={{ width: '8%' }} />
-                    <col style={{ width: '12%' }} />
-                    <col style={{ width: '8%' }} />
-                    <col style={{ width: '9%' }} />
-                    <col style={{ width: '3%' }} />
-                  </colgroup>
-                  <thead className="bg-[#1D3557] text-white">
-                    <tr className="text-left">
-                      <th className="px-2 py-1.5 font-semibold">Part No. / Name</th>
-                      <th className="px-2 py-1.5 font-semibold">HSN</th>
-                      <th className="px-2 py-1.5 font-semibold text-right">Qty</th>
-                      <th className="px-2 py-1.5 font-semibold">UOM</th>
-                      <th className="px-2 py-1.5 font-semibold text-right">Rate</th>
-                      <th className="px-2 py-1.5 font-semibold">GST%</th>
-                      <th className="px-2 py-1.5 font-semibold text-right">Total Amount</th>
-                      <th className="px-2 py-1.5"></th>
+              <div className="border border-[#E5E7EB] rounded-sm overflow-x-auto">
+                <table className="line-items-grid" data-testid="mrp-po-lines-table">
+                  <thead>
+                    <tr>
+                      <th className="row-num">#</th>
+                      <th style={{ minWidth: '280px' }}>Part No. / Name</th>
+                      <th style={{ width: '90px' }}>HSN</th>
+                      <th style={{ width: '80px', textAlign: 'right' }}>Qty</th>
+                      <th style={{ width: '70px' }}>UOM</th>
+                      <th style={{ width: '110px', textAlign: 'right' }}>Rate</th>
+                      <th style={{ width: '70px' }}>GST%</th>
+                      <th style={{ width: '120px', textAlign: 'right' }}>Total Amount</th>
+                      <th className="remove-cell"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {Object.entries(selectedItems).map(([itemId, entry], idx) => {
                       const lineAmount = (parseFloat(entry.quantity) || 0) * (parseFloat(entry.unit_price) || 0);
                       return (
-                        <tr key={itemId} className="bg-[#F9FAFB]" data-testid={`mrp-po-line-row-${idx}`}>
+                        <tr key={itemId} data-testid={`mrp-po-line-row-${idx}`}>
+                          <td className="row-num">{idx + 1}</td>
                           <td>
-                            <div className="px-1">
+                            <div className="px-1 py-1 space-y-1">
                               <div className="mono text-[12px] font-semibold text-[#1D3557]">{entry.part_number || '-'}</div>
                               <div className="text-[11px] text-[#4B5563]">{entry.name}</div>
-                              <input
-                                type="text"
+                              <textarea
+                                rows={1}
                                 value={entry.description || ''}
                                 onChange={(e) => updateDialogField(itemId, 'description', e.target.value)}
                                 placeholder="Description (printed on PO)"
-                                className="mt-1 w-full px-2 py-0.5 border border-dashed border-[#D1D5DB] rounded-sm text-[11px] italic bg-transparent focus:bg-white focus:border-[#1D3557] focus:border-solid focus:outline-none"
+                                className="grid-textarea"
                                 data-testid={`mrp-po-line-description-${idx}`}
                               />
                             </div>
@@ -508,36 +475,36 @@ export default function MRPPage() {
                           <td>
                             <input type="text" value={entry.hsn_code || ''}
                               onChange={(e) => updateDialogField(itemId, 'hsn_code', e.target.value)}
-                              className="cell-input" data-testid={`mrp-po-line-hsn-${idx}`} />
+                              className="grid-input mono" data-testid={`mrp-po-line-hsn-${idx}`} />
                           </td>
                           <td>
                             <input type="number" min="0" step="any" value={entry.quantity}
                               onChange={(e) => updateDialogField(itemId, 'quantity', parseFloat(e.target.value) || 0)}
-                              className="cell-input num" data-testid={`mrp-po-line-qty-${idx}`} />
+                              className="grid-input mono num" data-testid={`mrp-po-line-qty-${idx}`} />
                           </td>
                           <td>
                             <input type="text" value={entry.uom || ''}
                               onChange={(e) => updateDialogField(itemId, 'uom', e.target.value)}
-                              className="cell-input" data-testid={`mrp-po-line-uom-${idx}`} />
+                              className="grid-input" data-testid={`mrp-po-line-uom-${idx}`} />
                           </td>
                           <td>
                             <input type="number" min="0" step="0.01" value={entry.unit_price}
                               onChange={(e) => updateDialogField(itemId, 'unit_price', parseFloat(e.target.value) || 0)}
-                              className="cell-input num" data-testid={`mrp-po-line-rate-${idx}`} />
+                              className="grid-input mono num" data-testid={`mrp-po-line-rate-${idx}`} />
                           </td>
                           <td>
                             <select value={String(entry.gst_rate ?? 18)}
                               onChange={(e) => updateDialogField(itemId, 'gst_rate', parseFloat(e.target.value))}
-                              className="gst-select" data-testid={`mrp-po-line-gst-${idx}`}>
+                              className="grid-select" data-testid={`mrp-po-line-gst-${idx}`}>
                               {[0,5,12,18,28].map(r => <option key={r} value={String(r)}>{r}%</option>)}
                             </select>
                           </td>
-                          <td className="text-right mono font-medium">{lineAmount.toFixed(2)}</td>
-                          <td className="text-center">
+                          <td className="static-cell amount">{lineAmount.toFixed(2)}</td>
+                          <td className="remove-cell">
                             <button type="button" onClick={() => removeFromDialog(itemId)}
                               className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Remove line"
                               data-testid={`mrp-po-line-remove-${idx}`}>
-                              <X className="w-3.5 h-3.5" />
+                              <X className="w-3 h-3" />
                             </button>
                           </td>
                         </tr>

@@ -4,7 +4,6 @@ load_dotenv()
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Body
 from fastapi.responses import StreamingResponse, JSONResponse
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import io
@@ -14,18 +13,21 @@ from typing import List, Optional, Dict, Any, Tuple
 import uuid
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
-import bcrypt
-import jwt
-import secrets
+import jwt  # used by /auth/refresh route below
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# JWT Config
-JWT_ALGORITHM = "HS256"
-JWT_SECRET = os.environ.get("JWT_SECRET", secrets.token_hex(32))
+# Shared core building blocks (DB, permissions, auth)
+from core.db import client, db
+from core.permissions import (
+    ALL_MODULES, ALL_ACTIONS, MODULE_ACTIONS,
+    allowed_actions_for, DEFAULT_PERMISSIONS, get_default_permissions,
+)
+from core.auth import (
+    JWT_ALGORITHM, JWT_SECRET,
+    hash_password, verify_password,
+    get_jwt_secret, create_access_token, create_refresh_token,
+    get_current_user, get_cookie_settings,
+    require_roles, _require_access,
+)
 
 # Create the main app
 app = FastAPI(title="Machinery Manufacturing ERP")
@@ -89,72 +91,6 @@ class UserResponse(BaseModel):
     name: str
     role: str
     created_at: datetime
-
-# Module permission definitions
-# NOTE: `bom_process_cost` supports only [view, edit]; `bom_rollup_cost` supports only [view].
-# Every other module supports the full CRUD set (`ALL_ACTIONS`).
-ALL_MODULES = [
-    "dashboard", "items", "bom", "routings", "bom_process_cost", "bom_rollup_cost",
-    "mrp", "production", "manufacturing",
-    "quality", "inventory", "suppliers", "customers",
-    "purchase_orders", "purchase_invoices", "delivery_challan", "job_work",
-    "stores", "settings",
-    "crm_marketing", "crm_support"
-]
-ALL_ACTIONS = ["view", "create", "edit", "delete"]
-# Per-module allowed action set (override). If a module isn't listed here, it uses ALL_ACTIONS.
-MODULE_ACTIONS = {
-    "bom_process_cost": ["view", "edit"],
-    "bom_rollup_cost": ["view"],
-}
-
-def allowed_actions_for(module: str) -> list:
-    return MODULE_ACTIONS.get(module, ALL_ACTIONS)
-
-# Default permissions by role
-DEFAULT_PERMISSIONS = {
-    "admin": {m: allowed_actions_for(m).copy() for m in ALL_MODULES},
-    "production_manager": {
-        "dashboard": ["view"], "items": ["view", "create", "edit"], "bom": ["view", "create", "edit"],
-        "routings": ["view", "create", "edit"],
-        "bom_process_cost": ["view", "edit"], "bom_rollup_cost": [],
-        "mrp": ["view"], "production": ["view", "create", "edit", "delete"],
-        "manufacturing": ["view", "create", "edit", "delete"], "quality": ["view"],
-        "inventory": ["view"], "suppliers": ["view", "create", "edit"],
-        "customers": ["view", "create", "edit"],
-        "purchase_orders": ["view", "create", "edit"],
-        "purchase_invoices": ["view", "create", "edit"],
-        "delivery_challan": ["view", "create", "edit", "delete"],
-        "job_work": ["view", "create", "edit", "delete"],
-        "stores": ["view"], "settings": ["view"]
-    },
-    "quality_inspector": {
-        "dashboard": ["view"], "items": ["view"], "bom": ["view"], "routings": ["view"],
-        "bom_process_cost": [], "bom_rollup_cost": [],
-        "mrp": [], "production": ["view"],
-        "manufacturing": ["view"], "quality": ["view", "create", "edit"],
-        "inventory": ["view"], "suppliers": [],
-        "customers": [], "purchase_orders": [], "purchase_invoices": [],
-        "delivery_challan": ["view"], "job_work": ["view"],
-        "stores": ["view"], "settings": ["view"]
-    },
-    "inventory_manager": {
-        "dashboard": ["view"], "items": ["view", "create", "edit"], "bom": ["view"], "routings": ["view"],
-        "bom_process_cost": [], "bom_rollup_cost": [],
-        "mrp": ["view"], "production": ["view"],
-        "manufacturing": ["view"], "quality": ["view"],
-        "inventory": ["view", "create", "edit", "delete"], "suppliers": ["view"],
-        "customers": ["view"],
-        "purchase_orders": ["view", "create", "edit"],
-        "purchase_invoices": ["view", "create", "edit"],
-        "delivery_challan": ["view", "create", "edit"],
-        "job_work": ["view"],
-        "stores": ["view", "create", "edit", "delete"], "settings": ["view"]
-    }
-}
-
-def get_default_permissions(role: str) -> dict:
-    return DEFAULT_PERMISSIONS.get(role, DEFAULT_PERMISSIONS["inventory_manager"])
 
 class ItemCreate(BaseModel):
     part_number: str
@@ -871,129 +807,6 @@ class CustomerUpdate(BaseModel):
     pin_code: Optional[str] = None
     payment_terms: Optional[str] = None
     status: Optional[str] = None
-
-# ================== PASSWORD UTILS ==================
-
-def hash_password(password: str) -> str:
-    salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
-    return hashed.decode("utf-8")
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
-
-# ================== JWT UTILS ==================
-
-def get_jwt_secret() -> str:
-    return JWT_SECRET
-
-def create_access_token(user_id: str, email: str) -> str:
-    payload = {
-        "sub": user_id,
-        "email": email,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
-        "type": "access"
-    }
-    return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
-
-def create_refresh_token(user_id: str) -> str:
-    payload = {
-        "sub": user_id,
-        "exp": datetime.now(timezone.utc) + timedelta(days=7),
-        "type": "refresh"
-    }
-    return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
-
-async def get_current_user(request: Request) -> dict:
-    token = request.cookies.get("access_token")
-    if not token:
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    try:
-        payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
-        if payload.get("type") != "access":
-            raise HTTPException(status_code=401, detail="Invalid token type")
-        user = await db.users.find_one({"_id": ObjectId(payload["sub"])})
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-        user["id"] = str(user["_id"])
-        del user["_id"]
-        user.pop("password_hash", None)
-        # Ensure permissions exist
-        if "permissions" not in user or not user["permissions"]:
-            user["permissions"] = get_default_permissions(user.get("role", "inventory_manager"))
-        # Overlay role_group permissions + admin-group flag (mirrors /auth/me logic)
-        group_id = user.get("role_group_id")
-        if group_id:
-            try:
-                group = await db.role_groups.find_one({"id": group_id}, {"_id": 0})
-            except Exception:
-                group = None
-            if group:
-                if group.get("permissions"):
-                    user["permissions"] = group["permissions"]
-                user["is_admin_group"] = bool(group.get("is_admin_group"))
-        # Auto-elevate effective role to "admin" when the user either
-        #   (a) belongs to an admin role_group, OR
-        #   (b) has every action on every module in their effective permissions.
-        # This unblocks all hardcoded `user["role"] not in [...]` route guards for
-        # users who legitimately hold all granular permissions.
-        if user.get("is_admin_group"):
-            user["role"] = "admin"
-        else:
-            perms = user.get("permissions") or {}
-            try:
-                if perms and all(
-                    set(allowed_actions_for(m)).issubset(set(perms.get(m, [])))
-                    for m in ALL_MODULES
-                ):
-                    user["role"] = "admin"
-            except Exception:
-                pass
-        return user
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-# Cookie settings helper for production/development
-def get_cookie_settings():
-    frontend_url = os.environ.get("FRONTEND_URL", "")
-    cors_origins = os.environ.get("CORS_ORIGINS", "")
-    is_prod = any(domain in frontend_url for domain in ["emergent.host", "emergentagent.com"]) or cors_origins == "*" or os.environ.get("ENVIRONMENT") == "production"
-    return {"secure": is_prod, "samesite": "none" if is_prod else "lax"}
-
-
-def require_roles(allowed_roles: List[str]):
-    async def role_checker(request: Request):
-        user = await get_current_user(request)
-        if user["role"] not in allowed_roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        return user
-    return role_checker
-
-def _require_access(user: dict, allowed_roles: list, module: str = None, action: str = None):
-    """
-    Authorization helper.
-    Grants access if EITHER:
-      (a) user["role"] is in `allowed_roles` (legacy path), OR
-      (b) user has `action` on `module` in their effective permissions dict.
-    Raises HTTPException(403) otherwise. `module` & `action` are optional —
-    if omitted this falls back to strict role-only behaviour.
-    """
-    if allowed_roles and user.get("role") in allowed_roles:
-        return
-    if module and action:
-        perms = user.get("permissions") or {}
-        module_perms = perms.get(module) or []
-        if action in module_perms:
-            return
-    raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-
 
 # ================== AUTH ROUTES ==================
 

@@ -481,131 +481,81 @@ export default function PurchaseOrdersPage() {
                   <ShoppingCart className="w-8 h-8 mx-auto mb-2 text-[#9CA3AF]" /><p className="text-sm">No items added yet</p>
                 </div>
               ) : (
-                <div className="border border-[#E5E7EB] rounded-sm">
-                  <table className="w-full text-sm po-lines-compact" data-testid="po-lines-table">
-                    <style>{`
-                      .po-lines-compact td { padding: 6px 8px; vertical-align: middle; }
-                      .po-lines-compact th { padding: 8px 8px; font-size: 13px; }
-                      .po-lines-compact .cell-input {
-                        width: 100%;
-                        padding: 5px 8px;
-                        border: 1px solid transparent;
-                        border-radius: 2px;
-                        background: transparent;
-                        font-size: 14px;
-                        font-family: 'Courier New', monospace;
-                        outline: none;
-                      }
-                      .po-lines-compact .cell-input:hover { border-color: #D1D5DB; background: #fff; }
-                      .po-lines-compact .cell-input:focus { border-color: #1D3557; background: #fff; }
-                      .po-lines-compact .cell-input.num { text-align: right; }
-                      /* Hide native number-input spinners so full digits are always visible */
-                      .po-lines-compact input[type=number]::-webkit-outer-spin-button,
-                      .po-lines-compact input[type=number]::-webkit-inner-spin-button {
-                        -webkit-appearance: none; margin: 0;
-                      }
-                      .po-lines-compact input[type=number] { -moz-appearance: textfield; }
-                      .po-lines-compact .disc-toggle {
-                        width: 22px; height: 26px; font-size: 12px; font-weight: 600;
-                        border: 1px solid #D1D5DB; background: #F3F4F6; color: #1D3557;
-                        border-radius: 2px; cursor: pointer; flex-shrink: 0;
-                      }
-                      .po-lines-compact .disc-toggle:hover { background: #E5E7EB; }
-                      .po-lines-compact .gst-select {
-                        width: 100%; height: 26px; padding: 0 6px;
-                        border: 1px solid transparent; border-radius: 2px;
-                        background: transparent; font-size: 14px; font-family: 'Courier New', monospace;
-                      }
-                      .po-lines-compact .gst-select:hover { border-color: #D1D5DB; background: #fff; }
-                      .po-lines-compact tr { border-bottom: 1px solid #E5E7EB; }
-                      .po-lines-compact tr:last-child { border-bottom: none; }
-                      .po-lines-compact .desc-input {
-                        width: 100%; padding: 3px 8px; margin-top: 3px;
-                        border: 1px dashed #D1D5DB; border-radius: 2px;
-                        font-size: 13px; font-style: italic; background: transparent;
-                      }
-                      .po-lines-compact .desc-input:focus { border-style: solid; border-color: #1D3557; background: #fff; outline: none; }
-                    `}</style>
-                    <colgroup>
-                      <col style={{ width: '40%' }} />
-                      <col style={{ width: '8%' }} />
-                      <col style={{ width: '8%' }} />
-                      <col style={{ width: '8%' }} />
-                      <col style={{ width: '8%' }} />
-                      <col style={{ width: '8%' }} />
-                      <col style={{ width: '7%' }} />
-                      <col style={{ width: '10%' }} />
-                      <col style={{ width: '3%' }} />
-                    </colgroup>
-                    <thead className="bg-[#1D3557] text-white">
-                      <tr className="text-left">
-                        <th className="px-2 py-1.5 font-semibold">Part No. / Name &amp; Description</th>
-                        <th className="px-2 py-1.5 font-semibold">HSN</th>
-                        <th className="px-2 py-1.5 font-semibold text-right">Qty</th>
-                        <th className="px-2 py-1.5 font-semibold">UOM</th>
-                        <th className="px-2 py-1.5 font-semibold text-right">Rate</th>
-                        <th className="px-2 py-1.5 font-semibold">Discount</th>
-                        <th className="px-2 py-1.5 font-semibold">GST%</th>
-                        <th className="px-2 py-1.5 font-semibold text-right">Total Amount</th>
-                        <th className="px-2 py-1.5"></th>
+                <div className="border border-[#E5E7EB] rounded-sm overflow-x-auto">
+                  <table className="line-items-grid" data-testid="po-lines-table">
+                    <thead>
+                      <tr>
+                        <th className="row-num">#</th>
+                        <th style={{ minWidth: '280px' }}>Part No. / Name &amp; Description</th>
+                        <th style={{ width: '90px' }}>HSN</th>
+                        <th style={{ width: '80px', textAlign: 'right' }}>Qty</th>
+                        <th style={{ width: '70px' }}>UOM</th>
+                        <th style={{ width: '100px', textAlign: 'right' }}>Rate</th>
+                        <th style={{ width: '110px' }}>Discount</th>
+                        <th style={{ width: '70px' }}>GST%</th>
+                        <th style={{ width: '120px', textAlign: 'right' }}>Total Amount</th>
+                        <th className="remove-cell"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {formData.lines.map((line, index) => (
-                        <tr key={index} className="bg-[#F9FAFB] align-top" data-testid={`po-line-row-${index}`}>
+                        <tr key={index} data-testid={`po-line-row-${index}`}>
+                          <td className="row-num">{index + 1}</td>
                           <td>
-                            <SearchableItemSelect
-                              items={items}
-                              value={line.item_id}
-                              onChange={(v) => updateLine(index, 'item_id', v)}
-                              placeholder="Type part no / name…"
-                              showCategory={true}
-                              allowClear={false}
-                              testId={`po-line-item-${index}`}
-                            />
-                            <input
-                              type="text"
-                              value={line.description || ''}
-                              onChange={(e) => updateLine(index, 'description', e.target.value)}
-                              className="desc-input"
-                              placeholder="Description (printed on PO)"
-                              data-testid={`po-line-description-${index}`}
-                            />
+                            <div className="px-1 py-1 space-y-1">
+                              <SearchableItemSelect
+                                items={items}
+                                value={line.item_id}
+                                onChange={(v) => updateLine(index, 'item_id', v)}
+                                placeholder="Type part no / name…"
+                                showCategory={true}
+                                allowClear={false}
+                                testId={`po-line-item-${index}`}
+                              />
+                              <textarea
+                                rows={1}
+                                value={line.description || ''}
+                                onChange={(e) => updateLine(index, 'description', e.target.value)}
+                                className="grid-textarea"
+                                placeholder="Description (printed on PO)"
+                                data-testid={`po-line-description-${index}`}
+                              />
+                            </div>
                           </td>
                           <td>
-                            <input type="text" value={line.hsn_code} onChange={(e) => updateLine(index, 'hsn_code', e.target.value)} className="cell-input" />
+                            <input type="text" value={line.hsn_code} onChange={(e) => updateLine(index, 'hsn_code', e.target.value)} className="grid-input mono" />
                           </td>
                           <td>
-                            <input type="number" min="0" step="any" value={line.quantity} onChange={(e) => updateLine(index, 'quantity', parseFloat(e.target.value) || 0)} className="cell-input num" />
+                            <input type="number" min="0" step="any" value={line.quantity} onChange={(e) => updateLine(index, 'quantity', parseFloat(e.target.value) || 0)} className="grid-input mono num" />
                           </td>
                           <td>
-                            <input type="text" value={line.uom} onChange={(e) => updateLine(index, 'uom', e.target.value)} className="cell-input" />
+                            <input type="text" value={line.uom} onChange={(e) => updateLine(index, 'uom', e.target.value)} className="grid-input" />
                           </td>
                           <td>
-                            <input type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => updateLine(index, 'unit_price', parseFloat(e.target.value) || 0)} className="cell-input num" />
+                            <input type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => updateLine(index, 'unit_price', parseFloat(e.target.value) || 0)} className="grid-input mono num" />
                           </td>
                           <td>
-                            <div className="flex items-center gap-1">
-                              <input type="number" min="0" step="0.01" value={line.discount_value === 0 ? '' : line.discount_value} onChange={(e) => updateLine(index, 'discount_value', e.target.value === '' ? 0 : parseFloat(e.target.value))} className="cell-input num" style={{flex: 1, minWidth: 0}} placeholder="0" data-testid={`po-line-discount-${index}`} />
+                            <div className="flex items-center" style={{ gap: 0 }}>
+                              <input type="number" min="0" step="0.01" value={line.discount_value === 0 ? '' : line.discount_value} onChange={(e) => updateLine(index, 'discount_value', e.target.value === '' ? 0 : parseFloat(e.target.value))} className="grid-input mono num" style={{flex: 1, minWidth: 0}} placeholder="0" data-testid={`po-line-discount-${index}`} />
                               <button
                                 type="button"
                                 onClick={() => updateLine(index, 'discount_type', line.discount_type === 'percentage' ? 'amount' : 'percentage')}
-                                className="disc-toggle"
                                 title={line.discount_type === 'percentage' ? 'Switch to flat Amount' : 'Switch to Percentage'}
                                 data-testid={`po-line-discount-type-${index}`}
+                                style={{ width: 22, height: 26, fontSize: 12, fontWeight: 600, border: '1px solid #D1D5DB', background: '#F3F4F6', color: '#1D3557', borderRadius: 2, cursor: 'pointer', flexShrink: 0 }}
                               >
                                 {line.discount_type === 'percentage' ? '%' : '₹'}
                               </button>
                             </div>
                           </td>
                           <td>
-                            <select value={String(line.gst_rate)} onChange={(e) => updateLine(index, 'gst_rate', parseFloat(e.target.value))} className="gst-select" data-testid={`po-line-gst-${index}`}>
+                            <select value={String(line.gst_rate)} onChange={(e) => updateLine(index, 'gst_rate', parseFloat(e.target.value))} className="grid-select" data-testid={`po-line-gst-${index}`}>
                               {[0,5,12,18,28].map(r => <option key={r} value={String(r)}>{r}%</option>)}
                             </select>
                           </td>
-                          <td className="text-right mono font-medium">{calcLineAmount(line).toFixed(2)}</td>
-                          <td className="text-center">
-                            <button type="button" onClick={() => removeLine(index)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Remove line" data-testid={`po-line-remove-${index}`}><X className="w-3.5 h-3.5" /></button>
+                          <td className="static-cell amount">{calcLineAmount(line).toFixed(2)}</td>
+                          <td className="remove-cell">
+                            <button type="button" onClick={() => removeLine(index)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Remove line" data-testid={`po-line-remove-${index}`}><X className="w-3 h-3" /></button>
                           </td>
                         </tr>
                       ))}
