@@ -1272,18 +1272,18 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                 <button className="btn-secondary flex items-center gap-1 text-xs" onClick={addLine} data-testid="quotation-add-line"><Plus className="w-3 h-3" /> Add Line</button>
               </div>
               <div className="border border-[#E5E7EB] rounded-sm overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead className="bg-[#F3F4F6]">
+                <table className="line-items-grid" data-testid="quotation-lines-table">
+                  <thead>
                     <tr>
-                      <th className="text-left p-2 w-10">#</th>
-                      <th className="text-left p-2 min-w-[260px]">Item Name &amp; Description</th>
-                      <th className="text-left p-2 w-20">Qty</th>
-                      <th className="text-left p-2 w-20">UOM</th>
-                      <th className="text-left p-2 w-24">Rate (₹)</th>
-                      <th className="text-left p-2 w-20">Disc %</th>
-                      <th className="text-left p-2 w-20">GST %</th>
-                      <th className="text-right p-2 w-36">Amount</th>
-                      <th className="w-10"></th>
+                      <th className="row-num">#</th>
+                      <th style={{ minWidth: '300px' }}>Item Name &amp; Description</th>
+                      <th style={{ width: '80px' }}>Qty</th>
+                      <th style={{ width: '70px' }}>UOM</th>
+                      <th style={{ width: '110px' }}>Rate (₹)</th>
+                      <th style={{ width: '70px' }}>Disc %</th>
+                      <th style={{ width: '70px' }}>GST %</th>
+                      <th style={{ width: '130px', textAlign: 'right' }}>Amount</th>
+                      <th className="remove-cell"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1292,36 +1292,28 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                       const disc = gross * ((parseFloat(l.discount_pct) || 0) / 100);
                       const amount = gross - disc;
                       return (
-                        <tr key={idx} className="border-t border-[#E5E7EB]" data-testid={`quotation-line-${idx}`}>
-                          <td className="p-2 mono align-top">{idx + 1}</td>
-                          <td className="p-2">
-                            <SearchableItemSelect
-                              items={items}
-                              value={l.item_id}
-                              onChange={(v) => { if (!v) updateLine(idx, { item_id: '' }); else onPickItem(idx, v); }}
-                              placeholder="Type part no / name…"
-                              showCategory={false}
-                              testId={`quotation-line-item-${idx}`}
-                            />
-                            <textarea rows={2} className="input-field text-xs resize-y min-h-[28px] mt-1" value={l.description} onChange={e => updateLine(idx, { description: e.target.value })} placeholder="Description (auto-filled on item pick — editable)" data-testid={`quotation-line-desc-${idx}`} />
+                        <tr key={idx} data-testid={`quotation-line-${idx}`}>
+                          <td className="row-num">{idx + 1}</td>
+                          <td>
+                            <div className="px-1 py-1 space-y-1">
+                              <SearchableItemSelect
+                                items={items}
+                                value={l.item_id}
+                                onChange={(v) => { if (!v) updateLine(idx, { item_id: '' }); else onPickItem(idx, v); }}
+                                placeholder="Type part no / name…"
+                                showCategory={false}
+                                testId={`quotation-line-item-${idx}`}
+                              />
+                              <textarea rows={2} className="grid-textarea" value={l.description} onChange={e => updateLine(idx, { description: e.target.value })} placeholder="Description (auto-filled — editable)" data-testid={`quotation-line-desc-${idx}`} />
+                            </div>
                           </td>
-                          <td className="p-2">
-                            <input type="number" step="0.01" className="input-field mono h-7 text-xs" value={l.quantity} onChange={e => updateLine(idx, { quantity: e.target.value })} data-testid={`quotation-line-qty-${idx}`} />
-                          </td>
-                          <td className="p-2">
-                            <input type="text" className="input-field h-7 text-xs" value={l.uom} onChange={e => updateLine(idx, { uom: e.target.value })} />
-                          </td>
-                          <td className="p-2">
-                            <input type="number" step="0.01" className="input-field mono h-7 text-xs" value={l.rate} onChange={e => updateLine(idx, { rate: e.target.value })} data-testid={`quotation-line-rate-${idx}`} />
-                          </td>
-                          <td className="p-2">
-                            <input type="number" step="0.01" className="input-field mono h-7 text-xs" value={l.discount_pct || 0} onChange={e => updateLine(idx, { discount_pct: e.target.value })} data-testid={`quotation-line-discount-${idx}`} />
-                          </td>
-                          <td className="p-2">
-                            <input type="number" step="0.01" className="input-field mono h-7 text-xs" value={l.gst_rate} onChange={e => updateLine(idx, { gst_rate: e.target.value })} />
-                          </td>
-                          <td className="p-2 text-right mono">{formatCurrency(amount)}</td>
-                          <td className="p-2">
+                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.quantity} onChange={e => updateLine(idx, { quantity: e.target.value })} data-testid={`quotation-line-qty-${idx}`} /></td>
+                          <td><input type="text" className="grid-input" value={l.uom} onChange={e => updateLine(idx, { uom: e.target.value })} /></td>
+                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.rate} onChange={e => updateLine(idx, { rate: e.target.value })} data-testid={`quotation-line-rate-${idx}`} /></td>
+                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.discount_pct || 0} onChange={e => updateLine(idx, { discount_pct: e.target.value })} data-testid={`quotation-line-discount-${idx}`} /></td>
+                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.gst_rate} onChange={e => updateLine(idx, { gst_rate: e.target.value })} /></td>
+                          <td className="static-cell amount">{formatCurrency(amount)}</td>
+                          <td className="remove-cell">
                             {form.lines.length > 1 && (
                               <button className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded p-1" onClick={() => removeLine(idx)} title="Remove" data-testid={`quotation-line-remove-${idx}`}><X className="w-3 h-3" /></button>
                             )}
@@ -2742,46 +2734,48 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                 <label className="text-sm font-medium text-[#374151]">Line Items</label>
                 <button type="button" onClick={addLine} className="text-xs text-[#1D3557] flex items-center gap-1" data-testid="ti-add-line"><Plus className="w-3 h-3" /> Add Line</button>
               </div>
-              <div className="border border-[#E5E7EB] rounded-sm overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead className="bg-[#F3F4F6]"><tr>
-                    <th className="px-2 py-1 text-left w-8">#</th>
-                    <th className="px-2 py-1 text-left min-w-[240px]">Item &amp; Description</th>
-                    <th className="px-2 py-1 text-left w-20">HSN</th>
-                    <th className="px-2 py-1 text-right w-16">Qty</th>
-                    <th className="px-2 py-1 text-left w-14">UOM</th>
-                    <th className="px-2 py-1 text-right w-20">Rate</th>
-                    <th className="px-2 py-1 text-right w-14">Disc%</th>
-                    <th className="px-2 py-1 text-right w-14">GST%</th>
-                    <th className="px-2 py-1 text-right w-20">Amount</th>
-                    <th className="px-2 py-1 w-8"></th>
+              <div className="border border-[#E5E7EB] rounded-sm overflow-x-auto">
+                <table className="line-items-grid" data-testid="ti-lines-table">
+                  <thead><tr>
+                    <th className="row-num">#</th>
+                    <th style={{ minWidth: '260px' }}>Item &amp; Description</th>
+                    <th style={{ width: '90px' }}>HSN</th>
+                    <th style={{ width: '70px', textAlign: 'right' }}>Qty</th>
+                    <th style={{ width: '60px' }}>UOM</th>
+                    <th style={{ width: '100px', textAlign: 'right' }}>Rate</th>
+                    <th style={{ width: '60px', textAlign: 'right' }}>Disc%</th>
+                    <th style={{ width: '60px', textAlign: 'right' }}>GST%</th>
+                    <th style={{ width: '120px', textAlign: 'right' }}>Amount</th>
+                    <th className="remove-cell"></th>
                   </tr></thead>
                   <tbody>
                     {form.lines.map((l, i) => {
                       const amount = ((parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0)) * (1 - (parseFloat(l.discount_pct) || 0) / 100);
                       return (
                         <tr key={i} data-testid={`ti-line-${i}`}>
-                          <td className="px-2 py-1 text-[#6B7280] align-top">{i + 1}</td>
-                          <td className="px-1 py-1">
-                            <SearchableItemSelect
-                              items={items}
-                              value={l.item_id}
-                              onChange={(v) => applyItemToLine(i, v)}
-                              placeholder="Type part no / name…"
-                              showCategory={false}
-                              testId={`ti-line-item-${i}`}
-                            />
-                            <textarea rows={2} className="w-full mt-1 px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-[11px] resize-y" placeholder="Description (auto-filled on item pick — editable)" value={l.description} onChange={e => updateLine(i, { description: e.target.value })} data-testid={`ti-line-desc-${i}`} />
+                          <td className="row-num">{i + 1}</td>
+                          <td>
+                            <div className="px-1 py-1 space-y-1">
+                              <SearchableItemSelect
+                                items={items}
+                                value={l.item_id}
+                                onChange={(v) => applyItemToLine(i, v)}
+                                placeholder="Type part no / name…"
+                                showCategory={false}
+                                testId={`ti-line-item-${i}`}
+                              />
+                              <textarea rows={2} className="grid-textarea" placeholder="Description (auto-filled — editable)" value={l.description} onChange={e => updateLine(i, { description: e.target.value })} data-testid={`ti-line-desc-${i}`} />
+                            </div>
                           </td>
-                          <td className="px-1 py-1"><input type="text" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs mono" value={l.hsn_code} onChange={e => updateLine(i, { hsn_code: e.target.value })} /></td>
-                          <td className="px-1 py-1"><input type="number" step="0.01" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs text-right mono" value={l.quantity} onChange={e => updateLine(i, { quantity: e.target.value })} data-testid={`ti-line-qty-${i}`} /></td>
-                          <td className="px-1 py-1"><input type="text" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs" value={l.uom} onChange={e => updateLine(i, { uom: e.target.value })} /></td>
-                          <td className="px-1 py-1"><input type="number" step="0.01" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs text-right mono" value={l.rate} onChange={e => updateLine(i, { rate: e.target.value })} data-testid={`ti-line-rate-${i}`} /></td>
-                          <td className="px-1 py-1"><input type="number" step="0.01" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs text-right mono" value={l.discount_pct} onChange={e => updateLine(i, { discount_pct: e.target.value })} data-testid={`ti-line-disc-${i}`} /></td>
-                          <td className="px-1 py-1"><input type="number" step="0.01" className="w-full px-1 py-0.5 border border-[#E5E7EB] rounded-sm text-xs text-right mono" value={l.gst_rate} onChange={e => updateLine(i, { gst_rate: e.target.value })} data-testid={`ti-line-gst-${i}`} /></td>
-                          <td className="px-2 py-1 text-right mono">{formatCurrency(amount)}</td>
-                          <td className="px-1 py-1">
-                            <button type="button" onClick={() => removeLine(i)} className="text-[#9B1C1C]" data-testid={`ti-line-remove-${i}`} title="Remove line"><X className="w-3 h-3" /></button>
+                          <td><input type="text" className="grid-input mono" value={l.hsn_code} onChange={e => updateLine(i, { hsn_code: e.target.value })} /></td>
+                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.quantity} onChange={e => updateLine(i, { quantity: e.target.value })} data-testid={`ti-line-qty-${i}`} /></td>
+                          <td><input type="text" className="grid-input" value={l.uom} onChange={e => updateLine(i, { uom: e.target.value })} /></td>
+                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.rate} onChange={e => updateLine(i, { rate: e.target.value })} data-testid={`ti-line-rate-${i}`} /></td>
+                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.discount_pct} onChange={e => updateLine(i, { discount_pct: e.target.value })} data-testid={`ti-line-disc-${i}`} /></td>
+                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.gst_rate} onChange={e => updateLine(i, { gst_rate: e.target.value })} data-testid={`ti-line-gst-${i}`} /></td>
+                          <td className="static-cell amount">{formatCurrency(amount)}</td>
+                          <td className="remove-cell">
+                            <button type="button" onClick={() => removeLine(i)} className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded p-1" data-testid={`ti-line-remove-${i}`} title="Remove line"><X className="w-3 h-3" /></button>
                           </td>
                         </tr>
                       );

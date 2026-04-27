@@ -107,6 +107,99 @@ code, .mono {
   position: relative;
 }
 
+/* ========================================================================
+   Excel-like compact line-item editor — used in Quotation, Invoice, PO, and
+   any other "form with line items" dialog. Goal: dense rows, thin gridlines,
+   no wasted horizontal padding so users can author rows quickly without
+   scrolling and without truncated cell values.
+   Apply by giving the <table> the class `.line-items-grid`.
+   ======================================================================== */
+.line-items-grid {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  table-layout: auto;
+}
+.line-items-grid thead th {
+  padding: 6px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1D3557;
+  background: #F3F4F6;
+  border: 1px solid #D1D5DB;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.line-items-grid tbody td {
+  padding: 0;
+  border: 1px solid #E5E7EB;
+  vertical-align: middle;
+}
+.line-items-grid tbody tr:hover td { background: #F9FAFB; }
+/* Cells with inputs: zero outer padding; the input fills the cell so the
+   user has the maximum usable area to type. Borders come from the cell. */
+.line-items-grid td .grid-input,
+.line-items-grid td .grid-select,
+.line-items-grid td .grid-textarea {
+  width: 100%;
+  height: 28px;
+  border: none;
+  outline: none;
+  padding: 4px 6px;
+  font-size: 13px;
+  font-family: inherit;
+  background: transparent;
+  color: inherit;
+}
+.line-items-grid td .grid-input.mono,
+.line-items-grid td .grid-select.mono { font-family: 'Courier New', Courier, monospace; }
+.line-items-grid td .grid-input.num,
+.line-items-grid td .grid-input.amount { text-align: right; }
+.line-items-grid td .grid-input:focus,
+.line-items-grid td .grid-select:focus,
+.line-items-grid td .grid-textarea:focus {
+  outline: 2px solid #1D3557;
+  outline-offset: -2px;
+  background: #fff;
+}
+.line-items-grid td .grid-textarea {
+  height: auto;
+  min-height: 28px;
+  resize: vertical;
+}
+/* Hide native number-input spinners — the digits get truncated otherwise.
+   Users still get keyboard up/down via browser default behavior. */
+.line-items-grid input[type=number]::-webkit-outer-spin-button,
+.line-items-grid input[type=number]::-webkit-inner-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
+.line-items-grid input[type=number] { -moz-appearance: textfield; }
+.line-items-grid .static-cell {
+  padding: 6px 8px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.line-items-grid .static-cell.amount {
+  text-align: right;
+  font-family: 'Courier New', Courier, monospace;
+  font-weight: 600;
+  color: #1D3557;
+  white-space: nowrap;
+}
+.line-items-grid .row-num {
+  width: 36px;
+  text-align: center;
+  background: #F9FAFB;
+  font-family: 'Courier New', Courier, monospace;
+  color: #6B7280;
+}
+.line-items-grid .remove-cell {
+  width: 32px;
+  text-align: center;
+  padding: 0;
+}
+
 /* Sortable column header — click to sort. Active sort styled with darker text. */
 .data-table th.sortable {
   cursor: pointer;
