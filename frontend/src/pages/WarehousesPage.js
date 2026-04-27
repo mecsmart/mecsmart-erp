@@ -688,7 +688,7 @@ export default function WarehousesPage() {
               <select
                 value={storesStockCategory}
                 onChange={(e) => setStoresStockCategory(e.target.value)}
-                className="input-field text-sm w-40 h-9 flex-shrink-0"
+                className="input-field text-sm !w-40 h-9 flex-shrink-0"
                 data-testid="stores-stock-category-filter"
               >
                 <option value="">All Categories</option>
@@ -700,7 +700,7 @@ export default function WarehousesPage() {
               <select
                 value={storesStockGroup}
                 onChange={(e) => setStoresStockGroup(e.target.value)}
-                className="input-field text-sm w-44 h-9 flex-shrink-0"
+                className="input-field text-sm !w-44 h-9 flex-shrink-0"
                 data-testid="stores-stock-group-filter"
               >
                 <option value="">All Groups</option>

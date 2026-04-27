@@ -26,6 +26,25 @@ export default function useResizableColumns(tableRef, deps = []) {
     const ths = table.querySelectorAll('thead th');
     if (!ths.length) return;
 
+    // LOCK column widths to their browser-computed natural distribution AND
+    // switch the table to fixed layout. Without this, sorting (which changes
+    // which rows are at the top) causes the browser to reflow the columns
+    // because table-layout:auto sizes columns by content. Locking widths +
+    // table-layout:fixed makes columns stable while still allowing the
+    // resize handles to widen/narrow them.
+    requestAnimationFrame(() => {
+      const widths = Array.from(ths).map((th) => th.getBoundingClientRect().width);
+      ths.forEach((th, i) => {
+        const w = widths[i];
+        if (w && !th.style.width) {
+          th.style.width = w + 'px';
+          th.style.minWidth = w + 'px';
+          th.style.maxWidth = w + 'px';
+        }
+      });
+      table.style.tableLayout = 'fixed';
+    });
+
     const cleanups = [];
     ths.forEach((th) => {
       // Avoid double-attaching when React re-renders rows (the same th element

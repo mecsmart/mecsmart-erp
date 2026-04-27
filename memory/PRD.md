@@ -20,6 +20,9 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-02-28** — **Stable column widths + Stores filter visibility (P0):**
+  1. **Column reflow on sort fixed:** `useResizableColumns` now captures each column's natural width on mount, locks them inline, and switches the table to `table-layout: fixed`. Sorting (or filtering) no longer reflows column widths — verified delta=0px on Stores Stock Part Number through 2 sort cycles. User-driven resize via the drag handle still works.
+  2. **Stores Stock category & group filters were invisible** because `.input-field` (`@apply w-full`) overrode Tailwind `w-40` / `w-44`. Switched to important modifiers (`!w-40`, `!w-44`). All 3 filters now sit on a single row with the correct widths (256/160/176 px).
 - **2026-02-28** — **Sortable + resizable columns + Stores filter no-wrap (P0 batch):**
   1. **Sortable Part Number column with chevron:** Items, Inventory Stock, Stores Stock tables. Click the header to cycle ASC → DESC. Sort uses `localeCompare(numeric:true)` for natural ordering (RM-1 < RM-2 < RM-10).
   2. **Resizable columns:** new `useResizableColumns(tableRef, deps)` hook attaches a 6px drag handle on the right edge of every `<th>`. Mouse-down + drag widens or narrows. Visual indicator (.col-resizer turns navy semi-transparent on hover/active). All 3 tables wired up (9, 10, 8 columns respectively).
