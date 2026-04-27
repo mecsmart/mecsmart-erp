@@ -20,6 +20,10 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-02-27** — **BOM Excel: routings as separate columns:**
+  - **Export:** Replaced the single "Parent Routings (Name:Cost)" column with ONE column per master Routing (sourced from `db.routings` where status='active', sorted by name). The parent FG/SA's first row carries the cost in the matching routing column; subsequent rows leave them blank. "Routings Summary" sheet still aggregates totals.
+  - **Import:** Each non-core column header is treated as a routing column. Values across rows of the same parent group are SUMMED (so cost can be placed on whichever row is convenient). Unknown headers auto-create new master routings (`status='active'`, description "Auto-created during BOM import on …"). Zero-cost entries are dropped from the resulting `parent_routings` array to avoid noise.
+  - Verified end-to-end: 172 master routings → 172 columns. Test import with new "NewOp_TestImport" header successfully wrote `[{name: 'Welding', cost: 250.5}, {name: 'NewOp_TestImport', cost: 100.0}]` and auto-created the master routing.
 - **2026-02-26** — **Header spacing + PO line text + Dashboard wiring (P0 batch):**
   1. **Tighter page chrome:** Layout main padding `p-4 lg:p-6` → `p-3 lg:p-4`. BOM page `space-y-6` → `space-y-3`, sticky header `py-3` → `py-2`, h1 `text-2xl` → `text-xl`, description `text-sm` → `text-xs`, filter card `p-4` → `px-3 py-2`. Same compact pattern for Dashboard. Result: ~30% less vertical chrome — much more BOM detail above the fold.
   2. **Stores Stock filters single-row layout:** Search (w-64), Category (w-44), Group (w-48), all h-9, no wrapping at 1920px viewport. Clear button now resets search too.
