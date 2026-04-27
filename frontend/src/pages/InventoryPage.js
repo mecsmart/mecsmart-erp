@@ -433,7 +433,7 @@ export default function InventoryPage() {
                 />
                 <span className="text-sm font-medium text-[#111827]">Show Low Stock Only</span>
               </label>
-              <Select value={categoryFilter || undefined} onValueChange={(v) => setCategoryFilter(v === 'all' ? '' : v)}>
+              <Select value={categoryFilter || 'all'} onValueChange={(v) => setCategoryFilter(v === 'all' ? '' : v)}>
                 <SelectTrigger className="w-48" data-testid="inventory-category-filter">
                   <Filter className="w-4 h-4 mr-2" />
                   <SelectValue placeholder="All Categories" />
@@ -446,8 +446,8 @@ export default function InventoryPage() {
                   <SelectItem value="finished_good">Finished Good</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={groupFilter || undefined} onValueChange={(v) => setGroupFilter(v === 'all' ? '' : v)}>
-                <SelectTrigger className="w-56" data-testid="inventory-group-filter">
+              <Select value={groupFilter || 'all'} onValueChange={(v) => setGroupFilter(v === 'all' ? '' : v)}>
+                <SelectTrigger className="w-56 relative" data-testid="inventory-group-filter">
                   <Filter className="w-4 h-4 mr-2" />
                   <SelectValue placeholder="All Groups" />
                 </SelectTrigger>
@@ -460,6 +460,17 @@ export default function InventoryPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {groupFilter && (
+                <button
+                  type="button"
+                  onClick={() => setGroupFilter('')}
+                  className="btn-secondary flex items-center space-x-1 text-xs h-9 -ml-1"
+                  title="Clear group filter"
+                  data-testid="inventory-group-filter-clear"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
               {(showLowStock || categoryFilter || groupFilter || stockSearch) && (
                 <button 
                   onClick={() => { setShowLowStock(false); setCategoryFilter(''); setGroupFilter(''); setStockSearch(''); }} 

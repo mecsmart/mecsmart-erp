@@ -97,14 +97,20 @@ export default function ItemsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch, categoryFilter, groupFilter]);
 
+  // Refetched on mount + after every import so newly-created groups appear in
+  // the item-row group display immediately (no refresh required).
+  const fetchItemGroups = async () => {
+    try {
+      const { data } = await api.get('/api/item-groups');
+      setItemGroups(data || []);
+    } catch (e) {
+      console.warn('Failed to fetch item groups:', e);
+    }
+  };
+
   useEffect(() => {
     (async () => {
-      try {
-        const { data } = await api.get('/api/item-groups');
-        setItemGroups(data || []);
-      } catch (e) {
-        console.warn('Failed to fetch item groups:', e);
-      }
+      await fetchItemGroups();
       try {
         const { data } = await api.get('/api/settings/uoms');
         if (Array.isArray(data) && data.length) {
@@ -330,6 +336,10 @@ export default function ItemsPage() {
         toast.success(`Import complete: ${created} created, ${updated} updated`, { id: toastId });
       }
       fetchItems();
+      // Re-pull item groups too — Excel import auto-creates any unknown
+      // groups, and without this refresh those new groups don't appear in the
+      // row's "Group" cell until the user reloads the page.
+      fetchItemGroups();
     } catch (error) {
       const msg = error?.response?.data?.detail || error?.message || 'Network/server error';
       toast.error(`Import failed: ${msg}`, { id: toastId });
@@ -660,7 +670,7 @@ export default function ItemsPage() {
             </div>
           </div>
           <div className="w-48">
-            <Select value={categoryFilter || undefined} onValueChange={(v) => setCategoryFilter(v === 'all' ? '' : v)}>
+            <Select value={categoryFilter || 'all'} onValueChange={(v) => setCategoryFilter(v === 'all' ? '' : v)}>
               <SelectTrigger data-testid="items-category-filter">
                 <Filter className="w-4 h-4 mr-2" />
                 <SelectValue placeholder="All Categories" />
@@ -673,8 +683,8 @@ export default function ItemsPage() {
               </SelectContent>
             </Select>
           </div>
-          <div className="w-48">
-            <Select value={groupFilter || undefined} onValueChange={(v) => setGroupFilter(v === 'all' ? '' : v)}>
+          <div className="w-48 relative">
+            <Select value={groupFilter || 'all'} onValueChange={(v) => setGroupFilter(v === 'all' ? '' : v)}>
               <SelectTrigger data-testid="items-group-filter">
                 <Filter className="w-4 h-4 mr-2" />
                 <SelectValue placeholder="All Groups" />
@@ -690,9 +700,23 @@ export default function ItemsPage() {
                   ))}
               </SelectContent>
             </Select>
+            {/* Inline clear (X) — one-click un-select. The outer Clear button
+                only shows when categoryFilter is set; this gives the user a
+                shortcut even when only the group filter is active. */}
+            {groupFilter && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setGroupFilter(''); }}
+                className="absolute right-8 top-1/2 -translate-y-1/2 p-0.5 text-[#9CA3AF] hover:text-[#9B1C1C] z-10"
+                title="Clear group filter"
+                data-testid="items-group-filter-clear"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
-          {categoryFilter && (
-            <button onClick={() => setCategoryFilter('')} className="btn-secondary flex items-center space-x-1">
+          {(categoryFilter || groupFilter) && (
+            <button onClick={() => { setCategoryFilter(''); setGroupFilter(''); }} className="btn-secondary flex items-center space-x-1">
               <X className="w-4 h-4" />
               <span>Clear</span>
             </button>
