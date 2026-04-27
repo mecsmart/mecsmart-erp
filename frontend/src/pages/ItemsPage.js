@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
+import useResizableColumns from '../hooks/useResizableColumns';
 import { 
   Plus, 
   Search, 
@@ -33,11 +34,21 @@ const FALLBACK_UNITS = ['pcs', 'kg', 'meter', 'sheet', 'kit', 'liter', 'set'];
 export default function ItemsPage() {
   const { user, hasPermission } = useAuth();
   const { formatCurrency, currencySymbol } = useCompanySettings();
+  // Sort state for the Part Number column. Click cycles ascending → descending.
+  const [partNumberSort, setPartNumberSort] = useState(null); // null | 'asc' | 'desc'
+  const tableRef = useRef(null);
+  const togglePartNumberSort = () => {
+    setPartNumberSort(s => (s === 'asc' ? 'desc' : 'asc'));
+  };
   const [items, setItems] = useState([]);
   const [itemGroups, setItemGroups] = useState([]);
   const [units, setUnits] = useState(FALLBACK_UNITS);
   const [taxSlabs, setTaxSlabs] = useState([0, 5, 12, 18, 28]);
   const [loading, setLoading] = useState(true);
+  
+  // Hook for resizable columns - must be after items/loading state declarations
+  useResizableColumns(tableRef, [items.length, loading]);
+  
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [groupFilter, setGroupFilter] = useState('');
@@ -702,10 +713,17 @@ export default function ItemsPage() {
           </div>
         ) : (
           <div className="overflow-x-auto sticky-header-scroll">
-            <table className="w-full data-table" data-testid="items-table">
+            <table ref={tableRef} className="w-full data-table" data-testid="items-table">
               <thead>
                 <tr>
-                  <th>Part Number</th>
+                  <th
+                    onClick={togglePartNumberSort}
+                    className={`sortable ${partNumberSort ? 'sorted' : ''}`}
+                    data-testid="items-th-part-number"
+                  >
+                    Part Number
+                    <span className="sort-chevron">{partNumberSort === 'desc' ? '▼' : '▲'}</span>
+                  </th>
                   <th>Name</th>
                   <th>Category</th>
                   <th>Group</th>
@@ -717,7 +735,17 @@ export default function ItemsPage() {
                 </tr>
               </thead>
               <tbody>
-                {items.slice(0, visibleCount).map((item) => {
+                {(() => {
+                  // Apply Part Number sort (case-insensitive, natural-ish via localeCompare with numeric=true)
+                  const sortedItems = partNumberSort
+                    ? [...items].sort((a, b) => {
+                        const ax = (a.part_number || '').toLowerCase();
+                        const bx = (b.part_number || '').toLowerCase();
+                        const cmp = ax.localeCompare(bx, undefined, { numeric: true, sensitivity: 'base' });
+                        return partNumberSort === 'asc' ? cmp : -cmp;
+                      })
+                    : items;
+                  return sortedItems.slice(0, visibleCount).map((item) => {
                   const itemGroup = itemGroups.find(g => g.id === item.group_id);
                   return (
                   <tr key={item.id} className={isLowStock(item) ? 'bg-[#FDE8E8]/30' : ''} data-testid={`item-row-${item.part_number}`}>
@@ -771,7 +799,8 @@ export default function ItemsPage() {
                     </td>
                   </tr>
                   );
-                })}
+                });
+                })()}
               </tbody>
             </table>
             {items.length > visibleCount && (

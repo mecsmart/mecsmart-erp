@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
+import useResizableColumns from '../hooks/useResizableColumns';
 import { 
   Plus, 
   Package, 
@@ -38,6 +39,11 @@ export default function InventoryPage() {
   const [itemGroups, setItemGroups] = useState([]);
   const [groupFilter, setGroupFilter] = useState('');
   const [taxSlabs, setTaxSlabs] = useState([0, 5, 12, 18, 28]);
+  // Sort + resize state for the inventory table.
+  const [partNumberSort, setPartNumberSort] = useState(null);
+  const tableRef = useRef(null);
+  useResizableColumns(tableRef, [inventory.length, loading]);
+  const togglePartNumberSort = () => setPartNumberSort(s => (s === 'asc' ? 'desc' : 'asc'));
 
   // Deep-link: sidebar "Configuration" now has its own route, keep only stock/transactions here
   useEffect(() => {
@@ -478,10 +484,17 @@ export default function InventoryPage() {
               </div>
             ) : (
               <div className="overflow-x-auto sticky-header-scroll">
-                <table className="w-full data-table" data-testid="inventory-table">
+                <table ref={tableRef} className="w-full data-table" data-testid="inventory-table">
                   <thead>
                     <tr>
-                      <th>Part Number</th>
+                      <th
+                        onClick={togglePartNumberSort}
+                        className={`sortable ${partNumberSort ? 'sorted' : ''}`}
+                        data-testid="inventory-th-part-number"
+                      >
+                        Part Number
+                        <span className="sort-chevron">{partNumberSort === 'desc' ? '▼' : '▲'}</span>
+                      </th>
                       <th>Name</th>
                       <th>Category</th>
                       <th className="text-right">Current Stock</th>
@@ -494,21 +507,26 @@ export default function InventoryPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {inventory.filter(item => {
-                      if (groupFilter && item.group_id !== groupFilter) return false;
-                      if (!stockSearch.trim()) return true;
-                      const q = stockSearch.toLowerCase();
-                      const grp = itemGroups.find(g => g.id === item.group_id);
-                      return [
-                        item.part_number,
-                        item.name,
-                        item.description,
-                        item.hsn_code,
-                        item.category,
-                        grp?.name,
-                        grp?.code,
-                      ].some(v => v && String(v).toLowerCase().includes(q));
-                    }).map((item) => (
+                    {(() => {
+                      const filtered = inventory.filter(item => {
+                        if (groupFilter && item.group_id !== groupFilter) return false;
+                        if (!stockSearch.trim()) return true;
+                        const q = stockSearch.toLowerCase();
+                        const grp = itemGroups.find(g => g.id === item.group_id);
+                        return [
+                          item.part_number, item.name, item.description, item.hsn_code,
+                          item.category, grp?.name, grp?.code,
+                        ].some(v => v && String(v).toLowerCase().includes(q));
+                      });
+                      const sorted = partNumberSort
+                        ? [...filtered].sort((a, b) => {
+                            const ax = (a.part_number || '').toLowerCase();
+                            const bx = (b.part_number || '').toLowerCase();
+                            const cmp = ax.localeCompare(bx, undefined, { numeric: true, sensitivity: 'base' });
+                            return partNumberSort === 'asc' ? cmp : -cmp;
+                          })
+                        : filtered;
+                      return sorted.map((item) => (
                       <tr key={item.id} className={isLowStock(item) ? 'bg-[#FDE8E8]/30' : ''} data-testid={`inventory-row-${item.part_number}`}>
                         <td className="mono font-medium">{item.part_number}</td>
                         <td>
@@ -562,7 +580,8 @@ export default function InventoryPage() {
                           </td>
                         )}
                       </tr>
-                    ))}
+                    ));
+                    })()}
                   </tbody>
                 </table>
               </div>

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import useResizableColumns from '../hooks/useResizableColumns';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
@@ -42,10 +43,17 @@ export default function WarehousesPage() {
   const [storesStockCategory, setStoresStockCategory] = useState('');
   const [storesStockGroup, setStoresStockGroup] = useState('');
   const [itemGroups, setItemGroups] = useState([]);
+  // Sort + resize state for the stores-stock table.
+  const [storesStockPnSort, setStoresStockPnSort] = useState(null);
+  const stockTableRef = useRef(null);
+  const toggleStoresStockPnSort = () => setStoresStockPnSort(s => (s === 'asc' ? 'desc' : 'asc'));
   const [plSearch, setPlSearch] = useState('');
   const [inventory, setInventory] = useState([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState(null);
   const [warehouseStock, setWarehouseStock] = useState([]);
+  
+  // Hook for resizable columns - must be after inventory/loading state declarations
+  useResizableColumns(stockTableRef, [inventory.length, loading]);
   
   const [isWarehouseDialogOpen, setIsWarehouseDialogOpen] = useState(false);
   const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
@@ -672,15 +680,15 @@ export default function WarehousesPage() {
         {/* Stock Tab - Inventory Overview */}
         <TabsContent value="stock" className="mt-4">
           <div className="card-flat p-2 mb-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative w-64">
+            <div className="flex items-center gap-2 flex-nowrap min-w-0">
+              <div className="relative flex-shrink min-w-[160px] max-w-[280px] w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
                 <input type="text" value={storesStockSearch} onChange={(e) => setStoresStockSearch(e.target.value)} placeholder="Search by part number or name..." className="search-input text-sm h-9" data-testid="stores-stock-search" />
               </div>
               <select
                 value={storesStockCategory}
                 onChange={(e) => setStoresStockCategory(e.target.value)}
-                className="input-field text-sm w-44 h-9"
+                className="input-field text-sm w-40 h-9 flex-shrink-0"
                 data-testid="stores-stock-category-filter"
               >
                 <option value="">All Categories</option>
@@ -692,7 +700,7 @@ export default function WarehousesPage() {
               <select
                 value={storesStockGroup}
                 onChange={(e) => setStoresStockGroup(e.target.value)}
-                className="input-field text-sm w-48 h-9"
+                className="input-field text-sm w-44 h-9 flex-shrink-0"
                 data-testid="stores-stock-group-filter"
               >
                 <option value="">All Groups</option>
@@ -703,7 +711,7 @@ export default function WarehousesPage() {
                 ))}
               </select>
               {(storesStockCategory || storesStockGroup || storesStockSearch) && (
-                <button onClick={() => { setStoresStockCategory(''); setStoresStockGroup(''); setStoresStockSearch(''); }} className="btn-secondary flex items-center space-x-1 text-sm h-9">
+                <button onClick={() => { setStoresStockCategory(''); setStoresStockGroup(''); setStoresStockSearch(''); }} className="btn-secondary flex items-center space-x-1 text-sm h-9 flex-shrink-0">
                   <X className="w-4 h-4" /><span>Clear</span>
                 </button>
               )}
@@ -716,31 +724,44 @@ export default function WarehousesPage() {
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><Package className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No stock items found</p></div>
             ) : (
               <div className="overflow-x-auto sticky-header-scroll">
-                <table className="w-full data-table" data-testid="stores-stock-table">
+                <table ref={stockTableRef} className="w-full data-table" data-testid="stores-stock-table">
                   <thead>
                     <tr>
-                      <th>Part Number</th><th>Name</th><th>Category</th>
+                      <th
+                        onClick={toggleStoresStockPnSort}
+                        className={`sortable ${storesStockPnSort ? 'sorted' : ''}`}
+                        data-testid="stores-stock-th-part-number"
+                      >
+                        Part Number
+                        <span className="sort-chevron">{storesStockPnSort === 'desc' ? '▼' : '▲'}</span>
+                      </th>
+                      <th>Name</th><th>Category</th>
                       <th className="text-right">Current Stock</th><th className="text-right">Safety Stock</th>
                       <th className="text-right">Reorder Point</th><th className="text-right">Unit Cost</th><th className="text-right">Value</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {inventory.filter(item => {
-                      if (storesStockCategory && item.category !== storesStockCategory) return false;
-                      if (storesStockGroup && item.group_id !== storesStockGroup) return false;
-                      if (!storesStockSearch.trim()) return true;
-                      const q = storesStockSearch.toLowerCase();
-                      const grp = itemGroups.find(g => g.id === item.group_id);
-                      return [
-                        item.part_number,
-                        item.name,
-                        item.description,
-                        item.hsn_code,
-                        item.category,
-                        grp?.name,
-                        grp?.code,
-                      ].some(v => v && String(v).toLowerCase().includes(q));
-                    }).map(item => {
+                    {(() => {
+                      const filtered = inventory.filter(item => {
+                        if (storesStockCategory && item.category !== storesStockCategory) return false;
+                        if (storesStockGroup && item.group_id !== storesStockGroup) return false;
+                        if (!storesStockSearch.trim()) return true;
+                        const q = storesStockSearch.toLowerCase();
+                        const grp = itemGroups.find(g => g.id === item.group_id);
+                        return [
+                          item.part_number, item.name, item.description, item.hsn_code,
+                          item.category, grp?.name, grp?.code,
+                        ].some(v => v && String(v).toLowerCase().includes(q));
+                      });
+                      const sorted = storesStockPnSort
+                        ? [...filtered].sort((a, b) => {
+                            const ax = (a.part_number || '').toLowerCase();
+                            const bx = (b.part_number || '').toLowerCase();
+                            const cmp = ax.localeCompare(bx, undefined, { numeric: true, sensitivity: 'base' });
+                            return storesStockPnSort === 'asc' ? cmp : -cmp;
+                          })
+                        : filtered;
+                      return sorted.map(item => {
                       const isLow = item.current_stock <= (item.reorder_point || item.safety_stock || 0);
                       return (
                         <tr key={item.id} className={isLow ? 'bg-[#FDE8E8]/30' : ''} data-testid={`stores-stock-row-${item.part_number}`}>
@@ -759,7 +780,8 @@ export default function WarehousesPage() {
                           <td className="text-right mono font-semibold">{formatCurrency((item.current_stock || 0) * (item.unit_cost || 0))}</td>
                         </tr>
                       );
-                    })}
+                    });
+                    })()}
                   </tbody>
                 </table>
               </div>

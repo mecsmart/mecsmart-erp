@@ -103,7 +103,37 @@ code, .mono {
 /* Data table styles */
 .data-table th {
   @apply bg-[#F3F4F6] text-[#4B5563] text-xs font-semibold uppercase tracking-wider py-2 px-3 border-b border-[#E5E7EB];
+  position: relative;
 }
+
+/* Sortable column header — click to sort. Active sort styled with darker text. */
+.data-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.data-table th.sortable:hover { background: #E5E7EB; }
+.data-table th.sortable.sorted { color: #1D3557; }
+.data-table th .sort-chevron {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 10px;
+  vertical-align: middle;
+  opacity: 0.4;
+}
+.data-table th.sortable.sorted .sort-chevron { opacity: 1; color: #1D3557; }
+
+/* Column resizer — small grip on the right edge. Drag to resize. */
+.data-table th .col-resizer {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  user-select: none;
+  background: transparent;
+  z-index: 25;
+}
+.data-table th .col-resizer:hover,
+.data-table th .col-resizer.resizing { background: #1D3557; opacity: 0.5; }
 
 /* Sticky-header wrapper: use on the overflow container that wraps the table.
    Using max-height instead of a hard height lets small tables shrink naturally. */
