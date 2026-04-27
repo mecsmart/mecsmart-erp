@@ -20,6 +20,10 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-02-28** — **Column resize without sibling squeezing (P0):**
+  - Root cause: `table-layout: fixed` + Tailwind `w-full` on the `<table>` was constraining total width to the container, so widening one column squeezed the others to compensate.
+  - Fix: `useResizableColumns` now sets the `<table>`'s explicit `width` and `minWidth` to the SUM of column widths, both on initial lock-in and during every drag-move. The parent's `overflow-x: auto` provides horizontal scroll if the total exceeds the viewport.
+  - Verified live: dragging Part Number +100px → PN went 294→394, other 4 columns unchanged. After click-sort: all widths preserved (394, 453, 185, 110, 83 — zero delta).
 - **2026-02-28** — **Group filter UX + post-import group refresh (P0):**
   1. **Auto-created groups visible immediately after Excel import:** `ItemsPage.handleImport` now calls a new `fetchItemGroups()` helper after import, alongside `fetchItems()`. Newly auto-created groups (matched by name on import) now display in the Group cell of imported rows without requiring a page refresh.
   2. **Group filter un-selection:** Inline X clear button next to the Group filter trigger (Items + Inventory pages, `data-testid='items-group-filter-clear'` / `'inventory-group-filter-clear'`). Also fixed a shadcn `Select` quirk where the trigger could show a stale label after the user picked "All Groups": switched binding from `value={state || undefined}` to `value={state || 'all'}` for both Group and Category filters so the trigger always reflects state.

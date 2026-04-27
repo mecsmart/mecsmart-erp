@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect } from 'react';
 
 /**
  * Attach drag-to-resize handles to every <th> inside the table whose ref is
@@ -6,17 +6,23 @@ import { useEffect, useCallback } from 'react';
  *
  * Usage:
  *   const tableRef = useRef(null);
- *   useResizableColumns(tableRef, [items.length]); // pass dependencies that indicate table is ready
+ *   useResizableColumns(tableRef, [items.length]);
  *   return <table ref={tableRef} className="data-table">…</table>;
  *
- * The handle is a 6px-wide div hugging the right edge. Mouse-down begins a
- * resize session: the th's width is set inline in pixels, and is updated as
- * the cursor moves. Releasing the mouse ends the session. No state is stored —
- * widths persist on the DOM until the table unmounts. (Good enough for this
- * UX; the user can re-resize any time.)
+ * Implementation notes:
+ *  - Locks each <th> to its natural-distribution width on mount and switches
+ *    the <table> to `table-layout: fixed`. Sorting / filtering / re-rendering
+ *    no longer reflow column widths.
+ *  - Sets the <table>'s explicit width to the SUM of column widths (instead
+ *    of leaving Tailwind's `w-full` to constrain it). When the user drags a
+ *    column wider, the parent <table>'s width grows by the same delta — so
+ *    the OTHER columns are not squeezed to compensate. The parent scroll
+ *    container's `overflow-x: auto` then kicks in for horizontal scrolling.
+ *  - Resize handles are 6px-wide divs hugging the right edge. Mouse-down
+ *    begins a resize session.
  *
  * @param {React.RefObject} tableRef - ref to the table element
- * @param {Array} deps - additional dependencies to trigger re-attachment (e.g., [items.length])
+ * @param {Array} deps - additional deps that signal the table is ready
  */
 export default function useResizableColumns(tableRef, deps = []) {
   useEffect(() => {
@@ -26,29 +32,35 @@ export default function useResizableColumns(tableRef, deps = []) {
     const ths = table.querySelectorAll('thead th');
     if (!ths.length) return;
 
-    // LOCK column widths to their browser-computed natural distribution AND
-    // switch the table to fixed layout. Without this, sorting (which changes
-    // which rows are at the top) causes the browser to reflow the columns
-    // because table-layout:auto sizes columns by content. Locking widths +
-    // table-layout:fixed makes columns stable while still allowing the
-    // resize handles to widen/narrow them.
+    const syncTableWidth = () => {
+      let total = 0;
+      ths.forEach((th) => { total += th.getBoundingClientRect().width; });
+      table.style.width = total + 'px';
+      table.style.minWidth = total + 'px';
+    };
+
+    // One-shot lock-in of natural widths + flip to fixed layout. Without RAF
+    // the column widths may still be 0 because layout hasn't been computed.
     requestAnimationFrame(() => {
       const widths = Array.from(ths).map((th) => th.getBoundingClientRect().width);
+      let total = 0;
       ths.forEach((th, i) => {
-        const w = widths[i];
-        if (w && !th.style.width) {
+        const w = Math.max(40, widths[i] || 80);
+        total += w;
+        if (!th.style.width) {
           th.style.width = w + 'px';
           th.style.minWidth = w + 'px';
           th.style.maxWidth = w + 'px';
         }
       });
       table.style.tableLayout = 'fixed';
+      table.style.width = total + 'px';
+      table.style.minWidth = total + 'px';
     });
 
     const cleanups = [];
     ths.forEach((th) => {
-      // Avoid double-attaching when React re-renders rows (the same th element
-      // may be reused).
+      // Avoid double-attaching when React re-renders rows (same <th> reused).
       if (th.querySelector(':scope > .col-resizer')) return;
 
       const handle = document.createElement('div');
@@ -64,6 +76,9 @@ export default function useResizableColumns(tableRef, deps = []) {
         th.style.width = next + 'px';
         th.style.minWidth = next + 'px';
         th.style.maxWidth = next + 'px';
+        // Grow the <table>'s width by the same delta so siblings keep their
+        // widths and the parent gains horizontal scroll if needed.
+        syncTableWidth();
       };
       const onUp = () => {
         handle.classList.remove('resizing');
