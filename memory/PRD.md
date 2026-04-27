@@ -20,6 +20,17 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-04-27** — **P4 Backend Refactor — Phase 1 (core/ modules extracted):**
+  - server.py shrunk 11,704 → 11,517 lines by moving shared utilities into `/app/backend/core/`:
+    - `core/db.py` — MongoDB client + `db` handle (15 lines)
+    - `core/permissions.py` — `ALL_MODULES`, `DEFAULT_PERMISSIONS`, `get_default_permissions`, `allowed_actions_for` (78 lines)
+    - `core/auth.py` — password hashing, JWT issuing, `get_current_user`, `_require_access`, `require_roles`, `get_cookie_settings` (178 lines)
+  - server.py now imports these instead of defining inline. Zero route-signature changes; testing agent confirmed 18/18 backend tests pass + all UI flows work.
+  - **Phase 2 (deferred):** extracting individual route domains (auth.py, items.py, inventory.py, …) into `/app/backend/routers/` — foundation now in place; safer to do per-domain in subsequent sessions.
+- **2026-04-27** — **Excel-like compact line-item grid + Create Item modal scroll (P0):**
+  - Replaced the verbose `po-lines-compact` inline-style table with the shared `.line-items-grid` CSS class on PO creation (`PurchaseOrdersPage.js`) and MRP→PO dialog (`MRPPage.js`). HSN, Qty, UOM, Discount, GST%, Total Amount columns now render in tight Excel-like rows; HSN no longer truncates.
+  - `ItemsPage.js` Create/Edit Item modal: `DialogContent` now has `max-h-[90vh] overflow-y-auto` so users can scroll on small screens and reach the Create Item button.
+  - MRP PO dialog also gained `max-h-[92vh] overflow-y-auto`.
 - **2026-02-28** — **Resize handle visibility + comfortable table padding (UX):**
   1. **Visible resize grip:** `.col-resizer` now shows a subtle 1px vertical bar between columns (gray #D1D5DB by default, navy #1D3557 on hover/drag). Hit area widened from 6px → 10px so the handle is easier to grab without precise targeting.
   2. **Comfortable padding everywhere:** `.data-table th` and `td` bumped from `py-2 px-3` → `py-2.5 px-4`. Layout main padding `p-3 lg:p-4` → `p-4 lg:p-5`. TD row heights now ~45px (was ~36px) — much more breathing room for scanning long lists.
@@ -96,16 +107,21 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 ## Roadmap / Backlog
 - **P2** GSP e-Invoice integration (IRN + signed QR from GST portal).
 - **P3** Dispatch Manager panel.
-- **P4** Refactor `/app/backend/server.py` (>10k lines) into routers (`auth.py`, `inventory.py`, …).
+- **P4 (Phase 1 ✅ done 2026-04-27)** Extracted `db`, permissions, and auth utilities into `/app/backend/core/`.
+- **P4 (Phase 2 — pending)** Per-domain route extraction into `/app/backend/routers/` (`auth.py`, `items.py`, `bom.py`, `inventory.py`, `purchase_orders.py`, `crm.py`, `jobwork.py`, …).
 - **P5** GST Compliance Phase 3 — GSTR-1/3B report formats + ITC tracking.
 - **P6** Barcode/QR scanning for inventory transactions.
 - **Future** Windows desktop wrapper (Electron/Tauri).
 
 ## Key Files
-- `/app/backend/server.py` — all APIs (refactor pending). `get_current_user` (line ~885) handles permission elevation centrally. `bom_router.get("/export/excel")` (line ~6076) recursive BOM tree exporter.
+- `/app/backend/server.py` — main app, route definitions (Phase-2 router split pending). Imports shared building blocks from `core/`.
+- `/app/backend/core/db.py` — Mongo client + `db`.
+- `/app/backend/core/permissions.py` — `ALL_MODULES`, `DEFAULT_PERMISSIONS`, `get_default_permissions`, `allowed_actions_for`.
+- `/app/backend/core/auth.py` — JWT + password hashing + `get_current_user` + `_require_access` + `require_roles` + `get_cookie_settings`.
 - `/app/frontend/src/pages/InventoryConfigurationPage.js` — dedicated Config page.
 - `/app/frontend/src/components/{SearchableSelect,SearchableItemSelect}.jsx` — universal typeahead.
 - `/app/frontend/src/components/Layout.js` — sidebar nav.
+- `/app/frontend/src/index.css` — `.line-items-grid` Excel-like compact transactional grid.
 
 ## Test Credentials
 See `/app/memory/test_credentials.md`.
