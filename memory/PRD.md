@@ -20,6 +20,10 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-02-28** — **Resize drag no longer triggers sort (P0):**
+  - Root cause: the resize handle is a child of the `<th>`. After mouse-down on the handle and mouse-up, the browser fires a synthetic `click` event that bubbles to the `<th>`'s `onClick` (sort handler). `stopPropagation()` on `mousedown` doesn't stop the synthetic click.
+  - Fix: `useResizableColumns` now (a) attaches a `click` listener on the handle that calls `stopPropagation + preventDefault`, and (b) installs a CAPTURE-phase `click` listener on the `<th>` that swallows clicks for ~0 ticks after a drag (tracked via `didResize` flag).
+  - Verified live (Playwright): drag PN col +80px → items stay in original order (RM-001, RM-002, RM-003 unchanged); click on th body still sorts correctly (items reorder to alphabetical).
 - **2026-02-28** — **Column resize without sibling squeezing (P0):**
   - Root cause: `table-layout: fixed` + Tailwind `w-full` on the `<table>` was constraining total width to the container, so widening one column squeezed the others to compensate.
   - Fix: `useResizableColumns` now sets the `<table>`'s explicit `width` and `minWidth` to the SUM of column widths, both on initial lock-in and during every drag-move. The parent's `overflow-x: auto` provides horizontal scroll if the total exceeds the viewport.

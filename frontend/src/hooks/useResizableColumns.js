@@ -69,8 +69,13 @@ export default function useResizableColumns(tableRef, deps = []) {
 
       let startX = 0;
       let startWidth = 0;
+      // True briefly after a drag — used to suppress the synthetic click
+      // event the browser fires on mouseup, which would otherwise reach the
+      // <th>'s onClick={togglePartNumberSort} and reorder the items.
+      let didResize = false;
 
       const onMove = (e) => {
+        didResize = true;
         const dx = e.clientX - startX;
         const next = Math.max(40, startWidth + dx);
         th.style.width = next + 'px';
@@ -84,20 +89,44 @@ export default function useResizableColumns(tableRef, deps = []) {
         handle.classList.remove('resizing');
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
+        // Reset the resize flag on the next tick — AFTER the synthetic click
+        // event fires (and is swallowed by `onClickCapture` below).
+        setTimeout(() => { didResize = false; }, 0);
       };
       const onDown = (e) => {
         e.preventDefault();
         e.stopPropagation();
         startX = e.clientX;
         startWidth = th.getBoundingClientRect().width;
+        didResize = false;
         handle.classList.add('resizing');
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
       };
       handle.addEventListener('mousedown', onDown);
 
+      // Block the click event on EITHER the handle itself OR the <th>
+      // immediately after a resize. Without this, the th's onClick fires
+      // and re-sorts the table — exactly the user-reported bug.
+      const onHandleClick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+      };
+      handle.addEventListener('click', onHandleClick);
+
+      const onThClickCapture = (e) => {
+        if (didResize) {
+          e.stopPropagation();
+          e.preventDefault();
+        }
+      };
+      // Capture phase so we run BEFORE React's synthetic onClick handler.
+      th.addEventListener('click', onThClickCapture, true);
+
       cleanups.push(() => {
         handle.removeEventListener('mousedown', onDown);
+        handle.removeEventListener('click', onHandleClick);
+        th.removeEventListener('click', onThClickCapture, true);
         if (handle.parentNode) handle.parentNode.removeChild(handle);
       });
     });
