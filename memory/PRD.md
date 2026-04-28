@@ -20,6 +20,9 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-04-29 (late)** — **BOM list now sorted numerically by part_number within each category (P0):**
+  - Old sort was alphabetic `localeCompare` which produces "FG-1, FG-10, FG-11, FG-2" (wrong).
+  - New sort uses `localeCompare(..., { numeric: true, sensitivity: 'base' })` so numeric segments compare as numbers. Category order still: FG → SG → CP → RM. Within each category, part numbers flow in natural/human order.
 - **2026-04-29** — **3 P0 fixes (BOM dropdown, customer-side salesperson, unified CRM nav):**
   1. **BOM creation dropdown finally selectable:** Debugged to root cause — Radix Dialog's RemoveScroll layer sets `pointer-events: none` on `<body>` while the modal is open, which cascaded to our body-portal'd `SearchableItemSelect` panel and killed hit-testing on options (`elementFromPoint` returned the dialog content instead of the button). Fix: explicit `pointerEvents: 'auto'` on the portal panel + option selection via `onMouseDown` (instead of `onClick`) to fire before Radix's DismissableLayer cancels the event. Verified in real browser click.
   2. **Customer-side multi-salesperson assignment (Odoo-style):** new `Customer.assigned_user_ids: List[str]`. `GET /api/customers` for non-admins now returns ONLY customers where they created it OR their id is in `assigned_user_ids` — no legacy null-created_by fallback. Admin customer form gained an "Assigned Salespersons" multi-select with all users. Customer cards show assigned salesperson pills for admins. Old per-user "Assigned Customers" UI removed from `UserManagementPage` (flow inverted).

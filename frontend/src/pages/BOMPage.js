@@ -957,11 +957,14 @@ export default function BOMPage() {
                 const exp = allExplosions[activeBom?.id];
                 return exp ? searchNodes(exp.explosion) : false;
               }).sort(([, a], [, b]) => {
-                // FG → SG → CP → RM order, then by part_number within each category
+                // FG → SG → CP → RM order, then numeric-aware sort by part_number
+                // within each category so 'FG-2' comes BEFORE 'FG-10' (instead of
+                // alphabetic 'FG-1, FG-10, FG-11, FG-2' that localeCompare
+                // produces by default).
                 const catRank = orderedCats.indexOf(a.item?.category);
                 const catRankB = orderedCats.indexOf(b.item?.category);
                 if (catRank !== catRankB) return (catRank === -1 ? 99 : catRank) - (catRankB === -1 ? 99 : catRankB);
-                return (a.item?.part_number || '').localeCompare(b.item?.part_number || '');
+                return (a.item?.part_number || '').localeCompare((b.item?.part_number || ''), undefined, { numeric: true, sensitivity: 'base' });
               }).map(([pid, group]) => {
                 const parentItem = group.item;
                 const activeBom = group.boms.find(b => b.status === 'active') || group.boms[0];
