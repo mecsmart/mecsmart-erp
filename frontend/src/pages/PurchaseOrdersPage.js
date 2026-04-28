@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { POPrintDialog } from '../components/PrintDialogs';
 import { SearchableItemSelect } from '../components/SearchableItemSelect';
 import { SearchableSelect } from '../components/SearchableSelect';
+import { useDraggableRows } from '../hooks/useDraggableRows';
 
 const statusOptions = [
   { value: 'draft', label: 'Draft' },
@@ -156,6 +157,11 @@ export default function PurchaseOrdersPage() {
 
   const addLine = () => setFormData({ ...formData, lines: [...formData.lines, { ...emptyLine }] });
   const removeLine = (i) => setFormData({ ...formData, lines: formData.lines.filter((_, idx) => idx !== i) });
+
+  const { getRowProps: getLineRowProps } = useDraggableRows(
+    formData.lines,
+    (next) => setFormData(f => ({ ...f, lines: next })),
+  );
 
   const updateLine = (index, field, value) => {
     const newLines = [...formData.lines];
@@ -499,8 +505,8 @@ export default function PurchaseOrdersPage() {
                     </thead>
                     <tbody>
                       {formData.lines.map((line, index) => (
-                        <tr key={index} data-testid={`po-line-row-${index}`}>
-                          <td className="row-num">{index + 1}</td>
+                        <tr key={index} data-testid={`po-line-row-${index}`} {...getLineRowProps(index)}>
+                          <td className="row-num drag-handle" title="Drag to reorder">{index + 1}</td>
                           <td>
                             <div className="px-1 py-1 space-y-1">
                               <SearchableItemSelect
@@ -560,6 +566,15 @@ export default function PurchaseOrdersPage() {
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot>
+                      <tr>
+                        <td className="add-line-cell" colSpan={10}>
+                          <button type="button" onClick={addLine} data-testid="po-add-line-footer-btn">
+                            <Plus className="w-3 h-3" /> Add Line
+                          </button>
+                        </td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               )}

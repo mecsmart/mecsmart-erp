@@ -6,11 +6,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 
 export default function CustomersPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const [customers, setCustomers] = useState([]);
   const [states, setStates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  // Admins can switch between "all" customers and "only mine".
+  // Non-admin users always see filtered view backend returns (own + assigned).
+  const [scopeFilter, setScopeFilter] = useState('all');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [formData, setFormData] = useState({
@@ -19,17 +22,24 @@ export default function CustomersPage() {
     payment_terms: 'Net 30', status: 'active',
   });
 
-  const canEdit = ['admin', 'production_manager'].includes(user?.role);
-  const canDelete = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.is_admin_group;
+  const canCreate = hasPermission('customers', 'create');
+  const canEditAny = hasPermission('customers', 'edit') || canCreate;
+  const canDelete = hasPermission('customers', 'delete') || isAdmin;
 
-  useEffect(() => { fetchData(); }, [statusFilter]);
+  useEffect(() => { fetchData(); }, [statusFilter, scopeFilter]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const params = statusFilter ? `?status=${statusFilter}` : '';
+      const params = new URLSearchParams();
+      if (statusFilter) params.append('status', statusFilter);
+      // Only admins can request the "mine" filter — backend ignores `mine` for non-admins
+      // because they're already restricted to their own/assigned set.
+      if (isAdmin && scopeFilter === 'mine') params.append('mine', 'true');
+      const qs = params.toString() ? `?${params.toString()}` : '';
       const [customersRes, statesRes] = await Promise.all([
-        api.get(`/api/customers${params}`),
+        api.get(`/api/customers${qs}`),
         api.get('/api/settings/states'),
       ]);
       setCustomers(customersRes.data);
@@ -87,7 +97,7 @@ export default function CustomersPage() {
           <h1 className="text-2xl font-bold font-[Chivo] text-[#1D3557]">Customers</h1>
           <p className="text-sm text-[#4B5563]">Manage customers with GST details</p>
         </div>
-        {canEdit && (
+        {canCreate && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild>
               <button className="btn-primary flex items-center space-x-2" data-testid="add-customer-btn">
@@ -183,6 +193,15 @@ export default function CustomersPage() {
             <SelectItem value="inactive">Inactive</SelectItem>
           </SelectContent>
         </Select>
+        {isAdmin && (
+          <Select value={scopeFilter} onValueChange={setScopeFilter}>
+            <SelectTrigger className="w-48" data-testid="customer-scope-filter"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Contacts</SelectItem>
+              <SelectItem value="mine">Own Contacts</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -218,7 +237,7 @@ export default function CustomersPage() {
               {c.phone && <div className="flex items-center"><Phone className="w-3 h-3 mr-2" />{c.phone}</div>}
               {c.email && <div className="flex items-center"><Mail className="w-3 h-3 mr-2" />{c.email}</div>}
             </div>
-            {canEdit && (
+            {canEditAny && (
               <div className="flex space-x-2 mt-3 pt-3 border-t border-[#E5E7EB]">
                 <button onClick={() => handleEdit(c)} className="text-[#1D3557] hover:bg-[#F3F4F6] p-1 rounded" data-testid={`edit-customer-${c.code}`}><Edit2 className="w-4 h-4" /></button>
                 {canDelete && <button onClick={() => handleDelete(c)} className="text-[#9B1C1C] hover:bg-[#FDE8E8] p-1 rounded" data-testid={`delete-customer-${c.code}`}><Trash2 className="w-4 h-4" /></button>}

@@ -72,7 +72,7 @@ export default function UserManagementPage() {
   const [editingUser, setEditingUser] = useState(null);
   const [permUser, setPermUser] = useState(null);
   const [permData, setPermData] = useState({});
-  const [formData, setFormData] = useState({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {}, signature_url: '' });
+  const [formData, setFormData] = useState({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {}, signature_url: '', assigned_customer_ids: [] });
   // Track if the admin has manually edited the permissions grid — so we don't auto-reset
   // their selections when switching roles after editing.
   const [permsTouched, setPermsTouched] = useState(false);
@@ -82,19 +82,24 @@ export default function UserManagementPage() {
   const [groupDialog, setGroupDialog] = useState(false);
   const [editingGroup, setEditingGroup] = useState(null);
   const [groupForm, setGroupForm] = useState({ name: '', description: '', is_admin_group: false, permissions: {} });
+  // All customers — used to populate the "Assigned Customers" multi-select in the user dialog
+  const [allCustomers, setAllCustomers] = useState([]);
+  const [customerSearch, setCustomerSearch] = useState('');
 
   useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     try {
-      const [usersRes, modulesRes, groupsRes] = await Promise.all([
+      const [usersRes, modulesRes, groupsRes, customersRes] = await Promise.all([
         api.get('/api/users'),
         api.get('/api/users/modules'),
         api.get('/api/users/role-groups').catch(() => ({ data: [] })),
+        api.get('/api/customers').catch(() => ({ data: [] })),
       ]);
       setUsers(usersRes.data);
       setModulesData(modulesRes.data);
       setRoleGroups(groupsRes.data || []);
+      setAllCustomers(customersRes.data || []);
     } catch (error) {
       console.error('Failed to fetch:', error);
     } finally { setLoading(false); }
@@ -158,7 +163,7 @@ export default function UserManagementPage() {
     try {
       await api.post('/api/users', formData);
       setIsCreateOpen(false);
-      setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {}, signature_url: '' });
+      setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {}, signature_url: '', assigned_customer_ids: [] });
       setPermsTouched(false);
       fetchData();
     } catch (error) {
@@ -168,26 +173,55 @@ export default function UserManagementPage() {
 
   const handleEdit = (u) => {
     setEditingUser(u);
-    setFormData({ email: u.email, password: '', name: u.name, role: u.role, role_group_id: u.role_group_id || '', permissions: u.permissions || {}, signature_url: u.signature_url || '' });
+    setFormData({ email: u.email, password: '', name: u.name, role: u.role, role_group_id: u.role_group_id || '', permissions: u.permissions || {}, signature_url: u.signature_url || '', assigned_customer_ids: u.assigned_customer_ids || [] });
     setPermsTouched(true);  // preserve existing user's permissions when dialog opens
+    setCustomerSearch('');
     setIsCreateOpen(true);
   };
 
   const handleUpdate = async () => {
     try {
-      const payload = { name: formData.name, role: formData.role, permissions: formData.permissions, role_group_id: formData.role_group_id || '', signature_url: formData.signature_url || '' };
+      const payload = { name: formData.name, role: formData.role, permissions: formData.permissions, role_group_id: formData.role_group_id || '', signature_url: formData.signature_url || '', assigned_customer_ids: formData.assigned_customer_ids || [] };
       if (formData.email && formData.email !== editingUser.email) payload.email = formData.email;
       if (formData.password) payload.password = formData.password;
       await api.put(`/api/users/${editingUser.id}`, payload);
       setIsCreateOpen(false);
       setEditingUser(null);
-      setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {}, signature_url: '' });
+      setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: {}, signature_url: '', assigned_customer_ids: [] });
       setPermsTouched(false);
       fetchData();
     } catch (error) {
       alert(error.response?.data?.detail || 'Failed to update user');
     }
   };
+
+  // Toggle a customer in the assigned list
+  const toggleAssignedCustomer = (customerId) => {
+    setFormData(prev => {
+      const list = prev.assigned_customer_ids || [];
+      const next = list.includes(customerId)
+        ? list.filter(id => id !== customerId)
+        : [...list, customerId];
+      return { ...prev, assigned_customer_ids: next };
+    });
+  };
+
+  const selectAllAssignedCustomers = () => {
+    setFormData(prev => ({ ...prev, assigned_customer_ids: filteredAssignableCustomers.map(c => c.id) }));
+  };
+  const clearAssignedCustomers = () => {
+    setFormData(prev => ({ ...prev, assigned_customer_ids: [] }));
+  };
+
+  const filteredAssignableCustomers = (() => {
+    const q = customerSearch.trim().toLowerCase();
+    if (!q) return allCustomers;
+    return allCustomers.filter(c =>
+      (c.name || '').toLowerCase().includes(q) ||
+      (c.code || '').toLowerCase().includes(q) ||
+      (c.gstin || '').toLowerCase().includes(q)
+    );
+  })();
 
   const handleSignatureUpload = (e) => {
     const file = e.target.files[0];
@@ -283,8 +317,9 @@ export default function UserManagementPage() {
               // Pre-seed permissions with the default for the default role so the admin
               // sees pre-ticked checkboxes matching the role they'll likely keep.
               const defaults = modulesData?.default_permissions?.['inventory_manager'] || {};
-              setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: JSON.parse(JSON.stringify(defaults)), signature_url: '' });
+              setFormData({ email: '', password: '', name: '', role: 'inventory_manager', role_group_id: '', permissions: JSON.parse(JSON.stringify(defaults)), signature_url: '', assigned_customer_ids: [] });
               setPermsTouched(false);
+              setCustomerSearch('');
             }}>
               <UserPlus className="w-4 h-4" /><span>Add User</span>
             </button>
@@ -346,6 +381,71 @@ export default function UserManagementPage() {
                     </>
                   )}
                 </div>
+                <div className="col-span-2 pt-2 border-t border-[#E5E7EB]">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-sm font-medium text-[#374151]">
+                      Assigned Customers
+                      <span className="text-[11px] font-normal text-[#6B7280] ml-1">
+                        — extra contacts this user can see, beyond what they create themselves
+                      </span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-[#1D3557] font-mono">
+                        {(formData.assigned_customer_ids || []).length} selected
+                      </span>
+                      {(formData.assigned_customer_ids || []).length > 0 && (
+                        <button type="button" onClick={clearAssignedCustomers} className="text-[11px] text-[#9B1C1C] underline" data-testid="user-assigned-clear-btn">
+                          Clear all
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="border border-[#E5E7EB] rounded-sm">
+                    <div className="flex items-center gap-2 p-2 border-b border-[#E5E7EB] bg-[#F9FAFB]">
+                      <input
+                        type="text"
+                        placeholder="Search by name, code, or GSTIN…"
+                        value={customerSearch}
+                        onChange={e => setCustomerSearch(e.target.value)}
+                        className="flex-1 px-2 py-1 text-xs border border-[#D1D5DB] rounded-sm focus:outline-none focus:ring-1 focus:ring-[#1D3557]"
+                        data-testid="user-assigned-search"
+                      />
+                      <button type="button" onClick={selectAllAssignedCustomers} className="text-[11px] text-[#1D3557] underline whitespace-nowrap" data-testid="user-assigned-select-all-btn">
+                        Select all{customerSearch ? ' filtered' : ''}
+                      </button>
+                    </div>
+                    <div className="max-h-48 overflow-y-auto">
+                      {filteredAssignableCustomers.length === 0 ? (
+                        <div className="p-3 text-xs text-[#9CA3AF] italic text-center">
+                          {allCustomers.length === 0 ? 'No customers exist yet.' : 'No customers match your search.'}
+                        </div>
+                      ) : (
+                        filteredAssignableCustomers.slice(0, 500).map(c => {
+                          const checked = (formData.assigned_customer_ids || []).includes(c.id);
+                          return (
+                            <label key={c.id} className="flex items-center gap-2 px-2 py-1 text-xs hover:bg-[#F3F4F6] cursor-pointer border-b border-[#F9FAFB] last:border-0" data-testid={`user-assigned-row-${c.code}`}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleAssignedCustomer(c.id)}
+                                data-testid={`user-assigned-checkbox-${c.code}`}
+                              />
+                              <span className="mono font-semibold text-[#1D3557] w-24 shrink-0 truncate">{c.code}</span>
+                              <span className="flex-1 truncate">{c.name}</span>
+                              {c.gstin && <span className="mono text-[10px] text-[#6B7280] hidden sm:inline shrink-0">{c.gstin}</span>}
+                            </label>
+                          );
+                        })
+                      )}
+                      {filteredAssignableCustomers.length > 500 && (
+                        <div className="px-2 py-1 text-[11px] text-[#6B7280] italic">
+                          Showing first 500 of {filteredAssignableCustomers.length}. Refine the search to narrow down.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="col-span-2 pt-2 border-t border-[#E5E7EB]">
                   <label className="text-sm font-medium text-[#374151] block mb-2">Signature (printed on invoices &amp; POs)</label>
                   {formData.signature_url ? (

@@ -200,6 +200,37 @@ code, .mono {
   padding: 0;
 }
 
+/* Drag-and-drop reordering visual states (used with the useDraggableRows hook). */
+.line-items-grid tbody tr.is-dragging td { opacity: 0.4; }
+.line-items-grid tbody tr.is-drop-target td { box-shadow: inset 0 2px 0 0 #1D3557; }
+.line-items-grid tbody tr td.row-num.drag-handle { cursor: grab; }
+.line-items-grid tbody tr td.row-num.drag-handle:active { cursor: grabbing; }
+.line-items-grid tbody tr.is-dragging td.row-num.drag-handle { cursor: grabbing; }
+
+/* "+ Add Line" footer row inside line-items-grid. Spans all columns and
+   matches the button-secondary look but full-width and tight. */
+.line-items-grid tfoot td.add-line-cell {
+  padding: 0;
+  border: 1px solid #E5E7EB;
+  border-top: none;
+  background: #F9FAFB;
+}
+.line-items-grid tfoot td.add-line-cell button {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1D3557;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.line-items-grid tfoot td.add-line-cell button:hover { background: #E5E7EB; }
+
 /* Sortable column header — click to sort. Active sort styled with darker text. */
 .data-table th.sortable {
   cursor: pointer;

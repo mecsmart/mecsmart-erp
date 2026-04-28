@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import ConfirmDialog from '../components/ConfirmDialog';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { SearchableItemSelect } from '../components/SearchableItemSelect';
+import { useDraggableRows } from '../hooks/useDraggableRows';
 
 // Stage definitions per pipeline — aligned to the customer's CRM diagram:
 //   Marketing: Enquiry → Quotation → Negotiation → Won / Lost
@@ -950,6 +951,10 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
   const addLine = () => setForm(f => ({ ...f, lines: [...f.lines, emptyQuotationLine()] }));
   const removeLine = (idx) => setForm(f => ({ ...f, lines: f.lines.length > 1 ? f.lines.filter((_, i) => i !== idx) : f.lines }));
   const updateLine = (idx, patch) => setForm(f => ({ ...f, lines: f.lines.map((l, i) => i === idx ? { ...l, ...patch } : l) }));
+  const { getRowProps: getQuotationRowProps } = useDraggableRows(
+    form.lines,
+    (next) => setForm(f => ({ ...f, lines: next })),
+  );
   const onPickItem = (idx, itemId) => {
     const it = items.find(i => i.id === itemId);
     updateLine(idx, {
@@ -1292,8 +1297,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                       const disc = gross * ((parseFloat(l.discount_pct) || 0) / 100);
                       const amount = gross - disc;
                       return (
-                        <tr key={idx} data-testid={`quotation-line-${idx}`}>
-                          <td className="row-num">{idx + 1}</td>
+                        <tr key={idx} data-testid={`quotation-line-${idx}`} {...getQuotationRowProps(idx)}>
+                          <td className="row-num drag-handle" title="Drag to reorder">{idx + 1}</td>
                           <td>
                             <div className="px-1 py-1 space-y-1">
                               <SearchableItemSelect
@@ -1322,6 +1327,15 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                       );
                     })}
                   </tbody>
+                  <tfoot>
+                    <tr>
+                      <td className="add-line-cell" colSpan={9}>
+                        <button type="button" onClick={addLine} data-testid="quotation-add-line-footer">
+                          <Plus className="w-3 h-3" /> Add Line
+                        </button>
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
               <div className="flex justify-end mt-2 text-xs">
@@ -2492,6 +2506,10 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
 
   const addLine = () => setForm(prev => ({ ...prev, lines: [...prev.lines, emptyTaxInvoiceLine()] }));
   const removeLine = (idx) => setForm(prev => ({ ...prev, lines: prev.lines.length <= 1 ? prev.lines : prev.lines.filter((_, i) => i !== idx) }));
+  const { getRowProps: getTaxInvoiceRowProps } = useDraggableRows(
+    form.lines,
+    (next) => setForm(prev => ({ ...prev, lines: next })),
+  );
 
   const computeTotals = () => {
     let subtotal = 0, totalDiscount = 0, totalGst = 0;
@@ -2752,8 +2770,8 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                     {form.lines.map((l, i) => {
                       const amount = ((parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0)) * (1 - (parseFloat(l.discount_pct) || 0) / 100);
                       return (
-                        <tr key={i} data-testid={`ti-line-${i}`}>
-                          <td className="row-num">{i + 1}</td>
+                        <tr key={i} data-testid={`ti-line-${i}`} {...getTaxInvoiceRowProps(i)}>
+                          <td className="row-num drag-handle" title="Drag to reorder">{i + 1}</td>
                           <td>
                             <div className="px-1 py-1 space-y-1">
                               <SearchableItemSelect
@@ -2781,6 +2799,15 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                       );
                     })}
                   </tbody>
+                  <tfoot>
+                    <tr>
+                      <td className="add-line-cell" colSpan={10}>
+                        <button type="button" onClick={addLine} data-testid="ti-add-line-footer">
+                          <Plus className="w-3 h-3" /> Add Line
+                        </button>
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>

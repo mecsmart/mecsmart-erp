@@ -1,0 +1,63 @@
+{
+  "summary": "Iteration 83 - All 5 fixes verified successfully. Backend: 11/11 tests passed. Frontend: All UI features working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_83_fixes.py",
+    "/app/test_reports/pytest/pytest_iteration_83.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_83_fixes.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": {
+    "admin": "admin@erp.com / Admin@123",
+    "non_admin": "test_perm@erp.com / Test@123"
+  },
+  "seed_data_creation": "None - used existing test data",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 5 fixes from iteration 83 are working: (1) Customers page permissions respect granular customers.create/edit/delete, (2) Per-user customer assignment via assigned_customer_ids persists and filters correctly, (3) Admin scope filter (All/Own Contacts) works with mine=true query param, (4) Non-admin sees only own+assigned+legacy customers, (5) Footer Add Line buttons in PO/Quotation/Tax Invoice grids, (6) Drag-and-drop row reordering with draggable=true on rows, (7) SearchableItemSelect searches by description and shows it as 2nd line in dropdown.",
+  "features_tested": {
+    "fix_1_customer_permissions": {
+      "status": "PASS",
+      "details": "Add Customer button (data-testid='add-customer-btn') visible for users with customers.create permission. Edit/delete buttons respect customers.edit and customers.delete."
+    },
+    "fix_2_assigned_customer_ids": {
+      "status": "PASS",
+      "details": "PUT /api/users/{id} accepts and persists assigned_customer_ids array. User Management dialog shows Assigned Customers section with search, select-all, and clear buttons."
+    },
+    "fix_3_admin_scope_filter": {
+      "status": "PASS",
+      "details": "Admin sees scope filter (data-testid='customer-scope-filter') with All Contacts/Own Contacts options. mine=true query param filters to created_by=admin.id only."
+    },
+    "fix_4_non_admin_customer_visibility": {
+      "status": "PASS",
+      "details": "Non-admin user sees only their own + assigned + legacy (null created_by) customers. Scope filter correctly hidden for non-admin."
+    },
+    "fix_5_footer_add_line_buttons": {
+      "status": "PASS",
+      "details": "PO (po-add-line-footer-btn), Quotation (quotation-add-line-footer), Tax Invoice (ti-add-line-footer) all have footer Add Line buttons in tfoot."
+    },
+    "fix_6_drag_drop_reordering": {
+      "status": "PASS",
+      "details": "Rows have draggable=true attribute. Drag handle on row-num cell. useDraggableRows hook applied to PO, Quotation, Tax Invoice grids."
+    },
+    "fix_7_searchable_item_description": {
+      "status": "PASS",
+      "details": "SearchableItemSelect searches by name + description. Dropdown shows description as 2nd line under item name. Tested with 'steel' search term matching 'Cold rolled steel sheet' description."
+    }
+  }
+}

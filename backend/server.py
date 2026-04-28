@@ -80,6 +80,7 @@ class UserUpdate(BaseModel):
     status: Optional[str] = None
     role_group_id: Optional[str] = None
     signature_url: Optional[str] = None  # base64 PNG/JPG data-URL for digital signature
+    assigned_customer_ids: Optional[List[str]] = None  # Customers visible to this user beyond their own (admin-managed)
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -2373,6 +2374,8 @@ async def update_user(user_id: str, data: UserUpdate, request: Request):
             update_data["status"] = data.status
         if data.role_group_id is not None:
             update_data["role_group_id"] = data.role_group_id or None
+        if data.assigned_customer_ids is not None:
+            update_data["assigned_customer_ids"] = data.assigned_customer_ids
     else:
         if data.name is not None:
             update_data["name"] = data.name
@@ -7267,17 +7270,31 @@ async def get_customers(request: Request, status: Optional[str] = None, mine: Op
     query = {}
     if status:
         query["status"] = status
-    # Per-user contact ownership: non-admin users see only their own created contacts
-    # when `mine=true` is passed, OR always if the user doesn't have admin privileges.
-    # Admins (role=admin or is_admin_group from role-group) see ALL contacts.
+    # Per-user contact ownership:
+    #   - Admins see ALL contacts by default. They can pass `mine=true` to filter to
+    #     only contacts they personally created.
+    #   - Non-admins always see (their own contacts) ∪ (contacts in user.assigned_customer_ids)
+    #     ∪ (legacy contacts without created_by) — `mine` is ignored.
     is_admin = user.get("role") == "admin"
     if not is_admin and user.get("role_group_id"):
         rg = await db.role_groups.find_one({"id": user["role_group_id"]}, {"_id": 0, "is_admin_group": 1})
         if rg and rg.get("is_admin_group"):
             is_admin = True
-    if not is_admin:
-        # Non-admins: restrict to own contacts + those without a creator (legacy data)
-        query["$or"] = [{"created_by": user["id"]}, {"created_by": {"$exists": False}}, {"created_by": None}]
+    if is_admin:
+        if mine:
+            query["created_by"] = user["id"]
+    else:
+        # Reload the user doc to read assigned_customer_ids (not exposed via get_current_user)
+        user_doc = await db.users.find_one({"_id": ObjectId(user["id"])}, {"_id": 0, "assigned_customer_ids": 1})
+        assigned_ids = (user_doc or {}).get("assigned_customer_ids") or []
+        clauses = [
+            {"created_by": user["id"]},
+            {"created_by": {"$exists": False}},
+            {"created_by": None},
+        ]
+        if assigned_ids:
+            clauses.append({"id": {"$in": assigned_ids}})
+        query["$or"] = clauses
     customers = await db.customers.find(query, {"_id": 0}).to_list(2000)
     return customers
 

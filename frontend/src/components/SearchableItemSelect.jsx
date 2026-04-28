@@ -21,7 +21,7 @@ export const SearchableItemSelect = ({
   items = [],
   value,
   onChange,
-  placeholder = 'Type to search item by part number or name…',
+  placeholder = 'Type to search by part no., name, or description…',
   filter,
   showCategory = true,
   testId,
@@ -38,7 +38,11 @@ export const SearchableItemSelect = ({
   const list = baseList.filter(i => {
     if (!query.trim()) return false; // Don't flood with all items on focus — wait for keystroke
     const q = query.toLowerCase();
-    return (i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q);
+    return (
+      (i.part_number || '').toLowerCase().includes(q) ||
+      (i.name || '').toLowerCase().includes(q) ||
+      (i.description || '').toLowerCase().includes(q)
+    );
   }).slice(0, 200);
 
   useEffect(() => {
@@ -103,8 +107,8 @@ export const SearchableItemSelect = ({
       )}
 
       {!selected && focused && query.trim() && (
-        <div className="absolute z-50 mt-1 w-full bg-white border border-[#E5E7EB] rounded-sm shadow-lg max-h-64 overflow-y-auto">
-          <div className="px-3 py-1 text-[10px] text-[#6B7280] uppercase tracking-wide border-b border-[#F3F4F6]">
+        <div className="absolute z-50 mt-1 w-full bg-white border border-[#E5E7EB] rounded-sm shadow-lg max-h-80 overflow-y-auto">
+          <div className="px-3 py-1 text-[10px] text-[#6B7280] uppercase tracking-wide border-b border-[#F3F4F6] sticky top-0 bg-white">
             {list.length} match{list.length !== 1 ? 'es' : ''} for "{query}"
           </div>
           {list.length === 0 ? (
@@ -118,10 +122,15 @@ export const SearchableItemSelect = ({
                 className="block w-full text-left px-3 py-1.5 text-sm hover:bg-[#F3F4F6] border-b border-[#F9FAFB] last:border-0"
                 data-testid={`${testId || 'ss'}-option-${i.id}`}
               >
-                <span className="mono font-semibold text-xs">{i.part_number}</span>
-                <span className="ml-2">{i.name}</span>
-                {showCategory && i.category && (
-                  <span className="ml-2 text-[10px] text-[#6B7280] italic">({i.category.replace('_', ' ')})</span>
+                <div className="flex items-center gap-2">
+                  <span className="mono font-semibold text-xs">{i.part_number}</span>
+                  <span className="truncate">{i.name}</span>
+                  {showCategory && i.category && (
+                    <span className="ml-auto text-[10px] text-[#6B7280] italic shrink-0">({i.category.replace('_', ' ')})</span>
+                  )}
+                </div>
+                {i.description && (
+                  <div className="text-[11px] text-[#6B7280] truncate mt-0.5">{i.description}</div>
                 )}
               </button>
             ))
