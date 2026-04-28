@@ -20,6 +20,8 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-04-30** — **BOM explosion children now sorted SG → CP → RM, then numeric part_number (P0):**
+  - `flattenRows` and `printBomExplosion` in `BOMPage.js` now re-sort siblings at every depth via a new `sortSiblings` helper: category priority `sub_assembly (SG)` → `component (CP)` → `raw_material (RM)`, then numeric-aware `localeCompare` on part_number (so `CGC0G0000129` comes before `CGC0G0000278`). Applies to on-screen table AND printed PDF. No backend data change — pure render-time ordering.
 - **2026-04-29 (late)** — **BOM list now sorted numerically by part_number within each category (P0):**
   - Old sort was alphabetic `localeCompare` which produces "FG-1, FG-10, FG-11, FG-2" (wrong).
   - New sort uses `localeCompare(..., { numeric: true, sensitivity: 'base' })` so numeric segments compare as numbers. Category order still: FG → SG → CP → RM. Within each category, part numbers flow in natural/human order.

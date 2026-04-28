@@ -363,9 +363,28 @@ export default function BOMPage() {
 
   const printBomExplosion = (parentItem, explosion, totalCost, bomInfo, fgProcessCost = 0, componentsCost = 0) => {
     const catLabel = (cat) => cat === 'finished_good' ? 'FG' : cat === 'sub_assembly' ? 'SG' : cat === 'raw_material' ? 'RM' : cat === 'component' ? 'CP' : 'PT';
+    // Same sibling sort the on-screen table uses (SG → CP → RM, then numeric
+    // part_number) so the printed PDF matches what the user sees.
+    const printCatOrder = { sub_assembly: 0, component: 1, raw_material: 2 };
+    const sortPrintSiblings = (nodes) => {
+      const arr = [...(nodes || [])];
+      arr.sort((a, b) => {
+        const ca = printCatOrder[a.item?.category];
+        const cb = printCatOrder[b.item?.category];
+        const ra = (ca === undefined) ? 99 : ca;
+        const rb = (cb === undefined) ? 99 : cb;
+        if (ra !== rb) return ra - rb;
+        return (a.item?.part_number || '').localeCompare(
+          b.item?.part_number || '',
+          undefined,
+          { numeric: true, sensitivity: 'base' }
+        );
+      });
+      return arr;
+    };
     const renderPrintRows = (nodes, level = 0) => {
       let html = '';
-      (nodes || []).forEach((node, idx) => {
+      sortPrintSiblings(nodes).forEach((node, idx) => {
         const item = node.item || {};
         const indent = level * 20;
         const bgColor = item.category === 'sub_assembly' ? '#FEF3C7' : item.category === 'raw_material' ? '#DBEAFE' : item.category === 'component' ? '#FEE2E2' : '#F3F4F6';
@@ -900,10 +919,32 @@ export default function BOMPage() {
               };
               const catLabel = (cat) => cat === 'finished_good' ? 'FG' : cat === 'sub_assembly' ? 'SG' : cat === 'raw_material' ? 'RM' : cat === 'component' ? 'CP' : 'PT';
               
-              // Recursive flatten explosion into table rows
+              // Recursive flatten explosion into table rows.
+              // Siblings at every depth are re-sorted by category (SG → CP → RM)
+              // and then numerically by part_number so the explosion table is
+              // scannable instead of following the (arbitrary) BOM insertion
+              // order. Alternates stay paired with their primary (they sort by
+              // the same key + a small offset so the alternate follows it).
+              const childCatOrder = { sub_assembly: 0, component: 1, raw_material: 2 };
+              const sortSiblings = (nodes) => {
+                const arr = [...(nodes || [])];
+                arr.sort((a, b) => {
+                  const ca = childCatOrder[a.item?.category];
+                  const cb = childCatOrder[b.item?.category];
+                  const ra = (ca === undefined) ? 99 : ca;
+                  const rb = (cb === undefined) ? 99 : cb;
+                  if (ra !== rb) return ra - rb;
+                  return (a.item?.part_number || '').localeCompare(
+                    b.item?.part_number || '',
+                    undefined,
+                    { numeric: true, sensitivity: 'base' }
+                  );
+                });
+                return arr;
+              };
               const flattenRows = (nodes, level = 1, parentKey = '') => {
                 const rows = [];
-                (nodes || []).forEach((node, idx) => {
+                sortSiblings(nodes).forEach((node, idx) => {
                   const item = node.item || {};
                   const cat = item.category || '';
                   const key = `${parentKey}-${idx}`;
