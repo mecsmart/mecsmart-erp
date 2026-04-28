@@ -20,6 +20,9 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-04-28** — **2 P0 UX fixes (search dropdown + drag-scroll):**
+  1. **Item-search dropdown brought to front:** `SearchableItemSelect` now renders its dropdown panel through a `react-dom` portal anchored to `document.body` with `position: fixed`, computed from the input's bounding rect. Previously the dropdown was clipped by the line-items-grid wrapper's `overflow-x-auto` (and any Dialog scroll container), so it appeared "behind" or below the next row. The panel now sits above all rows with `z-index: 9999` and auto-flips above the input when there's not enough room below.
+  2. **Drag-reorder auto-scroll:** `useDraggableRows` now auto-scrolls the closest scrollable ancestor (or the window) when the cursor approaches the top/bottom edge during a drag. Speed ramps from 0 → ~18px/frame as proximity to edge increases (80px detection band). The screen no longer "freezes" — users can now drag a row to a target far below the fold.
 - **2026-04-28** — **5 P0 fixes (Customers, line-items grid UX):**
   1. **Customer create permission honored:** `CustomersPage` Add/Edit/Delete buttons now use `hasPermission('customers', 'create'/'edit'/'delete')` instead of hardcoded role list. Granting `customers.create` to a custom role-group now unlocks the button.
   2. **Per-user customer assignment + admin scope filter:** new `UserUpdate.assigned_customer_ids: List[str]`. `GET /api/customers` now returns (`created_by=user`) ∪ (`id IN assigned_customer_ids`) ∪ (legacy null `created_by`) for non-admins; admins get all by default and can pass `?mine=true` to see only what they created. `UserManagementPage` user dialog gained an "Assigned Customers" multi-select with search, select-all, and clear-all. `CustomersPage` admin-only "All Contacts / Own Contacts" scope filter (`data-testid='customer-scope-filter'`).
