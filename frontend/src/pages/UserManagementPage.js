@@ -381,70 +381,10 @@ export default function UserManagementPage() {
                     </>
                   )}
                 </div>
-                <div className="col-span-2 pt-2 border-t border-[#E5E7EB]">
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm font-medium text-[#374151]">
-                      Assigned Customers
-                      <span className="text-[11px] font-normal text-[#6B7280] ml-1">
-                        — extra contacts this user can see, beyond what they create themselves
-                      </span>
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-[#1D3557] font-mono">
-                        {(formData.assigned_customer_ids || []).length} selected
-                      </span>
-                      {(formData.assigned_customer_ids || []).length > 0 && (
-                        <button type="button" onClick={clearAssignedCustomers} className="text-[11px] text-[#9B1C1C] underline" data-testid="user-assigned-clear-btn">
-                          Clear all
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="border border-[#E5E7EB] rounded-sm">
-                    <div className="flex items-center gap-2 p-2 border-b border-[#E5E7EB] bg-[#F9FAFB]">
-                      <input
-                        type="text"
-                        placeholder="Search by name, code, or GSTIN…"
-                        value={customerSearch}
-                        onChange={e => setCustomerSearch(e.target.value)}
-                        className="flex-1 px-2 py-1 text-xs border border-[#D1D5DB] rounded-sm focus:outline-none focus:ring-1 focus:ring-[#1D3557]"
-                        data-testid="user-assigned-search"
-                      />
-                      <button type="button" onClick={selectAllAssignedCustomers} className="text-[11px] text-[#1D3557] underline whitespace-nowrap" data-testid="user-assigned-select-all-btn">
-                        Select all{customerSearch ? ' filtered' : ''}
-                      </button>
-                    </div>
-                    <div className="max-h-48 overflow-y-auto">
-                      {filteredAssignableCustomers.length === 0 ? (
-                        <div className="p-3 text-xs text-[#9CA3AF] italic text-center">
-                          {allCustomers.length === 0 ? 'No customers exist yet.' : 'No customers match your search.'}
-                        </div>
-                      ) : (
-                        filteredAssignableCustomers.slice(0, 500).map(c => {
-                          const checked = (formData.assigned_customer_ids || []).includes(c.id);
-                          return (
-                            <label key={c.id} className="flex items-center gap-2 px-2 py-1 text-xs hover:bg-[#F3F4F6] cursor-pointer border-b border-[#F9FAFB] last:border-0" data-testid={`user-assigned-row-${c.code}`}>
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleAssignedCustomer(c.id)}
-                                data-testid={`user-assigned-checkbox-${c.code}`}
-                              />
-                              <span className="mono font-semibold text-[#1D3557] w-24 shrink-0 truncate">{c.code}</span>
-                              <span className="flex-1 truncate">{c.name}</span>
-                              {c.gstin && <span className="mono text-[10px] text-[#6B7280] hidden sm:inline shrink-0">{c.gstin}</span>}
-                            </label>
-                          );
-                        })
-                      )}
-                      {filteredAssignableCustomers.length > 500 && (
-                        <div className="px-2 py-1 text-[11px] text-[#6B7280] italic">
-                          Showing first 500 of {filteredAssignableCustomers.length}. Refine the search to narrow down.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                {/* Per-user "Assigned Customers" multi-select was removed in
+                    2026-04-29 — customer-side `assigned_user_ids` is now the
+                    source of truth. Admins assign salespeople from the
+                    Customers page, not here. */}
 
                 <div className="col-span-2 pt-2 border-t border-[#E5E7EB]">
                   <label className="text-sm font-medium text-[#374151] block mb-2">Signature (printed on invoices &amp; POs)</label>

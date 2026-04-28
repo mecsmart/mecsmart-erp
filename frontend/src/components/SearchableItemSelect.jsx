@@ -153,8 +153,22 @@ export const SearchableItemSelect = ({
             width: rect.width,
             maxHeight: panelMaxHeight,
             zIndex: 9999,
+            // Radix Dialog's RemoveScroll / ScrollLock sets `pointer-events: none`
+            // on <body> when a modal dialog is open. Since this panel is portal'd
+            // to document.body, it inherits that "no hit-testing" unless we
+            // explicitly opt back in here.
+            pointerEvents: 'auto',
           }}
           data-testid={`${testId || 'ss'}-panel`}
+          // Radix Dialog / Popover etc. register a DismissableLayer that cancels
+          // pointerdown events happening outside their DOM subtree. Because this
+          // panel is portal'd to document.body (outside the Dialog content),
+          // Radix treats clicks here as "outside" → option onClick never fires.
+          // Stopping propagation on pointerdown/mousedown lets the option click
+          // register normally while still allowing outside-click detection for
+          // clicks truly outside both the dialog and this panel.
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1 text-[10px] text-[#6B7280] uppercase tracking-wide border-b border-[#F3F4F6] sticky top-0 bg-white">
             {list.length} match{list.length !== 1 ? 'es' : ''} for "{query}"
@@ -166,7 +180,11 @@ export const SearchableItemSelect = ({
               <button
                 key={i.id}
                 type="button"
-                onClick={() => handleSelect(i)}
+                // IMPORTANT: Radix Dialog's DismissableLayer intercepts `click`
+                // events on portal'd siblings, causing our onClick to never fire
+                // (the input blurs and the panel unmounts before click completes).
+                // Using `onMouseDown` instead fires BEFORE the blur/unmount race.
+                onMouseDown={(e) => { e.preventDefault(); handleSelect(i); }}
                 className="block w-full text-left px-3 py-1.5 text-sm hover:bg-[#F3F4F6] border-b border-[#F9FAFB] last:border-0"
                 data-testid={`${testId || 'ss'}-option-${i.id}`}
               >

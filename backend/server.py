@@ -793,6 +793,9 @@ class CustomerCreate(BaseModel):
     pin_code: Optional[str] = ""
     payment_terms: Optional[str] = "Net 30"
     status: str = "active"
+    # Multi-salesperson assignment. A non-admin user only sees a customer if
+    # they created it OR their id is in this list.
+    assigned_user_ids: Optional[List[str]] = []
 
 class CustomerUpdate(BaseModel):
     name: Optional[str] = None
@@ -808,6 +811,7 @@ class CustomerUpdate(BaseModel):
     pin_code: Optional[str] = None
     payment_terms: Optional[str] = None
     status: Optional[str] = None
+    assigned_user_ids: Optional[List[str]] = None
 
 # ================== AUTH ROUTES ==================
 
@@ -7270,11 +7274,13 @@ async def get_customers(request: Request, status: Optional[str] = None, mine: Op
     query = {}
     if status:
         query["status"] = status
-    # Per-user contact ownership:
+    # Per-user contact ownership (customer-centric assignment, Odoo-style):
     #   - Admins see ALL contacts by default. They can pass `mine=true` to filter to
     #     only contacts they personally created.
-    #   - Non-admins always see (their own contacts) ∪ (contacts in user.assigned_customer_ids)
-    #     ∪ (legacy contacts without created_by) — `mine` is ignored.
+    #   - Non-admins see ONLY customers where they are the creator OR where their
+    #     user id is listed in `customer.assigned_user_ids`. A non-admin cannot see
+    #     any customer until the admin assigns them as a salesperson — no legacy
+    #     null-created_by fallback.
     is_admin = user.get("role") == "admin"
     if not is_admin and user.get("role_group_id"):
         rg = await db.role_groups.find_one({"id": user["role_group_id"]}, {"_id": 0, "is_admin_group": 1})
@@ -7284,17 +7290,10 @@ async def get_customers(request: Request, status: Optional[str] = None, mine: Op
         if mine:
             query["created_by"] = user["id"]
     else:
-        # Reload the user doc to read assigned_customer_ids (not exposed via get_current_user)
-        user_doc = await db.users.find_one({"_id": ObjectId(user["id"])}, {"_id": 0, "assigned_customer_ids": 1})
-        assigned_ids = (user_doc or {}).get("assigned_customer_ids") or []
-        clauses = [
+        query["$or"] = [
             {"created_by": user["id"]},
-            {"created_by": {"$exists": False}},
-            {"created_by": None},
+            {"assigned_user_ids": user["id"]},
         ]
-        if assigned_ids:
-            clauses.append({"id": {"$in": assigned_ids}})
-        query["$or"] = clauses
     customers = await db.customers.find(query, {"_id": 0}).to_list(2000)
     return customers
 

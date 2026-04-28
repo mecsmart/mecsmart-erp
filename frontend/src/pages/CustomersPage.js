@@ -9,6 +9,7 @@ export default function CustomersPage() {
   const { user, hasPermission } = useAuth();
   const [customers, setCustomers] = useState([]);
   const [states, setStates] = useState([]);
+  const [users, setUsers] = useState([]);  // All users, used to populate the Salesperson multi-select (admin only)
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   // Admins can switch between "all" customers and "only mine".
@@ -19,7 +20,7 @@ export default function CustomersPage() {
   const [formData, setFormData] = useState({
     code: '', name: '', gstin: '', state_code: '', contact_person: '',
     email: '', phone: '', address: '', address_line2: '', city: '', state: '', pin_code: '',
-    payment_terms: 'Net 30', status: 'active',
+    payment_terms: 'Net 30', status: 'active', assigned_user_ids: [],
   });
 
   const isAdmin = user?.role === 'admin' || user?.is_admin_group;
@@ -38,12 +39,16 @@ export default function CustomersPage() {
       // because they're already restricted to their own/assigned set.
       if (isAdmin && scopeFilter === 'mine') params.append('mine', 'true');
       const qs = params.toString() ? `?${params.toString()}` : '';
-      const [customersRes, statesRes] = await Promise.all([
+      const reqs = [
         api.get(`/api/customers${qs}`),
         api.get('/api/settings/states'),
-      ]);
+      ];
+      // Only admins need the users list for salesperson assignment
+      if (isAdmin) reqs.push(api.get('/api/users').catch(() => ({ data: [] })));
+      const [customersRes, statesRes, usersRes] = await Promise.all(reqs);
       setCustomers(customersRes.data);
       setStates(statesRes.data);
+      if (usersRes) setUsers(usersRes.data || []);
     } catch (error) {
       console.error('Failed to fetch customers:', error);
     } finally { setLoading(false); }
@@ -66,7 +71,7 @@ export default function CustomersPage() {
 
   const handleEdit = (c) => {
     setEditingCustomer(c);
-    setFormData({ code: c.code, name: c.name, gstin: c.gstin || '', state_code: c.state_code || '', contact_person: c.contact_person || '', email: c.email || '', phone: c.phone || '', address: c.address || '', address_line2: c.address_line2 || '', city: c.city || '', state: c.state || '', pin_code: c.pin_code || '', payment_terms: c.payment_terms || 'Net 30', status: c.status });
+    setFormData({ code: c.code, name: c.name, gstin: c.gstin || '', state_code: c.state_code || '', contact_person: c.contact_person || '', email: c.email || '', phone: c.phone || '', address: c.address || '', address_line2: c.address_line2 || '', city: c.city || '', state: c.state || '', pin_code: c.pin_code || '', payment_terms: c.payment_terms || 'Net 30', status: c.status, assigned_user_ids: c.assigned_user_ids || [] });
     setIsDialogOpen(true);
   };
 
@@ -82,7 +87,16 @@ export default function CustomersPage() {
 
   const resetForm = () => {
     setEditingCustomer(null);
-    setFormData({ code: '', name: '', gstin: '', state_code: '', contact_person: '', email: '', phone: '', address: '', address_line2: '', city: '', state: '', pin_code: '', payment_terms: 'Net 30', status: 'active' });
+    setFormData({ code: '', name: '', gstin: '', state_code: '', contact_person: '', email: '', phone: '', address: '', address_line2: '', city: '', state: '', pin_code: '', payment_terms: 'Net 30', status: 'active', assigned_user_ids: [] });
+  };
+
+  // Toggle a single salesperson user id in assigned_user_ids
+  const toggleAssignedUser = (uid) => {
+    setFormData(prev => {
+      const list = prev.assigned_user_ids || [];
+      const next = list.includes(uid) ? list.filter(x => x !== uid) : [...list, uid];
+      return { ...prev, assigned_user_ids: next };
+    });
   };
 
   const getStateName = (code) => {
@@ -174,6 +188,45 @@ export default function CustomersPage() {
                   <label className="text-sm font-medium">Pin Code</label>
                   <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm font-mono" maxLength={6} placeholder="411019" value={formData.pin_code} onChange={e => setFormData({...formData, pin_code: e.target.value.replace(/\D/g, '')})} data-testid="customer-pincode-input" />
                 </div>
+                {/* Admin-only: assign one or more salespeople to this customer.
+                    Non-admin users will only see customers where they're listed here. */}
+                {isAdmin && (
+                  <div className="col-span-2 pt-3 mt-2 border-t border-[#E5E7EB]">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-sm font-medium text-[#111827]">
+                        Assigned Salespersons
+                        <span className="text-[11px] font-normal text-[#6B7280] ml-1">
+                          — users who can see this customer (beyond those who created it)
+                        </span>
+                      </label>
+                      <span className="text-[11px] text-[#1D3557] font-mono">
+                        {(formData.assigned_user_ids || []).length} selected
+                      </span>
+                    </div>
+                    <div className="border border-[#E5E7EB] rounded-sm max-h-40 overflow-y-auto bg-[#F9FAFB]">
+                      {users.length === 0 ? (
+                        <div className="p-3 text-xs text-[#9CA3AF] italic text-center">No users available.</div>
+                      ) : (
+                        users.map(u => {
+                          const checked = (formData.assigned_user_ids || []).includes(u.id);
+                          return (
+                            <label key={u.id} className="flex items-center gap-2 px-2 py-1 text-xs hover:bg-[#F3F4F6] cursor-pointer border-b border-[#F3F4F6] last:border-0" data-testid={`customer-salesperson-row-${u.email}`}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleAssignedUser(u.id)}
+                                data-testid={`customer-salesperson-checkbox-${u.email}`}
+                              />
+                              <span className="font-medium text-[#111827] flex-1 truncate">{u.name || u.email}</span>
+                              <span className="text-[10px] text-[#6B7280] hidden sm:inline truncate">{u.email}</span>
+                              <span className="text-[10px] text-[#1D3557] uppercase tracking-wide shrink-0">{u.role}</span>
+                            </label>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="flex justify-end space-x-2 mt-4">
                 <button className="btn-secondary" onClick={() => { setIsDialogOpen(false); resetForm(); }}>Cancel</button>
@@ -237,6 +290,21 @@ export default function CustomersPage() {
               {c.phone && <div className="flex items-center"><Phone className="w-3 h-3 mr-2" />{c.phone}</div>}
               {c.email && <div className="flex items-center"><Mail className="w-3 h-3 mr-2" />{c.email}</div>}
             </div>
+            {isAdmin && (c.assigned_user_ids || []).length > 0 && (
+              <div className="mt-2 flex items-start gap-1 text-[11px]" data-testid={`customer-salespersons-${c.code}`}>
+                <span className="text-[#6B7280] uppercase tracking-wide shrink-0">Salespersons:</span>
+                <div className="flex flex-wrap gap-1">
+                  {(c.assigned_user_ids || []).map(uid => {
+                    const u = users.find(x => x.id === uid);
+                    return (
+                      <span key={uid} className="inline-flex items-center px-1.5 py-0.5 bg-[#E1EFFE] text-[#1E429F] rounded-sm text-[10px] font-medium">
+                        {u ? (u.name || u.email) : uid.slice(0, 6)}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             {canEditAny && (
               <div className="flex space-x-2 mt-3 pt-3 border-t border-[#E5E7EB]">
                 <button onClick={() => handleEdit(c)} className="text-[#1D3557] hover:bg-[#F3F4F6] p-1 rounded" data-testid={`edit-customer-${c.code}`}><Edit2 className="w-4 h-4" /></button>

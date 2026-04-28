@@ -15,7 +15,6 @@ import {
 const dashboardNavItem = { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, module: 'dashboard' };
 
 const topNavItems = [
-  { name: 'Customers', href: '/customers', icon: Users, module: 'customers' },
   { name: 'Sales Orders', href: '/production', icon: Factory, module: 'production' },
 ];
 
@@ -48,7 +47,7 @@ const jobWorkGroupItems = [
 ];
 
 const crmMarketingItems = [
-  { name: 'Contacts', href: '/crm?tab=marketing&sub=contacts', icon: Users, module: 'crm_marketing' },
+  { name: 'Customers', href: '/customers', icon: Users, module: 'customers' },
   { name: 'Quotations', href: '/crm?tab=marketing&sub=quotations', icon: FileText, module: 'crm_marketing' },
   { name: 'Proforma Invoices', href: '/crm?tab=marketing&sub=proformas', icon: FileStack, module: 'crm_marketing' },
   { name: 'Tax Invoices', href: '/crm?tab=marketing&sub=tax-invoices', icon: Calculator, module: 'crm_marketing' },

@@ -76,6 +76,12 @@ export default function CRMPage() {
     const params = new URLSearchParams(location.search);
     const t = params.get('tab');
     const s = params.get('sub') || '';
+    // Legacy: `sub=contacts` was replaced by a standalone /customers page nested
+    // under the CRM sidebar group. Redirect any bookmarked contacts URLs there.
+    if (t === 'marketing' && s === 'contacts') {
+      navigate('/customers', { replace: true });
+      return;
+    }
     if (t === 'support' || t === 'marketing' || t === 'quotations') setActiveTab(t);
     setActiveSub(s);
   }, [location.search]);

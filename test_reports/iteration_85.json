@@ -1,0 +1,52 @@
+{
+  "summary": "Iteration 85 - All 3 fixes verified successfully. Fix 1: BOM SearchableItemSelect dropdown works with onMouseDown + pointerEvents:auto. Fix 2: Customer-side salesperson assignment (assigned_user_ids) working - admin can assign, non-admin sees only assigned customers. Fix 3: Unified sidebar - Customers nested under CRM→Marketing, no top-level Customers, /crm?tab=marketing&sub=contacts redirects to /customers.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_85_customer_assignment.py",
+    "/app/test_reports/pytest/pytest_iteration_85.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_85_customer_assignment.py"
+  ],
+  "success_rate": {
+    "backend": "100% (6/6 tests passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": {
+    "admin": "admin@erp.com / Admin@123",
+    "non_admin": "test_perm@erp.com / Test@123"
+  },
+  "seed_data_creation": "None - used existing test data. Tata Motors (CUST-001) already assigned to test_perm user.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 3 fixes verified: (1) SearchableItemSelect uses onMouseDown + pointerEvents:auto to bypass Radix Dialog's scroll-lock, tested in BOM and PO dialogs. (2) Customer.assigned_user_ids field works - admin can assign salespeople via Customers page, non-admin sees only customers where created_by==user.id OR user.id IN assigned_user_ids. (3) Sidebar restructured - Customers under CRM→Marketing, no top-level Customers entry, /crm?tab=marketing&sub=contacts redirects to /customers. UserManagementPage no longer has Assigned Customers block.",
+  "features_tested": {
+    "fix_1_bom_dropdown": {
+      "status": "PASS",
+      "details": "SearchableItemSelect dropdown works in BOM Create dialog. Typed 'FG-001', dropdown appeared, clicked option with force=True, item selected as blue pill. Component selection also works (RM-001). PO line item selection also works (regression test passed)."
+    },
+    "fix_2_customer_salesperson_assignment": {
+      "status": "PASS",
+      "backend_tests": "6/6 passed - PUT /api/customers/{id} accepts assigned_user_ids, GET as admin returns all, GET with mine=true returns admin-created only, GET as non-admin returns only created_by OR assigned customers",
+      "frontend_tests": "Admin sees 'Assigned Salespersons' multi-select in customer dialog with 4 user checkboxes. Admin sees scope filter (All Contacts / Own Contacts). Non-admin sees only 1 customer (Tata Motors - assigned). Non-admin does NOT see scope filter or salesperson section."
+    },
+    "fix_3_unified_sidebar": {
+      "status": "PASS",
+      "details": "Sidebar verified: Dashboard, CRM (expandable), Sales Orders, Inventory, Production, Stores, Quality, Job Work, Settings, User Management. NO top-level 'Customers' entry. CRM→Marketing→Customers is first child. NO 'Contacts' entry. /crm?tab=marketing&sub=contacts redirects to /customers."
+    },
+    "fix_4_user_management_cleanup": {
+      "status": "PASS",
+      "details": "UserManagementPage no longer has 'Assigned Customers' block. 'user-assigned-search' testid removed. Signature section still works."
+    }
+  }
+}
