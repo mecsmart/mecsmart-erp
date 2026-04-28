@@ -20,6 +20,12 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-04-28** — **5 P0 fixes (Customers, line-items grid UX):**
+  1. **Customer create permission honored:** `CustomersPage` Add/Edit/Delete buttons now use `hasPermission('customers', 'create'/'edit'/'delete')` instead of hardcoded role list. Granting `customers.create` to a custom role-group now unlocks the button.
+  2. **Per-user customer assignment + admin scope filter:** new `UserUpdate.assigned_customer_ids: List[str]`. `GET /api/customers` now returns (`created_by=user`) ∪ (`id IN assigned_customer_ids`) ∪ (legacy null `created_by`) for non-admins; admins get all by default and can pass `?mine=true` to see only what they created. `UserManagementPage` user dialog gained an "Assigned Customers" multi-select with search, select-all, and clear-all. `CustomersPage` admin-only "All Contacts / Own Contacts" scope filter (`data-testid='customer-scope-filter'`).
+  3. **+ Add Line button at the bottom of every line-item grid** — Excel-style. Applied to Quotation, Tax Invoice, and PO grids via a new `<tfoot>` row inside `.line-items-grid` (testids: `po-add-line-footer-btn`, `quotation-add-line-footer`, `ti-add-line-footer`). Top button kept for accessibility.
+  4. **SearchableItemSelect now searches description** in addition to part_number + name. Dropdown shows description as a second line under the item name. Placeholder updated.
+  5. **Drag-and-drop row reordering** for line items in PO, Quotation, and Tax Invoice. New `useDraggableRows` hook (`/app/frontend/src/hooks/useDraggableRows.js`). Drag handle is the row-num cell (cursor: grab/grabbing); CSS adds visual `is-dragging` (40% opacity) and `is-drop-target` (2px top border) feedback.
 - **2026-04-27** — **P4 Backend Refactor — Phase 1 (core/ modules extracted):**
   - server.py shrunk 11,704 → 11,517 lines by moving shared utilities into `/app/backend/core/`:
     - `core/db.py` — MongoDB client + `db` handle (15 lines)
