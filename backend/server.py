@@ -9961,6 +9961,21 @@ async def _enrich_quotation(q):
             it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1})
             if it:
                 ln["item"] = it
+    # Back-fill GST split for legacy quotations saved before _compute_gst_split was
+    # wired into create/update. The print template reads doc.is_inter_state /
+    # doc.cgst / doc.sgst / doc.igst directly; without this back-fill they would
+    # all be zero on historical docs.
+    if "is_inter_state" not in q or q.get("cgst") is None:
+        try:
+            split = await _compute_gst_split(q.get("customer_id") or None, q.get("lines") or [])
+            q["is_inter_state"] = split["is_inter_state"]
+            q["cgst"] = split["cgst"]
+            q["sgst"] = split["sgst"]
+            q["igst"] = split["igst"]
+            q["hsn_summary"] = split["hsn_summary"]
+        except Exception:
+            # Non-fatal — print will just fall back to total_gst in Grand Total math.
+            pass
     # Compute lock flag
     q["is_locked"] = await _quotation_is_locked(q)
     return q
@@ -9984,12 +9999,20 @@ async def create_quotation(data: QuotationCreate, request: Request):
     q_no = await _get_next_number("quotation")
     lines = [l.model_dump() for l in data.lines]
     totals = _compute_quotation_totals(lines)
+    # GST split (CGST/SGST vs IGST) based on company state vs customer state — so the
+    # quotation print template shows the correct tax components just like PI / TI.
+    gst_split = await _compute_gst_split(data.customer_id or None, lines)
     doc = {
         "id": str(uuid.uuid4()),
         "quotation_no": q_no,
         **data.model_dump(exclude={"lines"}, exclude_none=False),
         "lines": lines,
         **totals,
+        "is_inter_state": gst_split["is_inter_state"],
+        "cgst": gst_split["cgst"],
+        "sgst": gst_split["sgst"],
+        "igst": gst_split["igst"],
+        "hsn_summary": gst_split["hsn_summary"],
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"],
     }
@@ -10042,6 +10065,23 @@ async def update_quotation(qid: str, data: QuotationUpdate, request: Request):
         totals = _compute_quotation_totals(lines)
         update["lines"] = lines
         update.update(totals)
+        # Recompute CGST/SGST/IGST split whenever lines change or the customer was
+        # swapped — otherwise the print template would still show stale tax amounts.
+        cust_id = update.get("customer_id") if "customer_id" in update else existing.get("customer_id")
+        gst_split = await _compute_gst_split(cust_id or None, lines)
+        update["is_inter_state"] = gst_split["is_inter_state"]
+        update["cgst"] = gst_split["cgst"]
+        update["sgst"] = gst_split["sgst"]
+        update["igst"] = gst_split["igst"]
+        update["hsn_summary"] = gst_split["hsn_summary"]
+    elif "customer_id" in update:
+        # Customer changed without line edits — re-split existing lines.
+        gst_split = await _compute_gst_split(update.get("customer_id") or None, existing.get("lines") or [])
+        update["is_inter_state"] = gst_split["is_inter_state"]
+        update["cgst"] = gst_split["cgst"]
+        update["sgst"] = gst_split["sgst"]
+        update["igst"] = gst_split["igst"]
+        update["hsn_summary"] = gst_split["hsn_summary"]
 
     new_status = update.get("status")
     # Auto-convert to SO when status transitions to 'accepted'

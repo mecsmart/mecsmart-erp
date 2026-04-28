@@ -20,6 +20,10 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-04-28 (late)** — **Quotation print now shows GST amount + CGST/SGST/IGST split (P0):**
+  - Root cause: `POST/PUT /api/crm/quotations` persisted only `total_gst` (a flat number). The print template (`printInvoiceDoc` in `CRMPage.js`) reads `doc.is_inter_state`, `doc.cgst`, `doc.sgst`, `doc.igst` — so it displayed nothing for quotations.
+  - Fix: `create_quotation` and `update_quotation` now call `_compute_gst_split(customer_id, lines)` (same helper used by Proforma/Tax Invoice) and persist `is_inter_state`, `cgst`, `sgst`, `igst`, `hsn_summary`. `_enrich_quotation` back-fills the split for legacy quotations at read time so historical prints show the right taxes without a migration.
+  - Verified: intra-state customer (state=27) → CGST 810 + SGST 810; inter-state customer (state=09) → IGST 360.
 - **2026-04-28** — **2 P0 UX fixes (search dropdown + drag-scroll):**
   1. **Item-search dropdown brought to front:** `SearchableItemSelect` now renders its dropdown panel through a `react-dom` portal anchored to `document.body` with `position: fixed`, computed from the input's bounding rect. Previously the dropdown was clipped by the line-items-grid wrapper's `overflow-x-auto` (and any Dialog scroll container), so it appeared "behind" or below the next row. The panel now sits above all rows with `z-index: 9999` and auto-flips above the input when there's not enough room below.
   2. **Drag-reorder auto-scroll:** `useDraggableRows` now auto-scrolls the closest scrollable ancestor (or the window) when the cursor approaches the top/bottom edge during a drag. Speed ramps from 0 → ~18px/frame as proximity to edge increases (80px detection band). The screen no longer "freezes" — users can now drag a row to a target far below the fold.
