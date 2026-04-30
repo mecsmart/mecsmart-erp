@@ -769,7 +769,7 @@ export default function BOMPage() {
                                   items={items}
                                   value={comp.item_id}
                                   onChange={(v) => updateComponent(index, 'item_id', v)}
-                                  placeholder="Select component"
+                                  placeholder="Type part no. or name…"
                                   testId={`component-item-select-${index}`}
                                 />
                               </div>

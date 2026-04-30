@@ -20,6 +20,10 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-04-30 (very late)** — **3 P0 fixes (RM BOM guard + clearer component search + HSN on Quotation):**
+  1. **RM items can no longer have a BOM.** Added a category check in BOTH `POST /api/bom` and the Excel `import_bom_excel` endpoint that rejects any row whose parent is a `raw_material`. The manual UI already blocked this; now imports + raw API calls do too. One stray BOM with an RM parent (left over from a prior import) was deleted.
+  2. **BOM component picker placeholder updated** to "Type part no. or name…" so the field clearly invites typing. Search already matches part_number + name + description.
+  3. **HSN column added to Quotation creation grid** (between Item Name and Qty). `QuotationLine` model gained `hsn_code: Optional[str]`. `onPickItem` auto-fills HSN from item master. Print template already reads `l.hsn_code` so PDFs reflect the new value automatically. tfoot colSpan bumped from 9 → 10.
 - **2026-04-30 (late)** — **4 P0 fixes (BOM edit sort + nested edit return + GST autofill + branding):**
   1. **BOM edit dialog components now sorted SG → CP → RM, then numeric part_number.** New `sortBomComponentsForEdit` helper applied in `handleEdit` and when navigating to a child BOM. Empty rows (newly added) sink to bottom so they don't disrupt selection.
   2. **Nested child-BOM edit returns to parent (no more list flash).** New `bomEditStack` state. Clicking "Edit <child> BOM" inside a parent edit now pushes the parent context onto the stack and swaps the dialog content (no close/reopen). Save/Cancel pops the stack — the user lands back on the parent edit screen with their unsaved edits preserved. Cancel button label dynamically becomes "Back to Parent BOM" when nested. Breadcrumb shows the navigation path: "EDITING NESTED: FG-001 › SA-001".

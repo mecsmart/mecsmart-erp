@@ -1307,6 +1307,15 @@ async def create_bom(bom_data: BOMCreate, request: Request):
     parent_item = await db.items.find_one({"id": bom_data.parent_item_id})
     if not parent_item:
         raise HTTPException(status_code=404, detail="Parent item not found")
+    # Guard: Raw Material items are leaf parts — they cannot have a BOM of
+    # their own (no children, no routing). Block at the API layer so this is
+    # enforced whether the BOM was created via UI, Excel import, or a raw API
+    # call.
+    if (parent_item.get("category") or "").lower() == "raw_material":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Item '{parent_item.get('part_number')}' is a Raw Material — RM items cannot have a BOM.",
+        )
     
     # Normalize component & parent routings to {name, cost}
     normalized_components = []
@@ -6625,6 +6634,15 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
             results["errors"].append(f"Row {row_num}: Component '{comp_pn}' not found in items")
             continue
 
+        # RM items are leaf materials — they cannot have their own BOM or
+        # routing. Block them at import (manual BOM creation already blocks
+        # RM parents in the UI; this mirrors that server-side for imports).
+        if (parent_item.get("category") or "").lower() == "raw_material":
+            results["errors"].append(
+                f"Row {row_num}: Parent '{parent_pn}' is a Raw Material (RM) — RM items cannot have a BOM. Skipped."
+            )
+            continue
+
         bom_groups[parent_pn]["parent_item_id"] = parent_item["id"]
         bom_groups[parent_pn]["components"].append({
             "item_id": comp_item["id"],
@@ -9892,6 +9910,7 @@ class QuotationLine(BaseModel):
     line_no: Optional[int] = None
     item_id: Optional[str] = ""   # optional; free-text only quotes allowed
     description: Optional[str] = ""
+    hsn_code: Optional[str] = ""  # HSN/SAC code (printed on quotation PDF)
     quantity: float
     uom: Optional[str] = "Nos"
     rate: float

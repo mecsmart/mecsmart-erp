@@ -878,7 +878,7 @@ const COMPANY_INFO = {
 };
 
 function emptyQuotationLine() {
-  return { item_id: '', description: '', quantity: 1, uom: 'Nos', rate: 0, discount_pct: 0, gst_rate: 18 };
+  return { item_id: '', description: '', hsn_code: '', quantity: 1, uom: 'Nos', rate: 0, discount_pct: 0, gst_rate: 18 };
 }
 
 function QuotationsPanel({ quotations, leads, customers, items, search, onRefresh, canEdit, prefillFromLead, onPrefillConsumed }) {
@@ -967,6 +967,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
       item_id: itemId,
       // Pre-fill the editable Description column from items.description if present; else leave empty/editable
       description: it?.description || '',
+      hsn_code: it?.hsn_code || '',
       uom: it?.uom || 'Nos',
       rate: it?.sale_price || it?.unit_cost || 0,
       gst_rate: it?.gst_rate ?? 18,
@@ -1288,6 +1289,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                     <tr>
                       <th className="row-num">#</th>
                       <th style={{ minWidth: '300px' }}>Item Name &amp; Description</th>
+                      <th style={{ width: '90px' }}>HSN</th>
                       <th style={{ width: '80px' }}>Qty</th>
                       <th style={{ width: '70px' }}>UOM</th>
                       <th style={{ width: '110px' }}>Rate (₹)</th>
@@ -1318,6 +1320,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                               <textarea rows={2} className="grid-textarea" value={l.description} onChange={e => updateLine(idx, { description: e.target.value })} placeholder="Description (auto-filled — editable)" data-testid={`quotation-line-desc-${idx}`} />
                             </div>
                           </td>
+                          <td><input type="text" className="grid-input mono" value={l.hsn_code || ''} onChange={e => updateLine(idx, { hsn_code: e.target.value })} data-testid={`quotation-line-hsn-${idx}`} placeholder="HSN" /></td>
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.quantity} onChange={e => updateLine(idx, { quantity: e.target.value })} data-testid={`quotation-line-qty-${idx}`} /></td>
                           <td><input type="text" className="grid-input" value={l.uom} onChange={e => updateLine(idx, { uom: e.target.value })} /></td>
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.rate} onChange={e => updateLine(idx, { rate: e.target.value })} data-testid={`quotation-line-rate-${idx}`} /></td>
@@ -1335,7 +1338,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td className="add-line-cell" colSpan={9}>
+                      <td className="add-line-cell" colSpan={10}>
                         <button type="button" onClick={addLine} data-testid="quotation-add-line-footer">
                           <Plus className="w-3 h-3" /> Add Line
                         </button>
