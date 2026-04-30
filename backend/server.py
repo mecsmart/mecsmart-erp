@@ -7268,6 +7268,14 @@ async def clear_transaction_data(request: Request):
 
 # ================== CUSTOMER ROUTES ==================
 
+@customers_router.post("/lookup-gstin")
+async def customer_lookup_gstin(payload: GSTINLookupRequest, request: Request):
+    # Customer alias of the supplier GSTIN lookup — same Appyflow logic, same
+    # response shape. Lets the Customer form auto-fill name/state/PIN/address
+    # from a GSTIN like the Supplier form already does.
+    return await lookup_gstin(payload, request)
+
+
 @customers_router.get("")
 async def get_customers(request: Request, status: Optional[str] = None, mine: Optional[bool] = False):
     user = await get_current_user(request)

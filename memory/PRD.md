@@ -20,6 +20,11 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-04-30 (late)** — **4 P0 fixes (BOM edit sort + nested edit return + GST autofill + branding):**
+  1. **BOM edit dialog components now sorted SG → CP → RM, then numeric part_number.** New `sortBomComponentsForEdit` helper applied in `handleEdit` and when navigating to a child BOM. Empty rows (newly added) sink to bottom so they don't disrupt selection.
+  2. **Nested child-BOM edit returns to parent (no more list flash).** New `bomEditStack` state. Clicking "Edit <child> BOM" inside a parent edit now pushes the parent context onto the stack and swaps the dialog content (no close/reopen). Save/Cancel pops the stack — the user lands back on the parent edit screen with their unsaved edits preserved. Cancel button label dynamically becomes "Back to Parent BOM" when nested. Breadcrumb shows the navigation path: "EDITING NESTED: FG-001 › SA-001".
+  3. **Customer GSTIN auto-fill.** New `POST /api/customers/lookup-gstin` (alias of supplier endpoint, same Appyflow logic). CustomersPage GSTIN field now has a "Fetch" button that pre-fills name, state (from GSTIN first-2-digits), city, PIN, and address. Sandbox/free-tier notice surfaced in a warning banner.
+  4. **"Made with Emergent" badge removed** from `index.html` per customer branding requirement.
 - **2026-04-30** — **BOM explosion children now sorted SG → CP → RM, then numeric part_number (P0):**
   - `flattenRows` and `printBomExplosion` in `BOMPage.js` now re-sort siblings at every depth via a new `sortSiblings` helper: category priority `sub_assembly (SG)` → `component (CP)` → `raw_material (RM)`, then numeric-aware `localeCompare` on part_number (so `CGC0G0000129` comes before `CGC0G0000278`). Applies to on-screen table AND printed PDF. No backend data change — pure render-time ordering.
 - **2026-04-29 (late)** — **BOM list now sorted numerically by part_number within each category (P0):**

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
-import { Plus, Users, Edit2, Trash2, Phone, Mail, MapPin, Filter, X } from 'lucide-react';
+import { Plus, Users, Edit2, Trash2, Phone, Mail, MapPin, Filter, X, Search, Loader2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 
@@ -12,6 +12,8 @@ export default function CustomersPage() {
   const [users, setUsers] = useState([]);  // All users, used to populate the Salesperson multi-select (admin only)
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  // GSTIN-lookup UI state
+  const [gstinLookup, setGstinLookup] = useState({ loading: false, error: '', notice: '' });
   // Admins can switch between "all" customers and "only mine".
   // Non-admin users always see filtered view backend returns (own + assigned).
   const [scopeFilter, setScopeFilter] = useState('all');
@@ -104,6 +106,53 @@ export default function CustomersPage() {
     return state ? state.name : code;
   };
 
+  // GSTIN lookup — calls backend Appyflow proxy and pre-fills name + state +
+  // PIN + address from the public GST registry. State_code is taken from the
+  // FIRST 2 DIGITS of the GSTIN (authoritative for CGST/SGST/IGST routing).
+  const fetchFromGstin = async () => {
+    const gstin = (formData.gstin || '').trim().toUpperCase();
+    if (gstin.length !== 15) {
+      setGstinLookup({ loading: false, error: 'Enter a 15-character GSTIN first', notice: '' });
+      return;
+    }
+    setGstinLookup({ loading: true, error: '', notice: '' });
+    try {
+      const r = await api.post('/api/customers/lookup-gstin', { gstin });
+      const d = r.data || {};
+      const addr = d.principal_address || {};
+      // Map state name (e.g., "Maharashtra") to our state-code list when state code from GSTIN is unknown.
+      let stCode = d.state_code_from_gstin || '';
+      if (!stCode && addr.state_name) {
+        const m = states.find(s => (s.name || '').toLowerCase() === (addr.state_name || '').toLowerCase());
+        if (m) stCode = m.code;
+      }
+      setFormData(prev => ({
+        ...prev,
+        gstin,
+        name: prev.name || d.trade_name || d.legal_name || '',
+        state_code: stCode || prev.state_code,
+        state: addr.state_name || prev.state,
+        city: addr.city || prev.city,
+        pin_code: (addr.pin_code || '').toString().replace(/\D/g, '').slice(0, 6) || prev.pin_code,
+        address: prev.address || [addr.building, addr.street, addr.locality].filter(Boolean).join(', ') || addr.full || '',
+        status: d.status === 'active' ? 'active' : prev.status,
+      }));
+      setGstinLookup({
+        loading: false,
+        error: '',
+        notice: d.sandbox_mode
+          ? 'Appyflow returned a SANDBOX/free-tier sample. Verify or upgrade plan for real data.'
+          : (d.provider_message || ''),
+      });
+    } catch (e) {
+      setGstinLookup({
+        loading: false,
+        error: e.response?.data?.detail || 'GSTIN lookup failed',
+        notice: '',
+      });
+    }
+  };
+
   return (
     <div className="space-y-6" data-testid="customers-page">
       <div className="flex items-center justify-between">
@@ -131,9 +180,42 @@ export default function CustomersPage() {
                   <label className="text-sm font-medium">Name *</label>
                   <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} data-testid="customer-name-input" />
                 </div>
-                <div>
-                  <label className="text-sm font-medium">GSTIN</label>
-                  <input type="text" className="w-full mt-1 px-3 py-2 border border-[#D1D5DB] rounded-sm font-mono uppercase" maxLength={15} placeholder="22AAAAA0000A1Z5" value={formData.gstin} onChange={e => setFormData({...formData, gstin: e.target.value.toUpperCase()})} data-testid="customer-gstin-input" />
+                <div className="col-span-2">
+                  <label className="text-sm font-medium flex items-center gap-2">
+                    GSTIN
+                    <span className="text-[10px] text-[#6B7280] font-normal italic">— click Fetch to auto-fill name, state &amp; address</span>
+                  </label>
+                  <div className="mt-1 flex items-stretch gap-2">
+                    <input
+                      type="text"
+                      className="flex-1 px-3 py-2 border border-[#D1D5DB] rounded-sm font-mono uppercase"
+                      maxLength={15}
+                      placeholder="22AAAAA0000A1Z5"
+                      value={formData.gstin}
+                      onChange={e => setFormData({...formData, gstin: e.target.value.toUpperCase()})}
+                      data-testid="customer-gstin-input"
+                    />
+                    <button
+                      type="button"
+                      onClick={fetchFromGstin}
+                      disabled={gstinLookup.loading || (formData.gstin || '').length !== 15}
+                      className="btn-secondary flex items-center gap-1 px-3 disabled:opacity-50"
+                      data-testid="customer-gstin-fetch-btn"
+                    >
+                      {gstinLookup.loading
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <Search className="w-4 h-4" />}
+                      <span>{gstinLookup.loading ? 'Fetching…' : 'Fetch'}</span>
+                    </button>
+                  </div>
+                  {gstinLookup.error && (
+                    <div className="mt-1 text-[11px] text-[#9B1C1C]" data-testid="customer-gstin-error">{gstinLookup.error}</div>
+                  )}
+                  {gstinLookup.notice && !gstinLookup.error && (
+                    <div className="mt-1 text-[11px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded-sm" data-testid="customer-gstin-notice">
+                      {gstinLookup.notice}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-sm font-medium">State</label>

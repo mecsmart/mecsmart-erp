@@ -45,6 +45,12 @@ export default function BOMPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingBom, setEditingBom] = useState(null);
+  // Stack of parent BOM edit contexts. When the user clicks "Edit <child> BOM"
+  // from inside an open BOM edit dialog, we push the current {bom, formData}
+  // here, then load the child BOM into the SAME dialog (no close/reopen flicker).
+  // When the child save/cancel completes we pop the stack and restore the parent's
+  // editing state, so the user lands back on the parent BOM edit screen.
+  const [bomEditStack, setBomEditStack] = useState([]);
   const [viewBom, setViewBom] = useState(null);
   const [bomExplosion, setBomExplosion] = useState(null);
   const [expandedItems, setExpandedItems] = useState({});
@@ -188,10 +194,21 @@ export default function BOMPage() {
         await api.post('/api/bom', payload);
         toast.success(`BOM "${payload.name}" created`, { id: toastId });
       }
-      setIsDialogOpen(false);
-      setEditingBom(null);
-      resetForm();
+      // If the user was editing a child BOM (via the "Edit <child> BOM" button
+      // inside a parent edit), pop the stack and restore the parent's edit
+      // state — keeping the dialog open. Only when the stack is empty do we
+      // actually close the dialog.
       await fetchBoms();
+      if (bomEditStack.length > 0) {
+        const parent = bomEditStack[bomEditStack.length - 1];
+        setBomEditStack(s => s.slice(0, -1));
+        setEditingBom(parent.bom);
+        setFormData(parent.formData);
+      } else {
+        setIsDialogOpen(false);
+        setEditingBom(null);
+        resetForm();
+      }
       if (viewBom?.id) {
         await fetchBomExplosion(viewBom.id);
       }
@@ -203,6 +220,31 @@ export default function BOMPage() {
     }
   };
 
+  // Sort BOM components for the edit dialog: SG → CP → RM, then numeric part_number.
+  // This mirrors the explosion-table sort so the user sees a consistent ordering
+  // when they expand a BOM panel and when they edit it. Components without a
+  // resolved item (newly added empty rows) sink to the bottom.
+  const sortBomComponentsForEdit = (components, itemMaster) => {
+    const cat = { sub_assembly: 0, component: 1, raw_material: 2 };
+    const lookup = new Map((itemMaster || []).map(i => [i.id, i]));
+    return [...(components || [])].sort((a, b) => {
+      const ia = lookup.get(a.item_id);
+      const ib = lookup.get(b.item_id);
+      // Empty rows always last, preserving relative order
+      if (!ia && !ib) return 0;
+      if (!ia) return 1;
+      if (!ib) return -1;
+      const ra = (cat[ia.category] === undefined) ? 99 : cat[ia.category];
+      const rb = (cat[ib.category] === undefined) ? 99 : cat[ib.category];
+      if (ra !== rb) return ra - rb;
+      return (ia.part_number || '').localeCompare(
+        ib.part_number || '',
+        undefined,
+        { numeric: true, sensitivity: 'base' }
+      );
+    });
+  };
+
   const handleEdit = (bom) => {
     setEditingBom(bom);
     setFormData({
@@ -212,7 +254,7 @@ export default function BOMPage() {
       revision: bom.revision,
       status: bom.status,
       effectivity_date: bom.effectivity_date ? bom.effectivity_date.split('T')[0] : '',
-      components: bom.components || [],
+      components: sortBomComponentsForEdit(bom.components || [], items),
       parent_routings: bom.parent_routings || [],
     });
     setIsDialogOpen(true);
@@ -510,9 +552,21 @@ export default function BOMPage() {
           )}
         {canEdit && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => {
+            // Closing the dialog (Esc, X, click-outside) — if the user was
+            // editing a child BOM, pop back to the parent instead of closing
+            // the dialog entirely. This keeps the parent BOM edit screen
+            // visible after the user dismisses the child window.
+            if (!open && bomEditStack.length > 0) {
+              const parent = bomEditStack[bomEditStack.length - 1];
+              setBomEditStack(s => s.slice(0, -1));
+              setEditingBom(parent.bom);
+              setFormData(parent.formData);
+              return;
+            }
             setIsDialogOpen(open);
             if (!open) {
               setEditingBom(null);
+              setBomEditStack([]);
               resetForm();
             }
           }}>
@@ -525,6 +579,22 @@ export default function BOMPage() {
             <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle className="font-[Chivo]">{editingBom ? 'Edit BOM' : 'Create New BOM'}</DialogTitle>
+                {bomEditStack.length > 0 && (
+                  <div className="text-[11px] text-[#6B7280] mt-1 flex items-center gap-1" data-testid="bom-edit-breadcrumb">
+                    <span className="text-[#9CA3AF] uppercase tracking-wide">Editing nested:</span>
+                    {bomEditStack.map((p, i) => (
+                      <span key={i} className="flex items-center gap-1">
+                        <span className="mono font-semibold text-[#1D3557]">
+                          {(items.find(it => it.id === p.bom?.parent_item_id) || {}).part_number || p.bom?.name}
+                        </span>
+                        <span className="text-[#9CA3AF]">›</span>
+                      </span>
+                    ))}
+                    <span className="mono font-semibold text-[#723B13]">
+                      {(items.find(it => it.id === editingBom?.parent_item_id) || {}).part_number || editingBom?.name}
+                    </span>
+                  </div>
+                )}
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4 mt-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -725,7 +795,32 @@ export default function BOMPage() {
                                     <span>
                                       Process cost is set on <span className="font-semibold text-[#1E429F]">{compItem?.part_number}</span>'s own BOM (Parent Item Routings): <span className="mono">{names || 'none'}</span> = <span className="mono font-semibold">{formatCurrency(total)}</span>
                                     </span>
-                                    <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsDialogOpen(false); setTimeout(() => handleEdit(childBom), 100); }} className="text-[10px] text-[#1D3557] underline hover:no-underline flex items-center gap-0.5" data-testid={`comp-${index}-goto-child-bom`}>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        // Push the current parent context onto the stack so we
+                                        // can return to it after the child save/cancel — keep
+                                        // the dialog open and just swap content.
+                                        if (editingBom) {
+                                          setBomEditStack(s => [...s, { bom: editingBom, formData: formData }]);
+                                        }
+                                        setEditingBom(childBom);
+                                        setFormData({
+                                          parent_item_id: childBom.parent_item_id,
+                                          name: childBom.name,
+                                          description: childBom.description || '',
+                                          revision: childBom.revision,
+                                          status: childBom.status,
+                                          effectivity_date: childBom.effectivity_date ? childBom.effectivity_date.split('T')[0] : '',
+                                          components: sortBomComponentsForEdit(childBom.components || [], items),
+                                          parent_routings: childBom.parent_routings || [],
+                                        });
+                                      }}
+                                      className="text-[10px] text-[#1D3557] underline hover:no-underline flex items-center gap-0.5"
+                                      data-testid={`comp-${index}-goto-child-bom`}
+                                    >
                                       <Edit2 className="w-3 h-3" />Edit {compItem?.part_number} BOM
                                     </button>
                                   </div>
@@ -815,8 +910,24 @@ export default function BOMPage() {
                 </div>
 
                 <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
-                  <button type="button" onClick={() => setIsDialogOpen(false)} className="btn-secondary">
-                    Cancel
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Cancel — if we're inside a child edit, pop back to parent
+                      // instead of closing the entire dialog.
+                      if (bomEditStack.length > 0) {
+                        const parent = bomEditStack[bomEditStack.length - 1];
+                        setBomEditStack(s => s.slice(0, -1));
+                        setEditingBom(parent.bom);
+                        setFormData(parent.formData);
+                        return;
+                      }
+                      setIsDialogOpen(false);
+                    }}
+                    className="btn-secondary"
+                    data-testid="bom-cancel-btn"
+                  >
+                    {bomEditStack.length > 0 ? 'Back to Parent BOM' : 'Cancel'}
                   </button>
                   <button type="submit" className="btn-primary" data-testid="bom-save-btn">
                     {editingBom ? 'Update BOM' : 'Create BOM'}
