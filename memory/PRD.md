@@ -20,6 +20,9 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-05-01** — **2 P0 fixes (BOM export type column + creator-signature prints):**
+  1. **BOM Excel export** now has **Parent Type** (col D) and **Component Type** (col I) columns with the short badge values used by the UI: FG / SG / Part / RM. Importer tolerates both formats (accepts new columns, still reads legacy files without them). Verified: `FG-001 → PT=FG, CT=RM/SG`.
+  2. **Print signatures belong to the document creator, not the current user.** Backend `_enrich_quotation`, `_enrich_proforma`, `_enrich_tax_invoice`, and `/po/{id}/print-data` now attach `created_by_user: {name, email, signature_url}`. Frontend `printInvoiceDoc` uses `doc.created_by_user ?? currentUser`; `POPrintDialog` embeds the creator's signature image in the "Prepared By" block. Verified via API: `QUO000024` → `created_by_user.name='System Admin', has_sig=True`.
 - **2026-04-30 (very late)** — **3 P0 fixes (RM BOM guard + clearer component search + HSN on Quotation):**
   1. **RM items can no longer have a BOM.** Added a category check in BOTH `POST /api/bom` and the Excel `import_bom_excel` endpoint that rejects any row whose parent is a `raw_material`. The manual UI already blocked this; now imports + raw API calls do too. One stray BOM with an RM parent (left over from a prior import) was deleted.
   2. **BOM component picker placeholder updated** to "Type part no. or name…" so the field clearly invites typing. Search already matches part_number + name + description.

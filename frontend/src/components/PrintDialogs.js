@@ -307,13 +307,22 @@ export function POPrintDialog({ po, open, onClose }) {
       termsHTML = `<div class="terms"><strong>Terms & Conditions:</strong><br/>${opts.termsText.replace(/\n/g, '<br/>')}</div>`;
     }
 
-    // Signatures
+    // Signatures — "Prepared By" now shows the document creator's signature
+    // image + name (attached by backend as d.created_by_user). Falls back to a
+    // blank signature line if the creator was deleted.
     let sigHTML = '';
     if (opts.showSignatures) {
+      const creator = d.created_by_user || {};
+      const creatorSignImg = creator.signature_url
+        ? `<img src="${creator.signature_url}" alt="signature" style="max-width:160px;max-height:48px;display:block;margin:0 auto 4px;" />`
+        : '<div style="height:48px;"></div>';
+      const creatorName = creator.name
+        ? `<div style="font-size:10px;color:#374151;margin-top:2px;">${creator.name}</div>`
+        : '';
       sigHTML = `<div class="signatures">
-        <div class="sign-block"><div class="sign-line">Prepared By</div></div>
-        <div class="sign-block"><div class="sign-line">Authorized Signatory</div></div>
-        <div class="sign-block"><div class="sign-line">Supplier Acceptance</div></div>
+        <div class="sign-block">${creatorSignImg}<div class="sign-line">Prepared By</div>${creatorName}</div>
+        <div class="sign-block"><div style="height:48px;"></div><div class="sign-line">Authorized Signatory</div></div>
+        <div class="sign-block"><div style="height:48px;"></div><div class="sign-line">Supplier Acceptance</div></div>
       </div>`;
     }
 

@@ -3525,7 +3525,11 @@ function numberToIndianWords(num) {
 function printInvoiceDoc(doc, opts) {
   const esc = (s) => String(s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const company = opts.company || {};
-  const user = opts.user || {};
+  const currentUser = opts.user || {};
+  // Signature belongs to the DOCUMENT CREATOR (backend attaches
+  // `doc.created_by_user`). If missing (e.g. pre-enrichment legacy docs), we
+  // fall back to the currently logged-in user so prints still render.
+  const signer = doc.created_by_user || currentUser;
   const cfg = {
     name: company.company_name || 'Company Name',
     tagline: company.tagline || '',
@@ -3738,8 +3742,8 @@ ${(isQuotation && opts.includeCover) ? `
   </div>
   ${(company.quotation_cover_intro || '') ? `<div class="cover-intro">${esc(company.quotation_cover_intro)}</div>` : ''}
   <div class="cover-sign">
-    ${user.signature_url ? `<img src="${esc(user.signature_url)}" class="cover-sign-img" alt="sign"/>` : ''}
-    <div class="cover-sign-name">${esc(user.name || 'Authorised Signatory')}</div>
+    ${signer.signature_url ? `<img src="${esc(signer.signature_url)}" class="cover-sign-img" alt="sign"/>` : ''}
+    <div class="cover-sign-name">${esc(signer.name || 'Authorised Signatory')}</div>
     <div class="cover-sign-title">For ${esc(cfg.name)}</div>
   </div>
 </div>
@@ -3894,9 +3898,9 @@ ${(isQuotation && opts.includeCover) ? `
       <div class="auth-label">Signature &amp; Stamp</div>
     </div>
     <div class="sign-col">
-      ${user.signature_url ? `<img src="${esc(user.signature_url)}" class="sign-img" alt="signature"/>` : '<div style="height:54px"></div>'}
+      ${signer.signature_url ? `<img src="${esc(signer.signature_url)}" class="sign-img" alt="signature"/>` : '<div style="height:54px"></div>'}
       <div class="line-box">For ${esc(cfg.name)}</div>
-      <div class="auth-label">${esc(user.name || 'Authorised Signatory')}</div>
+      <div class="auth-label">${esc(signer.name || 'Authorised Signatory')}</div>
     </div>
   </div>
 

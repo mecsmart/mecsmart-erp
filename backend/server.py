@@ -2814,6 +2814,8 @@ async def get_po_print_data(po_id: str, request: Request):
         line["item"] = item
     company = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
     order["company"] = company
+    # Attach creator's name + signature for print (not current logged-in user).
+    order["created_by_user"] = await _lookup_creator(order.get("created_by"))
     # Get delivery warehouse details
     if order.get("delivery_warehouse_id"):
         wh = await db.warehouses.find_one({"id": order["delivery_warehouse_id"]}, {"_id": 0})
@@ -6291,8 +6293,8 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
     ws.title = "BOM Tree"
 
     base_headers = [
-        "Level", "Parent Part Number", "Parent Name", "Revision", "Status",
-        "Component Part Number", "Component Name", "Quantity",
+        "Level", "Parent Part Number", "Parent Name", "Parent Type", "Revision", "Status",
+        "Component Part Number", "Component Name", "Component Type", "Quantity",
         "Is Alternate", "Effectivity Date",
     ]
     headers = base_headers + routing_names
@@ -6314,6 +6316,18 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
 
     # Aggregator for the second sheet — across all parent routings written.
     routings_summary = {nm: {"occurrences": 0, "total_cost": 0.0} for nm in routing_names}
+
+    # Short Material-Type badge — same short codes the UI shows (FG / SG / Part / RM).
+    # Anything unmapped falls through to "Part" which matches the existing UI convention.
+    def _type_badge(item):
+        cat = (item or {}).get("category") or ""
+        return {
+            "finished_good": "FG",
+            "sub_assembly": "SG",
+            "raw_material": "RM",
+            "component": "Part",
+            "purchased_part": "Part",
+        }.get(cat, "Part" if cat else "")
 
     def _routing_cost_map(rs):
         """Convert a parent_routings list ([str | {name,cost}]) to {name_lower: cost}.
@@ -6367,9 +6381,11 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
                 level,
                 (indent + (parent_item.get("part_number", "") or "")),
                 parent_item.get("name", ""),
+                _type_badge(parent_item),
                 parent_bom.get("revision", ""), parent_bom.get("status", ""),
                 comp_item.get("part_number", "") if comp else "",
                 comp_item.get("name", "") if comp else "",
+                _type_badge(comp_item) if comp else "",
                 comp.get("quantity", 0) if comp else "",
                 ("Yes" if (comp and comp.get("is_alternate")) else ("No" if comp else "")),
                 eff_date,
@@ -6535,8 +6551,8 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
     # columns becomes a routing column. We also map them to existing master
     # Routings (case-insensitive) so we keep canonical naming.
     core_keys = {
-        "level", "parent part number", "parent name", "revision", "status",
-        "component part number", "component name", "quantity",
+        "level", "parent part number", "parent name", "parent type", "revision", "status",
+        "component part number", "component name", "component type", "quantity",
         "is alternate", "effectivity date",
         # Legacy columns that should NOT be misread as routing columns
         "parent routing count", "parent routing cost total",
@@ -9970,6 +9986,31 @@ def _compute_quotation_totals(lines):
         "grand_total": round(subtotal + total_gst, 2),
     }
 
+
+async def _lookup_creator(created_by):
+    """Resolve a document's created_by id to a slim creator profile for print.
+
+    Returns `{name, email, signature_url}` so the print template can stamp the
+    document in the CREATOR's name/signature (not whoever is currently logged
+    in). None if the user was deleted or the id is missing/invalid.
+    """
+    if not created_by:
+        return None
+    try:
+        u = await db.users.find_one(
+            {"_id": ObjectId(created_by)},
+            {"_id": 0, "name": 1, "email": 1, "signature_url": 1},
+        )
+    except Exception:
+        u = None
+    if not u:
+        return None
+    return {
+        "name": u.get("name") or u.get("email") or "",
+        "email": u.get("email") or "",
+        "signature_url": u.get("signature_url") or "",
+    }
+
 async def _enrich_quotation(q):
     q.pop("_id", None)
     if q.get("customer_id"):
@@ -9981,6 +10022,9 @@ async def _enrich_quotation(q):
     if q.get("converted_so_id"):
         so = await db.production_orders.find_one({"id": q["converted_so_id"]}, {"_id": 0, "order_number": 1, "status": 1})
         q["converted_so"] = so
+    # Attach document creator so the printed doc signs in the creator's name
+    # (not the current logged-in user's).
+    q["created_by_user"] = await _lookup_creator(q.get("created_by"))
     # Hydrate item details on each line
     for ln in (q.get("lines") or []):
         if ln.get("item_id"):
@@ -10516,6 +10560,8 @@ async def _enrich_proforma(p):
             it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1, "hsn_code": 1})
             if it:
                 ln["item"] = it
+    # Attach document creator for signature stamping on the printed PI.
+    p["created_by_user"] = await _lookup_creator(p.get("created_by"))
     return p
 
 @crm_router.get("/proformas")
@@ -10724,6 +10770,8 @@ async def _enrich_tax_invoice(t):
             it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1, "hsn_code": 1})
             if it:
                 ln["item"] = it
+    # Attach document creator for signature stamping on the printed TI.
+    t["created_by_user"] = await _lookup_creator(t.get("created_by"))
     return t
 
 @crm_router.get("/tax-invoices")
