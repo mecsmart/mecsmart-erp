@@ -6293,7 +6293,7 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
     ws.title = "BOM Tree"
 
     base_headers = [
-        "Level", "Parent Part Number", "Parent Name", "Parent Type", "Revision", "Status",
+        "Level", "Parent Part Number", "Parent Name", "Revision", "Status",
         "Component Part Number", "Component Name", "Component Type", "Quantity",
         "Is Alternate", "Effectivity Date",
     ]
@@ -6381,7 +6381,6 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
                 level,
                 (indent + (parent_item.get("part_number", "") or "")),
                 parent_item.get("name", ""),
-                _type_badge(parent_item),
                 parent_bom.get("revision", ""), parent_bom.get("status", ""),
                 comp_item.get("part_number", "") if comp else "",
                 comp_item.get("name", "") if comp else "",
@@ -6551,9 +6550,11 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
     # columns becomes a routing column. We also map them to existing master
     # Routings (case-insensitive) so we keep canonical naming.
     core_keys = {
-        "level", "parent part number", "parent name", "parent type", "revision", "status",
+        "level", "parent part number", "parent name", "revision", "status",
         "component part number", "component name", "component type", "quantity",
         "is alternate", "effectivity date",
+        # "parent type" — tolerated but ignored if an older export includes it
+        "parent type",
         # Legacy columns that should NOT be misread as routing columns
         "parent routing count", "parent routing cost total",
         "parent routings (name:cost)", "parent routings",
