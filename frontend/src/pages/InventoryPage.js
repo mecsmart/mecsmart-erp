@@ -159,6 +159,10 @@ export default function InventoryPage() {
   const canEditItemMaster = user?.role === 'admin'
     || hasPermission('items', 'edit')
     || hasPermission('items', 'create');
+  // Price-visibility flags — gate sale/purchase price columns and the
+  // corresponding inputs in the stock-edit dialog. Admins always see them.
+  const canViewSalePrice = user?.role === 'admin' || user?.is_admin_group || hasPermission('inventory_sale_price', 'view');
+  const canViewPurchasePrice = user?.role === 'admin' || user?.is_admin_group || hasPermission('inventory_purchase_price', 'view');
 
   useEffect(() => {
     fetchData();
@@ -751,34 +755,40 @@ export default function InventoryPage() {
                       </div>
                       {isRM ? (
                         <>
-                          <div>
-                            <label className="block text-xs font-semibold text-[#111827] mb-1">Purchase Price</label>
-                            <input type="number" step="0.01" min="0"
-                              value={stockEditForm.purchase_price}
-                              onChange={(e) => setStockEditForm({ ...stockEditForm, purchase_price: parseFloat(e.target.value) || 0 })}
-                              className="input-field mono"
-                              data-testid="stock-edit-purchase-price" />
-                            <p className="text-[10px] text-[#6B7280] mt-0.5">Auto-updates from latest PO</p>
-                          </div>
-                          <div>
+                          {canViewPurchasePrice && (
+                            <div>
+                              <label className="block text-xs font-semibold text-[#111827] mb-1">Purchase Price</label>
+                              <input type="number" step="0.01" min="0"
+                                value={stockEditForm.purchase_price}
+                                onChange={(e) => setStockEditForm({ ...stockEditForm, purchase_price: parseFloat(e.target.value) || 0 })}
+                                className="input-field mono"
+                                data-testid="stock-edit-purchase-price" />
+                              <p className="text-[10px] text-[#6B7280] mt-0.5">Auto-updates from latest PO</p>
+                            </div>
+                          )}
+                          {canViewSalePrice && (
+                            <div>
+                              <label className="block text-xs font-semibold text-[#111827] mb-1">Sale Price</label>
+                              <input type="number" step="0.01" min="0"
+                                value={stockEditForm.sale_price}
+                                onChange={(e) => setStockEditForm({ ...stockEditForm, sale_price: parseFloat(e.target.value) || 0 })}
+                                className="input-field mono"
+                                data-testid="stock-edit-sale-price" />
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        canViewSalePrice && (
+                          <div className="col-span-2">
                             <label className="block text-xs font-semibold text-[#111827] mb-1">Sale Price</label>
                             <input type="number" step="0.01" min="0"
                               value={stockEditForm.sale_price}
                               onChange={(e) => setStockEditForm({ ...stockEditForm, sale_price: parseFloat(e.target.value) || 0 })}
                               className="input-field mono"
                               data-testid="stock-edit-sale-price" />
+                            <p className="text-[10px] text-[#6B7280] mt-0.5">Unit cost is rolled up from BOM for {it.category?.replace('_', ' ')}</p>
                           </div>
-                        </>
-                      ) : (
-                        <div className="col-span-2">
-                          <label className="block text-xs font-semibold text-[#111827] mb-1">Sale Price</label>
-                          <input type="number" step="0.01" min="0"
-                            value={stockEditForm.sale_price}
-                            onChange={(e) => setStockEditForm({ ...stockEditForm, sale_price: parseFloat(e.target.value) || 0 })}
-                            className="input-field mono"
-                            data-testid="stock-edit-sale-price" />
-                          <p className="text-[10px] text-[#6B7280] mt-0.5">Unit cost is rolled up from BOM for {it.category?.replace('_', ' ')}</p>
-                        </div>
+                        )
                       )}
                     </div>
                   </div>

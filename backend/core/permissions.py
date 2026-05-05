@@ -7,11 +7,16 @@ and per-role-group permissions on top of these defaults.
 
 # Module permission definitions.
 # NOTE: `bom_process_cost` supports only [view, edit]; `bom_rollup_cost` supports only [view].
-# Every other module supports the full CRUD set (`ALL_ACTIONS`).
+# Pseudo-modules `inventory_sale_price` / `inventory_purchase_price` /
+# `inventory_configuration` only have [view] and gate price-column visibility
+# and access to the Inventory Configuration screen respectively. Every other
+# module supports the full CRUD set (`ALL_ACTIONS`).
 ALL_MODULES = [
     "dashboard", "items", "bom", "routings", "bom_process_cost", "bom_rollup_cost",
     "mrp", "production", "manufacturing",
-    "quality", "inventory", "suppliers", "customers",
+    "quality", "inventory", "inventory_sale_price", "inventory_purchase_price",
+    "inventory_configuration",
+    "suppliers", "customers",
     "purchase_orders", "purchase_invoices", "delivery_challan", "job_work",
     "stores", "settings",
     "crm_marketing", "crm_support",
@@ -24,6 +29,9 @@ ALL_ACTIONS = ["view", "create", "edit", "delete"]
 MODULE_ACTIONS = {
     "bom_process_cost": ["view", "edit"],
     "bom_rollup_cost": ["view"],
+    "inventory_sale_price": ["view"],
+    "inventory_purchase_price": ["view"],
+    "inventory_configuration": ["view"],
 }
 
 

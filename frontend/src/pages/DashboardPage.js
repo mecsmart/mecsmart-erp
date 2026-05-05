@@ -33,9 +33,17 @@ export default function DashboardPage() {
     }
   };
 
-  // Permission-aware quick action helpers — uses live `hasPermission` so that
-  // custom roles only see actions they actually have create rights for.
-  const canCreate = (mod) => user?.role === 'admin' || hasPermission(mod, 'create');
+  // Permission helpers — gate KPI navigation + quick actions on the granular
+  // permission map. Admins always pass.
+  const isAdmin = user?.role === 'admin' || user?.is_admin_group;
+  const canView = (mod) => isAdmin || hasPermission(mod, 'view');
+  const canCreate = (mod) => isAdmin || hasPermission(mod, 'create');
+
+  // Click handler that respects view permission. If the user can't view the
+  // target module, the tile becomes a passive card (no navigation, lock icon).
+  const navIfAllowed = (mod, path) => () => {
+    if (canView(mod)) navigate(path);
+  };
 
   if (loading) {
     return (
@@ -52,12 +60,13 @@ export default function DashboardPage() {
         <p className="text-xs text-[#4B5563]">Overview of your manufacturing operations</p>
       </div>
 
-      {/* KPI Cards — clickable, navigate to the relevant module */}
+      {/* KPI Cards — clickable IF the user has view permission on the target module */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         <button
           type="button"
-          onClick={() => navigate('/items')}
-          className="kpi-card text-left hover:shadow-md hover:border-[#1D3557] transition-all cursor-pointer"
+          onClick={navIfAllowed('items', '/items')}
+          disabled={!canView('items')}
+          className="kpi-card text-left hover:shadow-md hover:border-[#1D3557] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:border-[#E5E7EB]"
           data-testid="kpi-total-items"
         >
           <div className="flex items-center justify-between">
@@ -73,8 +82,9 @@ export default function DashboardPage() {
 
         <button
           type="button"
-          onClick={() => navigate('/bom')}
-          className="kpi-card text-left hover:shadow-md hover:border-[#1D3557] transition-all cursor-pointer"
+          onClick={navIfAllowed('bom', '/bom')}
+          disabled={!canView('bom')}
+          className="kpi-card text-left hover:shadow-md hover:border-[#1D3557] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:border-[#E5E7EB]"
           data-testid="kpi-active-boms"
         >
           <div className="flex items-center justify-between">
@@ -90,8 +100,9 @@ export default function DashboardPage() {
 
         <button
           type="button"
-          onClick={() => navigate('/production')}
-          className="kpi-card text-left hover:shadow-md hover:border-[#1D3557] transition-all cursor-pointer"
+          onClick={navIfAllowed('production', '/production')}
+          disabled={!canView('production')}
+          className="kpi-card text-left hover:shadow-md hover:border-[#1D3557] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:border-[#E5E7EB]"
           data-testid="kpi-pending-orders"
         >
           <div className="flex items-center justify-between">
@@ -107,8 +118,9 @@ export default function DashboardPage() {
 
         <button
           type="button"
-          onClick={() => navigate('/inventory?lowStock=1')}
-          className="kpi-card text-left hover:shadow-md hover:border-[#9B1C1C] transition-all cursor-pointer"
+          onClick={navIfAllowed('inventory', '/inventory?lowStock=1')}
+          disabled={!canView('inventory')}
+          className="kpi-card text-left hover:shadow-md hover:border-[#9B1C1C] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:border-[#E5E7EB]"
           data-testid="kpi-low-stock"
         >
           <div className="flex items-center justify-between">

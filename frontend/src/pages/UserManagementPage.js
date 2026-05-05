@@ -39,6 +39,9 @@ const MODULE_GROUPS = [
   ] },
   { main: 'Inventory', subs: [
     { key: 'inventory', label: 'Stock' },
+    { key: 'inventory_sale_price', label: 'Stock — Sale Price (visibility)' },
+    { key: 'inventory_purchase_price', label: 'Stock — Purchase Price (visibility)' },
+    { key: 'inventory_configuration', label: 'Inventory Configuration' },
     { key: 'mrp', label: 'MRP' },
     { key: 'purchase_orders', label: 'Purchase Orders' },
     { key: 'purchase_invoices', label: 'Purchase Invoice' },
