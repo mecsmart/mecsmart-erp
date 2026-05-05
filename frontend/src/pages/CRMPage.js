@@ -94,7 +94,9 @@ export default function CRMPage() {
         api.get('/api/crm/quotations'),
         api.get('/api/items').catch(() => ({ data: [] })),
         api.get('/api/customers'),
-        api.get('/api/users').catch(() => ({ data: [] })),
+        // /api/users requires admin. Fall back to /api/users/assignable (open to any
+        // authenticated user) so Support / Sales reps can still pick assignees.
+        api.get('/api/users').catch(() => api.get('/api/users/assignable').catch(() => ({ data: [] }))),
         api.get('/api/crm/pipeline-config/marketing').catch(() => ({ data: null })),
         api.get('/api/crm/pipeline-config/support').catch(() => ({ data: null })),
       ]);
@@ -111,8 +113,8 @@ export default function CRMPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const canMarketingEdit = user?.role === 'admin' || user?.permissions?.crm_marketing?.includes('create');
-  const canSupportEdit = user?.role === 'admin' || user?.permissions?.crm_support?.includes('create');
+  const canMarketingEdit = user?.role === 'admin' || user?.permissions?.crm_marketing?.includes('create') || user?.permissions?.crm_marketing?.includes('edit');
+  const canSupportEdit = user?.role === 'admin' || user?.permissions?.crm_support?.includes('create') || user?.permissions?.crm_support?.includes('edit');
 
   // Breadcrumb label
   const crumbMain = activeTab === 'quotations' ? 'Quotations' : activeTab === 'support' ? 'Support' : 'Marketing';
@@ -899,6 +901,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     notes: '',
     terms: '',
     status: 'draft',
+    currency: 'INR',
     lines: [emptyQuotationLine()],
   };
   const [form, setForm] = useState(emptyForm);
@@ -925,6 +928,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
         notes: q.notes || '',
         terms: q.terms || '',
         status: q.status || 'draft',
+        currency: q.currency || 'INR',
         lines: (q.lines && q.lines.length) ? q.lines.map(l => ({ ...l })) : [emptyQuotationLine()],
       });
     } else if (fromLead) {
@@ -1254,6 +1258,21 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                 <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v }))}>
                   <SelectTrigger data-testid="quotation-status-form"><SelectValue /></SelectTrigger>
                   <SelectContent>{QUOTATION_STATUSES.filter(s => s.key !== 'converted').map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">
+                  Currency <span className="text-[10px] font-normal text-[#6B7280]">(non-INR ⇒ no GST)</span>
+                </label>
+                <Select value={form.currency || 'INR'} onValueChange={v => setForm(f => ({ ...f, currency: v }))}>
+                  <SelectTrigger data-testid="quotation-currency"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="INR">INR — ₹</SelectItem>
+                    <SelectItem value="USD">USD — $</SelectItem>
+                    <SelectItem value="EUR">EUR — €</SelectItem>
+                    <SelectItem value="GBP">GBP — £</SelectItem>
+                    <SelectItem value="AED">AED — د.إ</SelectItem>
+                  </SelectContent>
                 </Select>
               </div>
             </div>
@@ -3504,9 +3523,13 @@ function WhatsAppShareDialog({ open, onOpenChange, doc, kind, company, user }) {
   );
 }
 
-function numberToIndianWords(num) {
+function numberToIndianWords(num, currencyCode) {
   const n = Math.round(parseFloat(num) || 0);
-  if (n === 0) return 'Rupees Zero Only';
+  const CUR_NAMES = {
+    INR: 'Rupees', USD: 'Dollars', EUR: 'Euros', GBP: 'Pounds', AED: 'Dirhams',
+  };
+  const main = CUR_NAMES[(currencyCode || 'INR').toUpperCase()] || 'Rupees';
+  if (n === 0) return `${main} Zero Only`;
   const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
     'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
   const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
@@ -3521,7 +3544,7 @@ function numberToIndianWords(num) {
   if (lakh) parts.push(threeDigit(lakh) + ' Lakh');
   if (thousand) parts.push(threeDigit(thousand) + ' Thousand');
   if (rest) parts.push(threeDigit(rest));
-  return 'Rupees ' + parts.join(' ') + ' Only';
+  return `${main} ` + parts.join(' ') + ' Only';
 }
 
 function printInvoiceDoc(doc, opts) {
@@ -3552,6 +3575,11 @@ function printInvoiceDoc(doc, opts) {
   const isTaxInvoice = opts.kind === 'tax_invoice';
   const isProforma = opts.kind === 'proforma';
   const isQuotation = opts.kind === 'quotation';
+  // Currency support — non-INR documents are export/import (no GST).
+  const docCurrency = (doc.currency || 'INR').toUpperCase();
+  const isExportDoc = docCurrency !== 'INR';
+  const CUR_SYMBOLS = { INR: '₹', USD: '$', EUR: '€', GBP: '£', AED: 'د.إ' };
+  const sym = CUR_SYMBOLS[docCurrency] || '₹';
   // Accent: Quotation #444853 (slate), PI #E0C09A (tan/beige), TI → plain #2D3E50 used ONLY for
   // emphasised text (company name, invoice no, TAX INVOICE title, grand total, T&C heading, item header bg).
   // Everything else on TI stays plain black text on white — no filled info bars / no bars on bill-to etc.
@@ -3862,18 +3890,19 @@ ${(isQuotation && opts.includeCover) ? `
       ${(!cfg.bank_name && !cfg.bank_account) ? '<div style="font-size:10px;color:#94a3b8">Bank details not configured. Set them in Settings → Company Details.</div>' : ''}
     </div>
     <table class="totals">
-      <tr><td class="lbl">Subtotal</td><td class="val">₹${(doc.subtotal || 0).toFixed(2)}</td></tr>
-      ${doc.total_discount ? `<tr><td class="lbl">Total Discount</td><td class="val">-₹${doc.total_discount.toFixed(2)}</td></tr>` : ''}
-      ${isInter
-        ? `<tr><td class="lbl">IGST</td><td class="val">₹${(doc.igst || 0).toFixed(2)}</td></tr>`
-        : `<tr><td class="lbl">CGST</td><td class="val">₹${(doc.cgst || 0).toFixed(2)}</td></tr><tr><td class="lbl">SGST</td><td class="val">₹${(doc.sgst || 0).toFixed(2)}</td></tr>`
+      <tr><td class="lbl">Subtotal</td><td class="val">${sym}${(doc.subtotal || 0).toFixed(2)}</td></tr>
+      ${doc.total_discount ? `<tr><td class="lbl">Total Discount</td><td class="val">-${sym}${doc.total_discount.toFixed(2)}</td></tr>` : ''}
+      ${isExportDoc ? '' : (isInter
+        ? `<tr><td class="lbl">IGST</td><td class="val">${sym}${(doc.igst || 0).toFixed(2)}</td></tr>`
+        : `<tr><td class="lbl">CGST</td><td class="val">${sym}${(doc.cgst || 0).toFixed(2)}</td></tr><tr><td class="lbl">SGST</td><td class="val">${sym}${(doc.sgst || 0).toFixed(2)}</td></tr>`)
       }
-      <tr class="grand"><td class="lbl">Grand Total</td><td class="val">₹${(doc.grand_total || 0).toFixed(2)}</td></tr>
-      <tr class="words-row"><td colspan="2"><strong>In Words:</strong> ${esc(numberToIndianWords(doc.grand_total || 0))}</td></tr>
+      <tr class="grand"><td class="lbl">Grand Total</td><td class="val">${sym}${(doc.grand_total || 0).toFixed(2)}</td></tr>
+      ${isExportDoc ? `<tr><td colspan="2" style="font-size:9px;color:#6B7280;text-align:right;padding:2px 6px;">Export/Import — GST not applicable. Currency: ${docCurrency}</td></tr>` : ''}
+      <tr class="words-row"><td colspan="2"><strong>In Words:</strong> ${esc(numberToIndianWords(doc.grand_total || 0, docCurrency))}</td></tr>
     </table>
   </div>
 
-  ${isTaxInvoice ? `
+  ${isTaxInvoice && !isExportDoc ? `
   <h4 class="section">HSN-wise Tax Summary</h4>
   <table class="hsn">
     <thead><tr>
@@ -3885,7 +3914,7 @@ ${(isQuotation && opts.includeCover) ? `
   </table>
   ${doc.qr_code ? `<div class="qr-block">
     <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=4&data=${encodeURIComponent(doc.qr_code)}" class="qr-img" alt="Payment QR"/>
-    <div class="qr-caption"><strong>Scan to Pay</strong><br/><span class="qr-note">UPI-compatible payment QR. Total: ₹${(doc.grand_total || 0).toFixed(2)}</span></div>
+    <div class="qr-caption"><strong>Scan to Pay</strong><br/><span class="qr-note">UPI-compatible payment QR. Total: ${sym}${(doc.grand_total || 0).toFixed(2)}</span></div>
   </div>` : ''}
   ` : ''}
 

@@ -24,7 +24,7 @@ const inventoryGroupItems = [
   { name: 'MRP', href: '/mrp', icon: Calculator, module: 'mrp' },
   { name: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart, module: 'purchase_orders' },
   { name: 'Purchase Invoices', href: '/purchase-invoices', icon: FileText, module: 'purchase_orders' },
-  { name: 'Configuration', href: '/inventory/configuration', icon: Cog, module: 'inventory' },
+  { name: 'Configuration', href: '/inventory/configuration', icon: Cog, module: 'inventory_configuration' },
 ];
 
 const productionGroupItems = [
@@ -427,8 +427,13 @@ export default function Layout() {
                 <User className="w-5 h-5 text-[#9CA3AF]" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">{user?.name || 'User'}</p>
-                <p className="text-xs text-[#9CA3AF] truncate">{user?.email}</p>
+                <p className="text-sm font-medium text-white truncate" data-testid="sidebar-user-name">{user?.name || 'User'}</p>
+                <p className="text-xs text-[#9CA3AF] truncate" data-testid="sidebar-user-email">{user?.email}</p>
+                {user?.role_group?.name && (
+                  <p className="text-[10px] uppercase tracking-wide text-[#60A5FA] font-semibold mt-0.5 truncate" data-testid="sidebar-user-group">
+                    {user.role_group.name}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -444,8 +449,8 @@ export default function Layout() {
             <h1 className="text-lg font-semibold font-[Chivo] text-[#111827] hidden sm:block">MecSmart ERP</h1>
           </div>
           <div className="flex items-center space-x-4">
-            <span className={`status-badge ${getRoleBadge(user?.role)}`}>
-              {user?.role?.replace('_', ' ') || 'User'}
+            <span className={`status-badge ${getRoleBadge(user?.role)}`} data-testid="header-user-group-badge">
+              {user?.role_group?.name || user?.role?.replace('_', ' ') || 'User'}
             </span>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

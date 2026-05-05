@@ -29,6 +29,7 @@ const emptyForm = {
   supplier_id: '', expected_date: '', delivery_warehouse_id: '', 
   quotation_ref: '', quotation_date: '', lines: [], additional_charges: [], notes: '',
   revision_label: '',  // Manual revision label ("A", "1", "Rev-01"); blank = auto
+  currency: 'INR',     // INR (default), USD, EUR, GBP, AED — non-INR ⇒ no GST (export/import)
 };
 
 export default function PurchaseOrdersPage() {
@@ -123,6 +124,7 @@ export default function PurchaseOrdersPage() {
       notes: po.notes || '',
       terms_conditions: po.terms_conditions !== undefined ? po.terms_conditions : undefined,
       revision_label: po.revision_label || (po.revision ? `R${po.revision}` : ''),
+      currency: po.currency || 'INR',
     });
     setIsDialogOpen(true);
   };
@@ -342,16 +344,16 @@ export default function PurchaseOrdersPage() {
                       ) : <span className="text-[#9CA3AF]">-</span>}
                     </td>
                     <td className="mono">{po.lines?.length || 0} items</td>
-                    <td className="text-right mono">{formatCurrency(po.subtotal || 0)}</td>
+                    <td className="text-right mono">{formatCurrency(po.subtotal || 0, po.currency)}</td>
                     <td className="text-right">
                       {po.total_tax > 0 ? (
                         <div className="text-xs">
-                          <span className="mono font-medium">{formatCurrency(po.total_tax || 0)}</span>
+                          <span className="mono font-medium">{formatCurrency(po.total_tax || 0, po.currency)}</span>
                           <span className="block text-[#6B7280]">{po.is_inter_state ? 'IGST' : 'CGST+SGST'}</span>
                         </div>
                       ) : <span className="mono text-[#9CA3AF]">-</span>}
                     </td>
-                    <td className="text-right mono font-semibold">{formatCurrency(po.total_amount || 0)}</td>
+                    <td className="text-right mono font-semibold">{formatCurrency(po.total_amount || 0, po.currency)}</td>
                     <td>
                       <span className={`status-badge ${getStatusColor(po.status)}`}>{po.status === 'received' ? 'GRN Done' : po.status === 'short_closed' ? 'Short Closed' : po.status}</span>
                     </td>
@@ -461,19 +463,37 @@ export default function PurchaseOrdersPage() {
               </div>
             </div>
 
-            {/* Row 3: Delivery Warehouse (full width) */}
-            <div>
-              <label className="block text-sm font-semibold text-[#111827] mb-1">Delivery Warehouse</label>
-              <Select value={formData.delivery_warehouse_id || undefined} onValueChange={(v) => setFormData({ ...formData, delivery_warehouse_id: v })}>
-                <SelectTrigger data-testid="po-delivery-warehouse-select"><SelectValue placeholder="Select warehouse" /></SelectTrigger>
-                <SelectContent>
-                  {warehouses.map((w) => <SelectItem key={w.id} value={w.id}>{w.code} - {w.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {formData.delivery_warehouse_id && (() => {
-                const wh = warehouses.find(w => w.id === formData.delivery_warehouse_id);
-                return wh?.address ? <p className="text-xs text-[#6B7280] mt-1 flex items-center"><Truck className="w-3 h-3 mr-1" />{wh.address}</p> : null;
-              })()}
+            {/* Row 3: Delivery Warehouse + Currency */}
+            <div className="grid grid-cols-3 gap-4">
+              <div className="col-span-2">
+                <label className="block text-sm font-semibold text-[#111827] mb-1">Delivery Warehouse</label>
+                <Select value={formData.delivery_warehouse_id || undefined} onValueChange={(v) => setFormData({ ...formData, delivery_warehouse_id: v })}>
+                  <SelectTrigger data-testid="po-delivery-warehouse-select"><SelectValue placeholder="Select warehouse" /></SelectTrigger>
+                  <SelectContent>
+                    {warehouses.map((w) => <SelectItem key={w.id} value={w.id}>{w.code} - {w.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {formData.delivery_warehouse_id && (() => {
+                  const wh = warehouses.find(w => w.id === formData.delivery_warehouse_id);
+                  return wh?.address ? <p className="text-xs text-[#6B7280] mt-1 flex items-center"><Truck className="w-3 h-3 mr-1" />{wh.address}</p> : null;
+                })()}
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-[#111827] mb-1">
+                  Currency
+                  <span className="text-[11px] text-[#6B7280] font-normal ml-1">(non-INR ⇒ no GST)</span>
+                </label>
+                <Select value={formData.currency || 'INR'} onValueChange={(v) => setFormData({ ...formData, currency: v })}>
+                  <SelectTrigger data-testid="po-currency-select"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="INR">INR — ₹</SelectItem>
+                    <SelectItem value="USD">USD — $</SelectItem>
+                    <SelectItem value="EUR">EUR — €</SelectItem>
+                    <SelectItem value="GBP">GBP — £</SelectItem>
+                    <SelectItem value="AED">AED — د.إ</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Order Lines */}
@@ -628,10 +648,12 @@ export default function PurchaseOrdersPage() {
             {formData.lines.length > 0 && (
               <div className="flex justify-end pt-2">
                 <div className="text-right space-y-1 min-w-[220px]">
-                  <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Items Subtotal:</span><span className="mono font-medium">{formatCurrency(calcSubtotal())}</span></div>
-                  {calcChargesTotal() > 0 && <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Charges:</span><span className="mono font-medium">{formatCurrency(calcChargesTotal())}</span></div>}
-                  <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Est. GST:</span><span className="mono font-medium">{formatCurrency(calcGST())}</span></div>
-                  <div className="flex justify-between border-t border-[#D1D5DB] pt-1"><span className="text-sm font-semibold">Total:</span><span className="mono font-bold text-lg">{formatCurrency(calcSubtotal() + calcChargesTotal() + calcGST())}</span></div>
+                  <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Items Subtotal:</span><span className="mono font-medium">{formatCurrency(calcSubtotal(), formData.currency)}</span></div>
+                  {calcChargesTotal() > 0 && <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Charges:</span><span className="mono font-medium">{formatCurrency(calcChargesTotal(), formData.currency)}</span></div>}
+                  {(formData.currency || 'INR') === 'INR' && (
+                    <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Est. GST:</span><span className="mono font-medium">{formatCurrency(calcGST(), formData.currency)}</span></div>
+                  )}
+                  <div className="flex justify-between border-t border-[#D1D5DB] pt-1"><span className="text-sm font-semibold">Total:</span><span className="mono font-bold text-lg">{formatCurrency(calcSubtotal() + calcChargesTotal() + ((formData.currency || 'INR') === 'INR' ? calcGST() : 0), formData.currency)}</span></div>
                 </div>
               </div>
             )}

@@ -458,6 +458,7 @@ class PurchaseOrderCreate(BaseModel):
     notes: Optional[str] = ""
     terms_conditions: Optional[str] = None  # Overrides default PO T&C from company settings
     revision_label: Optional[str] = None    # Manual revision label ("A", "1", "R01")
+    currency: Optional[str] = "INR"          # INR (default), USD, EUR, GBP, AED — non-INR = export/import (no GST)
 
 class PurchaseOrderUpdate(BaseModel):
     supplier_id: Optional[str] = None
@@ -471,6 +472,7 @@ class PurchaseOrderUpdate(BaseModel):
     notes: Optional[str] = None
     terms_conditions: Optional[str] = None
     revision_label: Optional[str] = None
+    currency: Optional[str] = None
 
 class GRNLineVerify(BaseModel):
     item_id: str
@@ -2331,6 +2333,22 @@ async def get_users(request: Request):
         users_list.append(u)
     return users_list
 
+
+@users_router.get("/assignable")
+async def get_assignable_users(request: Request):
+    """Light user list (id/name/email) usable by ANY authenticated user — meant
+    for assignment dropdowns (e.g. Support tickets, Lead owner) so non-admins
+    can also delegate work without exposing the full user-management payload."""
+    await get_current_user(request)
+    users_list = []
+    async for u in db.users.find({}, {"_id": 1, "name": 1, "email": 1}):
+        users_list.append({
+            "id": str(u["_id"]),
+            "name": u.get("name", ""),
+            "email": u.get("email", ""),
+        })
+    return users_list
+
 @users_router.post("", status_code=201)
 async def create_user(user_data: UserCreate, request: Request):
     admin = await get_current_user(request)
@@ -2908,11 +2926,15 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
     # Generate PO number from configurable series
     po_number = await get_next_series_number("po_number")
     
+    # Currency: INR (default) keeps GST. Non-INR (export/import) → no GST.
+    po_currency = (po_data.currency or "INR").upper()
+    is_export = po_currency != "INR"
+
     # Get company settings for GST calculation
     company_settings = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
     company_state = company_settings.get("state_code", "") if company_settings else ""
     supplier_state = supplier.get("state_code", "")
-    is_inter_state = company_state and supplier_state and company_state != supplier_state
+    is_inter_state = (not is_export) and bool(company_state) and bool(supplier_state) and company_state != supplier_state
     
     # Calculate line totals with discount and GST
     lines_with_tax = []
@@ -2945,7 +2967,7 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
             if not line_data.get("description"):
                 line_data["description"] = item_doc.get("description", "")
         
-        gst_rate = line.gst_rate or 0
+        gst_rate = 0 if is_export else (line.gst_rate or 0)
         tax_amount = round(line_amount * gst_rate / 100, 2)
         
         if is_inter_state:
@@ -2973,7 +2995,7 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
     for charge in (po_data.additional_charges or []):
         c_data = charge.model_dump()
         c_amount = charge.amount
-        c_gst_rate = charge.gst_rate or 0
+        c_gst_rate = 0 if is_export else (charge.gst_rate or 0)
         c_tax = round(c_amount * c_gst_rate / 100, 2)
         
         if is_inter_state:
@@ -3024,6 +3046,7 @@ async def create_purchase_order(po_data: PurchaseOrderCreate, request: Request):
         "total_tax": round(total_tax, 2),
         "total_amount": round(total_amount, 2),
         "is_inter_state": is_inter_state,
+        "currency": po_currency,
         "status": "draft",
         "notes": po_data.notes,
         "terms_conditions": po_data.terms_conditions if po_data.terms_conditions is not None else None,
@@ -3222,7 +3245,10 @@ async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, reques
         company_settings = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
         company_state = company_settings.get("state_code", "") if company_settings else ""
         supplier_state = supplier.get("state_code", "") if supplier else ""
-        is_inter_state = company_state and supplier_state and company_state != supplier_state
+        # Currency: explicit update value > existing > default INR. Non-INR ⇒ no GST.
+        po_currency = (po_data.currency or existing_po.get("currency") or "INR").upper()
+        is_export = po_currency != "INR"
+        is_inter_state = (not is_export) and bool(company_state) and bool(supplier_state) and company_state != supplier_state
         
         lines_with_tax = []
         subtotal = 0
@@ -3251,7 +3277,7 @@ async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, reques
                 if not line_data.get("description"):
                     line_data["description"] = item_doc.get("description", "")
             
-            gst_rate = line.gst_rate or 0
+            gst_rate = 0 if is_export else (line.gst_rate or 0)
             tax_amount = round(line_amount * gst_rate / 100, 2)
             if is_inter_state:
                 line_data["igst_amount"] = tax_amount
@@ -3284,7 +3310,7 @@ async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, reques
         for charge in charges_source:
             c_data = charge.model_dump() if hasattr(charge, 'model_dump') else dict(charge)
             c_amount = c_data.get("amount", 0)
-            c_gst_rate = c_data.get("gst_rate", 0)
+            c_gst_rate = 0 if is_export else c_data.get("gst_rate", 0)
             c_tax = round(c_amount * c_gst_rate / 100, 2)
             if is_inter_state:
                 c_data["igst_amount"] = c_tax
@@ -3316,6 +3342,7 @@ async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, reques
             "total_tax": round(total_tax, 2),
             "total_amount": round(total_amount, 2),
             "is_inter_state": is_inter_state,
+            "currency": po_currency,
         }
         if po_data.supplier_id:
             update_data["supplier_id"] = po_data.supplier_id
@@ -3344,6 +3371,10 @@ async def update_purchase_order(po_id: str, po_data: PurchaseOrderUpdate, reques
     # Manual revision label override (BOM-style). Blank string clears it, falling back to numeric revision.
     if po_data.revision_label is not None:
         update_data["revision_label"] = po_data.revision_label.strip() or None
+    # Currency-only update (no line edit) — persist as-is. (When `lines` was provided
+    # above, currency was already written into update_data via the recompute branch.)
+    if po_data.currency is not None and "currency" not in update_data:
+        update_data["currency"] = (po_data.currency or "INR").upper()
     
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
@@ -9989,6 +10020,7 @@ class QuotationCreate(BaseModel):
     notes: Optional[str] = ""
     terms: Optional[str] = ""
     status: Optional[str] = "draft"   # draft | sent | accepted | rejected | converted
+    currency: Optional[str] = "INR"   # INR (default), USD, EUR, GBP, AED — non-INR = export (no GST)
 
 class QuotationUpdate(BaseModel):
     lead_id: Optional[str] = None
@@ -10003,6 +10035,7 @@ class QuotationUpdate(BaseModel):
     notes: Optional[str] = None
     terms: Optional[str] = None
     status: Optional[str] = None
+    currency: Optional[str] = None
 
 def _compute_quotation_totals(lines):
     subtotal = 0.0
@@ -10111,9 +10144,15 @@ async def create_quotation(data: QuotationCreate, request: Request):
     q_no = await _get_next_number("quotation")
     lines = [l.model_dump() for l in data.lines]
     totals = _compute_quotation_totals(lines)
-    # GST split (CGST/SGST vs IGST) based on company state vs customer state — so the
-    # quotation print template shows the correct tax components just like PI / TI.
-    gst_split = await _compute_gst_split(data.customer_id or None, lines)
+    currency = (data.currency or "INR").upper()
+    # Non-INR (export) → GST is not applicable. Otherwise compute CGST/SGST vs IGST.
+    if currency != "INR":
+        gst_split = _zero_gst_split_for_export(lines)
+        # Override the quotation totals so grand_total drops GST too.
+        totals["total_gst"] = 0
+        totals["grand_total"] = totals["subtotal"]
+    else:
+        gst_split = await _compute_gst_split(data.customer_id or None, lines)
     doc = {
         "id": str(uuid.uuid4()),
         "quotation_no": q_no,
@@ -10176,19 +10215,37 @@ async def update_quotation(qid: str, data: QuotationUpdate, request: Request):
         lines = [l if isinstance(l, dict) else l.model_dump() for l in update["lines"]]
         totals = _compute_quotation_totals(lines)
         update["lines"] = lines
-        update.update(totals)
         # Recompute CGST/SGST/IGST split whenever lines change or the customer was
         # swapped — otherwise the print template would still show stale tax amounts.
         cust_id = update.get("customer_id") if "customer_id" in update else existing.get("customer_id")
-        gst_split = await _compute_gst_split(cust_id or None, lines)
+        currency = (update.get("currency") or existing.get("currency") or "INR").upper()
+        if currency != "INR":
+            gst_split = _zero_gst_split_for_export(lines)
+            totals["total_gst"] = 0
+            totals["grand_total"] = totals["subtotal"]
+        else:
+            gst_split = await _compute_gst_split(cust_id or None, lines)
+        update.update(totals)
         update["is_inter_state"] = gst_split["is_inter_state"]
         update["cgst"] = gst_split["cgst"]
         update["sgst"] = gst_split["sgst"]
         update["igst"] = gst_split["igst"]
         update["hsn_summary"] = gst_split["hsn_summary"]
-    elif "customer_id" in update:
-        # Customer changed without line edits — re-split existing lines.
-        gst_split = await _compute_gst_split(update.get("customer_id") or None, existing.get("lines") or [])
+    elif "customer_id" in update or "currency" in update:
+        # Customer or currency changed without line edits — re-split existing lines.
+        currency = (update.get("currency") or existing.get("currency") or "INR").upper()
+        cust_id = update.get("customer_id") if "customer_id" in update else existing.get("customer_id")
+        existing_lines = existing.get("lines") or []
+        if currency != "INR":
+            gst_split = _zero_gst_split_for_export(existing_lines)
+            update["lines"] = existing_lines
+            update["total_gst"] = 0
+            update["grand_total"] = float(existing.get("subtotal") or 0)
+        else:
+            gst_split = await _compute_gst_split(cust_id or None, existing_lines)
+            # Re-derive grand_total in case we're flipping currency back to INR
+            update["total_gst"] = round(gst_split["cgst"] + gst_split["sgst"] + gst_split["igst"], 2)
+            update["grand_total"] = round(float(existing.get("subtotal") or 0) + update["total_gst"], 2)
         update["is_inter_state"] = gst_split["is_inter_state"]
         update["cgst"] = gst_split["cgst"]
         update["sgst"] = gst_split["sgst"]
@@ -10523,6 +10580,43 @@ async def _compute_gst_split(customer_id: Optional[str], lines: List[dict], plac
     }
 
 
+def _zero_gst_split_for_export(lines: List[dict]) -> dict:
+    """For non-INR (export/import) documents, GST is not applicable. Zero out the
+    per-line tax fields and return a zero-split aggregate with HSN bucket carrying
+    only taxable amounts (rate=0)."""
+    hsn_bucket = {}
+    for ln in lines:
+        taxable = float(ln.get("amount") or 0)
+        ln["taxable_value"] = round(taxable, 2)
+        ln["gst_rate"] = 0
+        ln["igst_rate"] = 0
+        ln["igst_amt"] = 0
+        ln["cgst_rate"] = 0
+        ln["cgst_amt"] = 0
+        ln["sgst_rate"] = 0
+        ln["sgst_amt"] = 0
+        hsn = (ln.get("hsn_code") or "").strip() or "-"
+        key = (hsn, 0)
+        if key not in hsn_bucket:
+            hsn_bucket[key] = {"hsn": hsn, "rate": 0, "taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0}
+        hsn_bucket[key]["taxable"] += taxable
+    hsn_summary = [{
+        "hsn": v["hsn"], "rate": v["rate"],
+        "taxable": round(v["taxable"], 2),
+        "cgst": 0, "sgst": 0, "igst": 0,
+    } for v in hsn_bucket.values()]
+    return {
+        "is_inter_state": False,
+        "company_state": "",
+        "customer_state": "",
+        "cgst": 0,
+        "sgst": 0,
+        "igst": 0,
+        "total_gst": 0,
+        "hsn_summary": hsn_summary,
+    }
+
+
 # --------- PROFORMA INVOICE ---------
 class ProformaLine(BaseModel):
     line_no: Optional[int] = None
@@ -10552,6 +10646,7 @@ class ProformaCreate(BaseModel):
     notes: Optional[str] = ""
     terms: Optional[str] = ""
     status: Optional[str] = "draft"  # draft / sent / paid / cancelled / converted
+    currency: Optional[str] = "INR"  # INR (default), USD, EUR, GBP, AED — non-INR = export (no GST)
 
 class ProformaUpdate(BaseModel):
     status: Optional[str] = None
@@ -10566,6 +10661,7 @@ class ProformaUpdate(BaseModel):
     contact_person: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    currency: Optional[str] = None
 
 async def _finalize_invoice_lines(lines: List[dict]) -> dict:
     """Recompute per-line amount (net after discount) and aggregate totals.
@@ -10623,7 +10719,11 @@ async def create_proforma(data: ProformaCreate, request: Request):
     proforma_no = await _get_next_number("proforma")
     lines = [l.model_dump() for l in data.lines]
     base = await _finalize_invoice_lines(lines)
-    gst = await _compute_gst_split(data.customer_id, lines)
+    currency = (data.currency or "INR").upper()
+    if currency != "INR":
+        gst = _zero_gst_split_for_export(lines)
+    else:
+        gst = await _compute_gst_split(data.customer_id, lines)
     doc = {
         "id": str(uuid.uuid4()),
         "proforma_no": proforma_no,
@@ -10655,7 +10755,11 @@ async def update_proforma(pid: str, data: ProformaUpdate, request: Request):
     if "lines" in update:
         lines = [l if isinstance(l, dict) else l.model_dump() for l in update["lines"]]
         base = await _finalize_invoice_lines(lines)
-        gst = await _compute_gst_split(existing.get("customer_id"), lines)
+        currency = (update.get("currency") or existing.get("currency") or "INR").upper()
+        if currency != "INR":
+            gst = _zero_gst_split_for_export(lines)
+        else:
+            gst = await _compute_gst_split(existing.get("customer_id"), lines)
         update["lines"] = lines
         update.update(base)
         update.update({
@@ -10663,6 +10767,22 @@ async def update_proforma(pid: str, data: ProformaUpdate, request: Request):
             "total_gst": gst["total_gst"], "is_inter_state": gst["is_inter_state"],
             "hsn_summary": gst["hsn_summary"],
             "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
+        })
+    elif "currency" in update:
+        # Currency changed without line edits — re-split existing lines.
+        existing_lines = existing.get("lines") or []
+        currency = (update.get("currency") or "INR").upper()
+        if currency != "INR":
+            gst = _zero_gst_split_for_export(existing_lines)
+            update["lines"] = existing_lines
+        else:
+            gst = await _compute_gst_split(existing.get("customer_id"), existing_lines)
+        base_subtotal = float(existing.get("subtotal") or 0)
+        update.update({
+            "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
+            "total_gst": gst["total_gst"], "is_inter_state": gst["is_inter_state"],
+            "hsn_summary": gst["hsn_summary"],
+            "grand_total": round(base_subtotal + gst["total_gst"], 2),
         })
     update["updated_at"] = datetime.now(timezone.utc)
     await db.proforma_invoices.update_one({"id": pid}, {"$set": update})
@@ -10708,7 +10828,12 @@ async def convert_quotation_to_proforma(qid: str, payload: dict = Body(default={
                 ln["hsn_code"] = it["hsn_code"]
     proforma_no = await _get_next_number("proforma")
     base = await _finalize_invoice_lines(pf_lines)
-    gst = await _compute_gst_split(q.get("customer_id"), pf_lines)
+    # Carry currency from the source quotation; non-INR ⇒ no GST.
+    q_currency = (q.get("currency") or "INR").upper()
+    if q_currency != "INR":
+        gst = _zero_gst_split_for_export(pf_lines)
+    else:
+        gst = await _compute_gst_split(q.get("customer_id"), pf_lines)
     # Pull billing/shipping address from customer
     billing = shipping = ""
     if q.get("customer_id"):
@@ -10739,6 +10864,7 @@ async def convert_quotation_to_proforma(qid: str, payload: dict = Body(default={
         "is_inter_state": gst["is_inter_state"],
         "hsn_summary": gst["hsn_summary"],
         "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
+        "currency": q_currency,
         "status": "draft",
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"],
@@ -10783,6 +10909,7 @@ class TaxInvoiceCreate(BaseModel):
     notes: Optional[str] = ""
     terms: Optional[str] = ""
     status: Optional[str] = "draft"  # draft / issued / paid / cancelled
+    currency: Optional[str] = "INR"  # INR (default), USD, EUR, GBP, AED — non-INR = export (no GST)
 
 class TaxInvoiceUpdate(BaseModel):
     status: Optional[str] = None
@@ -10794,6 +10921,7 @@ class TaxInvoiceUpdate(BaseModel):
     billing_address: Optional[str] = None
     shipping_address: Optional[str] = None
     customer_po_number: Optional[str] = None
+    currency: Optional[str] = None
 
 async def _enrich_tax_invoice(t):
     t.pop("_id", None)
@@ -10833,7 +10961,11 @@ async def create_tax_invoice(data: TaxInvoiceCreate, request: Request):
     invoice_no = await _get_next_number("tax_invoice")
     lines = [l.model_dump() for l in data.lines]
     base = await _finalize_invoice_lines(lines)
-    gst = await _compute_gst_split(data.customer_id, lines, place_of_supply=data.place_of_supply)
+    currency = (data.currency or "INR").upper()
+    if currency != "INR":
+        gst = _zero_gst_split_for_export(lines)
+    else:
+        gst = await _compute_gst_split(data.customer_id, lines, place_of_supply=data.place_of_supply)
     doc = {
         "id": str(uuid.uuid4()),
         "invoice_no": invoice_no,
@@ -10852,7 +10984,11 @@ async def create_tax_invoice(data: TaxInvoiceCreate, request: Request):
     if not doc.get("invoice_date"):
         doc["invoice_date"] = datetime.now(timezone.utc)
     # Build dynamic UPI QR from company settings (bank_upi + company_name)
-    doc["qr_code"] = await _build_upi_qr_payload(doc["grand_total"], invoice_no)
+    # Only generate QR for INR invoices (domestic); export invoices don't need UPI QR.
+    if currency == "INR":
+        doc["qr_code"] = await _build_upi_qr_payload(doc["grand_total"], invoice_no)
+    else:
+        doc["qr_code"] = ""
     await db.tax_invoices.insert_one(doc)
     return await _enrich_tax_invoice(doc)
 
@@ -10870,13 +11006,17 @@ async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request)
         if data.status is None and any(v is not None for v in (data.lines, data.billing_address, data.shipping_address, data.customer_po_number, data.due_date, data.place_of_supply)):
             raise HTTPException(status_code=400, detail="A paid invoice is locked — only status changes and notes/terms are allowed")
     update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
-    # Recompute GST if lines OR place_of_supply changed (POS override affects inter-state detection)
-    needs_gst_recompute = "lines" in update or "place_of_supply" in update
+    # Recompute GST if lines OR place_of_supply OR currency changed
+    needs_gst_recompute = "lines" in update or "place_of_supply" in update or "currency" in update
     if needs_gst_recompute:
         lines = [l if isinstance(l, dict) else l.model_dump() for l in (update.get("lines") or existing.get("lines") or [])]
         base = await _finalize_invoice_lines(lines)
         effective_pos = update.get("place_of_supply", existing.get("place_of_supply", ""))
-        gst = await _compute_gst_split(existing.get("customer_id"), lines, place_of_supply=effective_pos)
+        currency = (update.get("currency") or existing.get("currency") or "INR").upper()
+        if currency != "INR":
+            gst = _zero_gst_split_for_export(lines)
+        else:
+            gst = await _compute_gst_split(existing.get("customer_id"), lines, place_of_supply=effective_pos)
         update["lines"] = lines
         update.update(base)
         update.update({
@@ -10885,8 +11025,11 @@ async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request)
             "hsn_summary": gst["hsn_summary"],
             "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
         })
-        # Refresh UPI QR with current company settings + new grand total
-        update["qr_code"] = await _build_upi_qr_payload(update["grand_total"], existing.get("invoice_no", ""))
+        # Refresh UPI QR with current company settings + new grand total (only for INR)
+        if currency == "INR":
+            update["qr_code"] = await _build_upi_qr_payload(update["grand_total"], existing.get("invoice_no", ""))
+        else:
+            update["qr_code"] = ""
     update["updated_at"] = datetime.now(timezone.utc)
     await db.tax_invoices.update_one({"id": tid}, {"$set": update})
     return await _enrich_tax_invoice(await db.tax_invoices.find_one({"id": tid}))
@@ -11169,7 +11312,12 @@ async def convert_proforma_to_tax_invoice(pid: str, payload: dict = Body(default
         })
     invoice_no = await _get_next_number("tax_invoice")
     base = await _finalize_invoice_lines(lines)
-    gst = await _compute_gst_split(p.get("customer_id"), lines)
+    # Carry currency forward from the proforma; non-INR ⇒ no GST.
+    p_currency = (p.get("currency") or "INR").upper()
+    if p_currency != "INR":
+        gst = _zero_gst_split_for_export(lines)
+    else:
+        gst = await _compute_gst_split(p.get("customer_id"), lines)
     doc = {
         "id": str(uuid.uuid4()),
         "invoice_no": invoice_no,
@@ -11193,11 +11341,12 @@ async def convert_proforma_to_tax_invoice(pid: str, payload: dict = Body(default
         "hsn_summary": gst["hsn_summary"],
         "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
         "qr_code": f"UPI://pay?pa=machineworks@upi&pn=MachineWorksERP&am={round(base['subtotal'] + gst['total_gst'], 2)}&tn={invoice_no}",
+        "currency": p_currency,
         "status": "issued",
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"],
     }
-    doc["qr_code"] = await _build_upi_qr_payload(doc["grand_total"], invoice_no)
+    doc["qr_code"] = await _build_upi_qr_payload(doc["grand_total"], invoice_no) if p_currency == "INR" else ""
     await db.tax_invoices.insert_one(doc)
     await db.proforma_invoices.update_one(
         {"id": pid},

@@ -6,6 +6,9 @@ const CompanySettingsContext = createContext(null);
 const CURRENCY_MAP = {
   INR: { symbol: '₹', code: 'INR', locale: 'en-IN' },
   USD: { symbol: '$', code: 'USD', locale: 'en-US' },
+  EUR: { symbol: '€', code: 'EUR', locale: 'de-DE' },
+  GBP: { symbol: '£', code: 'GBP', locale: 'en-GB' },
+  AED: { symbol: 'د.إ', code: 'AED', locale: 'en-AE' },
 };
 
 export function CompanySettingsProvider({ children }) {

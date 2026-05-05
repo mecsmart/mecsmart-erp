@@ -79,6 +79,9 @@ export default function ItemsPage() {
     || hasPermission('inventory', 'create')
     || hasPermission('inventory', 'edit');
   const canDelete = user?.role === 'admin' || hasPermission('items', 'delete');
+  // Price-visibility flags — gate sale/purchase price form fields. Admins always see them.
+  const canViewSalePrice = user?.role === 'admin' || user?.is_admin_group || hasPermission('inventory_sale_price', 'view');
+  const canViewPurchasePrice = user?.role === 'admin' || user?.is_admin_group || hasPermission('inventory_purchase_price', 'view');
 
   // Debounce search input so fast typing doesn't fire /api/items on every keystroke
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -520,20 +523,39 @@ export default function ItemsPage() {
                 <div className="grid grid-cols-3 gap-4">
                   {formData.category === 'raw_material' ? (
                     <>
-                      <div>
-                        <label className="block text-sm font-semibold text-[#111827] mb-1">Purchase Price ({currencySymbol})</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={formData.purchase_price}
-                          onChange={(e) => setFormData({ ...formData, purchase_price: parseFloat(e.target.value) || 0, unit_cost: parseFloat(e.target.value) || formData.unit_cost })}
-                          className="input-field mono"
-                          placeholder="Initial price — auto-updates from PO"
-                          data-testid="item-purchase-price-input"
-                        />
-                        <p className="text-[10px] text-[#6B7280] mt-0.5">Auto-updates from latest PO</p>
-                      </div>
-                      <div>
+                      {canViewPurchasePrice && (
+                        <div>
+                          <label className="block text-sm font-semibold text-[#111827] mb-1">Purchase Price ({currencySymbol})</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={formData.purchase_price}
+                            onChange={(e) => setFormData({ ...formData, purchase_price: parseFloat(e.target.value) || 0, unit_cost: parseFloat(e.target.value) || formData.unit_cost })}
+                            className="input-field mono"
+                            placeholder="Initial price — auto-updates from PO"
+                            data-testid="item-purchase-price-input"
+                          />
+                          <p className="text-[10px] text-[#6B7280] mt-0.5">Auto-updates from latest PO</p>
+                        </div>
+                      )}
+                      {canViewSalePrice && (
+                        <div>
+                          <label className="block text-sm font-semibold text-[#111827] mb-1">Sale Price ({currencySymbol})</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={formData.sale_price}
+                            onChange={(e) => setFormData({ ...formData, sale_price: parseFloat(e.target.value) || 0 })}
+                            className="input-field mono"
+                            data-testid="item-sale-price-input"
+                          />
+                          <p className="text-[10px] text-[#6B7280] mt-0.5">Selling price (for spares/direct sale)</p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    canViewSalePrice && (
+                      <div className="col-span-2">
                         <label className="block text-sm font-semibold text-[#111827] mb-1">Sale Price ({currencySymbol})</label>
                         <input
                           type="number"
@@ -543,22 +565,9 @@ export default function ItemsPage() {
                           className="input-field mono"
                           data-testid="item-sale-price-input"
                         />
-                        <p className="text-[10px] text-[#6B7280] mt-0.5">Selling price (for spares/direct sale)</p>
+                        <p className="text-[10px] text-[#6B7280] mt-0.5">Selling price to customers</p>
                       </div>
-                    </>
-                  ) : (
-                    <div className="col-span-2">
-                      <label className="block text-sm font-semibold text-[#111827] mb-1">Sale Price ({currencySymbol})</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={formData.sale_price}
-                        onChange={(e) => setFormData({ ...formData, sale_price: parseFloat(e.target.value) || 0 })}
-                        className="input-field mono"
-                        data-testid="item-sale-price-input"
-                      />
-                      <p className="text-[10px] text-[#6B7280] mt-0.5">Selling price to customers</p>
-                    </div>
+                    )
                   )}
                   <div>
                     <label className="block text-sm font-semibold text-[#111827] mb-1">Lead Time (days)</label>

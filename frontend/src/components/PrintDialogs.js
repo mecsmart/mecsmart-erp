@@ -19,7 +19,7 @@ const PAPER_SIZES = [
   { id: 'a5', name: 'A5', w: '148mm', h: '210mm' },
 ];
 
-const CURRENCY_SYMBOLS = { INR: '\u20B9', USD: '$' };
+const CURRENCY_SYMBOLS = { INR: '\u20B9', USD: '$', EUR: '\u20AC', GBP: '\u00A3', AED: '\u062F.\u0625' };
 
 function formatFullAddress(obj) {
   if (!obj) return '';
@@ -33,7 +33,8 @@ function formatFullAddress(obj) {
   return parts.join(', ');
 }
 
-function getCurrencySymbol(company) {
+function getCurrencySymbol(company, override) {
+  if (override && CURRENCY_SYMBOLS[override]) return CURRENCY_SYMBOLS[override];
   return CURRENCY_SYMBOLS[company?.primary_currency] || CURRENCY_SYMBOLS.INR;
 }
 
@@ -108,8 +109,16 @@ export function POPrintDialog({ po, open, onClose }) {
       return ones[Math.floor(g / 100)] + ' Hundred' + (g % 100 ? ' and ' + convertGroup(g % 100, false) : '');
     };
     const parts = groups.map((g, i) => g ? convertGroup(g, i === 0) + (scales[i] ? ' ' + scales[i] : '') : '').filter(Boolean).reverse();
-    const mainUnit = currencyName === 'USD' ? 'Dollars' : 'Rupees';
-    const subUnit = currencyName === 'USD' ? 'Cents' : 'Paise';
+    const CURRENCY_WORDS = {
+      INR: { main: 'Rupees', sub: 'Paise' },
+      USD: { main: 'Dollars', sub: 'Cents' },
+      EUR: { main: 'Euros', sub: 'Cents' },
+      GBP: { main: 'Pounds', sub: 'Pence' },
+      AED: { main: 'Dirhams', sub: 'Fils' },
+    };
+    const cw = CURRENCY_WORDS[currencyName] || CURRENCY_WORDS.INR;
+    const mainUnit = cw.main;
+    const subUnit = cw.sub;
     const main = parts.join(' ');
     const decimal = Math.round((num - Math.floor(num)) * 100);
     return main + ' ' + mainUnit + (decimal > 0 ? ' and ' + convertGroup(decimal) + ' ' + subUnit : '') + ' Only';
@@ -190,7 +199,8 @@ export function POPrintDialog({ po, open, onClose }) {
     // Build letterhead (new 2-col spec: logo+tagline left, company info right).
     let letterhead = '';
     const companyAddr = formatFullAddress(company);
-    const sym = getCurrencySymbol(company);
+    // Use the PO's saved currency (export/import POs use USD/EUR/etc.); fall back to company default
+    const sym = getCurrencySymbol(company, d.currency);
     if (opts.showLetterhead) {
       letterhead = buildLetterheadHTML(opts.showLogo === false ? { ...company, logo_data: '' } : company);
     }
@@ -279,26 +289,29 @@ export function POPrintDialog({ po, open, onClose }) {
       chargesHTML += `</tbody></table>`;
     }
 
-    // Totals
+    // Totals — for export/import POs (non-INR), GST is not applicable.
+    const isExportDoc = (d.currency || 'INR') !== 'INR';
     let totalsHTML = `<div class="totals-box"><table>
       <tr><td class="label-cell">Subtotal</td><td class="val-cell">${sym}${(d.subtotal||0).toFixed(2)}</td></tr>`;
     if ((d.charges_subtotal||0) > 0) totalsHTML += `<tr><td class="label-cell">Charges</td><td class="val-cell">${sym}${(d.charges_subtotal||0).toFixed(2)}</td></tr>`;
-    if (opts.showGSTBreakup) {
-      if (d.is_inter_state) {
-        totalsHTML += `<tr><td class="label-cell">IGST</td><td class="val-cell">${sym}${(d.total_igst||0).toFixed(2)}</td></tr>`;
+    if (!isExportDoc) {
+      if (opts.showGSTBreakup) {
+        if (d.is_inter_state) {
+          totalsHTML += `<tr><td class="label-cell">IGST</td><td class="val-cell">${sym}${(d.total_igst||0).toFixed(2)}</td></tr>`;
+        } else {
+          totalsHTML += `<tr><td class="label-cell">CGST</td><td class="val-cell">${sym}${(d.total_cgst||0).toFixed(2)}</td></tr>`;
+          totalsHTML += `<tr><td class="label-cell">SGST</td><td class="val-cell">${sym}${(d.total_sgst||0).toFixed(2)}</td></tr>`;
+        }
       } else {
-        totalsHTML += `<tr><td class="label-cell">CGST</td><td class="val-cell">${sym}${(d.total_cgst||0).toFixed(2)}</td></tr>`;
-        totalsHTML += `<tr><td class="label-cell">SGST</td><td class="val-cell">${sym}${(d.total_sgst||0).toFixed(2)}</td></tr>`;
+        totalsHTML += `<tr><td class="label-cell">Tax</td><td class="val-cell">${sym}${(d.total_tax||0).toFixed(2)}</td></tr>`;
       }
-    } else {
-      totalsHTML += `<tr><td class="label-cell">Tax</td><td class="val-cell">${sym}${(d.total_tax||0).toFixed(2)}</td></tr>`;
     }
-    totalsHTML += `<tr class="grand"><td class="label-cell grand-total">Grand Total</td><td class="val-cell grand-total">${sym}${(d.total_amount||0).toFixed(2)}</td></tr></table></div>`;
+    totalsHTML += `<tr class="grand"><td class="label-cell grand-total">Grand Total</td><td class="val-cell grand-total">${sym}${(d.total_amount||0).toFixed(2)}</td></tr></table>${isExportDoc ? `<div style="font-size:9px;color:#6B7280;text-align:right;margin-top:4px;">Export/Import — GST not applicable. Currency: ${d.currency}</div>` : ''}</div>`;
 
     // Amount in words
     let wordsHTML = '';
     if (opts.showQtyWords) {
-      wordsHTML = `<div class="amount-words"><strong>Amount in words:</strong> ${numberToWords(d.total_amount || 0, company?.primary_currency)}</div>`;
+      wordsHTML = `<div class="amount-words"><strong>Amount in words:</strong> ${numberToWords(d.total_amount || 0, d.currency || company?.primary_currency)}</div>`;
     }
 
     // Terms

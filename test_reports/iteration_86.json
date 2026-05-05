@@ -1,0 +1,78 @@
+{
+  "summary": "Iteration 86 - Secondary Currency Support & Permission Modules. All backend tests passed (18/18). Frontend features verified: Currency dropdowns in PO/Quotation forms, new permission modules in Role Groups, Support ticket assignee dropdown.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_86_currency_permissions.py",
+    "/app/test_reports/pytest/pytest_iteration_86.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/server.py (fixed Tax Invoice QR code generation for non-INR currency)",
+    "/app/backend/tests/test_iteration_86_currency_permissions.py"
+  ],
+  "success_rate": {
+    "backend": "100% (18/18 tests passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": {
+    "admin": "admin@erp.com / Admin@123"
+  },
+  "seed_data_creation": "None - used existing test data",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All features from iteration 86 verified: (1) Secondary currency support (INR/USD/EUR/GBP/AED) in PO, Quotation, Proforma, Tax Invoice - non-INR documents have GST=0, (2) /api/users/assignable endpoint returns light user list for any authenticated user, (3) New permission modules inventory_sale_price, inventory_purchase_price, inventory_configuration visible in Role Groups permissions matrix, (4) Inventory Configuration link in sidebar gated by inventory_configuration permission, (5) Support ticket assignee dropdown populated from /api/users/assignable.",
+  "features_tested": {
+    "backend_currency_support": {
+      "status": "PASS",
+      "details": "18/18 tests passed. PO/Quotation/Proforma/Tax Invoice with non-INR currency have total_gst=0. Currency flipping (INR→USD) recomputes GST correctly. Proforma inherits currency from quotation. Tax Invoice QR code is empty for non-INR (fixed during testing)."
+    },
+    "backend_assignable_users": {
+      "status": "PASS",
+      "details": "GET /api/users/assignable returns light user list (id, name, email) for any authenticated user. GET /api/users remains admin-only."
+    },
+    "backend_permission_modules": {
+      "status": "PASS",
+      "details": "GET /api/users/modules includes inventory_sale_price, inventory_purchase_price, inventory_configuration with view-only actions."
+    },
+    "frontend_po_currency_dropdown": {
+      "status": "PASS",
+      "details": "PO Create dialog has Currency dropdown (data-testid='po-currency-select') with options: INR — ₹, USD — $, EUR — €, GBP — £, AED — د.إ. Label shows '(non-INR ⇒ no GST)' hint."
+    },
+    "frontend_quotation_currency_dropdown": {
+      "status": "PASS",
+      "details": "Quotation Create dialog has Currency dropdown (data-testid='quotation-currency') with same 5 currency options."
+    },
+    "frontend_role_group_permissions": {
+      "status": "PASS",
+      "details": "Role Group permissions matrix shows 3 new modules: 'Stock — Sale Price (visibility)', 'Stock — Purchase Price (visibility)', 'Inventory Configuration' - all with view-only checkboxes."
+    },
+    "frontend_support_assignee": {
+      "status": "PASS",
+      "details": "Support Ticket form has Assignee dropdown (data-testid='ticket-assignee') populated with users from /api/users/assignable."
+    },
+    "frontend_inventory_configuration_link": {
+      "status": "PASS",
+      "details": "Inventory sidebar group shows Configuration link (href='/inventory/configuration', data-testid='nav-configuration') gated by inventory_configuration permission."
+    },
+    "frontend_header_role_display": {
+      "status": "PASS",
+      "details": "Header shows 'admin' badge and 'System Admin' name. Sidebar bottom shows 'System Admin' and 'admin@erp.com'."
+    }
+  },
+  "bug_fixes_applied": {
+    "tax_invoice_qr_code": {
+      "file": "/app/backend/server.py",
+      "issue": "Tax Invoice QR code was generated for non-INR currency (export invoices)",
+      "fix": "Added currency check - QR code only generated for INR invoices, empty string for non-INR"
+    }
+  }
+}
