@@ -5159,8 +5159,14 @@ async def unreserve_materials_for_wo(wo_id: str, request: Request):
 
 
 @work_orders_router.post("/{wo_id}/start")
-async def start_work_order(wo_id: str, request: Request):
-    """Start a work order - consumes required materials from inventory"""
+async def start_work_order(wo_id: str, request: Request, preview: bool = False):
+    """Start a work order — consumes required materials from inventory.
+
+    Pass `?preview=true` to compute what WOULD be consumed (and surface any
+    insufficient-stock / reserved-by-other-MO conflicts) without actually
+    deducting stock or marking the MO as started. The frontend uses this to
+    show a confirmation dialog before committing.
+    """
     user = await get_current_user(request)
     _require_access(user, ["admin", "production_manager"], module="manufacturing", action="create")
     wo = await db.work_orders.find_one({"id": wo_id})
@@ -5290,31 +5296,31 @@ async def start_work_order(wo_id: str, request: Request):
                         "available": current_stock
                     })
                 else:
-                    # Consume the material
+                    # Compute what we'd consume. Skip the DB writes entirely when
+                    # the request is just a preview — we still build
+                    # `consumed_materials` so the dialog shows the same numbers
+                    # the user will see after confirming.
                     new_stock = current_stock - required_qty
-                    
-                    # Create inventory transaction
-                    tx_doc = {
-                        "id": str(uuid.uuid4()),
-                        "item_id": comp_item_id,
-                        "transaction_type": "issue",
-                        "quantity": required_qty,
-                        "reference_type": "work_order",
-                        "reference_id": wo_id,
-                        "previous_stock": current_stock,
-                        "new_stock": new_stock,
-                        "notes": f"Consumed for WO {wo.get('wo_number')}",
-                        "created_at": datetime.now(timezone.utc),
-                        "created_by": user["id"]
-                    }
-                    await db.inventory_transactions.insert_one(tx_doc)
-                    
-                    # Update item stock
-                    await db.items.update_one(
-                        {"id": comp_item_id},
-                        {"$set": {"current_stock": new_stock}}
-                    )
-                    
+                    if not preview:
+                        tx_doc = {
+                            "id": str(uuid.uuid4()),
+                            "item_id": comp_item_id,
+                            "transaction_type": "issue",
+                            "quantity": required_qty,
+                            "reference_type": "work_order",
+                            "reference_id": wo_id,
+                            "previous_stock": current_stock,
+                            "new_stock": new_stock,
+                            "notes": f"Consumed for WO {wo.get('wo_number')}",
+                            "created_at": datetime.now(timezone.utc),
+                            "created_by": user["id"]
+                        }
+                        await db.inventory_transactions.insert_one(tx_doc)
+                        await db.items.update_one(
+                            {"id": comp_item_id},
+                            {"$set": {"current_stock": new_stock}}
+                        )
+
                     consumed_materials.append({
                         "item_id": comp_item_id,
                         "item": comp_item.get("part_number"),
@@ -5331,6 +5337,18 @@ async def start_work_order(wo_id: str, request: Request):
             "insufficient_materials": insufficient_materials
         }
     
+    # PREVIEW mode: return what WOULD happen without persisting state.
+    # The frontend uses this to show a confirmation dialog; user can close it
+    # to abort without any side-effects.
+    if preview:
+        return {
+            "success": True,
+            "preview": True,
+            "message": "Preview only — no materials consumed yet. Confirm to start.",
+            "consumed_materials": consumed_materials,
+            "wo_number": wo.get("wo_number"),
+        }
+
     # Update work order status to in_progress (skip if already started)
     if not already_started:
         await db.work_orders.update_one(

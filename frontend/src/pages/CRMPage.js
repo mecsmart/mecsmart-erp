@@ -1544,9 +1544,11 @@ function MultiItemPicker({ items, selectedIds, onChange, testid }) {
   const matches = items.filter(i => {
     if (selectedIds.includes(i.id)) return false;
     if (catFilter && i.category !== catFilter) return false;
-    if (!query.trim()) return false;
+    // Show all (up to 50) when no filters are set so the support agent can
+    // browse products straight away. Typing or picking a category narrows it.
+    if (!query.trim()) return true;
     const q = query.toLowerCase();
-    return ((i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q));
+    return ((i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q) || (i.description || '').toLowerCase().includes(q));
   }).slice(0, 50);
   const add = (id) => { onChange([...selectedIds, id]); setQuery(''); };
   const remove = (id) => onChange(selectedIds.filter(x => x !== id));
@@ -1583,15 +1585,15 @@ function MultiItemPicker({ items, selectedIds, onChange, testid }) {
           <option value="finished_good">Finished Good</option>
         </select>
       </div>
-      {matches.length > 0 && (
-        <div className="border border-[#E5E7EB] mt-1 max-h-40 overflow-y-auto bg-white text-xs">
-          {matches.map(i => (
-            <button key={i.id} onClick={() => add(i.id)} className="block w-full text-left px-2 py-1 hover:bg-[#F3F4F6]" data-testid={`${testid}-opt-${i.id}`}>
-              <span className="mono font-medium">{i.part_number}</span> · {i.name} <span className="text-[#9CA3AF]">({i.category?.replace('_', ' ')})</span>
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="border border-[#E5E7EB] mt-1 max-h-40 overflow-y-auto bg-white text-xs">
+        {matches.length === 0 ? (
+          <div className="px-2 py-1.5 text-[#9CA3AF] italic">No products match</div>
+        ) : matches.map(i => (
+          <button key={i.id} onClick={() => add(i.id)} className="block w-full text-left px-2 py-1 hover:bg-[#F3F4F6]" data-testid={`${testid}-opt-${i.id}`}>
+            <span className="mono font-medium">{i.part_number}</span> · {i.name} <span className="text-[#9CA3AF]">({i.category?.replace('_', ' ')})</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

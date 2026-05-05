@@ -27,6 +27,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 
+// Patch a single WO row in the flat array — used after preview-confirmed
+// MO start so we can update status without a heavy refetch (which would
+// collapse the tree and reset the user's scroll position).
+function patchWorkOrderInTree(workOrders, woId, patch) {
+  return (workOrders || []).map(w => (w.id === woId ? { ...w, ...patch } : w));
+}
+
 export default function ManufacturingPage() {
   const { user } = useAuth();
   const { formatCurrency, currencySymbol } = useCompanySettings();
@@ -220,20 +227,33 @@ export default function ManufacturingPage() {
   const handleUpdateWorkOrderStatus = async (woId, newStatus) => {
     try {
       if (newStatus === 'in_progress') {
-        const { data } = await api.post(`/api/work-orders/${woId}/start`);
+        // Two-step flow:
+        //   1. Preview — server reports insufficient stock / reservation conflicts
+        //      WITHOUT consuming. Show a confirm dialog.
+        //   2. On Confirm → actual /start (which deducts stock).
+        // If the user closes the dialog instead of clicking Confirm, NO
+        // material is consumed.
+        const { data } = await api.post(`/api/work-orders/${woId}/start?preview=true`);
         if (data.reserved_conflicts) {
           setStartResultDialog({ open: true, success: false, data: { type: 'reserved', message: data.message, conflicts: data.reserved_conflicts } });
-          fetchData();
           return;
         }
         if (data.success === false) {
           const dtype = data.insufficient_materials?.length > 0 ? 'insufficient' : 'error';
           setStartResultDialog({ open: true, success: false, data: { type: dtype, message: data.message, materials: data.insufficient_materials || [] } });
-          fetchData();
           return;
         }
-        setStartResultDialog({ open: true, success: true, data: { message: data.message || 'Manufacturing order started!', consumed: data.consumed_materials } });
-        fetchData();
+        // success preview — show confirmation dialog
+        setStartResultDialog({
+          open: true,
+          success: true,
+          data: {
+            type: 'preview',
+            woId: woId,
+            message: data.message,
+            consumed: data.consumed_materials || [],
+          },
+        });
       } else {
         await api.put(`/api/work-orders/${woId}`, { status: newStatus });
         fetchData();
@@ -244,6 +264,31 @@ export default function ManufacturingPage() {
     } catch (error) {
       console.error('Failed to update work order:', error);
       const detail = error.response?.data?.detail || error.response?.data?.message || 'Failed to update manufacturing order';
+      setStartResultDialog({ open: true, success: false, data: { type: 'error', message: detail } });
+    }
+  };
+
+  // User confirmed the preview — actually start the MO and consume materials.
+  // Preserves scroll position by NOT calling the heavy `fetchData()` reload —
+  // we update state in place by patching the affected WO node in the tree.
+  const confirmStartWorkOrder = async (woId) => {
+    try {
+      const { data } = await api.post(`/api/work-orders/${woId}/start`);
+      // Patch the affected WO row in-state instead of a full refetch (which
+      // collapses the tree, losing scroll position).
+      setWorkOrders(prev => patchWorkOrderInTree(prev, woId, {
+        status: 'in_progress',
+        materials_consumed: true,
+        consumed_materials: data.consumed_materials || [],
+      }));
+      // Briefly show success message
+      setStartResultDialog({
+        open: true,
+        success: true,
+        data: { type: 'started', message: data.message || 'Manufacturing order started!', consumed: data.consumed_materials },
+      });
+    } catch (error) {
+      const detail = error.response?.data?.detail || 'Failed to start';
       setStartResultDialog({ open: true, success: false, data: { type: 'error', message: detail } });
     }
   };
@@ -1976,12 +2021,14 @@ export default function ManufacturingPage() {
         </DialogContent>
       </Dialog>
 
-      {/* MO Start Result Dialog */}
+      {/* MO Start Result Dialog — also serves as PREVIEW dialog (type=='preview') */}
       <Dialog open={startResultDialog.open} onOpenChange={(o) => { if (!o) setStartResultDialog({ open: false, success: null, data: null }); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-[Chivo] flex items-center gap-2">
-              {startResultDialog.success ? (
+              {startResultDialog.data?.type === 'preview' ? (
+                <><PackageCheck className="w-5 h-5 text-[#1D3557]" /> Confirm Start — Material Consumption</>
+              ) : startResultDialog.success ? (
                 <><CheckCircle2 className="w-5 h-5 text-[#03543F]" /> Manufacturing Order Started</>
               ) : startResultDialog.data?.type === 'reserved' ? (
                 <><AlertCircle className="w-5 h-5 text-[#9B1C1C]" /> Materials Reserved by Other MOs</>
@@ -1991,7 +2038,25 @@ export default function ManufacturingPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="mt-3 space-y-3">
-            {startResultDialog.success && startResultDialog.data && (
+            {startResultDialog.data?.type === 'preview' && (
+              <>
+                <p className="text-sm text-[#1D3557] bg-[#E1EFFE]/40 rounded p-3 border-l-2 border-[#1D3557]">
+                  Once you click <strong>Confirm Start</strong>, the materials below will be deducted from inventory.
+                  Click <strong>Cancel</strong> (or close this window) to abort — <strong>no material will be consumed.</strong>
+                </p>
+                <div className="bg-[#F3F4F6] rounded p-3 max-h-60 overflow-y-auto">
+                  <p className="text-xs font-semibold mb-2 text-[#4B5563]">Materials That Will Be Consumed:</p>
+                  {(startResultDialog.data.consumed || []).map((m, i) => (
+                    <div key={i} className="text-sm flex justify-between py-0.5 border-b border-[#E5E7EB] last:border-0">
+                      <span className="mono text-xs">{m.item} - {m.name || ''}</span>
+                      <span className="mono font-medium">{m.quantity} {m.uom || 'pcs'}</span>
+                    </div>
+                  ))}
+                  {(!startResultDialog.data.consumed || startResultDialog.data.consumed.length === 0) && <p className="text-xs text-[#9CA3AF]">No materials will be consumed (e.g. SC MO).</p>}
+                </div>
+              </>
+            )}
+            {startResultDialog.data?.type !== 'preview' && startResultDialog.success && startResultDialog.data && (
               <>
                 <p className="text-sm text-[#03543F] font-medium">{startResultDialog.data.message}</p>
                 <div className="bg-[#F3F4F6] rounded p-3 max-h-48 overflow-y-auto">
@@ -2047,10 +2112,37 @@ export default function ManufacturingPage() {
             {!startResultDialog.success && startResultDialog.data?.type === 'error' && (
               <p className="text-sm text-[#9B1C1C] font-medium bg-[#FDE8E8]/50 rounded p-4">{startResultDialog.data.message}</p>
             )}
-            <div className="flex justify-end pt-3 border-t">
-              <button onClick={() => setStartResultDialog({ open: false, success: null, data: null })} className={startResultDialog.success ? 'btn-primary' : 'btn-secondary'} data-testid="mo-start-result-close">
-                {startResultDialog.success ? 'OK' : 'Cancel'}
-              </button>
+            <div className="flex justify-end gap-2 pt-3 border-t">
+              {startResultDialog.data?.type === 'preview' ? (
+                <>
+                  <button
+                    onClick={() => setStartResultDialog({ open: false, success: null, data: null })}
+                    className="btn-secondary"
+                    data-testid="mo-start-preview-cancel"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      const id = startResultDialog.data.woId;
+                      setStartResultDialog({ open: false, success: null, data: null });
+                      confirmStartWorkOrder(id);
+                    }}
+                    className="btn-primary"
+                    data-testid="mo-start-preview-confirm"
+                  >
+                    Confirm Start
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setStartResultDialog({ open: false, success: null, data: null })}
+                  className={startResultDialog.success ? 'btn-primary' : 'btn-secondary'}
+                  data-testid="mo-start-result-close"
+                >
+                  {startResultDialog.success ? 'OK' : 'Cancel'}
+                </button>
+              )}
             </div>
           </div>
         </DialogContent>

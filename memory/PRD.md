@@ -20,6 +20,10 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-05-05** — **3 P0 fixes (MO start preview, scroll preserve, Support products):**
+  1. **MO Start now has a confirm-first preview.** New `?preview=true` query on `POST /api/work-orders/{id}/start` computes the materials WITHOUT consuming or marking the MO started. Frontend calls preview first, shows the consumption list, and the user can **Cancel / close the dialog → no material consumed**. Only `Confirm Start` triggers the real consumption.
+  2. **Scroll position preserved after MO start.** Replaced the heavy `fetchData()` reload after start with an in-place state patch via the new `patchWorkOrderInTree` helper — the WO row's status flips to `in_progress` without collapsing the tree or jumping the page back to the top.
+  3. **Support ticket Products picker now shows products immediately.** `MultiItemPicker` previously hid the list until the agent typed something. It now defaults to showing the first 50 items so support agents can browse & select straight away. Search box still narrows by part_number / name / description.
 - **2026-05-01** — **2 P0 fixes (BOM export type column + creator-signature prints):**
   1. **BOM Excel export** now has **Parent Type** (col D) and **Component Type** (col I) columns with the short badge values used by the UI: FG / SG / Part / RM. Importer tolerates both formats (accepts new columns, still reads legacy files without them). Verified: `FG-001 → PT=FG, CT=RM/SG`.
   2. **Print signatures belong to the document creator, not the current user.** Backend `_enrich_quotation`, `_enrich_proforma`, `_enrich_tax_invoice`, and `/po/{id}/print-data` now attach `created_by_user: {name, email, signature_url}`. Frontend `printInvoiceDoc` uses `doc.created_by_user ?? currentUser`; `POPrintDialog` embeds the creator's signature image in the "Prepared By" block. Verified via API: `QUO000024` → `created_by_user.name='System Admin', has_sig=True`.
