@@ -50,9 +50,12 @@ export default function PurchaseOrdersPage() {
 
   // Permission-driven visibility: admin always allowed, otherwise use granular permissions.
   // This unblocks custom roles that were granted purchase_orders.create/edit explicitly.
-  const canEdit = user?.role === 'admin'
-    || hasPermission('purchase_orders', 'create')
-    || hasPermission('purchase_orders', 'edit');
+  // Permission gating — view = list only; edit = update existing PO + GRN +
+  // short-close; create = brand-new PO. Admins always pass.
+  const isAdmin = user?.role === 'admin' || user?.is_admin_group;
+  const canCreate = isAdmin || hasPermission('purchase_orders', 'create');
+  const canEdit = canCreate || hasPermission('purchase_orders', 'edit');
+  const canDelete = isAdmin || hasPermission('purchase_orders', 'delete');
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -257,7 +260,7 @@ export default function PurchaseOrdersPage() {
           <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Purchase Orders</h1>
           <p className="text-sm text-[#4B5563]">Create and manage purchase orders</p>
         </div>
-        {canEdit && (
+        {canCreate && (
           <button onClick={openCreateDialog} className="btn-primary flex items-center space-x-2" data-testid="create-po-btn">
             <Plus className="w-4 h-4" /><span>Create PO</span>
           </button>

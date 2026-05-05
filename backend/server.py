@@ -2341,13 +2341,26 @@ async def create_user(user_data: UserCreate, request: Request):
     existing = await db.users.find_one({"email": email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
+
+    # Permissions are now defined ONLY at the role-group level. The user-level
+    # `role` field is auto-derived from the group (admin-group → "admin",
+    # otherwise we default to "inventory_manager" purely so legacy
+    # role-checking code keeps working). Per-user permission overrides are no
+    # longer accepted from the client.
+    derived_role = "inventory_manager"
+    if user_data.role_group_id:
+        rg = await db.role_groups.find_one({"id": user_data.role_group_id}, {"_id": 0, "is_admin_group": 1})
+        if rg and rg.get("is_admin_group"):
+            derived_role = "admin"
+
     user_doc = {
         "email": email,
         "password_hash": hash_password(user_data.password),
         "name": user_data.name,
-        "role": user_data.role,
-        "permissions": user_data.permissions or get_default_permissions(user_data.role),
+        "role": derived_role,
+        # Empty per-user permissions — `get_current_user` will overlay the
+        # role-group's permissions on every request.
+        "permissions": {},
         "role_group_id": user_data.role_group_id,
         "status": "active",
         "created_at": datetime.now(timezone.utc),
@@ -2379,14 +2392,24 @@ async def update_user(user_id: str, data: UserUpdate, request: Request):
                 update_data["email"] = new_email
         if data.name is not None:
             update_data["name"] = data.name
-        if data.role is not None:
-            update_data["role"] = data.role
+        # Per-user `role` field is auto-derived from the role group below.
+        # Ignore any explicit role sent from the client.
         if data.permissions is not None:
-            update_data["permissions"] = data.permissions
+            # Per-user permission overrides are deprecated. Empty out the field
+            # so role-group permissions become the single source of truth.
+            update_data["permissions"] = {}
         if data.status is not None:
             update_data["status"] = data.status
         if data.role_group_id is not None:
-            update_data["role_group_id"] = data.role_group_id or None
+            new_group_id = data.role_group_id or None
+            update_data["role_group_id"] = new_group_id
+            # Re-derive role from the new group
+            derived_role = "inventory_manager"
+            if new_group_id:
+                rg = await db.role_groups.find_one({"id": new_group_id}, {"_id": 0, "is_admin_group": 1})
+                if rg and rg.get("is_admin_group"):
+                    derived_role = "admin"
+            update_data["role"] = derived_role
         if data.assigned_customer_ids is not None:
             update_data["assigned_customer_ids"] = data.assigned_customer_ids
     else:

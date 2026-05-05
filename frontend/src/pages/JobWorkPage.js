@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 
 export default function JobWorkPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { formatCurrency, companySettings, currencySymbol } = useCompanySettings();
   const location = useLocation();
   const [orders, setOrders] = useState([]);
@@ -81,7 +81,11 @@ export default function JobWorkPage() {
 
   const [recWarehouse, setRecWarehouse] = useState('');
 
-  const canEdit = ['admin', 'production_manager'].includes(user?.role);
+  // Permission gating — view = list only; edit = process existing orders
+  // (receive, convert, DC-create); create = brand-new subcontract order.
+  const isAdmin = user?.role === 'admin' || user?.is_admin_group;
+  const canCreate = hasPermission ? hasPermission('job_work', 'create') : isAdmin;
+  const canEdit = (hasPermission ? hasPermission('job_work', 'edit') : false) || canCreate;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -627,7 +631,7 @@ export default function JobWorkPage() {
           </summary>
           <div className="px-4 pb-4">
           <div className="flex justify-end mb-4">
-            {canEdit && <button onClick={() => setOrderDialog(true)} className="btn-primary flex items-center space-x-2" data-testid="create-jw-order-btn"><Plus className="w-4 h-4" /><span>New Subcontract Order</span></button>}
+            {canCreate && <button onClick={() => setOrderDialog(true)} className="btn-primary flex items-center space-x-2" data-testid="create-jw-order-btn"><Plus className="w-4 h-4" /><span>New Subcontract Order</span></button>}
           </div>
           <div className="card-flat overflow-hidden">
             {orders.length === 0 ? (
@@ -749,7 +753,7 @@ export default function JobWorkPage() {
           <summary className="cursor-pointer px-4 py-3 flex items-center justify-between hover:bg-[#F9FAFB] select-none font-semibold text-[#111827] rounded-sm">
             <span className="flex items-center gap-2"><FileText className="w-4 h-4 text-[#1D3557]" /> Delivery Challans <span className="text-xs text-[#6B7280] font-normal">({challans.length})</span></span>
             <span className="flex items-center gap-2">
-              {canEdit && (
+              {canCreate && (
                 <span role="button" tabIndex={0} onClick={(e) => { e.preventDefault(); e.stopPropagation(); openManualDC(); }} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1" data-testid="create-manual-dc-btn">
                   <Plus className="w-3 h-3" /> Create DC
                 </span>

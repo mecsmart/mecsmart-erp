@@ -20,6 +20,10 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-05-05 (late)** — **Permission gating + simplified Role-Group-only model:**
+  1. **BOM / MO / SO / Subcontract / DC / PO action buttons now respect granular `view/create/edit/delete`** permissions instead of the legacy `['admin','production_manager']` role check. Users with `view`-only on a module no longer see Add/Edit/Delete buttons. Backend `_require_access` already enforced this — frontend was the leak.
+  2. **Role removed from User dialog (option B).** User Create/Edit form now shows ONLY a Role Group selector. Permissions are sourced solely from the role group's `permissions` map. Per-user permission overrides are deprecated; backend force-empties `user.permissions` on update.
+  3. **Auto-derived `role` field.** `POST /api/users` and `PUT /api/users/{id}` now derive `role` from the assigned group: `is_admin_group=true → role='admin'`, otherwise `role='inventory_manager'` (kept purely so legacy code paths that still read `user["role"]` keep working). Verified end-to-end: created `newadmin@test.com` with only `role_group_id` → `/auth/me` returned `role=admin, is_admin_group=True`.
 - **2026-05-05** — **3 P0 fixes (MO start preview, scroll preserve, Support products):**
   1. **MO Start now has a confirm-first preview.** New `?preview=true` query on `POST /api/work-orders/{id}/start` computes the materials WITHOUT consuming or marking the MO started. Frontend calls preview first, shows the consumption list, and the user can **Cancel / close the dialog → no material consumed**. Only `Confirm Start` triggers the real consumption.
   2. **Scroll position preserved after MO start.** Replaced the heavy `fetchData()` reload after start with an in-place state patch via the new `patchWorkOrderInTree` helper — the WO row's status flips to `in_progress` without collapsing the tree or jumping the page back to the top.

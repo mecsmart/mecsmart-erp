@@ -34,7 +34,7 @@ const statusOptions = [
 ];
 
 export default function BOMPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { formatCurrency, currencySymbol, companySettings } = useCompanySettings();
   // Cost visibility: governed by the `bom_rollup_cost.view` permission OR admin/admin-group.
   const rollupPerms = user?.permissions?.bom_rollup_cost || [];
@@ -84,7 +84,13 @@ export default function BOMPage() {
     parent_routings: [],
   });
 
-  const canEdit = ['admin', 'production_manager'].includes(user?.role);
+  // Permission gating — always trust the granular permissions object (falls
+  // back to the legacy role list only when the user has NO permissions map set,
+  // so seed/admin still works).
+  const isAdmin = user?.role === 'admin' || user?.is_admin_group;
+  const canCreate = hasPermission ? hasPermission('bom', 'create') : isAdmin;
+  const canEdit = (hasPermission ? hasPermission('bom', 'edit') : false) || canCreate;
+  const canDelete = (hasPermission ? hasPermission('bom', 'delete') : false) || isAdmin;
   const [routingOptions, setRoutingOptions] = useState([]);
 
   useEffect(() => {
@@ -542,7 +548,7 @@ export default function BOMPage() {
           <button onClick={handleBomExport} className="btn-secondary flex items-center space-x-1 text-sm" data-testid="export-bom-btn">
             <Download className="w-4 h-4" /><span>Export</span>
           </button>
-          {canEdit && (
+          {canCreate && (
             <>
               <input type="file" ref={bomFileRef} accept=".xlsx,.xls" onChange={handleBomImport} className="hidden" />
               <button onClick={() => bomFileRef.current?.click()} disabled={bomImporting} className="btn-secondary flex items-center space-x-1 text-sm" data-testid="import-bom-btn">
@@ -550,7 +556,7 @@ export default function BOMPage() {
               </button>
             </>
           )}
-        {canEdit && (
+        {canCreate && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => {
             // Closing the dialog (Esc, X, click-outside) — if the user was
             // editing a child BOM, pop back to the parent instead of closing

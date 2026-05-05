@@ -35,7 +35,7 @@ function patchWorkOrderInTree(workOrders, woId, patch) {
 }
 
 export default function ManufacturingPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { formatCurrency, currencySymbol } = useCompanySettings();
   const [workCenters, setWorkCenters] = useState([]);
   const [routings, setRoutings] = useState([]);
@@ -101,7 +101,13 @@ export default function ManufacturingPage() {
     subcontract_type: 'with_material',
   });
 
-  const canEdit = ['admin', 'production_manager'].includes(user?.role);
+  // Permission gating — view = list only, edit = process (start/complete MO/SO),
+  // create = brand-new MO/SO. Falls back to role check only when hasPermission
+  // is unavailable (legacy or admin seed).
+  const isAdmin = user?.role === 'admin' || user?.is_admin_group;
+  const canCreate = hasPermission ? hasPermission('manufacturing', 'create') : isAdmin;
+  const canEdit = (hasPermission ? hasPermission('manufacturing', 'edit') : false) || canCreate;
+  const canDelete = (hasPermission ? hasPermission('manufacturing', 'delete') : false) || isAdmin;
   const [suppliers, setSuppliers] = useState([]);
   const [editingRouting, setEditingRouting] = useState(null);
   const [moTree, setMoTree] = useState(null);
@@ -917,7 +923,7 @@ export default function ManufacturingPage() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
                 <input type="text" value={moSearch} onChange={(e) => setMoSearch(e.target.value)} placeholder="Search MO, item..." className="search-input text-sm" data-testid="mo-search-input" />
               </div>
-            {canEdit && (
+            {canCreate && (
               <Dialog open={isWorkOrderDialogOpen} onOpenChange={setIsWorkOrderDialogOpen}>
                 <DialogTrigger asChild>
                   <button className="btn-primary flex items-center space-x-2" data-testid="create-work-order-btn">
