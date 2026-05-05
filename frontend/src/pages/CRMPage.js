@@ -42,9 +42,14 @@ const PRIORITY_OPTIONS = [
 
 const SOURCE_OPTIONS = ['website', 'referral', 'trade_show', 'cold_call', 'other'];
 
-function formatCurrency(v) {
+const CURRENCY_SYMBOLS = { INR: '₹', USD: '$', EUR: '€', GBP: '£', AED: 'د.إ' };
+
+function formatCurrency(v, currencyCode) {
   const n = parseFloat(v || 0);
-  return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+  const sym = CURRENCY_SYMBOLS[(currencyCode || 'INR').toUpperCase()] || '₹';
+  // For INR keep en-IN grouping; other currencies use plain en-US.
+  const locale = (currencyCode || 'INR').toUpperCase() === 'INR' ? 'en-IN' : 'en-US';
+  return `${sym}${n.toLocaleString(locale, { maximumFractionDigits: 0 })}`;
 }
 
 function formatDateTime(v) {
@@ -1311,7 +1316,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                       <th style={{ width: '90px' }}>HSN</th>
                       <th style={{ width: '80px' }}>Qty</th>
                       <th style={{ width: '70px' }}>UOM</th>
-                      <th style={{ width: '110px' }}>Rate (₹)</th>
+                      <th style={{ width: '110px' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
                       <th style={{ width: '70px' }}>Disc %</th>
                       <th style={{ width: '70px' }}>GST %</th>
                       <th style={{ width: '130px', textAlign: 'right' }}>Amount</th>
@@ -1345,7 +1350,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.rate} onChange={e => updateLine(idx, { rate: e.target.value })} data-testid={`quotation-line-rate-${idx}`} /></td>
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.discount_pct || 0} onChange={e => updateLine(idx, { discount_pct: e.target.value })} data-testid={`quotation-line-discount-${idx}`} /></td>
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.gst_rate} onChange={e => updateLine(idx, { gst_rate: e.target.value })} /></td>
-                          <td className="static-cell amount">{formatCurrency(amount)}</td>
+                          <td className="static-cell amount">{formatCurrency(amount, form.currency)}</td>
                           <td className="remove-cell">
                             {form.lines.length > 1 && (
                               <button className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded p-1" onClick={() => removeLine(idx)} title="Remove" data-testid={`quotation-line-remove-${idx}`}><X className="w-3 h-3" /></button>
@@ -1368,10 +1373,15 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
               </div>
               <div className="flex justify-end mt-2 text-xs">
                 <div className="w-64 space-y-1">
-                  <div className="flex justify-between"><span>Subtotal (after discount):</span><span className="mono">{formatCurrency(totals.sub)}</span></div>
-                  {totals.discount > 0 && <div className="flex justify-between text-[#9B1C1C]"><span>Discount:</span><span className="mono">-{formatCurrency(totals.discount)}</span></div>}
-                  <div className="flex justify-between"><span>GST:</span><span className="mono">{formatCurrency(totals.gst)}</span></div>
-                  <div className="flex justify-between font-semibold border-t border-[#E5E7EB] pt-1"><span>Grand Total:</span><span className="mono">{formatCurrency(totals.total)}</span></div>
+                  <div className="flex justify-between"><span>Subtotal (after discount):</span><span className="mono">{formatCurrency(totals.sub, form.currency)}</span></div>
+                  {totals.discount > 0 && <div className="flex justify-between text-[#9B1C1C]"><span>Discount:</span><span className="mono">-{formatCurrency(totals.discount, form.currency)}</span></div>}
+                  {(form.currency || 'INR') === 'INR' && (
+                    <div className="flex justify-between"><span>GST:</span><span className="mono">{formatCurrency(totals.gst, form.currency)}</span></div>
+                  )}
+                  <div className="flex justify-between font-semibold border-t border-[#E5E7EB] pt-1"><span>Grand Total:</span><span className="mono">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.total : totals.sub, form.currency)}</span></div>
+                  {(form.currency || 'INR') !== 'INR' && (
+                    <div className="text-[10px] text-[#6B7280] italic">Export/Import — GST not applicable. Currency: {form.currency}</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -2401,6 +2411,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
     place_of_supply: '',
     notes: '',
     terms: '',
+    currency: 'INR',
     lines: [emptyTaxInvoiceLine()],
   };
   const [form, setForm] = useState(emptyForm);
@@ -2446,6 +2457,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
         place_of_supply: ti.place_of_supply || '',
         notes: ti.notes || '',
         terms: ti.terms || '',
+        currency: ti.currency || 'INR',
         lines: (ti.lines || []).map(l => ({ ...l })),
       });
     } else {
@@ -2580,6 +2592,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
           billing_address: payload.billing_address,
           shipping_address: payload.shipping_address,
           customer_po_number: payload.customer_po_number,
+          currency: payload.currency,
         });
       } else {
         await api.post('/api/crm/tax-invoices', payload);
@@ -2745,7 +2758,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
             )}
 
             {/* Common fields */}
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-5 gap-3">
               <div>
                 <label className="text-xs text-[#4B5563]">Invoice Date</label>
                 <input type="date" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" value={form.invoice_date} onChange={e => setForm({ ...form, invoice_date: e.target.value })} data-testid="ti-invoice-date" />
@@ -2761,6 +2774,16 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
               <div>
                 <label className="text-xs text-[#4B5563]">Customer PO Ref <span className="text-[#9CA3AF]">(optional)</span></label>
                 <input type="text" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" placeholder="optional" value={form.customer_po_number} onChange={e => setForm({ ...form, customer_po_number: e.target.value })} data-testid="ti-po-ref" />
+              </div>
+              <div>
+                <label className="text-xs text-[#4B5563]">Currency <span className="text-[10px] text-[#9CA3AF]">(non-INR ⇒ no GST)</span></label>
+                <select className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" value={form.currency || 'INR'} onChange={e => setForm({ ...form, currency: e.target.value })} data-testid="ti-currency">
+                  <option value="INR">INR — ₹</option>
+                  <option value="USD">USD — $</option>
+                  <option value="EUR">EUR — €</option>
+                  <option value="GBP">GBP — £</option>
+                  <option value="AED">AED — د.إ</option>
+                </select>
               </div>
             </div>
 
@@ -2790,7 +2813,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                     <th style={{ width: '90px' }}>HSN</th>
                     <th style={{ width: '70px', textAlign: 'right' }}>Qty</th>
                     <th style={{ width: '60px' }}>UOM</th>
-                    <th style={{ width: '100px', textAlign: 'right' }}>Rate</th>
+                    <th style={{ width: '100px', textAlign: 'right' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
                     <th style={{ width: '60px', textAlign: 'right' }}>Disc%</th>
                     <th style={{ width: '60px', textAlign: 'right' }}>GST%</th>
                     <th style={{ width: '120px', textAlign: 'right' }}>Amount</th>
@@ -2821,7 +2844,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.rate} onChange={e => updateLine(i, { rate: e.target.value })} data-testid={`ti-line-rate-${i}`} /></td>
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.discount_pct} onChange={e => updateLine(i, { discount_pct: e.target.value })} data-testid={`ti-line-disc-${i}`} /></td>
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.gst_rate} onChange={e => updateLine(i, { gst_rate: e.target.value })} data-testid={`ti-line-gst-${i}`} /></td>
-                          <td className="static-cell amount">{formatCurrency(amount)}</td>
+                          <td className="static-cell amount">{formatCurrency(amount, form.currency)}</td>
                           <td className="remove-cell">
                             <button type="button" onClick={() => removeLine(i)} className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded p-1" data-testid={`ti-line-remove-${i}`} title="Remove line"><X className="w-3 h-3" /></button>
                           </td>
@@ -2845,10 +2868,15 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
             {/* Totals */}
             <div className="flex justify-end">
               <div className="w-64 border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB] text-sm">
-                <div className="flex justify-between"><span className="text-[#4B5563]">Subtotal</span><span className="mono">{formatCurrency(totals.subtotal)}</span></div>
-                {totals.totalDiscount > 0 && <div className="flex justify-between"><span className="text-[#4B5563]">Discount</span><span className="mono">-{formatCurrency(totals.totalDiscount)}</span></div>}
-                <div className="flex justify-between"><span className="text-[#4B5563]">GST</span><span className="mono">{formatCurrency(totals.totalGst)}</span></div>
-                <div className="flex justify-between border-t border-[#E5E7EB] mt-1 pt-1 font-semibold"><span>Grand Total</span><span className="mono text-[#1D3557]">{formatCurrency(totals.grandTotal)}</span></div>
+                <div className="flex justify-between"><span className="text-[#4B5563]">Subtotal</span><span className="mono">{formatCurrency(totals.subtotal, form.currency)}</span></div>
+                {totals.totalDiscount > 0 && <div className="flex justify-between"><span className="text-[#4B5563]">Discount</span><span className="mono">-{formatCurrency(totals.totalDiscount, form.currency)}</span></div>}
+                {(form.currency || 'INR') === 'INR' && (
+                  <div className="flex justify-between"><span className="text-[#4B5563]">GST</span><span className="mono">{formatCurrency(totals.totalGst, form.currency)}</span></div>
+                )}
+                <div className="flex justify-between border-t border-[#E5E7EB] mt-1 pt-1 font-semibold"><span>Grand Total</span><span className="mono text-[#1D3557]">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.grandTotal : totals.subtotal, form.currency)}</span></div>
+                {(form.currency || 'INR') !== 'INR' && (
+                  <div className="text-[10px] text-[#6B7280] italic mt-1">Export/Import — GST not applicable. Currency: {form.currency}</div>
+                )}
               </div>
             </div>
 

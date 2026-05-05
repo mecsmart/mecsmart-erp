@@ -764,6 +764,8 @@ export default function ItemsPage() {
                   <th className="text-right">GST%</th>
                   <th className="text-right">Stock</th>
                   <th className="text-right">Unit Cost</th>
+                  {canViewPurchasePrice && <th className="text-right" data-testid="items-th-purchase-price">Purchase Price</th>}
+                  {canViewSalePrice && <th className="text-right" data-testid="items-th-sale-price">Sale Price</th>}
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -808,6 +810,16 @@ export default function ItemsPage() {
                     <td className="text-right mono">{item.gst_rate != null ? `${item.gst_rate}%` : '-'}</td>
                     <td className="text-right mono">{item.current_stock} {item.unit_of_measure}</td>
                     <td className="text-right mono">{formatCurrency(item.unit_cost)}</td>
+                    {canViewPurchasePrice && (
+                      <td className="text-right mono" data-testid={`item-purchase-price-${item.part_number}`}>
+                        {item.category === 'raw_material' && item.purchase_price ? formatCurrency(item.purchase_price) : <span className="text-[#9CA3AF]">-</span>}
+                      </td>
+                    )}
+                    {canViewSalePrice && (
+                      <td className="text-right mono" data-testid={`item-sale-price-${item.part_number}`}>
+                        {item.sale_price ? formatCurrency(item.sale_price) : <span className="text-[#9CA3AF]">-</span>}
+                      </td>
+                    )}
                     <td>
                       <div className="flex items-center space-x-2">
                         {canEdit && (

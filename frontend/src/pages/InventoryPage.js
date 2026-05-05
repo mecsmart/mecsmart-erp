@@ -517,6 +517,8 @@ export default function InventoryPage() {
                       <th className="text-right">Safety Stock</th>
                       <th className="text-right">Reorder Point</th>
                       <th className="text-right">Unit Cost</th>
+                      {canViewPurchasePrice && <th className="text-right" data-testid="inventory-th-purchase-price">Purchase Price</th>}
+                      {canViewSalePrice && <th className="text-right" data-testid="inventory-th-sale-price">Sale Price</th>}
                       <th className="text-right">Value</th>
                       {canEditItem && <th className="text-center">Actions</th>}
                     </tr>
@@ -580,6 +582,16 @@ export default function InventoryPage() {
                         <td className="text-right mono">{item.safety_stock}</td>
                         <td className="text-right mono">{item.reorder_point}</td>
                         <td className="text-right mono">{formatCurrency(item.unit_cost)}</td>
+                        {canViewPurchasePrice && (
+                          <td className="text-right mono" data-testid={`inventory-purchase-price-${item.part_number}`}>
+                            {item.category === 'raw_material' && item.purchase_price ? formatCurrency(item.purchase_price) : <span className="text-[#9CA3AF]">-</span>}
+                          </td>
+                        )}
+                        {canViewSalePrice && (
+                          <td className="text-right mono" data-testid={`inventory-sale-price-${item.part_number}`}>
+                            {item.sale_price ? formatCurrency(item.sale_price) : <span className="text-[#9CA3AF]">-</span>}
+                          </td>
+                        )}
                         <td className="text-right mono">{formatCurrency(item.current_stock * item.unit_cost)}</td>
                         {canEditItem && (
                           <td className="text-center">
