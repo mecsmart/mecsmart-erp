@@ -25,6 +25,7 @@ export default function PurchaseInvoicePage() {
   const [suppliers, setSuppliers] = useState([]);
   const [formData, setFormData] = useState({
     supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '',
+    additional_charges: [],  // Freight / Packaging / Insurance — pre-filled from parent PO when GRN is selected
     lines: []
   });
 
@@ -41,7 +42,7 @@ export default function PurchaseInvoicePage() {
       const [invRes, grnRes, itemRes, supRes] = await Promise.all([
         api.get(`/api/purchase-invoices${params}`),
         api.get('/api/purchase-invoices/pending-grns'),
-        api.get('/api/items'),
+        api.get('/api/items?lite=1'),
         api.get('/api/suppliers'),
       ]);
       setInvoices(invRes.data);
@@ -53,7 +54,7 @@ export default function PurchaseInvoicePage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handleGRNSelect = (grnId) => {
+  const handleGRNSelect = async (grnId) => {
     const grn = pendingGRNs.find(g => g.id === grnId);
     if (!grn) return;
     const isJW = !!(grn.is_jw || grn.jw_order_id || grn.sc_order_id);
@@ -91,6 +92,20 @@ export default function PurchaseInvoicePage() {
         };
       });
     }
+    // Pre-fill additional_charges from the parent PO. Freight / packaging /
+    // insurance booked at PO time should flow into the PI by default — user
+    // can still tweak before saving.
+    let preCharges = [];
+    if (!isJW && grn.po_id) {
+      try {
+        const { data: po } = await api.get(`/api/purchase-orders/${grn.po_id}`);
+        preCharges = (po?.additional_charges || []).map(c => ({
+          name: c.name || '',
+          amount: parseFloat(c.amount) || 0,
+          gst_rate: parseFloat(c.gst_rate) || 0,
+        }));
+      } catch (e) { /* PO may have been deleted; non-fatal */ }
+    }
     setFormData({
       ...formData,
       grn_id: grnId,
@@ -98,6 +113,7 @@ export default function PurchaseInvoicePage() {
       po_id: grn.po_id || '',
       invoice_no: grn.supplier_invoice_no || '',
       invoice_date: grn.supplier_invoice_date ? grn.supplier_invoice_date.split('T')[0] : '',
+      additional_charges: preCharges,
       lines
     });
   };
@@ -111,7 +127,18 @@ export default function PurchaseInvoicePage() {
   };
 
   const calcSubtotal = () => formData.lines.reduce((s, l) => s + (l.quantity * l.unit_price - (l.discount || 0)), 0);
-  const calcGST = () => formData.lines.reduce((s, l) => s + ((l.quantity * l.unit_price - (l.discount || 0)) * (l.gst_rate || 18) / 100), 0);
+  const calcChargesSubtotal = () => (formData.additional_charges || []).reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
+  const calcLinesGST = () => formData.lines.reduce((s, l) => s + ((l.quantity * l.unit_price - (l.discount || 0)) * (l.gst_rate || 18) / 100), 0);
+  const calcChargesGST = () => (formData.additional_charges || []).reduce((s, c) => s + ((parseFloat(c.amount) || 0) * (parseFloat(c.gst_rate) || 0) / 100), 0);
+  const calcGST = () => calcLinesGST() + calcChargesGST();
+  const calcTotal = () => calcSubtotal() + calcChargesSubtotal() + calcGST();
+  const addCharge = () => setFormData(fd => ({ ...fd, additional_charges: [...(fd.additional_charges || []), { name: '', amount: 0, gst_rate: 18 }] }));
+  const removeCharge = (idx) => setFormData(fd => ({ ...fd, additional_charges: fd.additional_charges.filter((_, i) => i !== idx) }));
+  const updateCharge = (idx, field, val) => {
+    const charges = [...(formData.additional_charges || [])];
+    charges[idx] = { ...charges[idx], [field]: val };
+    setFormData(fd => ({ ...fd, additional_charges: charges }));
+  };
 
   const handleSubmit = async () => {
     // In manual mode, skip GRN check. Still require supplier + invoice_no + at least one line.
@@ -132,7 +159,7 @@ export default function PurchaseInvoicePage() {
     } catch (e) { alert(e.response?.data?.detail || 'Failed to create invoice'); }
   };
 
-  const resetForm = () => { setFormData({ supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', lines: [] }); setManualMode(false); setGrnSearchQuery(''); };
+  const resetForm = () => { setFormData({ supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', additional_charges: [], lines: [] }); setManualMode(false); setGrnSearchQuery(''); };
 
   const handleApprove = async (id) => {
     if (!window.confirm('Approve this invoice?')) return;
@@ -562,11 +589,58 @@ export default function PurchaseInvoicePage() {
                       </tbody>
                     </table>
                   </div>
+                  {/* Additional Charges (freight / packaging / insurance). Pre-filled from
+                      the parent PO when a GRN is selected — user can edit / add / remove. */}
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-sm font-semibold text-[#1D3557]">Additional Charges</div>
+                      <button type="button" onClick={addCharge} className="btn-secondary text-xs flex items-center gap-1" data-testid="pi-add-charge-btn">
+                        <Plus className="w-3 h-3" /> Add Charge
+                      </button>
+                    </div>
+                    {(formData.additional_charges || []).length === 0 ? (
+                      <div className="text-xs text-[#9CA3AF] italic">No additional charges. Click "Add Charge" to include freight, packaging, insurance, etc.</div>
+                    ) : (
+                      <div className="overflow-x-auto border border-[#E5E7EB] rounded-sm">
+                        <table className="w-full text-xs">
+                          <thead className="bg-[#F9FAFB] text-[#374151]">
+                            <tr>
+                              <th className="py-1 px-2 text-left font-semibold">Charge Name</th>
+                              <th className="py-1 px-2 text-right font-semibold">Amount</th>
+                              <th className="py-1 px-2 text-right font-semibold">GST %</th>
+                              <th className="py-1 px-2 text-right font-semibold">Total</th>
+                              <th className="py-1 px-1 w-8"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {formData.additional_charges.map((c, idx) => {
+                              const amt = parseFloat(c.amount) || 0;
+                              const tax = amt * (parseFloat(c.gst_rate) || 0) / 100;
+                              return (
+                                <tr key={idx} className="border-t border-[#E5E7EB]" data-testid={`pi-charge-row-${idx}`}>
+                                  <td className="py-1 px-2"><input type="text" value={c.name || ''} onChange={e => updateCharge(idx, 'name', e.target.value)} placeholder="e.g. Freight" className="w-full px-2 py-1 border rounded-sm text-xs" data-testid={`pi-charge-name-${idx}`} /></td>
+                                  <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={c.amount || 0} onChange={e => updateCharge(idx, 'amount', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" data-testid={`pi-charge-amount-${idx}`} /></td>
+                                  <td className="py-1 px-2">
+                                    <select value={c.gst_rate || 0} onChange={e => updateCharge(idx, 'gst_rate', parseFloat(e.target.value))} className="w-full px-1 py-1 border rounded-sm text-xs" data-testid={`pi-charge-gst-${idx}`}>
+                                      {[0,5,12,18,28].map(r => <option key={r} value={r}>{r}%</option>)}
+                                    </select>
+                                  </td>
+                                  <td className="py-1 px-2 text-right mono text-xs font-medium">{formatCurrency(amt + tax)}</td>
+                                  <td className="py-1 px-1"><button type="button" onClick={() => removeCharge(idx)} className="text-[#9B1C1C] hover:text-[#DC2626] p-1" data-testid={`pi-charge-remove-${idx}`}><X className="w-3 h-3" /></button></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                   <div className="flex justify-end mt-3 text-sm">
-                    <div className="w-52 space-y-1">
-                      <div className="flex justify-between"><span className="text-[#4B5563]">Subtotal:</span><span className="mono">{formatCurrency(calcSubtotal())}</span></div>
+                    <div className="w-60 space-y-1">
+                      <div className="flex justify-between"><span className="text-[#4B5563]">Items Subtotal:</span><span className="mono">{formatCurrency(calcSubtotal())}</span></div>
+                      {calcChargesSubtotal() > 0 && <div className="flex justify-between"><span className="text-[#4B5563]">Charges:</span><span className="mono">{formatCurrency(calcChargesSubtotal())}</span></div>}
                       <div className="flex justify-between"><span className="text-[#4B5563]">GST:</span><span className="mono">{formatCurrency(calcGST())}</span></div>
-                      <div className="flex justify-between font-bold border-t pt-1 mt-1"><span>Total:</span><span className="mono text-lg">{formatCurrency(calcSubtotal() + calcGST())}</span></div>
+                      <div className="flex justify-between font-bold border-t pt-1 mt-1"><span>Total:</span><span className="mono text-lg">{formatCurrency(calcTotal())}</span></div>
                     </div>
                   </div>
                 </div>

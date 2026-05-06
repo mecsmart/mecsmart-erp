@@ -98,7 +98,11 @@ export default function ItemsPage() {
   // Render pagination — avoid laying out thousands of rows at once.
   const PAGE_SIZE = 100;
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [items, debouncedSearch, categoryFilter, groupFilter]);
+  // Reset pagination ONLY when the user actively narrows the dataset
+  // (search/filter change). Editing an item triggers a setItems() call which
+  // creates a new array reference — we must NOT reset visibleCount there,
+  // else any item past row 100 disappears after a quick edit.
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [debouncedSearch, categoryFilter, groupFilter]);
 
   useEffect(() => {
     fetchItems();

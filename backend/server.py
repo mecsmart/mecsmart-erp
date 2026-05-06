@@ -532,6 +532,7 @@ class PurchaseInvoiceCreate(BaseModel):
     invoice_date: datetime
     due_date: Optional[datetime] = None
     lines: List[PurchaseInvoiceLineItem]
+    additional_charges: Optional[List[POAdditionalCharge]] = []  # Freight, packaging, insurance etc.
     notes: Optional[str] = ""
     is_manual: Optional[bool] = False  # Manual PI — no parent GRN, direct entry (services, freight etc.)
 
@@ -542,6 +543,7 @@ class PurchaseInvoiceUpdate(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
     lines: Optional[List[PurchaseInvoiceLineItem]] = None
+    additional_charges: Optional[List[POAdditionalCharge]] = None
 
 # ===== Job Work / Subcontracting Models =====
 class JobWorkLineItem(BaseModel):
@@ -8244,7 +8246,37 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request)
         })
     
     total_tax = total_cgst + total_sgst + total_igst
-    total_amount = subtotal + total_tax
+
+    # Additional charges (freight / packaging / insurance) — mirror PO behaviour:
+    # taxed individually, summed into totals. Stored on the invoice doc so the
+    # print template can render the breakdown.
+    charges_subtotal = 0.0
+    charges_cgst_total = 0.0
+    charges_sgst_total = 0.0
+    charges_igst_total = 0.0
+    charges_with_tax = []
+    for charge in (data.additional_charges or []):
+        c_amount = float(charge.amount or 0)
+        c_gst_rate = float(charge.gst_rate or 0)
+        c_tax = round(c_amount * c_gst_rate / 100, 2)
+        if is_inter_state:
+            charges_igst_total += c_tax
+        else:
+            charges_cgst_total += c_tax / 2
+            charges_sgst_total += c_tax / 2
+        charges_subtotal += c_amount
+        charges_with_tax.append({
+            "name": charge.name,
+            "amount": c_amount,
+            "gst_rate": c_gst_rate,
+            "tax_amount": c_tax,
+            "total_with_tax": round(c_amount + c_tax, 2),
+        })
+    total_cgst += charges_cgst_total
+    total_sgst += charges_sgst_total
+    total_igst += charges_igst_total
+    total_tax = total_cgst + total_sgst + total_igst
+    total_amount = subtotal + charges_subtotal + total_tax
     
     invoice_doc = {
         "id": str(uuid.uuid4()),
@@ -8257,7 +8289,9 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request)
         "invoice_date": data.invoice_date,
         "due_date": data.due_date,
         "lines": lines,
+        "additional_charges": charges_with_tax,
         "subtotal": round(subtotal, 2),
+        "charges_subtotal": round(charges_subtotal, 2),
         "total_cgst": round(total_cgst, 2),
         "total_sgst": round(total_sgst, 2),
         "total_igst": round(total_igst, 2),
