@@ -8318,7 +8318,69 @@ async def update_purchase_invoice(invoice_id: str, data: PurchaseInvoiceUpdate, 
     
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     if update_data:
+        # Edits to an APPROVED invoice automatically reset it to "draft" so it
+        # has to be re-approved. Mirrors how PO revisions clear the approval.
+        # Only triggers if the user actually modified content (lines / charges
+        # / amount / dates), not when toggling status itself.
+        content_changed = any(
+            k in update_data for k in ("lines", "additional_charges", "invoice_no", "invoice_date", "due_date", "notes")
+        )
+        was_approved = invoice.get("status") == "approved"
+        if content_changed and was_approved and "status" not in update_data:
+            update_data["status"] = "draft"
+            update_data["approved_at"] = None
+            update_data["approved_by"] = None
         update_data["updated_at"] = datetime.now(timezone.utc)
+        # Recompute totals if lines or additional_charges changed.
+        if "lines" in update_data or "additional_charges" in update_data:
+            supplier = await db.suppliers.find_one({"id": invoice.get("supplier_id")})
+            company_settings = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
+            company_state = (company_settings or {}).get("state_code", "")
+            supplier_state = (supplier or {}).get("state_code", "")
+            is_inter_state = bool(company_state) and bool(supplier_state) and company_state != supplier_state
+            new_lines = update_data.get("lines") if "lines" in update_data else invoice.get("lines") or []
+            new_charges_input = update_data.get("additional_charges") if "additional_charges" in update_data else invoice.get("additional_charges") or []
+            subtotal = 0.0
+            total_cgst = 0.0
+            total_sgst = 0.0
+            total_igst = 0.0
+            for ln in new_lines:
+                amt = float(ln.get("quantity", 0)) * float(ln.get("unit_price", 0)) - float(ln.get("discount", 0) or 0)
+                tax = amt * float(ln.get("gst_rate", 0) or 0) / 100
+                if is_inter_state:
+                    total_igst += tax
+                else:
+                    total_cgst += tax / 2
+                    total_sgst += tax / 2
+                subtotal += amt
+            charges_subtotal = 0.0
+            charges_with_tax = []
+            for c in new_charges_input:
+                c_amt = float(c.get("amount", 0))
+                c_rate = float(c.get("gst_rate", 0) or 0)
+                c_tax = round(c_amt * c_rate / 100, 2)
+                if is_inter_state:
+                    total_igst += c_tax
+                else:
+                    total_cgst += c_tax / 2
+                    total_sgst += c_tax / 2
+                charges_subtotal += c_amt
+                charges_with_tax.append({
+                    "name": c.get("name", ""),
+                    "amount": c_amt,
+                    "gst_rate": c_rate,
+                    "tax_amount": c_tax,
+                    "total_with_tax": round(c_amt + c_tax, 2),
+                })
+            update_data["additional_charges"] = charges_with_tax
+            update_data["subtotal"] = round(subtotal, 2)
+            update_data["charges_subtotal"] = round(charges_subtotal, 2)
+            update_data["total_cgst"] = round(total_cgst, 2)
+            update_data["total_sgst"] = round(total_sgst, 2)
+            update_data["total_igst"] = round(total_igst, 2)
+            total_tax = total_cgst + total_sgst + total_igst
+            update_data["total_tax"] = round(total_tax, 2)
+            update_data["total_amount"] = round(subtotal + charges_subtotal + total_tax, 2)
         await db.purchase_invoices.update_one({"id": invoice_id}, {"$set": update_data})
     
     return await db.purchase_invoices.find_one({"id": invoice_id}, {"_id": 0})
@@ -8326,8 +8388,7 @@ async def update_purchase_invoice(invoice_id: str, data: PurchaseInvoiceUpdate, 
 @purchase_invoices_router.post("/{invoice_id}/approve")
 async def approve_purchase_invoice(invoice_id: str, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin"]:
-        raise HTTPException(status_code=403, detail="Only admin can approve invoices")
+    _require_access(user, ["admin"], module="purchase_invoices", action="edit")
     invoice = await db.purchase_invoices.find_one({"id": invoice_id})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -8339,8 +8400,7 @@ async def approve_purchase_invoice(invoice_id: str, request: Request):
 @purchase_invoices_router.post("/{invoice_id}/mark-paid")
 async def mark_invoice_paid(invoice_id: str, request: Request):
     user = await get_current_user(request)
-    if user["role"] not in ["admin"]:
-        raise HTTPException(status_code=403, detail="Only admin can mark invoices as paid")
+    _require_access(user, ["admin"], module="purchase_invoices", action="edit")
     invoice = await db.purchase_invoices.find_one({"id": invoice_id})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")

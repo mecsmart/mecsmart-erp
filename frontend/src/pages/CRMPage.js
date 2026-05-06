@@ -1418,34 +1418,44 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                 <div className="w-72 space-y-1">
                   <div className="flex justify-between"><span>Subtotal (after line discount):</span><span className="mono">{formatCurrency(totals.sub, form.currency)}</span></div>
                   {/* Global (footer) discount — % or absolute amount, applied AFTER line discounts and BEFORE GST.
-                      Layout: a wider Select shows e.g. "₹ Amount" / "% Percent" so the currency symbol is always
-                      legible regardless of theme. The amount input is right-aligned and prefixed with the chosen symbol. */}
-                  <div className="flex justify-between items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 my-1">
-                    <span className="text-[#374151] font-semibold">Global Discount:</span>
-                    <div className="flex items-center gap-1">
-                      <select
-                        className="input-field h-7 text-xs px-1 py-0 w-24"
-                        value={form.global_discount_type || 'amount'}
-                        onChange={(e) => setForm(f => ({ ...f, global_discount_type: e.target.value }))}
-                        data-testid="quotation-global-discount-type"
-                      >
-                        <option value="amount">{(CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹') + ' Amount'}</option>
-                        <option value="percent">% Percent</option>
-                      </select>
-                      <div className="flex items-center border border-[#D1D5DB] rounded-sm bg-white">
-                        <span className="px-1 text-[#6B7280] text-xs select-none" data-testid="quotation-global-discount-symbol">
-                          {(form.global_discount_type || 'amount') === 'percent' ? '%' : (CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹')}
-                        </span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          className="h-6 text-xs px-1 py-0 w-16 mono text-right border-0 outline-none focus:ring-0"
-                          value={form.global_discount_value || 0}
-                          onChange={(e) => setForm(f => ({ ...f, global_discount_value: parseFloat(e.target.value) || 0 }))}
-                          data-testid="quotation-global-discount-value"
-                        />
+                      UI: a clear two-button toggle (Currency / Percent) instead of a cramped <select> that truncated
+                      the option label. The active mode's symbol also prefixes the input value for unambiguous reading. */}
+                  <div className="flex justify-between items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 my-1 gap-2">
+                    <span className="text-[#374151] font-semibold whitespace-nowrap">Global Discount:</span>
+                    <div className="flex items-center gap-2">
+                      <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden" role="tablist">
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={(form.global_discount_type || 'amount') === 'amount'}
+                          onClick={() => setForm(f => ({ ...f, global_discount_type: 'amount' }))}
+                          className={`h-7 w-9 text-sm font-semibold mono transition-colors ${(form.global_discount_type || 'amount') === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                          data-testid="quotation-global-discount-mode-amount"
+                          title="Discount as currency amount"
+                        >
+                          {CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'}
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={form.global_discount_type === 'percent'}
+                          onClick={() => setForm(f => ({ ...f, global_discount_type: 'percent' }))}
+                          className={`h-7 w-9 text-sm font-semibold mono transition-colors border-l border-[#D1D5DB] ${form.global_discount_type === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                          data-testid="quotation-global-discount-mode-percent"
+                          title="Discount as percentage of subtotal"
+                        >
+                          %
+                        </button>
                       </div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="input-field h-7 text-xs px-2 py-0 w-24 mono text-right"
+                        value={form.global_discount_value || 0}
+                        onChange={(e) => setForm(f => ({ ...f, global_discount_value: parseFloat(e.target.value) || 0 }))}
+                        data-testid="quotation-global-discount-value"
+                      />
                     </div>
                   </div>
                   {totals.globalDiscount > 0 && (

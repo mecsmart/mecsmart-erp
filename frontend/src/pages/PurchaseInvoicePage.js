@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
-import { Plus, FileText, CheckCircle2, DollarSign, X, Search, Download } from 'lucide-react';
+import { Plus, FileText, CheckCircle2, DollarSign, X, Search, Download, Edit2 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { SearchableSelect } from '../components/SearchableSelect';
@@ -18,6 +18,7 @@ export default function PurchaseInvoicePage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState(null);  // Holds the invoice being edited (PUT mode) vs null = create mode
   const [selectedIds, setSelectedIds] = useState([]);  // Bulk Tally XML selection
   // Manual PI toggle — when true, the GRN search/lock is bypassed and user enters everything by hand.
   const [manualMode, setManualMode] = useState(false);
@@ -142,21 +143,59 @@ export default function PurchaseInvoicePage() {
 
   const handleSubmit = async () => {
     // In manual mode, skip GRN check. Still require supplier + invoice_no + at least one line.
-    if (!manualMode && !formData.grn_id) { alert('Please select a GRN (or switch to Manual entry mode)'); return; }
-    if (manualMode && !formData.supplier_id) { alert('Please select a supplier'); return; }
+    if (!editingInvoice && !manualMode && !formData.grn_id) { alert('Please select a GRN (or switch to Manual entry mode)'); return; }
+    if (!editingInvoice && manualMode && !formData.supplier_id) { alert('Please select a supplier'); return; }
     if (!formData.invoice_no) { alert('Please enter supplier invoice number'); return; }
     if (formData.lines.length === 0) { alert('Add at least one line item'); return; }
     try {
-      await api.post('/api/purchase-invoices', {
+      const payload = {
         ...formData,
-        is_manual: manualMode,
+        is_manual: editingInvoice ? !!editingInvoice.is_manual : manualMode,
         invoice_date: formData.invoice_date ? new Date(formData.invoice_date).toISOString() : new Date().toISOString(),
         due_date: formData.due_date ? new Date(formData.due_date).toISOString() : null,
-      });
+      };
+      if (editingInvoice) {
+        await api.put(`/api/purchase-invoices/${editingInvoice.id}`, payload);
+      } else {
+        await api.post('/api/purchase-invoices', payload);
+      }
       setDialogOpen(false);
       resetForm();
+      setEditingInvoice(null);
       fetchData();
-    } catch (e) { alert(e.response?.data?.detail || 'Failed to create invoice'); }
+    } catch (e) { alert(e.response?.data?.detail || 'Failed to save invoice'); }
+  };
+
+  // Open the edit dialog pre-populated. Backend resets approved → draft when
+  // the user changes content, so re-approval is enforced at the data layer.
+  const handleEditInvoice = (inv) => {
+    setEditingInvoice(inv);
+    setManualMode(!!inv.is_manual);
+    setFormData({
+      supplier_id: inv.supplier_id || '',
+      po_id: inv.po_id || '',
+      grn_id: inv.grn_id || '',
+      invoice_no: inv.invoice_no || '',
+      invoice_date: inv.invoice_date ? String(inv.invoice_date).split('T')[0] : '',
+      due_date: inv.due_date ? String(inv.due_date).split('T')[0] : '',
+      notes: inv.notes || '',
+      additional_charges: (inv.additional_charges || []).map(c => ({
+        name: c.name || '',
+        amount: parseFloat(c.amount) || 0,
+        gst_rate: parseFloat(c.gst_rate) || 0,
+      })),
+      lines: (inv.lines || []).map(l => ({
+        item_id: l.item_id || '',
+        item_name: l.item_name || l.description || '',
+        quantity: parseFloat(l.quantity) || 0,
+        unit_price: parseFloat(l.unit_price) || 0,
+        discount: parseFloat(l.discount) || 0,
+        gst_rate: parseFloat(l.gst_rate) || 18,
+        is_process_charge: !!l.is_process_charge,
+        description: l.description || '',
+      })),
+    });
+    setDialogOpen(true);
   };
 
   const resetForm = () => { setFormData({ supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', additional_charges: [], lines: [] }); setManualMode(false); setGrnSearchQuery(''); };
@@ -347,12 +386,24 @@ export default function PurchaseInvoicePage() {
                     <td><span className={`status-badge ${getStatusColor(inv.status)}`}>{inv.status}</span></td>
                     <td>
                       <div className="flex items-center space-x-1">
-                        {isAdmin && inv.status === 'draft' && (
+                        {/* Edit button — opens the form pre-populated. Edits to an approved
+                            invoice will reset its status to draft (re-approval required). */}
+                        {canEdit && inv.status !== 'paid' && (
+                          <button
+                            onClick={() => handleEditInvoice(inv)}
+                            className="p-1.5 text-[#1D3557] hover:bg-[#E1EFFE] rounded"
+                            data-testid={`edit-inv-${inv.id}`}
+                            title={inv.status === 'approved' ? 'Edit (will reset to draft for re-approval)' : 'Edit invoice'}
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canEdit && inv.status === 'draft' && (
                           <button onClick={() => handleApprove(inv.id)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`approve-inv-${inv.id}`}>
                             <CheckCircle2 className="w-3 h-3 inline mr-1" />Approve
                           </button>
                         )}
-                        {isAdmin && inv.status === 'approved' && (
+                        {canEdit && inv.status === 'approved' && (
                           <button onClick={() => handleMarkPaid(inv.id)} className="btn-primary text-xs px-2 py-1" data-testid={`pay-inv-${inv.id}`}>
                             <DollarSign className="w-3 h-3 inline mr-1" />Mark Paid
                           </button>
@@ -373,15 +424,22 @@ export default function PurchaseInvoicePage() {
       </div>
 
       {/* Create Invoice Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setEditingInvoice(null); resetForm(); } }}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="font-[Chivo]">{manualMode ? 'Manual Purchase Invoice' : 'New Purchase Invoice from GRN'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-[Chivo]">{editingInvoice ? `Edit Purchase Invoice ${editingInvoice.invoice_no || ''}` : (manualMode ? 'Manual Purchase Invoice' : 'New Purchase Invoice from GRN')}</DialogTitle></DialogHeader>
+          {editingInvoice && editingInvoice.status === 'approved' && (
+            <div className="bg-[#FEF3C7] border border-[#F59E0B] text-[#92400E] text-xs px-3 py-2 rounded-sm" data-testid="edit-reset-banner">
+              ⚠ This invoice is currently <strong>approved</strong>. Saving any change will reset its status to <strong>draft</strong> — re-approval will be required.
+            </div>
+          )}
           <div className="space-y-4 mt-3">
-            {/* Mode Toggle */}
+            {/* Mode Toggle — hidden in edit mode (mode is fixed to whatever the existing invoice uses). */}
+            {!editingInvoice && (
             <div className="flex items-center gap-3 bg-[#F3F4F6] border border-[#D1D5DB] rounded-sm p-2">
               <button type="button" onClick={() => { setManualMode(false); }} className={`flex-1 text-xs py-1.5 rounded-sm transition-colors ${!manualMode ? 'bg-white border border-[#1D3557] text-[#1D3557] font-semibold shadow-sm' : 'text-[#6B7280] hover:text-[#111827]'}`} data-testid="pi-mode-grn">From GRN (standard)</button>
               <button type="button" onClick={() => { setManualMode(true); setFormData({ supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', lines: [] }); }} className={`flex-1 text-xs py-1.5 rounded-sm transition-colors ${manualMode ? 'bg-white border border-[#1D3557] text-[#1D3557] font-semibold shadow-sm' : 'text-[#6B7280] hover:text-[#111827]'}`} data-testid="pi-mode-manual">Manual Entry (no GRN)</button>
             </div>
+            )}
 
             {manualMode ? (
               /* Manual Supplier + info */
@@ -402,6 +460,15 @@ export default function PurchaseInvoicePage() {
                 <p className="text-xs text-[#723B13] bg-[#FDF6B2] border border-[#FDF6B2] rounded-sm px-3 py-2">
                   <strong>Manual entry mode:</strong> Use this for invoices not tied to a GRN (freight, services, direct expenses). No stock movement happens. Add line items manually below.
                 </p>
+              </div>
+            ) : editingInvoice ? (
+              /* Edit mode — show a locked summary card so the user knows which
+                 invoice is being modified. The GRN/supplier/PO are immutable post-creation. */
+              <div className="bg-[#F0F4F8] border border-[#D1D5DB] rounded-sm p-4 text-xs grid grid-cols-2 gap-2">
+                <div><span className="text-[#6B7280]">Invoice #:</span> <span className="mono font-semibold">{editingInvoice.invoice_no}</span></div>
+                <div><span className="text-[#6B7280]">Supplier:</span> <span className="font-medium">{editingInvoice.supplier_name || editingInvoice.supplier_id}</span></div>
+                {editingInvoice.po_number && <div><span className="text-[#6B7280]">PO #:</span> <span className="mono">{editingInvoice.po_number}</span></div>}
+                {editingInvoice.grn_number && <div><span className="text-[#6B7280]">GRN #:</span> <span className="mono">{editingInvoice.grn_number}</span></div>}
               </div>
             ) : (
               /* GRN Selection with search */
@@ -653,8 +720,8 @@ export default function PurchaseInvoicePage() {
             )}
 
             <div className="flex justify-end space-x-3 pt-3 border-t">
-              <button onClick={() => setDialogOpen(false)} className="btn-secondary">Cancel</button>
-              <button onClick={handleSubmit} className="btn-primary" disabled={manualMode ? !formData.supplier_id : !formData.grn_id} data-testid="inv-save-btn">Create Invoice</button>
+              <button onClick={() => { setDialogOpen(false); setEditingInvoice(null); }} className="btn-secondary">Cancel</button>
+              <button onClick={handleSubmit} className="btn-primary" disabled={!editingInvoice && (manualMode ? !formData.supplier_id : !formData.grn_id)} data-testid="inv-save-btn">{editingInvoice ? 'Save Changes' : 'Create Invoice'}</button>
             </div>
           </div>
         </DialogContent>
