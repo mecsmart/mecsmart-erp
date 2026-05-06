@@ -1417,29 +1417,35 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
               <div className="flex justify-end mt-2 text-xs">
                 <div className="w-72 space-y-1">
                   <div className="flex justify-between"><span>Subtotal (after line discount):</span><span className="mono">{formatCurrency(totals.sub, form.currency)}</span></div>
-                  {totals.discount > 0 && <div className="flex justify-between text-[#9B1C1C]"><span>Line Discount:</span><span className="mono">-{formatCurrency(totals.discount, form.currency)}</span></div>}
-                  {/* Global (footer) discount — % or absolute amount, applied AFTER line discounts and BEFORE GST. */}
+                  {/* Global (footer) discount — % or absolute amount, applied AFTER line discounts and BEFORE GST.
+                      Layout: a wider Select shows e.g. "₹ Amount" / "% Percent" so the currency symbol is always
+                      legible regardless of theme. The amount input is right-aligned and prefixed with the chosen symbol. */}
                   <div className="flex justify-between items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 my-1">
                     <span className="text-[#374151] font-semibold">Global Discount:</span>
                     <div className="flex items-center gap-1">
                       <select
-                        className="input-field h-6 text-xs px-1 py-0 w-16"
+                        className="input-field h-7 text-xs px-1 py-0 w-24"
                         value={form.global_discount_type || 'amount'}
                         onChange={(e) => setForm(f => ({ ...f, global_discount_type: e.target.value }))}
                         data-testid="quotation-global-discount-type"
                       >
-                        <option value="amount">{CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'}</option>
-                        <option value="percent">%</option>
+                        <option value="amount">{(CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹') + ' Amount'}</option>
+                        <option value="percent">% Percent</option>
                       </select>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="input-field h-6 text-xs px-1 py-0 w-20 mono text-right"
-                        value={form.global_discount_value || 0}
-                        onChange={(e) => setForm(f => ({ ...f, global_discount_value: parseFloat(e.target.value) || 0 }))}
-                        data-testid="quotation-global-discount-value"
-                      />
+                      <div className="flex items-center border border-[#D1D5DB] rounded-sm bg-white">
+                        <span className="px-1 text-[#6B7280] text-xs select-none" data-testid="quotation-global-discount-symbol">
+                          {(form.global_discount_type || 'amount') === 'percent' ? '%' : (CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹')}
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="h-6 text-xs px-1 py-0 w-16 mono text-right border-0 outline-none focus:ring-0"
+                          value={form.global_discount_value || 0}
+                          onChange={(e) => setForm(f => ({ ...f, global_discount_value: parseFloat(e.target.value) || 0 }))}
+                          data-testid="quotation-global-discount-value"
+                        />
+                      </div>
                     </div>
                   </div>
                   {totals.globalDiscount > 0 && (
@@ -3994,8 +4000,7 @@ ${(isQuotation && opts.includeCover) ? `
       ${(!cfg.bank_name && !cfg.bank_account) ? '<div style="font-size:10px;color:#94a3b8">Bank details not configured. Set them in Settings → Company Details.</div>' : ''}
     </div>
     <table class="totals">
-      <tr><td class="lbl">Subtotal</td><td class="val">${sym}${(doc.subtotal || 0).toFixed(2)}</td></tr>
-      ${doc.total_discount ? `<tr><td class="lbl">Total Discount</td><td class="val">-${sym}${doc.total_discount.toFixed(2)}</td></tr>` : ''}
+      <tr><td class="lbl">Subtotal (after line discount)</td><td class="val">${sym}${(doc.subtotal || 0).toFixed(2)}</td></tr>
       ${doc.global_discount_amount ? `<tr><td class="lbl">Global Discount${doc.global_discount_type === 'percent' && doc.global_discount_value ? ` (${doc.global_discount_value}%)` : ''}</td><td class="val">-${sym}${doc.global_discount_amount.toFixed(2)}</td></tr>` : ''}
       ${doc.global_discount_amount ? `<tr><td class="lbl">Net Subtotal</td><td class="val">${sym}${(doc.net_subtotal || 0).toFixed(2)}</td></tr>` : ''}
       ${isExportDoc ? '' : (isInter
