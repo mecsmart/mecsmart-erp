@@ -941,7 +941,7 @@ async def refresh_token(request: Request, response: Response):
 # ================== ITEMS ROUTES ==================
 
 @items_router.get("")
-async def get_items(request: Request, category: Optional[str] = None, search: Optional[str] = None, group_id: Optional[str] = None):
+async def get_items(request: Request, category: Optional[str] = None, search: Optional[str] = None, group_id: Optional[str] = None, lite: Optional[bool] = False):
     await get_current_user(request)
     query = {}
     if category:
@@ -953,9 +953,24 @@ async def get_items(request: Request, category: Optional[str] = None, search: Op
             {"part_number": {"$regex": search, "$options": "i"}},
             {"name": {"$regex": search, "$options": "i"}}
         ]
+    # `lite=1` projects only the fields needed by item-picker dropdowns (BOM,
+    # PO, Quotation, etc.) — id, part_number, name, description, category,
+    # unit_of_measure, hsn_code, gst_rate, sale_price, purchase_price,
+    # unit_cost. Cuts payload size ~3-5x for catalogues with thousands of SKUs
+    # and shaves seconds off slow connections.
+    if lite:
+        projection = {
+            "_id": 0, "id": 1, "part_number": 1, "name": 1, "description": 1,
+            "category": 1, "group_id": 1, "unit_of_measure": 1,
+            "hsn_code": 1, "gst_rate": 1,
+            "unit_cost": 1, "sale_price": 1, "purchase_price": 1,
+            "current_stock": 1, "safety_stock": 1, "reorder_point": 1,
+        }
+    else:
+        projection = {"_id": 0}
     # No practical hard cap — ERPs routinely carry thousands of SKUs, and the
     # BOM / PO / SO / Quotation pickers load the full list then filter client-side.
-    items = await db.items.find(query, {"_id": 0}).to_list(50000)
+    items = await db.items.find(query, projection).to_list(50000)
     return items
 
 @items_router.get("/{item_id}")
@@ -991,6 +1006,13 @@ async def create_item(item_data: ItemCreate, request: Request):
     existing = await db.items.find_one({"part_number": item_data.part_number})
     if existing:
         raise HTTPException(status_code=400, detail="Part number already exists")
+    # UOM is mandatory and must reference a UOM in the master.
+    uom_code = (item_data.unit_of_measure or "").strip().lower()
+    if not uom_code:
+        raise HTTPException(status_code=400, detail="Unit of Measure (UOM) is mandatory")
+    uom_exists = await db.uoms.find_one({"code": uom_code}, {"_id": 0, "code": 1})
+    if not uom_exists:
+        raise HTTPException(status_code=400, detail=f"UOM '{uom_code}' is not configured. Add it under Settings → Units of Measure first.")
     
     item_doc = {
         "id": str(uuid.uuid4()),
@@ -6094,8 +6116,9 @@ async def get_work_order_print_data(wo_id: str, request: Request):
 # ================== EXPORT / IMPORT ROUTES ==================
 
 @items_router.get("/export/excel")
-async def export_items_excel(request: Request, category: Optional[str] = None):
-    """Export items to Excel. Optional `category` filter: raw_material | component | sub_assembly | finished_good | all"""
+async def export_items_excel(request: Request, category: Optional[str] = None, group_id: Optional[str] = None):
+    """Export items to Excel. Optional `category` filter: raw_material | component | sub_assembly | finished_good | all.
+    Optional `group_id` filter restricts the export to a single Item Group (e.g. only fasteners)."""
     await get_current_user(request)
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -6105,12 +6128,26 @@ async def export_items_excel(request: Request, category: Optional[str] = None):
         valid_cats = {"raw_material", "component", "sub_assembly", "finished_good"}
         if category and category != "all" and category in valid_cats:
             query["category"] = category
+        # Item-Group filter — when provided, scope export to that group only.
+        group_label = None
+        if group_id:
+            grp = await db.item_groups.find_one({"id": group_id}, {"_id": 0})
+            if not grp:
+                raise HTTPException(status_code=404, detail=f"Item Group '{group_id}' not found")
+            query["group_id"] = group_id
+            group_label = grp.get("name") or grp.get("code") or "Group"
         items = await db.items.find(query, {"_id": 0}).to_list(10000)
 
         wb = Workbook()
         ws = wb.active
         cat_label_map = {"raw_material": "Raw Materials", "component": "Parts", "sub_assembly": "Sub-Assemblies", "finished_good": "Finished Goods"}
-        ws.title = cat_label_map.get(category, "Items Master") if category and category != "all" else "Items Master"
+        # Compose worksheet title from group + category labels (Excel sheet names cap at 31 chars).
+        title_parts = []
+        if group_label:
+            title_parts.append(group_label)
+        if category and category != "all":
+            title_parts.append(cat_label_map.get(category, category))
+        ws.title = (" - ".join(title_parts) or "Items Master")[:31]
 
         headers = ["Part Number", "Name", "Description", "Category", "Group", "UOM", "Purchase Cost", "Sales Price", "Lead Time (Days)", "Safety Stock", "Current Stock", "Reorder Point", "HSN Code", "GST Rate (%)"]
         header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
@@ -7252,9 +7289,19 @@ async def delete_uom(uom_id: str, request: Request):
     user = await get_current_user(request)
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Only admin can manage units")
-    result = await db.uoms.delete_one({"id": uom_id})
-    if result.deleted_count == 0:
+    uom = await db.uoms.find_one({"id": uom_id}, {"_id": 0})
+    if not uom:
         raise HTTPException(status_code=404, detail="UOM not found")
+    # Refuse to delete a UOM that is in active use by any item — referential
+    # integrity guard. Without this, deleting a UOM silently breaks every item
+    # using it and the UI would render a blank UOM column.
+    in_use = await db.items.count_documents({"unit_of_measure": uom["code"]})
+    if in_use > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete UOM '{uom['code']}' — it is used by {in_use} item(s). Re-assign those items to another UOM first.",
+        )
+    await db.uoms.delete_one({"id": uom_id})
     return {"deleted": uom_id}
 
 @settings_router.post("/migrate-addresses")

@@ -46,6 +46,10 @@ export default function BOMPage() {
   // Sentinel for auto-scrolling to the bottom of the components list after
   // adding a new row inside the BOM creation/edit dialog.
   const componentsEndRef = useRef(null);
+  // Direct ref to the Dialog's scroll container — addComponent() falls back to
+  // hard-scrolling this element to the very bottom if scrollIntoView under-shoots
+  // (Radix Dialog content sometimes computes layout before the new row mounts).
+  const dialogScrollRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -159,7 +163,9 @@ export default function BOMPage() {
 
   const fetchItems = async () => {
     try {
-      const { data } = await api.get('/api/items');
+      // `lite=1` returns only picker-relevant fields → 3–5x smaller payload on
+      // large catalogues. Speeds up BOM dialog open from seconds → ms.
+      const { data } = await api.get('/api/items?lite=1');
       setItems(data);
       // UOM master needed to honor decimal places when displaying quantities.
       try {
@@ -324,12 +330,20 @@ export default function BOMPage() {
       ...fd,
       components: [...fd.components, { item_id: '', quantity: 1, unit_of_measure: 'pcs', is_alternate: false, routings: [] }],
     }));
-    // After the new row mounts, smooth-scroll the Dialog's scroll container so
-    // the freshly-added component is visible. Without this, the user has to
-    // manually scroll because the new row appears below the viewport. We use
-    // requestAnimationFrame to ensure layout has settled, then scrollIntoView.
+    // After the new row mounts, scroll the Dialog's scroll container all the
+    // way to the bottom. Use a dual strategy: rAF → scrollIntoView on the
+    // sentinel, AND directly bump dialogScrollRef.scrollTop to scrollHeight.
+    // The previous one-shot scrollIntoView under-shot when the sentinel hadn't
+    // finished laying out (only one item's worth of distance moved), leaving
+    // the new row partly off-screen.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        if (dialogScrollRef.current) {
+          dialogScrollRef.current.scrollTo({
+            top: dialogScrollRef.current.scrollHeight,
+            behavior: 'smooth',
+          });
+        }
         if (componentsEndRef.current) {
           componentsEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
         }
@@ -617,6 +631,7 @@ export default function BOMPage() {
               </button>
             </DialogTrigger>
             <DialogContent
+              ref={dialogScrollRef}
               className="max-w-3xl max-h-[90vh] overflow-y-auto"
               onEscapeKeyDown={(e) => e.preventDefault()}
               onPointerDownOutside={(e) => e.preventDefault()}

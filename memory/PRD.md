@@ -20,6 +20,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-05-06 (late)** — **Quotation print crash + UOM integrity + group-wise item export + import perm gate + BOM speed:**
+  1. **Quotation/Proforma/Tax-Invoice print crash fixed.** `printInvoiceDoc` referenced the React-scope `user` variable from a module-level helper → `ReferenceError: user is not defined`. Replaced with the `signer` / `currentUser` locals it already builds. All three doc types print again.
+  2. **UOM master integrity.** Backend now rejects `DELETE /api/settings/uoms/{id}` if any item references the UOM (HTTP 400 with the count). Frontend surfaces the friendly message via sonner.
+  3. **UOM mandatory at item creation.** Backend `POST /api/items` validates `unit_of_measure` is non-empty AND exists in `db.uoms`; frontend marks the field with a red `*` and toasts on empty submit.
+  4. **Group-wise Item Excel export.** New `?group_id=` filter on `GET /api/items/export/excel` (also combinable with `?category=`); the Items page Export dropdown grew an **Export by item group** submenu listing every Item-Group entry. Filename includes the group code.
+  5. **Item Import permission gate.** Frontend Import button is hidden unless the user has `items.create` permission (mirrors backend `_require_access` which already enforced it). Removes phantom buttons that 403'd on click.
+  6. **BOM picker speed-up — `?lite=1`.** New slim projection on `GET /api/items` returning only picker-relevant fields (no audit fields, no extras). BOMPage now opens via `/api/items?lite=1`. Measured ~27 % payload shrink on a 558-SKU catalogue (more on bigger ones).
+  7. **BOM Add-Component scroll fix.** `addComponent()` now uses a dual-strategy scroll: `rAF → dialogScrollRef.scrollTo({top: scrollHeight})` AND sentinel `scrollIntoView`. The previous one-shot under-shot ~1 row when layout hadn't settled. New row is fully visible regardless of list length.
 - **2026-05-06** — **UOM decimal precision + BOM dialog UX:**
   1. **UOM master gained `decimal_places`** (0–6, default 2, clamped server-side). New shared frontend helper `formatQty(qty, uomCode, uomsList)` in `/app/frontend/src/utils/uomFormat.js` looks up the UOM's precision and renders quantities consistently. Applied to Inventory Stock table (current/safety/reorder + warehouse breakdown), Items table Stock column, and BOM rollup grids. Settings → UOM tab grew a "Decimals" column + numeric input (`uom-decimal-places-input`).
   2. **BOM Create/Edit dialog hardened.** Escape key, outside-click and Radix `interactOutside` events all `preventDefault()`, so accidental clicks no longer wipe unsaved component edits. Closing now only happens via Cancel / Save / X.

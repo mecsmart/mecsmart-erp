@@ -81,6 +81,9 @@ export default function ItemsPage() {
     || hasPermission('inventory', 'create')
     || hasPermission('inventory', 'edit');
   const canDelete = user?.role === 'admin' || hasPermission('items', 'delete');
+  // Import requires `items.create` (mirrors backend `_require_access`). Without
+  // this, lower-tier users would see a phantom Import button that 403s on click.
+  const canCreateItems = user?.role === 'admin' || hasPermission('items', 'create') || hasPermission('inventory', 'create');
   // Price-visibility flags — gate sale/purchase price form fields. Admins always see them.
   const canViewSalePrice = user?.role === 'admin' || user?.is_admin_group || hasPermission('inventory_sale_price', 'view');
   const canViewPurchasePrice = user?.role === 'admin' || user?.is_admin_group || hasPermission('inventory_purchase_price', 'view');
@@ -183,6 +186,11 @@ export default function ItemsPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    // Mandatory: UOM (matches backend validation so the user gets immediate feedback).
+    if (!(formData.unit_of_measure || '').trim()) {
+      toast.error('Unit of Measure (UOM) is required');
+      return;
+    }
     try {
       if (editingItem) {
         await api.put(`/api/items/${editingItem.id}`, formData);
@@ -195,7 +203,7 @@ export default function ItemsPage() {
       fetchItems();
     } catch (error) {
       console.error('Failed to save item:', error);
-      alert(error.response?.data?.detail || 'Failed to save item');
+      toast.error(error.response?.data?.detail || 'Failed to save item');
     }
   };
 
@@ -272,12 +280,20 @@ export default function ItemsPage() {
     { value: 'finished_good', label: 'Finished Goods (FG)', filename: 'items_finished_goods.xlsx' },
   ];
 
-  const handleExport = async (category = 'all') => {
+  const handleExport = async (category = 'all', groupId = '') => {
     setExportMenuOpen(false);
     const catMeta = EXPORT_CATEGORIES.find(c => c.value === category) || EXPORT_CATEGORIES[0];
+    const grpMeta = groupId ? itemGroups.find(g => g.id === groupId) : null;
     const apiUrl = api.defaults.baseURL || process.env.REACT_APP_BACKEND_URL || '';
-    const qs = category && category !== 'all' ? `?category=${category}` : '';
+    const params = new URLSearchParams();
+    if (category && category !== 'all') params.set('category', category);
+    if (groupId) params.set('group_id', groupId);
+    const qs = params.toString() ? `?${params.toString()}` : '';
     const directUrl = `${apiUrl}/api/items/export/excel${qs}`;
+    const exportLabel = grpMeta ? `${grpMeta.name} - ${catMeta.label}` : catMeta.label;
+    // Filename: prefix group name when scoped to a group.
+    const safeGrp = grpMeta ? `_${grpMeta.code || grpMeta.name}`.toLowerCase().replace(/[^a-z0-9]+/g, '_') : '';
+    const downloadFilename = grpMeta ? `items${safeGrp}_${catMeta.filename}` : catMeta.filename;
 
     // STRATEGY: open the API URL directly in a new top-level window.
     // This delegates the entire download to the browser:
@@ -285,7 +301,7 @@ export default function ItemsPage() {
     //  - `Content-Disposition: attachment` header is honored natively
     //  - No blob URL / iframe sandbox / popup-blocker issues
     // We use window.top (not window.open) to escape the Emergent preview iframe.
-    const toastId = toast.loading(`Opening ${catMeta.label} export…`);
+    const toastId = toast.loading(`Opening ${exportLabel} export…`);
     try {
       const topWin = window.top || window;
       const popup = topWin.open(directUrl, '_blank', 'noopener,noreferrer');
@@ -297,10 +313,10 @@ export default function ItemsPage() {
         iframe.src = directUrl;
         document.body.appendChild(iframe);
         setTimeout(() => { try { document.body.removeChild(iframe); } catch { /* noop */ } }, 10000);
-        toast.success(`${catMeta.label} download triggered — check your browser's downloads`, { id: toastId, duration: 4000 });
+        toast.success(`${exportLabel} download triggered — check your browser's downloads`, { id: toastId, duration: 4000 });
         return;
       }
-      toast.success(`${catMeta.label} export started — check your browser downloads`, { id: toastId, duration: 4000 });
+      toast.success(`${exportLabel} export started — check your browser downloads`, { id: toastId, duration: 4000 });
     } catch (err) {
       console.error('[Export] direct open failed, falling back to blob download', err);
       // Fallback to blob download (original path) — keeps compatibility
@@ -315,12 +331,12 @@ export default function ItemsPage() {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = catMeta.filename;
+        link.download = downloadFilename;
         document.body.appendChild(link);
         link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
         setTimeout(() => { try { document.body.removeChild(link); } catch { /* noop */ } }, 100);
         setTimeout(() => { try { window.URL.revokeObjectURL(url); } catch { /* noop */ } }, 5000);
-        toast.success(`${catMeta.label} exported (${(blob.size / 1024).toFixed(1)} KB)`, { id: toastId });
+        toast.success(`${exportLabel} exported (${(blob.size / 1024).toFixed(1)} KB)`, { id: toastId });
       } catch (blobErr) {
         const msg = blobErr?.response?.data?.detail || blobErr?.message || 'Network/server error';
         toast.error(`Export failed: ${msg}`, { id: toastId });
@@ -384,7 +400,7 @@ export default function ItemsPage() {
             {exportMenuOpen && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setExportMenuOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 z-50 w-64 bg-white border border-[#D1D5DB] rounded-sm shadow-lg py-1" data-testid="export-menu">
+                <div className="absolute right-0 top-full mt-1 z-50 w-72 bg-white border border-[#D1D5DB] rounded-sm shadow-lg py-1 max-h-[70vh] overflow-y-auto" data-testid="export-menu">
                   <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-[#6B7280] font-semibold">Export by category</div>
                   {EXPORT_CATEGORIES.map(c => (
                     <button
@@ -397,11 +413,28 @@ export default function ItemsPage() {
                       <Download className="w-3 h-3 text-[#6B7280]" />
                     </button>
                   ))}
+                  {itemGroups.length > 0 && (
+                    <>
+                      <div className="border-t border-[#E5E7EB] my-1" />
+                      <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-[#6B7280] font-semibold">Export by item group</div>
+                      {itemGroups.map(g => (
+                        <button
+                          key={g.id}
+                          onClick={() => handleExport('all', g.id)}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-[#F3F4F6] flex items-center justify-between"
+                          data-testid={`export-group-${g.code || g.id}`}
+                        >
+                          <span className="truncate">{g.name}{g.code ? ` (${g.code})` : ''}</span>
+                          <Download className="w-3 h-3 text-[#6B7280] flex-shrink-0 ml-2" />
+                        </button>
+                      ))}
+                    </>
+                  )}
                 </div>
               </>
             )}
           </div>
-          {canEdit && (
+          {canCreateItems && (
             <>
               <input type="file" ref={fileInputRef} accept=".xlsx,.xls" onChange={handleImport} className="hidden" data-testid="import-items-file" />
               <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="btn-secondary flex items-center space-x-1 text-sm" data-testid="import-items-btn">
@@ -483,7 +516,7 @@ export default function ItemsPage() {
                     </Select>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">Unit of Measure</label>
+                    <label className="block text-sm font-semibold text-[#111827] mb-1">Unit of Measure <span className="text-[#9B1C1C]">*</span></label>
                     <Select value={formData.unit_of_measure} onValueChange={(v) => setFormData({ ...formData, unit_of_measure: v })}>
                       <SelectTrigger data-testid="item-uom-select">
                         <SelectValue />

@@ -3843,7 +3843,7 @@ ${(isQuotation && opts.includeCover) ? `
     <div class="col"><div class="label">${esc(opts.title)} No</div><div class="value">${esc(docNo)}</div></div>
     <div class="col"><div class="label">Date</div><div class="value">${docDate ? new Date(docDate).toLocaleDateString('en-IN') : '-'}</div></div>
     <div class="col"><div class="label">${esc(validLabel)}</div><div class="value">${validValue ? new Date(validValue).toLocaleDateString('en-IN') : '-'}</div></div>
-    <div class="col"><div class="label">${isTaxInvoice ? 'Place of Supply' : 'Salesperson'}</div><div class="value">${esc(isTaxInvoice ? (doc.place_of_supply || '-') : (user.name || 'Sales Team'))}</div></div>
+    <div class="col"><div class="label">${isTaxInvoice ? 'Place of Supply' : 'Salesperson'}</div><div class="value">${esc(isTaxInvoice ? (doc.place_of_supply || '-') : (signer.name || currentUser.name || 'Sales Team'))}</div></div>
   </div>
 
   <!-- Bill To / Ship To -->
