@@ -20,6 +20,11 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-05-06 (very late)** — **Quotation Bulk + Global Discount + Items page scroll preservation:**
+  1. **Bulk Line Discount.** New input next to "Add Line" in the Quotation form — typing a `%` value and pressing Enter (or blur) sets `discount_pct` on every existing line in one click and toasts the result. Saves time on "10% across the board" style quotes.
+  2. **Global (footer) Discount.** Quotations now persist `global_discount_type` ("amount" | "percent") + `global_discount_value`. The discount is applied on the post-line-discount subtotal, BEFORE GST. CGST/SGST/IGST split is scaled proportionally so the printed GST split always sums back to the actual taxed amount. Print template shows new "Global Discount (X%)" + "Net Subtotal" rows when applicable. Backend clamps over-large discounts so grand_total can't go negative.
+  3. **Items page in-place updates.** `handleSubmit` now does an optimistic patch to `setItems` (PUT) or prepend (POST) instead of a full `fetchItems()` refetch. Scroll position preserved end-to-end. Same fix applied to InventoryPage's Stock Edit save (`saveStockEdit` → `setInventory` patch).
+  4. **Items page initial load uses `?lite=1`.** Combined with the BOM picker work, this trims ~30% off the catalogue payload and avoids re-downloading audit/created_by fields the table never displays.
 - **2026-05-06 (late)** — **Quotation print crash + UOM integrity + group-wise item export + import perm gate + BOM speed:**
   1. **Quotation/Proforma/Tax-Invoice print crash fixed.** `printInvoiceDoc` referenced the React-scope `user` variable from a module-level helper → `ReferenceError: user is not defined`. Replaced with the `signer` / `currentUser` locals it already builds. All three doc types print again.
   2. **UOM master integrity.** Backend now rejects `DELETE /api/settings/uoms/{id}` if any item references the UOM (HTTP 400 with the count). Frontend surfaces the friendly message via sonner.
