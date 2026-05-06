@@ -13,6 +13,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { SearchableItemSelect } from '../components/SearchableItemSelect';
 import { useDraggableRows } from '../hooks/useDraggableRows';
+import { toast } from 'sonner';
 
 // Stage definitions per pipeline — aligned to the customer's CRM diagram:
 //   Marketing: Enquiry → Quotation → Negotiation → Won / Lost
@@ -907,6 +908,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     terms: '',
     status: 'draft',
     currency: 'INR',
+    global_discount_type: 'amount',
+    global_discount_value: 0,
     lines: [emptyQuotationLine()],
   };
   const [form, setForm] = useState(emptyForm);
@@ -934,6 +937,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
         terms: q.terms || '',
         status: q.status || 'draft',
         currency: q.currency || 'INR',
+        global_discount_type: q.global_discount_type || 'amount',
+        global_discount_value: q.global_discount_value || 0,
         lines: (q.lines && q.lines.length) ? q.lines.map(l => ({ ...l })) : [emptyQuotationLine()],
       });
     } else if (fromLead) {
@@ -985,16 +990,27 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
 
   const totals = React.useMemo(() => {
     let sub = 0, gst = 0, discount = 0;
+    const perLine = [];
     form.lines.forEach(l => {
       const gross = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
       const dsc = gross * ((parseFloat(l.discount_pct) || 0) / 100);
       const net = gross - dsc;
       discount += dsc;
       sub += net;
-      gst += net * ((parseFloat(l.gst_rate) || 0) / 100);
+      perLine.push({ net, gstRate: parseFloat(l.gst_rate) || 0 });
     });
-    return { sub, gst, discount, total: sub + gst };
-  }, [form.lines]);
+    // Resolve global (footer) discount.
+    const gdType = form.global_discount_type || 'amount';
+    const gdRaw = parseFloat(form.global_discount_value) || 0;
+    const gdAmt = Math.max(0, Math.min(
+      gdType === 'percent' ? sub * gdRaw / 100 : gdRaw,
+      sub,
+    ));
+    const netSub = sub - gdAmt;
+    const factor = sub > 0 ? netSub / sub : 1;
+    perLine.forEach(p => { gst += p.net * factor * (p.gstRate / 100); });
+    return { sub, gst, discount, globalDiscount: gdAmt, netSub, total: netSub + gst };
+  }, [form.lines, form.global_discount_type, form.global_discount_value]);
 
   const save = async () => {
     try {
@@ -1014,6 +1030,9 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
         notes: form.notes,
         terms: form.terms,
         status: form.status,
+        currency: form.currency || 'INR',
+        global_discount_type: form.global_discount_type || 'amount',
+        global_discount_value: parseFloat(form.global_discount_value) || 0,
         lines: form.lines.map(l => ({
           item_id: l.item_id || '',
           description: l.description || '',
@@ -1303,9 +1322,33 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
 
             {/* Lines editor */}
             <div>
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                 <div className="text-sm font-semibold text-[#1D3557]">Line Items</div>
-                <button className="btn-secondary flex items-center gap-1 text-xs" onClick={addLine} data-testid="quotation-add-line"><Plus className="w-3 h-3" /> Add Line</button>
+                <div className="flex items-center gap-2 text-xs">
+                  {/* Bulk Line Discount — apply same % to every line in one click. Useful
+                      for "10% across the board" style quotes without touching each row. */}
+                  <span className="text-[#6B7280]">Bulk discount %:</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    placeholder="0"
+                    className="input-field h-7 w-16 mono text-right"
+                    data-testid="quotation-bulk-discount-input"
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } }}
+                    onBlur={(e) => {
+                      const pct = parseFloat(e.target.value);
+                      if (Number.isFinite(pct) && pct >= 0 && pct <= 100) {
+                        setForm(f => ({ ...f, lines: f.lines.map(l => ({ ...l, discount_pct: pct })) }));
+                        toast.success(`Applied ${pct}% to all ${form.lines.length} line(s)`);
+                        e.target.value = '';
+                      }
+                    }}
+                  />
+                  <span className="text-[10px] text-[#9CA3AF] italic">enter / blur to apply</span>
+                  <button className="btn-secondary flex items-center gap-1 text-xs ml-2" onClick={addLine} data-testid="quotation-add-line"><Plus className="w-3 h-3" /> Add Line</button>
+                </div>
               </div>
               <div className="border border-[#E5E7EB] rounded-sm overflow-x-auto">
                 <table className="line-items-grid" data-testid="quotation-lines-table">
@@ -1372,13 +1415,46 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                 </table>
               </div>
               <div className="flex justify-end mt-2 text-xs">
-                <div className="w-64 space-y-1">
-                  <div className="flex justify-between"><span>Subtotal (after discount):</span><span className="mono">{formatCurrency(totals.sub, form.currency)}</span></div>
-                  {totals.discount > 0 && <div className="flex justify-between text-[#9B1C1C]"><span>Discount:</span><span className="mono">-{formatCurrency(totals.discount, form.currency)}</span></div>}
+                <div className="w-72 space-y-1">
+                  <div className="flex justify-between"><span>Subtotal (after line discount):</span><span className="mono">{formatCurrency(totals.sub, form.currency)}</span></div>
+                  {totals.discount > 0 && <div className="flex justify-between text-[#9B1C1C]"><span>Line Discount:</span><span className="mono">-{formatCurrency(totals.discount, form.currency)}</span></div>}
+                  {/* Global (footer) discount — % or absolute amount, applied AFTER line discounts and BEFORE GST. */}
+                  <div className="flex justify-between items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 my-1">
+                    <span className="text-[#374151] font-semibold">Global Discount:</span>
+                    <div className="flex items-center gap-1">
+                      <select
+                        className="input-field h-6 text-xs px-1 py-0 w-16"
+                        value={form.global_discount_type || 'amount'}
+                        onChange={(e) => setForm(f => ({ ...f, global_discount_type: e.target.value }))}
+                        data-testid="quotation-global-discount-type"
+                      >
+                        <option value="amount">{CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'}</option>
+                        <option value="percent">%</option>
+                      </select>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="input-field h-6 text-xs px-1 py-0 w-20 mono text-right"
+                        value={form.global_discount_value || 0}
+                        onChange={(e) => setForm(f => ({ ...f, global_discount_value: parseFloat(e.target.value) || 0 }))}
+                        data-testid="quotation-global-discount-value"
+                      />
+                    </div>
+                  </div>
+                  {totals.globalDiscount > 0 && (
+                    <div className="flex justify-between text-[#9B1C1C]">
+                      <span>Global Discount Applied:</span>
+                      <span className="mono">-{formatCurrency(totals.globalDiscount, form.currency)}</span>
+                    </div>
+                  )}
+                  {totals.globalDiscount > 0 && (
+                    <div className="flex justify-between"><span>Net Subtotal:</span><span className="mono">{formatCurrency(totals.netSub, form.currency)}</span></div>
+                  )}
                   {(form.currency || 'INR') === 'INR' && (
                     <div className="flex justify-between"><span>GST:</span><span className="mono">{formatCurrency(totals.gst, form.currency)}</span></div>
                   )}
-                  <div className="flex justify-between font-semibold border-t border-[#E5E7EB] pt-1"><span>Grand Total:</span><span className="mono">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.total : totals.sub, form.currency)}</span></div>
+                  <div className="flex justify-between font-semibold border-t border-[#E5E7EB] pt-1"><span>Grand Total:</span><span className="mono">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.total : totals.netSub, form.currency)}</span></div>
                   {(form.currency || 'INR') !== 'INR' && (
                     <div className="text-[10px] text-[#6B7280] italic">Export/Import — GST not applicable. Currency: {form.currency}</div>
                   )}
@@ -3920,6 +3996,8 @@ ${(isQuotation && opts.includeCover) ? `
     <table class="totals">
       <tr><td class="lbl">Subtotal</td><td class="val">${sym}${(doc.subtotal || 0).toFixed(2)}</td></tr>
       ${doc.total_discount ? `<tr><td class="lbl">Total Discount</td><td class="val">-${sym}${doc.total_discount.toFixed(2)}</td></tr>` : ''}
+      ${doc.global_discount_amount ? `<tr><td class="lbl">Global Discount${doc.global_discount_type === 'percent' && doc.global_discount_value ? ` (${doc.global_discount_value}%)` : ''}</td><td class="val">-${sym}${doc.global_discount_amount.toFixed(2)}</td></tr>` : ''}
+      ${doc.global_discount_amount ? `<tr><td class="lbl">Net Subtotal</td><td class="val">${sym}${(doc.net_subtotal || 0).toFixed(2)}</td></tr>` : ''}
       ${isExportDoc ? '' : (isInter
         ? `<tr><td class="lbl">IGST</td><td class="val">${sym}${(doc.igst || 0).toFixed(2)}</td></tr>`
         : `<tr><td class="lbl">CGST</td><td class="val">${sym}${(doc.cgst || 0).toFixed(2)}</td></tr><tr><td class="lbl">SGST</td><td class="val">${sym}${(doc.sgst || 0).toFixed(2)}</td></tr>`)

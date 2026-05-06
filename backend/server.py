@@ -965,6 +965,7 @@ async def get_items(request: Request, category: Optional[str] = None, search: Op
             "hsn_code": 1, "gst_rate": 1,
             "unit_cost": 1, "sale_price": 1, "purchase_price": 1,
             "current_stock": 1, "safety_stock": 1, "reorder_point": 1,
+            "lead_time_days": 1,
         }
     else:
         projection = {"_id": 0}
@@ -10085,6 +10086,11 @@ class QuotationCreate(BaseModel):
     terms: Optional[str] = ""
     status: Optional[str] = "draft"   # draft | sent | accepted | rejected | converted
     currency: Optional[str] = "INR"   # INR (default), USD, EUR, GBP, AED — non-INR = export (no GST)
+    # Global (footer) discount applied AFTER line subtotal, BEFORE GST. Only one
+    # of the two should be non-zero in practice — the UI enforces a single mode
+    # per document. type="percent" interprets value as % of subtotal.
+    global_discount_type: Optional[str] = "amount"   # "amount" | "percent"
+    global_discount_value: Optional[float] = 0.0
 
 class QuotationUpdate(BaseModel):
     lead_id: Optional[str] = None
@@ -10100,16 +10106,20 @@ class QuotationUpdate(BaseModel):
     terms: Optional[str] = None
     status: Optional[str] = None
     currency: Optional[str] = None
+    global_discount_type: Optional[str] = None
+    global_discount_value: Optional[float] = None
 
-def _compute_quotation_totals(lines):
+def _compute_quotation_totals(lines, global_discount_type: str = "amount", global_discount_value: float = 0.0):
     subtotal = 0.0
     total_discount = 0.0
     total_gst = 0.0
+    # First pass — compute per-line net (after line-level discount) but DEFER GST
+    # so that we can apply the global discount proportionally before tax.
+    line_nets = []
     for idx, l in enumerate(lines, start=1):
         qty = float(l.get("quantity") or 0)
         rate = float(l.get("rate") or 0)
         discount_pct = float(l.get("discount_pct") or 0)
-        gst_rate = float(l.get("gst_rate") or 0)
         gross = qty * rate
         discount = gross * discount_pct / 100.0
         net = gross - discount
@@ -10117,12 +10127,30 @@ def _compute_quotation_totals(lines):
         l["amount"] = round(net, 2)
         subtotal += net
         total_discount += discount
-        total_gst += net * gst_rate / 100.0
+        line_nets.append((l, net, float(l.get("gst_rate") or 0)))
+    # Resolve global discount → absolute amount on the post-line-discount subtotal.
+    gd_type = (global_discount_type or "amount").lower()
+    gd_val = float(global_discount_value or 0)
+    if gd_type == "percent":
+        global_discount_amt = round(subtotal * gd_val / 100.0, 2)
+    else:
+        global_discount_amt = round(gd_val, 2)
+    # Clamp so a too-large global discount can't drive subtotal negative.
+    global_discount_amt = max(0.0, min(global_discount_amt, subtotal))
+    net_subtotal = subtotal - global_discount_amt
+    # Spread the global discount proportionally across lines so per-line GST is
+    # accurate. Each line's effective taxable = net * (net_subtotal / subtotal).
+    factor = (net_subtotal / subtotal) if subtotal > 0 else 1.0
+    for l, net, gst_rate in line_nets:
+        taxable = net * factor
+        total_gst += taxable * gst_rate / 100.0
     return {
         "subtotal": round(subtotal, 2),
         "total_discount": round(total_discount, 2),
+        "global_discount_amount": round(global_discount_amt, 2),
+        "net_subtotal": round(net_subtotal, 2),
         "total_gst": round(total_gst, 2),
-        "grand_total": round(subtotal + total_gst, 2),
+        "grand_total": round(net_subtotal + total_gst, 2),
     }
 
 
@@ -10207,16 +10235,30 @@ async def create_quotation(data: QuotationCreate, request: Request):
         raise HTTPException(status_code=400, detail="At least one line item is required")
     q_no = await _get_next_number("quotation")
     lines = [l.model_dump() for l in data.lines]
-    totals = _compute_quotation_totals(lines)
+    totals = _compute_quotation_totals(lines, data.global_discount_type or "amount", data.global_discount_value or 0)
     currency = (data.currency or "INR").upper()
     # Non-INR (export) → GST is not applicable. Otherwise compute CGST/SGST vs IGST.
     if currency != "INR":
         gst_split = _zero_gst_split_for_export(lines)
         # Override the quotation totals so grand_total drops GST too.
         totals["total_gst"] = 0
-        totals["grand_total"] = totals["subtotal"]
+        totals["grand_total"] = totals["net_subtotal"]
     else:
         gst_split = await _compute_gst_split(data.customer_id or None, lines)
+        # Scale CGST/SGST/IGST split to honour the global discount (the split
+        # helper computed tax on raw line amounts; we proportionally reduce it
+        # so split + grand_total stay consistent).
+        if totals["subtotal"] > 0 and totals["net_subtotal"] != totals["subtotal"]:
+            scale = totals["net_subtotal"] / totals["subtotal"]
+            gst_split["cgst"] = round(gst_split["cgst"] * scale, 2)
+            gst_split["sgst"] = round(gst_split["sgst"] * scale, 2)
+            gst_split["igst"] = round(gst_split["igst"] * scale, 2)
+            gst_split["total_gst"] = round(gst_split["cgst"] + gst_split["sgst"] + gst_split["igst"], 2)
+            for hsn in gst_split.get("hsn_summary", []):
+                hsn["cgst"] = round(hsn.get("cgst", 0) * scale, 2)
+                hsn["sgst"] = round(hsn.get("sgst", 0) * scale, 2)
+                hsn["igst"] = round(hsn.get("igst", 0) * scale, 2)
+                hsn["taxable"] = round(hsn.get("taxable", 0) * scale, 2)
     doc = {
         "id": str(uuid.uuid4()),
         "quotation_no": q_no,
@@ -10275,41 +10317,43 @@ async def update_quotation(qid: str, data: QuotationUpdate, request: Request):
         raise HTTPException(status_code=400, detail="Cannot edit a quotation with an active linked Sales Order. Cancel the SO first.")
 
     update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
+    # Resolve effective global discount (use update value if provided, else existing).
+    eff_gd_type = update.get("global_discount_type") or existing.get("global_discount_type") or "amount"
+    eff_gd_value = update.get("global_discount_value") if "global_discount_value" in update else existing.get("global_discount_value", 0)
+    needs_recompute = (
+        "lines" in update or "customer_id" in update or "currency" in update
+        or "global_discount_type" in update or "global_discount_value" in update
+    )
     if "lines" in update:
         lines = [l if isinstance(l, dict) else l.model_dump() for l in update["lines"]]
-        totals = _compute_quotation_totals(lines)
+    elif needs_recompute:
+        lines = existing.get("lines") or []
+    else:
+        lines = None
+    if lines is not None:
+        totals = _compute_quotation_totals(lines, eff_gd_type, eff_gd_value or 0)
         update["lines"] = lines
-        # Recompute CGST/SGST/IGST split whenever lines change or the customer was
-        # swapped — otherwise the print template would still show stale tax amounts.
         cust_id = update.get("customer_id") if "customer_id" in update else existing.get("customer_id")
         currency = (update.get("currency") or existing.get("currency") or "INR").upper()
         if currency != "INR":
             gst_split = _zero_gst_split_for_export(lines)
             totals["total_gst"] = 0
-            totals["grand_total"] = totals["subtotal"]
+            totals["grand_total"] = totals["net_subtotal"]
         else:
             gst_split = await _compute_gst_split(cust_id or None, lines)
+            # Scale CGST/SGST/IGST split for the global discount (mirror the create path).
+            if totals["subtotal"] > 0 and totals["net_subtotal"] != totals["subtotal"]:
+                scale = totals["net_subtotal"] / totals["subtotal"]
+                gst_split["cgst"] = round(gst_split["cgst"] * scale, 2)
+                gst_split["sgst"] = round(gst_split["sgst"] * scale, 2)
+                gst_split["igst"] = round(gst_split["igst"] * scale, 2)
+                gst_split["total_gst"] = round(gst_split["cgst"] + gst_split["sgst"] + gst_split["igst"], 2)
+                for hsn in gst_split.get("hsn_summary", []):
+                    hsn["cgst"] = round(hsn.get("cgst", 0) * scale, 2)
+                    hsn["sgst"] = round(hsn.get("sgst", 0) * scale, 2)
+                    hsn["igst"] = round(hsn.get("igst", 0) * scale, 2)
+                    hsn["taxable"] = round(hsn.get("taxable", 0) * scale, 2)
         update.update(totals)
-        update["is_inter_state"] = gst_split["is_inter_state"]
-        update["cgst"] = gst_split["cgst"]
-        update["sgst"] = gst_split["sgst"]
-        update["igst"] = gst_split["igst"]
-        update["hsn_summary"] = gst_split["hsn_summary"]
-    elif "customer_id" in update or "currency" in update:
-        # Customer or currency changed without line edits — re-split existing lines.
-        currency = (update.get("currency") or existing.get("currency") or "INR").upper()
-        cust_id = update.get("customer_id") if "customer_id" in update else existing.get("customer_id")
-        existing_lines = existing.get("lines") or []
-        if currency != "INR":
-            gst_split = _zero_gst_split_for_export(existing_lines)
-            update["lines"] = existing_lines
-            update["total_gst"] = 0
-            update["grand_total"] = float(existing.get("subtotal") or 0)
-        else:
-            gst_split = await _compute_gst_split(cust_id or None, existing_lines)
-            # Re-derive grand_total in case we're flipping currency back to INR
-            update["total_gst"] = round(gst_split["cgst"] + gst_split["sgst"] + gst_split["igst"], 2)
-            update["grand_total"] = round(float(existing.get("subtotal") or 0) + update["total_gst"], 2)
         update["is_inter_state"] = gst_split["is_inter_state"]
         update["cgst"] = gst_split["cgst"]
         update["sgst"] = gst_split["sgst"]

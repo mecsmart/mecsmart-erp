@@ -20,6 +20,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { toast } from 'sonner';
 
 const transactionTypes = [
   { value: 'receive', label: 'Receive', icon: ArrowDownRight, color: 'text-[#03543F]' },
@@ -135,9 +136,12 @@ export default function InventoryPage() {
         }
         payload.sale_price = stockEditForm.sale_price;
       }
-      await api.put(`/api/inventory/items/${item.id}/stock-fields`, payload);
+      const { data: updated } = await api.put(`/api/inventory/items/${item.id}/stock-fields`, payload);
+      // Patch the item in place — preserves scroll position so the user
+      // doesn't get bounced back to the top after every stock edit.
+      setInventory(prev => prev.map(it => it.id === item.id ? { ...it, ...(updated || payload) } : it));
       setStockEditDialog({ open: false, item: null });
-      fetchData();
+      toast.success(`${item.part_number} updated`);
     } catch (e) {
       alert(e.response?.data?.detail || 'Failed to save stock changes');
     } finally {

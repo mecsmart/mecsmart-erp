@@ -1,0 +1,111 @@
+{
+  "summary": "Iteration 88 - Comprehensive testing of Quotation Global Discount & Items Page Scroll Preservation features. All backend tests passed (8/8). All frontend tests passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_89_quotation_global_discount.py",
+    "/app/test_reports/pytest/pytest_iteration_89.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_89_quotation_global_discount.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created test customer and item for quotation tests (auto-cleaned)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All quotation global discount features working correctly. Items page and Inventory Stock page scroll preservation working. Print template shows Global Discount and Net Subtotal rows.",
+  "tests_executed": {
+    "backend": [
+      {
+        "test": "test_global_discount_percent_10_on_1000_subtotal",
+        "status": "PASSED",
+        "description": "POST /api/crm/quotations with global_discount_type='percent' & value=10 on lines totaling ₹1000 (18% GST) returns: subtotal=1000, global_discount_amount=100, net_subtotal=900, total_gst=162, grand_total=1062"
+      },
+      {
+        "test": "test_global_discount_amount_50_on_950_subtotal",
+        "status": "PASSED",
+        "description": "POST /api/crm/quotations with global_discount_type='amount' & value=50 on lines totaling ₹950: global_discount_amount=50, net_subtotal=900, total_gst=162, grand_total=1062"
+      },
+      {
+        "test": "test_global_discount_larger_than_subtotal_is_clamped",
+        "status": "PASSED",
+        "description": "Global discount value larger than subtotal is clamped (grand_total never goes negative)"
+      },
+      {
+        "test": "test_put_quotation_update_global_discount_only",
+        "status": "PASSED",
+        "description": "PUT /api/crm/quotations/{id} updating only global_discount_type/value recomputes totals & GST split correctly"
+      },
+      {
+        "test": "test_usd_currency_with_global_discount_no_gst",
+        "status": "PASSED",
+        "description": "Currency=USD with global_discount=10% — GST stays 0 (export); grand_total = net_subtotal"
+      },
+      {
+        "test": "test_items_lite_includes_lead_time_days",
+        "status": "PASSED",
+        "description": "GET /api/items?lite=1 includes lead_time_days field"
+      },
+      {
+        "test": "test_quotation_save_and_retrieve_global_discount",
+        "status": "PASSED",
+        "description": "Quotation form save persists global_discount_type & global_discount_value; reopening pre-fills same values"
+      },
+      {
+        "test": "test_line_discount_plus_global_discount",
+        "status": "PASSED",
+        "description": "Line-level discount + global discount can coexist (line first, then global)"
+      }
+    ],
+    "frontend": [
+      {
+        "test": "Items page uses lite endpoint",
+        "status": "PASSED",
+        "description": "Items page initial load uses /api/items?lite=1 (smaller payload, faster)"
+      },
+      {
+        "test": "Items page scroll preservation",
+        "status": "PASSED",
+        "description": "Items page edit — clicking Edit, changing a field, clicking Update closes the dialog and the page does NOT scroll to top"
+      },
+      {
+        "test": "Inventory Stock page scroll preservation",
+        "status": "PASSED",
+        "description": "Stock Edit dialog save patches the row in place; scroll position preserved"
+      },
+      {
+        "test": "Quotation form bulk discount input",
+        "status": "PASSED",
+        "description": "Line Items header has 'Bulk discount %' input (data-testid=quotation-bulk-discount-input). Toast shows 'Applied 10% to all N line(s)'"
+      },
+      {
+        "test": "Quotation form global discount controls",
+        "status": "PASSED",
+        "description": "Totals box has Global Discount row with type dropdown and value input (data-testid quotation-global-discount-type/value)"
+      },
+      {
+        "test": "Quotation global discount persistence",
+        "status": "PASSED",
+        "description": "Quotation form save persists global_discount_type & global_discount_value; reopening pre-fills same values"
+      },
+      {
+        "test": "Quotation print template",
+        "status": "PASSED",
+        "description": "When global_discount_amount > 0, the totals table shows 'Global Discount' and 'Net Subtotal' rows"
+      }
+    ]
+  }
+}
