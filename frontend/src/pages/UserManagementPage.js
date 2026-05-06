@@ -59,7 +59,9 @@ const MODULE_GROUPS = [
   ] },
   { main: 'CRM', subs: [
     { key: 'crm_marketing', label: 'Marketing (Leads)' },
+    { key: 'marketing_configuration', label: 'Marketing Configuration' },
     { key: 'crm_support', label: 'Support (Tickets)' },
+    { key: 'support_configuration', label: 'Support Configuration' },
   ] },
   { main: 'Quality', subs: [{ key: 'quality', label: 'Quality Inspection' }] },
   { main: 'Settings', subs: [{ key: 'settings', label: 'Settings & User Management' }] },

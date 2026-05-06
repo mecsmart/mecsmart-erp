@@ -1,0 +1,71 @@
+{
+  "name": "mecsmart-erp-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MecSmart ERP — native Windows desktop wrapper.",
+  "main": "main.js",
+  "author": {
+    "name": "MecSmart",
+    "email": "support@mecsmart.local"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build:win": "electron-builder --win --x64",
+    "build:win:portable": "electron-builder --win --x64 -c.win.target=portable",
+    "publish:win": "electron-builder --win --x64 --publish always"
+  },
+  "devDependencies": {
+    "electron": "^31.3.1",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.3.9"
+  },
+  "build": {
+    "appId": "com.mecsmart.erp",
+    "productName": "MecSmart ERP",
+    "copyright": "Copyright © 2026 MecSmart",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "server-config.html",
+      "build/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "publisherName": "MecSmart"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MecSmart ERP",
+      "uninstallDisplayName": "MecSmart ERP",
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://updates.mecsmart.local/desktop/",
+        "channel": "latest"
+      }
+    ]
+  }
+}

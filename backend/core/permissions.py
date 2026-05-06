@@ -20,6 +20,7 @@ ALL_MODULES = [
     "purchase_orders", "purchase_invoices", "delivery_challan", "job_work",
     "stores", "settings",
     "crm_marketing", "crm_support",
+    "marketing_configuration", "support_configuration",
 ]
 
 ALL_ACTIONS = ["view", "create", "edit", "delete"]
@@ -31,7 +32,12 @@ MODULE_ACTIONS = {
     "bom_rollup_cost": ["view"],
     "inventory_sale_price": ["view"],
     "inventory_purchase_price": ["view"],
-    "inventory_configuration": ["view"],
+    # Configuration modules use [view, edit] only — `view` reveals the page in
+    # the sidebar; `edit` permits saving changes. There's no separate create/
+    # delete since these are "single document" config screens.
+    "inventory_configuration": ["view", "edit"],
+    "marketing_configuration": ["view", "edit"],
+    "support_configuration": ["view", "edit"],
 }
 
 

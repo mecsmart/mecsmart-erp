@@ -10071,6 +10071,38 @@ async def get_pipeline_config(pipeline_type: str, request: Request):
     stages = sorted(doc.get("stages") or [], key=lambda s: s.get("order", 0))
     return {"pipeline_type": pipeline_type, "stages": stages}
 
+
+# ---- Marketing config (default Quotation T&C, lead defaults, etc.) ---------
+class MarketingConfigUpdate(BaseModel):
+    default_quotation_terms: Optional[str] = None
+    default_quotation_notes: Optional[str] = None
+
+@crm_router.get("/marketing-config")
+async def get_marketing_config(request: Request):
+    """Returns the singleton marketing config doc. Auto-seeds an empty
+    default record on first read so the frontend always has a stable shape."""
+    await get_current_user(request)
+    doc = await db.crm_marketing_config.find_one({"_id": "singleton"}, {"_id": 0}) or {}
+    return {
+        "default_quotation_terms": doc.get("default_quotation_terms", ""),
+        "default_quotation_notes": doc.get("default_quotation_notes", ""),
+    }
+
+@crm_router.put("/marketing-config")
+async def update_marketing_config(data: MarketingConfigUpdate, request: Request):
+    user = await get_current_user(request)
+    _require_access(user, ["admin"], module="marketing_configuration", action="edit")
+    payload = {k: v for k, v in data.model_dump(exclude_none=True).items()}
+    if not payload:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    payload["updated_at"] = datetime.now(timezone.utc)
+    await db.crm_marketing_config.update_one(
+        {"_id": "singleton"},
+        {"$set": payload},
+        upsert=True,
+    )
+    return await get_marketing_config(request)
+
 @crm_router.put("/pipeline-config/{pipeline_type}")
 async def update_pipeline_config(pipeline_type: str, data: CRMPipelineConfigUpdate, request: Request):
     await get_current_user(request)
@@ -10328,6 +10360,12 @@ async def create_quotation(data: QuotationCreate, request: Request):
     if not data.lines:
         raise HTTPException(status_code=400, detail="At least one line item is required")
     q_no = await _get_next_number("quotation")
+    # Apply default T&C / Notes from marketing config if blank.
+    mk_cfg = await db.crm_marketing_config.find_one({"_id": "singleton"}, {"_id": 0}) or {}
+    if not (data.terms or "").strip() and mk_cfg.get("default_quotation_terms"):
+        data.terms = mk_cfg["default_quotation_terms"]
+    if not (data.notes or "").strip() and mk_cfg.get("default_quotation_notes"):
+        data.notes = mk_cfg["default_quotation_notes"]
     lines = [l.model_dump() for l in data.lines]
     totals = _compute_quotation_totals(lines, data.global_discount_type or "amount", data.global_discount_value or 0)
     currency = (data.currency or "INR").upper()

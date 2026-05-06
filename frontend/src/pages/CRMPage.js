@@ -121,6 +121,12 @@ export default function CRMPage() {
 
   const canMarketingEdit = user?.role === 'admin' || user?.permissions?.crm_marketing?.includes('create') || user?.permissions?.crm_marketing?.includes('edit');
   const canSupportEdit = user?.role === 'admin' || user?.permissions?.crm_support?.includes('create') || user?.permissions?.crm_support?.includes('edit');
+  // Configuration-page permissions — page is visible to anyone with `view`,
+  // but Save buttons require `edit`. Admins always pass.
+  const canViewMarketingConfig = user?.role === 'admin' || user?.permissions?.marketing_configuration?.includes('view') || user?.permissions?.marketing_configuration?.includes('edit');
+  const canEditMarketingConfig = user?.role === 'admin' || user?.permissions?.marketing_configuration?.includes('edit');
+  const canViewSupportConfig = user?.role === 'admin' || user?.permissions?.support_configuration?.includes('view') || user?.permissions?.support_configuration?.includes('edit');
+  const canEditSupportConfig = user?.role === 'admin' || user?.permissions?.support_configuration?.includes('edit');
 
   // Breadcrumb label
   const crumbMain = activeTab === 'quotations' ? 'Quotations' : activeTab === 'support' ? 'Support' : 'Marketing';
@@ -177,7 +183,13 @@ export default function CRMPage() {
         />
       )}
       {activeTab === 'marketing' && activeSub === 'configuration' && (
-        <PipelineConfigPanel pipelineType="marketing" onRefresh={fetchData} canEdit={canMarketingEdit} />
+        canViewMarketingConfig ? (
+          <PipelineConfigPanel pipelineType="marketing" onRefresh={fetchData} canEdit={canEditMarketingConfig} />
+        ) : (
+          <div className="card-flat p-6 text-center text-sm text-[#6B7280]" data-testid="marketing-config-no-access">
+            You do not have permission to view Marketing Configuration. Ask your admin to grant <code>marketing_configuration.view</code>.
+          </div>
+        )
       )}
       {activeTab === 'marketing' && activeSub === 'proformas' && (
         <ProformasPanel customers={customers} search={search} onRefresh={fetchData} canEdit={canMarketingEdit} />
@@ -216,7 +228,13 @@ export default function CRMPage() {
         <ActivityLogPanel search={search} />
       )}
       {activeTab === 'support' && activeSub === 'configuration' && (
-        <PipelineConfigPanel pipelineType="support" onRefresh={fetchData} canEdit={canSupportEdit} />
+        canViewSupportConfig ? (
+          <PipelineConfigPanel pipelineType="support" onRefresh={fetchData} canEdit={canEditSupportConfig} />
+        ) : (
+          <div className="card-flat p-6 text-center text-sm text-[#6B7280]" data-testid="support-config-no-access">
+            You do not have permission to view Support Configuration. Ask your admin to grant <code>support_configuration.view</code>.
+          </div>
+        )
       )}
     </div>
   );
@@ -955,6 +973,18 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     } else {
       setEditing(null);
       setForm(emptyForm);
+      // For a fresh quotation (no edit, no lead prefill) hydrate Notes/Terms
+      // from the marketing config singleton. The user can still override
+      // before saving — this just sets a starting point.
+      api.get('/api/crm/marketing-config')
+        .then(({ data }) => {
+          setForm(f => ({
+            ...f,
+            terms: f.terms || data.default_quotation_terms || '',
+            notes: f.notes || data.default_quotation_notes || '',
+          }));
+        })
+        .catch(() => { /* non-fatal */ });
     }
     setDialog(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1978,7 +2008,92 @@ function PipelineConfigPanel({ pipelineType, onRefresh, canEdit }) {
       )}
 
       {pipelineType === 'marketing' && <QuotationCoverPageConfig canEdit={canEdit} />}
+      {pipelineType === 'marketing' && <QuotationDefaultTermsConfig canEdit={canEdit} />}
       {pipelineType === 'marketing' && <InvoiceTermsConfig canEdit={canEdit} />}
+    </div>
+  );
+}
+
+// Marketing-side default Terms & Conditions / Notes that auto-populate every
+// new Quotation. Editable only with `marketing_configuration.edit` permission;
+// visible whenever the user has `marketing_configuration.view` (which the
+// surrounding Configuration tab already gates).
+function QuotationDefaultTermsConfig({ canEdit }) {
+  const [terms, setTerms] = useState('');
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/api/crm/marketing-config')
+      .then(({ data }) => {
+        if (cancelled) return;
+        setTerms(data.default_quotation_terms || '');
+        setNotes(data.default_quotation_notes || '');
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+    return () => { cancelled = true; };
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.put('/api/crm/marketing-config', {
+        default_quotation_terms: terms,
+        default_quotation_notes: notes,
+      });
+      toast.success('Default Quotation T&C saved. Future quotations will auto-fill these unless overridden per-quote.');
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div className="card-flat p-4 space-y-3" data-testid="quotation-default-terms-config">
+      <div>
+        <h3 className="text-sm font-semibold text-[#1D3557]">Default Quotation T&amp;C</h3>
+        <p className="text-xs text-[#6B7280] mt-1">
+          These are pre-filled into every new Quotation when its T&amp;C / Notes fields are left blank. Per-quotation overrides still win — this only sets the starting point.
+        </p>
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-[#374151] mb-1">Terms &amp; Conditions</label>
+        <textarea
+          className="w-full px-3 py-2 border border-[#D1D5DB] rounded-sm text-sm"
+          rows={6}
+          placeholder={"Example:\n\n1. Payment: 50% advance, 50% before dispatch.\n2. Delivery: 4-6 weeks from order confirmation.\n3. Validity: 30 days from quotation date.\n4. Taxes & duties extra at actuals.\n5. Subject to Bangalore jurisdiction."}
+          value={terms}
+          onChange={e => setTerms(e.target.value)}
+          disabled={!canEdit}
+          data-testid="quotation-default-terms-textarea"
+        />
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-[#374151] mb-1">Notes (default)</label>
+        <textarea
+          className="w-full px-3 py-2 border border-[#D1D5DB] rounded-sm text-sm"
+          rows={3}
+          placeholder="Optional default notes shown after the line items (e.g. bank account, GST number, contact person)."
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          disabled={!canEdit}
+          data-testid="quotation-default-notes-textarea"
+        />
+      </div>
+      {canEdit && (
+        <div className="flex justify-end">
+          <button className="btn-primary" onClick={save} disabled={saving} data-testid="quotation-default-terms-save-btn">
+            {saving ? 'Saving...' : 'Save Default T&C'}
+          </button>
+        </div>
+      )}
+      {!canEdit && <p className="text-[11px] text-[#9B1C1C] italic">Read-only — your role group lacks <code>marketing_configuration.edit</code>.</p>}
     </div>
   );
 }

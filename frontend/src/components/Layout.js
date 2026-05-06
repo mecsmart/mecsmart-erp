@@ -53,13 +53,13 @@ const crmMarketingItems = [
   { name: 'Tax Invoices', href: '/crm?tab=marketing&sub=tax-invoices', icon: Calculator, module: 'crm_marketing' },
   { name: 'Packing Lists', href: '/crm?tab=marketing&sub=packing-lists', icon: Package, module: 'crm_marketing' },
   { name: 'Products', href: '/items', icon: Package, module: 'items' },
-  { name: 'Configuration', href: '/crm?tab=marketing&sub=configuration', icon: Cog, module: 'crm_marketing' },
+  { name: 'Configuration', href: '/crm?tab=marketing&sub=configuration', icon: Cog, module: 'marketing_configuration' },
 ];
 
 const crmSupportItems = [
   { name: 'SLA Due', href: '/crm?tab=support&sub=sla', icon: AlertTriangle, module: 'crm_support' },
   { name: 'Activity Logs', href: '/crm?tab=support&sub=activity', icon: ClipboardCheck, module: 'crm_support' },
-  { name: 'Configuration', href: '/crm?tab=support&sub=configuration', icon: Cog, module: 'crm_support' },
+  { name: 'Configuration', href: '/crm?tab=support&sub=configuration', icon: Cog, module: 'support_configuration' },
 ];
 
 const afterGroupNavItems = [

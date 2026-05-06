@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; connect-src http: https:" />
+  <title>MecSmart ERP — Server Setup</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #1D3557 0%, #0F172A 100%);
+      color: #fff;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 22px 26px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0.2px; }
+    .sub { margin-top: 4px; font-size: 12px; color: #9CA3AF; }
+    main { padding: 22px 26px; flex: 1; }
+    label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: #E5E7EB; }
+    input[type=text] {
+      width: 100%;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.16);
+      color: #fff;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: 'Consolas', 'SF Mono', monospace;
+    }
+    input[type=text]:focus { outline: none; border-color: #3B82F6; }
+    .hint { font-size: 11px; color: #9CA3AF; margin-top: 6px; line-height: 1.5; }
+    .hint code { background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+    .status {
+      margin-top: 14px;
+      font-size: 12px;
+      padding: 8px 10px;
+      border-radius: 4px;
+      display: none;
+    }
+    .status.ok    { display: block; background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.4); color: #BBF7D0; }
+    .status.err   { display: block; background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.4); color: #FECACA; }
+    .status.busy  { display: block; background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.4); color: #BFDBFE; }
+    footer {
+      padding: 14px 26px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    button {
+      padding: 9px 18px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.15s;
+    }
+    button.primary { background: #3B82F6; color: #fff; }
+    button.primary:hover { background: #2563EB; }
+    button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.ghost { background: transparent; color: #9CA3AF; border-color: rgba(255,255,255,0.16); }
+    button.ghost:hover { color: #fff; }
+    .ver { font-size: 10px; color: #64748B; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Connect to your MecSmart server</h1>
+    <div class="sub">Enter the address of your office server. You only need to do this once.</div>
+  </header>
+
+  <main>
+    <label for="url">Server URL</label>
+    <input id="url" type="text" placeholder="http://192.168.1.50:8001" autofocus />
+    <div class="hint">
+      Examples: <code>http://erp.local</code> · <code>http://192.168.1.50:8001</code> · <code>https://erp.mycompany.com</code><br>
+      Ask your IT admin if you don't know the address.
+    </div>
+    <div id="status" class="status"></div>
+  </main>
+
+  <footer>
+    <span class="ver" id="version"></span>
+    <div>
+      <button class="ghost" id="cancel">Quit</button>
+      <button class="primary" id="connect">Test &amp; Connect</button>
+    </div>
+  </footer>
+
+  <script>
+    const urlEl = document.getElementById('url');
+    const btnEl = document.getElementById('connect');
+    const cancelEl = document.getElementById('cancel');
+    const statusEl = document.getElementById('status');
+    const versionEl = document.getElementById('version');
+
+    // Show app version in the bottom-left corner.
+    if (window.mecsmart?.getAppVersion) {
+      window.mecsmart.getAppVersion().then(v => { versionEl.textContent = 'v' + v; });
+    }
+
+    function setStatus(kind, text) {
+      statusEl.className = 'status ' + kind;
+      statusEl.textContent = text;
+    }
+
+    async function probe(url) {
+      // Hit a cheap, auth-free endpoint to verify the server is alive AND
+      // really is a MecSmart backend. /api/health is unauthenticated by design.
+      const target = url.replace(/\/+$/, '') + '/api/health';
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      try {
+        const r = await fetch(target, { signal: ctrl.signal });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return true;
+      } finally { clearTimeout(t); }
+    }
+
+    btnEl.addEventListener('click', async () => {
+      const raw = urlEl.value.trim();
+      if (!raw) { setStatus('err', 'Please enter a server URL.'); return; }
+      btnEl.disabled = true;
+      setStatus('busy', 'Probing ' + raw + ' …');
+      try {
+        await probe(raw);
+        setStatus('ok', 'Server reachable. Saving…');
+        const r = await window.mecsmart.saveServerUrl(raw);
+        if (!r.ok) setStatus('err', r.error);
+      } catch (e) {
+        setStatus('err',
+          'Could not reach the server.\n' +
+          '• Check that the URL is correct.\n' +
+          '• Make sure you can ping the server from this PC.\n' +
+          '• Confirm port (default 8001) is open in the firewall.\n' +
+          '\nError: ' + (e.message || e));
+        btnEl.disabled = false;
+      }
+    });
+
+    cancelEl.addEventListener('click', () => window.close());
+    urlEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') btnEl.click(); });
+  </script>
+</body>
+</html>
