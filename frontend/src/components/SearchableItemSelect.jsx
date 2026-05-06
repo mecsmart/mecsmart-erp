@@ -94,10 +94,21 @@ export const SearchableItemSelect = ({
     setQuery('');
   };
 
-  // Decide whether to flip the panel above the input when there's not enough
-  // space below. Computed from `rect`.
+  // Decide whether to flip the panel above the input. The previous heuristic
+  // (need full panelMaxHeight above before flipping) felt sluggish — when the
+  // search box is in the middle/bottom of a long Dialog the panel would
+  // STILL render below and overlap the next rows. New rule: flip up whenever
+  // there's MORE room above than below. This keeps the dropdown comfortably
+  // visible regardless of where the input sits inside the dialog.
   const panelMaxHeight = 320;
-  const flipUp = rect && (window.innerHeight - rect.inputBottom < panelMaxHeight + 16) && rect.inputTop > panelMaxHeight + 16;
+  let flipUp = false;
+  let availableHeight = panelMaxHeight;
+  if (rect) {
+    const spaceBelow = window.innerHeight - rect.inputBottom - 16;
+    const spaceAbove = rect.inputTop - 16;
+    flipUp = spaceAbove > spaceBelow && spaceBelow < panelMaxHeight;
+    availableHeight = Math.min(panelMaxHeight, Math.max(120, flipUp ? spaceAbove : spaceBelow));
+  }
 
   return (
     <div ref={wrapRef} className="relative">
@@ -148,10 +159,10 @@ export const SearchableItemSelect = ({
           className="bg-white border border-[#E5E7EB] rounded-sm shadow-lg overflow-y-auto"
           style={{
             position: 'fixed',
-            top: flipUp ? rect.inputTop - Math.min(panelMaxHeight, list.length * 44 + 28) - 4 : rect.inputBottom + 4,
+            top: flipUp ? rect.inputTop - Math.min(availableHeight, list.length * 44 + 28) - 4 : rect.inputBottom + 4,
             left: rect.left,
             width: rect.width,
-            maxHeight: panelMaxHeight,
+            maxHeight: availableHeight,
             zIndex: 9999,
             // Radix Dialog's RemoveScroll / ScrollLock sets `pointer-events: none`
             // on <body> when a modal dialog is open. Since this panel is portal'd

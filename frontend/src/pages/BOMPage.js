@@ -4,6 +4,7 @@ import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
+import { formatQty } from '../utils/uomFormat';
 import { 
   Plus, 
   FileStack, 
@@ -41,6 +42,10 @@ export default function BOMPage() {
   const canSeeCosts = user?.role === 'admin' || user?.is_admin_group === true || rollupPerms.includes('view');
   const [boms, setBoms] = useState([]);
   const [items, setItems] = useState([]);
+  const [uoms, setUoms] = useState([]);
+  // Sentinel for auto-scrolling to the bottom of the components list after
+  // adding a new row inside the BOM creation/edit dialog.
+  const componentsEndRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -106,12 +111,14 @@ export default function BOMPage() {
     } catch (e) { console.error('Failed to fetch routings:', e); }
   };
 
-  const fetchBoms = async () => {
+  const fetchBoms = async ({ skipExplosions = false } = {}) => {
     try {
       const params = statusFilter ? `?status=${statusFilter}` : '';
       const { data } = await api.get(`/api/bom${params}`);
       setBoms(data);
       setLoading(false); // Show the table immediately — don't block on explosions
+
+      if (skipExplosions) return;
 
       // Fire explosion requests in parallel (not sequential!) and cap to avoid huge concurrency.
       // Only fire for BOMs currently visible in the default view. Explosions are optional UX data
@@ -139,10 +146,26 @@ export default function BOMPage() {
     }
   };
 
+  // After-save reload: only refresh the BOM list and trigger explosions in the
+  // background. The previous flow awaited every active BOM's /explode call
+  // before resolving — turning a save into a multi-second wait when the list
+  // grew. Now save returns instantly and explosions populate in the
+  // background, mirroring the table's natural lazy fetch behavior.
+  const reloadBomsBackground = async () => {
+    await fetchBoms({ skipExplosions: true });
+    // Defer explosion refresh — they update the inline rollup costs only.
+    setTimeout(() => { fetchBoms().catch(() => {}); }, 0);
+  };
+
   const fetchItems = async () => {
     try {
       const { data } = await api.get('/api/items');
       setItems(data);
+      // UOM master needed to honor decimal places when displaying quantities.
+      try {
+        const { data: u } = await api.get('/api/settings/uoms');
+        setUoms(u || []);
+      } catch (_e) { /* non-fatal */ }
     } catch (error) {
       console.error('Failed to fetch items:', error);
     }
@@ -204,7 +227,7 @@ export default function BOMPage() {
       // inside a parent edit), pop the stack and restore the parent's edit
       // state — keeping the dialog open. Only when the stack is empty do we
       // actually close the dialog.
-      await fetchBoms();
+      await reloadBomsBackground();
       if (bomEditStack.length > 0) {
         const parent = bomEditStack[bomEditStack.length - 1];
         setBomEditStack(s => s.slice(0, -1));
@@ -297,9 +320,20 @@ export default function BOMPage() {
   };
 
   const addComponent = () => {
-    setFormData({
-      ...formData,
-      components: [...formData.components, { item_id: '', quantity: 1, unit_of_measure: 'pcs', is_alternate: false, routings: [] }],
+    setFormData((fd) => ({
+      ...fd,
+      components: [...fd.components, { item_id: '', quantity: 1, unit_of_measure: 'pcs', is_alternate: false, routings: [] }],
+    }));
+    // After the new row mounts, smooth-scroll the Dialog's scroll container so
+    // the freshly-added component is visible. Without this, the user has to
+    // manually scroll because the new row appears below the viewport. We use
+    // requestAnimationFrame to ensure layout has settled, then scrollIntoView.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (componentsEndRef.current) {
+          componentsEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        }
+      });
     });
   };
 
@@ -521,7 +555,7 @@ export default function BOMPage() {
               </div>
             </td>
             <td className="py-2 px-3 text-sm">{item.item?.name || 'Unknown'}</td>
-            <td className="py-2 px-3 text-sm text-right mono">{item.quantity}</td>
+            <td className="py-2 px-3 text-sm text-right mono">{formatQty(item.quantity, item.item?.unit_of_measure, uoms)}</td>
             <td className="py-2 px-3 text-sm">{item.item?.unit_of_measure || '-'}</td>
             {canSeeCosts && <td className="py-2 px-3 text-sm text-right mono">{item.unit_cost != null ? formatCurrency(item.unit_cost) : '-'}</td>}
             {canSeeCosts && <td className="py-2 px-3 text-sm text-right mono font-medium">{item.extended_cost != null ? formatCurrency(item.extended_cost) : '-'}</td>}
@@ -582,7 +616,12 @@ export default function BOMPage() {
                 <span>Create BOM</span>
               </button>
             </DialogTrigger>
-            <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogContent
+              className="max-w-3xl max-h-[90vh] overflow-y-auto"
+              onEscapeKeyDown={(e) => e.preventDefault()}
+              onPointerDownOutside={(e) => e.preventDefault()}
+              onInteractOutside={(e) => e.preventDefault()}
+            >
               <DialogHeader>
                 <DialogTitle className="font-[Chivo]">{editingBom ? 'Edit BOM' : 'Create New BOM'}</DialogTitle>
                 {bomEditStack.length > 0 && (
@@ -913,6 +952,8 @@ export default function BOMPage() {
                       <Plus className="w-3 h-3" /><span>Add Component</span>
                     </button>
                   </div>
+                  {/* Scroll anchor — addComponent() smooth-scrolls this into view so the new row is always visible. */}
+                  <div ref={componentsEndRef} aria-hidden="true" />
                 </div>
 
                 <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
@@ -1224,7 +1265,7 @@ export default function BOMPage() {
                                 </button>
                               )}
                             </td>
-                            <td className="py-2 px-2 text-right mono font-medium">{row.quantity}</td>
+                            <td className="py-2 px-2 text-right mono font-medium">{formatQty(row.quantity, row.item?.unit_of_measure, uoms)}</td>
                             <td className="py-2 px-2 text-[#6B7280]">{row.item?.unit_of_measure || '-'}</td>
                             <td className="py-2 px-2">
                               {(row.routings || []).length > 0 ? (

@@ -1,0 +1,75 @@
+{
+  "summary": "Iteration 87 - UOM decimal_places feature and BOM dialog improvements. All backend tests passed (9/9). Frontend features verified: UOM decimal_places in Settings, formatQty() in Inventory/Items/BOM pages, BOM dialog Escape/outside-click prevention, component auto-scroll.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_87_uom_decimal_places.py",
+    "/app/test_reports/pytest/pytest_iteration_87.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_87_uom_decimal_places.py"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": {
+    "admin": "admin@erp.com / Admin@123"
+  },
+  "seed_data_creation": "None - used existing test data",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All features from iteration 87 verified: (1) UOM decimal_places field works - POST/PUT/GET endpoints accept and persist decimal_places (0-6, default 2, clamped), (2) Settings page shows 'Decimals' column in UOM table and 'Decimal Places' input in Add/Edit dialog, (3) formatQty() used in Inventory Stock table, Items page Stock column, and BOM explosion grids, (4) BOM Create/Edit dialog does NOT close on Escape or outside-click (onEscapeKeyDown/onPointerDownOutside/onInteractOutside preventDefault), (5) Add Component button auto-scrolls dialog to show new row (componentsEndRef sentinel), (6) SearchableItemSelect flips up when space below is limited.",
+  "features_tested": {
+    "backend_uom_decimal_places": {
+      "status": "PASS",
+      "details": "9/9 tests passed. POST with decimal_places=3 returns 3. POST with decimal_places=99 clamps to 6. POST without decimal_places defaults to 2. PUT updates persist. GET backfills decimal_places=2 for all rows."
+    },
+    "frontend_settings_uom_decimals": {
+      "status": "PASS",
+      "details": "Settings page UOM table shows 'Decimals' column. Add/Edit UOM dialog has 'Decimal Places' input (data-testid=uom-decimal-places-input) with default value 2. 15 UOMs displayed with decimal values."
+    },
+    "frontend_inventory_formatQty": {
+      "status": "PASS",
+      "details": "Inventory Stock table uses formatQty() - quantities displayed as '59.00 sheet', '67.00 meter', '341.00 kit', '16.00 pcs' etc."
+    },
+    "frontend_items_formatQty": {
+      "status": "PASS",
+      "details": "Items page Stock column uses formatQty() - same UOM-aware precision formatting."
+    },
+    "frontend_bom_dialog_no_close_on_escape": {
+      "status": "PASS",
+      "details": "BOM Create/Edit dialog does NOT close on Escape key press. onEscapeKeyDown preventDefault working."
+    },
+    "frontend_bom_dialog_no_close_on_outside_click": {
+      "status": "PASS",
+      "details": "BOM Create/Edit dialog does NOT close on clicking outside (backdrop). onPointerDownOutside/onInteractOutside preventDefault working."
+    },
+    "frontend_bom_add_component_auto_scroll": {
+      "status": "PASS",
+      "details": "Add Component button appends new row and dialog scrolls to show it. componentsEndRef sentinel with scrollIntoView working."
+    },
+    "frontend_searchable_item_select_flip": {
+      "status": "PASS",
+      "details": "SearchableItemSelect uses 'space above > space below' heuristic to flip dropdown up when needed. Panel maxHeight adapts to available viewport area."
+    },
+    "frontend_bom_save_performance": {
+      "status": "PASS",
+      "details": "BOM save returns immediately via reloadBomsBackground() - explosions populate in background via setTimeout(0). No multi-second wait."
+    }
+  },
+  "regression_tests": {
+    "currency_features": "Not explicitly tested but no regressions observed in UI",
+    "role_group_permissions": "Not explicitly tested but admin login and permissions working",
+    "price_visibility": "Not explicitly tested but prices visible in Inventory/Items pages"
+  }
+}

@@ -4,6 +4,7 @@ import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import useResizableColumns from '../hooks/useResizableColumns';
+import { formatQty } from '../utils/uomFormat';
 import { 
   Plus, 
   Search, 
@@ -41,6 +42,7 @@ export default function ItemsPage() {
     setPartNumberSort(s => (s === 'asc' ? 'desc' : 'asc'));
   };
   const [items, setItems] = useState([]);
+  const [uoms, setUoms] = useState([]);
   const [itemGroups, setItemGroups] = useState([]);
   const [units, setUnits] = useState(FALLBACK_UNITS);
   const [taxSlabs, setTaxSlabs] = useState([0, 5, 12, 18, 28]);
@@ -165,6 +167,13 @@ export default function ItemsPage() {
       
       const { data } = await api.get(`/api/items?${params.toString()}`);
       setItems(data);
+      // UOM master is small; cache it once for decimal-place lookups in the table.
+      if (uoms.length === 0) {
+        try {
+          const { data: u } = await api.get('/api/settings/uoms');
+          setUoms(u || []);
+        } catch (_e) { /* non-fatal */ }
+      }
     } catch (error) {
       console.error('Failed to fetch items:', error);
     } finally {
@@ -808,7 +817,7 @@ export default function ItemsPage() {
                     </td>
                     <td className="mono text-sm">{item.hsn_code || '-'}</td>
                     <td className="text-right mono">{item.gst_rate != null ? `${item.gst_rate}%` : '-'}</td>
-                    <td className="text-right mono">{item.current_stock} {item.unit_of_measure}</td>
+                    <td className="text-right mono">{formatQty(item.current_stock, item.unit_of_measure, uoms)} {item.unit_of_measure}</td>
                     <td className="text-right mono">{formatCurrency(item.unit_cost)}</td>
                     {canViewPurchasePrice && (
                       <td className="text-right mono" data-testid={`item-purchase-price-${item.part_number}`}>

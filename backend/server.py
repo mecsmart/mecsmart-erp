@@ -7111,12 +7111,16 @@ async def list_uoms(request: Request):
     rows = await db.uoms.find({}, {"_id": 0}).sort("code", 1).to_list(500)
     if not rows:
         seed = [
-            {"id": str(uuid.uuid4()), "code": u["code"], "name": u["name"], "description": ""}
+            {"id": str(uuid.uuid4()), "code": u["code"], "name": u["name"], "description": "", "decimal_places": 2}
             for u in DEFAULT_UOMS
         ]
         if seed:
             await db.uoms.insert_many(seed)
         rows = seed
+    # Backfill decimal_places for legacy rows so the UI never receives undefined.
+    for r in rows:
+        if "decimal_places" not in r or r.get("decimal_places") is None:
+            r["decimal_places"] = 2
     return rows
 
 
@@ -7132,11 +7136,18 @@ async def create_uom(payload: dict, request: Request):
     exists = await db.uoms.find_one({"code": code})
     if exists:
         raise HTTPException(status_code=400, detail=f"UOM code '{code}' already exists")
+    # Decimal places — clamped to [0..6]; defaults to 2 if not provided.
+    try:
+        decimal_places = int(payload.get("decimal_places") if payload.get("decimal_places") is not None else 2)
+    except (TypeError, ValueError):
+        decimal_places = 2
+    decimal_places = max(0, min(6, decimal_places))
     doc = {
         "id": str(uuid.uuid4()),
         "code": code,
         "name": name,
         "description": str(payload.get("description", "") or ""),
+        "decimal_places": decimal_places,
         "created_at": datetime.now(timezone.utc),
     }
     await db.uoms.insert_one(doc)
@@ -7170,6 +7181,12 @@ async def update_uom(uom_id: str, payload: dict, request: Request):
         update["name"] = name
     if payload.get("description") is not None:
         update["description"] = str(payload.get("description") or "")
+    if payload.get("decimal_places") is not None:
+        try:
+            dp = int(payload.get("decimal_places"))
+        except (TypeError, ValueError):
+            dp = 2
+        update["decimal_places"] = max(0, min(6, dp))
     if not update:
         raise HTTPException(status_code=400, detail="No fields to update")
     update["updated_at"] = datetime.now(timezone.utc)

@@ -4,6 +4,7 @@ import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import useResizableColumns from '../hooks/useResizableColumns';
+import { formatQty } from '../utils/uomFormat';
 import { 
   Plus, 
   Package, 
@@ -39,6 +40,8 @@ export default function InventoryPage() {
   const [itemGroups, setItemGroups] = useState([]);
   const [groupFilter, setGroupFilter] = useState('');
   const [taxSlabs, setTaxSlabs] = useState([0, 5, 12, 18, 28]);
+  // UOM master — needed to render quantities with the configured decimal places.
+  const [uoms, setUoms] = useState([]);
   // Sort + resize state for the inventory table.
   const [partNumberSort, setPartNumberSort] = useState(null);
   const tableRef = useRef(null);
@@ -175,13 +178,14 @@ export default function InventoryPage() {
       if (showLowStock) params.append('low_stock', 'true');
       if (categoryFilter) params.append('category', categoryFilter);
       
-      const [inventoryRes, transactionsRes, warehousesRes, stockByItemRes, groupsRes, gstRes] = await Promise.all([
+      const [inventoryRes, transactionsRes, warehousesRes, stockByItemRes, groupsRes, gstRes, uomsRes] = await Promise.all([
         api.get(`/api/inventory?${params.toString()}`),
         api.get('/api/inventory/transactions?limit=50'),
         api.get('/api/warehouses'),
         api.get('/api/warehouses/stock/by-item'),
         api.get('/api/item-groups').catch(() => ({ data: [] })),
         api.get('/api/settings/gst-slabs').catch(() => ({ data: [] })),
+        api.get('/api/settings/uoms').catch(() => ({ data: [] })),
       ]);
       setInventory(inventoryRes.data);
       setTransactions(transactionsRes.data);
@@ -190,6 +194,7 @@ export default function InventoryPage() {
       setItemGroups(groupsRes.data || []);
       const slabs = Array.isArray(gstRes.data) && gstRes.data.length ? gstRes.data : [0, 5, 12, 18, 28];
       setTaxSlabs(slabs);
+      setUoms(uomsRes.data || []);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -563,7 +568,7 @@ export default function InventoryPage() {
                           </span>
                         </td>
                         <td className={`text-right mono font-medium ${isLowStock(item) ? 'text-[#9B1C1C]' : ''}`}>
-                          {item.current_stock} {item.unit_of_measure}
+                          {formatQty(item.current_stock, item.unit_of_measure, uoms)} {item.unit_of_measure}
                         </td>
                         <td className="text-xs">
                           {(stockByItem[item.id] || []).length === 0 ? (
@@ -573,14 +578,14 @@ export default function InventoryPage() {
                               {(stockByItem[item.id] || []).map((ws, wi) => (
                                 <div key={wi} className="flex gap-1">
                                   <span className="text-[#1E429F] font-medium">{ws.warehouse_code || ws.warehouse_name}:</span>
-                                  <span className="mono">{ws.quantity}</span>
+                                  <span className="mono">{formatQty(ws.quantity, item.unit_of_measure, uoms)}</span>
                                 </div>
                               ))}
                             </div>
                           )}
                         </td>
-                        <td className="text-right mono">{item.safety_stock}</td>
-                        <td className="text-right mono">{item.reorder_point}</td>
+                        <td className="text-right mono">{formatQty(item.safety_stock, item.unit_of_measure, uoms)}</td>
+                        <td className="text-right mono">{formatQty(item.reorder_point, item.unit_of_measure, uoms)}</td>
                         <td className="text-right mono">{formatCurrency(item.unit_cost)}</td>
                         {canViewPurchasePrice && (
                           <td className="text-right mono" data-testid={`inventory-purchase-price-${item.part_number}`}>

@@ -39,7 +39,7 @@ export default function SettingsPage() {
   const [uoms, setUoms] = useState([]);
   const [uomDialog, setUomDialog] = useState(false);
   const [editingUom, setEditingUom] = useState(null);
-  const [uomForm, setUomForm] = useState({ code: '', name: '', description: '' });
+  const [uomForm, setUomForm] = useState({ code: '', name: '', description: '', decimal_places: 2 });
   const fileInputRef = useRef(null);
   const isAdmin = user?.role === 'admin' || hasPermission('settings', 'edit');
 
@@ -93,16 +93,19 @@ export default function SettingsPage() {
 
   const openUomDialog = (u = null) => {
     setEditingUom(u);
-    setUomForm(u ? { code: u.code || '', name: u.name || '', description: u.description || '' }
-                 : { code: '', name: '', description: '' });
+    setUomForm(u ? { code: u.code || '', name: u.name || '', description: u.description || '', decimal_places: u.decimal_places != null ? u.decimal_places : 2 }
+                 : { code: '', name: '', description: '', decimal_places: 2 });
     setUomDialog(true);
   };
 
   const saveUom = async () => {
+    const dpRaw = parseInt(uomForm.decimal_places, 10);
+    const decimal_places = isNaN(dpRaw) ? 2 : Math.max(0, Math.min(6, dpRaw));
     const payload = {
       code: (uomForm.code || '').trim().toLowerCase(),
       name: (uomForm.name || '').trim(),
       description: (uomForm.description || '').trim(),
+      decimal_places,
     };
     if (!payload.code || !payload.name) { toast.error('Code and Name are required'); return; }
     try {
@@ -394,13 +397,14 @@ export default function SettingsPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full data-table" data-testid="uoms-table">
-                  <thead><tr><th className="w-24">Code</th><th>Name</th><th>Description</th><th className="w-24 text-right">Actions</th></tr></thead>
+                  <thead><tr><th className="w-24">Code</th><th>Name</th><th>Description</th><th className="w-24 text-right">Decimals</th><th className="w-24 text-right">Actions</th></tr></thead>
                   <tbody>
                     {uoms.map(u => (
                       <tr key={u.id} data-testid={`uom-row-${u.code}`}>
                         <td className="mono font-semibold">{u.code}</td>
                         <td>{u.name}</td>
                         <td className="text-[#6B7280]">{u.description || '-'}</td>
+                        <td className="text-right mono" data-testid={`uom-decimals-${u.code}`}>{u.decimal_places != null ? u.decimal_places : 2}</td>
                         <td>
                           <div className="flex items-center justify-end space-x-2">
                             {isAdmin && (<>
@@ -437,6 +441,22 @@ export default function SettingsPage() {
                 <div>
                   <label className="block text-sm font-semibold text-[#111827] mb-1">Description</label>
                   <input type="text" value={uomForm.description} onChange={e => setUomForm({...uomForm, description: e.target.value})} className="input-field" placeholder="(optional)" data-testid="uom-description-input" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-[#111827] mb-1">Decimal Places</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="6"
+                    step="1"
+                    value={uomForm.decimal_places}
+                    onChange={e => setUomForm({...uomForm, decimal_places: e.target.value})}
+                    className="input-field mono"
+                    data-testid="uom-decimal-places-input"
+                  />
+                  <p className="text-[11px] text-[#6B7280] mt-1">
+                    Number of digits after the decimal point used to display quantities of this UOM in Stock, BOM, transactions, and prints. Range 0–6 (e.g. <span className="mono">pcs → 0</span>, <span className="mono">kg → 3</span>).
+                  </p>
                 </div>
                 <div className="flex justify-end space-x-3 pt-3 border-t border-[#E5E7EB]">
                   <button onClick={() => setUomDialog(false)} className="btn-secondary">Cancel</button>
