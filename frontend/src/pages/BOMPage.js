@@ -37,9 +37,17 @@ const statusOptions = [
 export default function BOMPage() {
   const { user, hasPermission } = useAuth();
   const { formatCurrency, currencySymbol, companySettings } = useCompanySettings();
-  // Cost visibility: governed by the `bom_rollup_cost.view` permission OR admin/admin-group.
-  const rollupPerms = user?.permissions?.bom_rollup_cost || [];
-  const canSeeCosts = user?.role === 'admin' || user?.is_admin_group === true || rollupPerms.includes('view');
+  // Cost visibility: granted by EITHER `bom_process_cost.view` OR
+  // `bom_rollup_cost.view` (admin / admin-group always sees costs). Previously
+  // the check only honoured `bom_rollup_cost`, so users granted only the
+  // process-cost permission saw blank cost columns even though their role
+  // group had the box ticked. We now consult `hasPermission()` so the same
+  // logic that gates the Settings UI gates the cost columns too.
+  const canSeeCosts =
+    user?.role === 'admin'
+    || user?.is_admin_group === true
+    || hasPermission('bom_rollup_cost', 'view')
+    || hasPermission('bom_process_cost', 'view');
   const [boms, setBoms] = useState([]);
   const [items, setItems] = useState([]);
   const [uoms, setUoms] = useState([]);
@@ -533,7 +541,32 @@ export default function BOMPage() {
     </div>` : ''}
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:30px">Printed on ${new Date().toLocaleString()}</p>
     </body></html>`;
+    // window.open returns null when popups are blocked (most browsers do this
+    // by default for non-user-initiated calls or in incognito with strict
+    // settings). Guard, surface a friendly toast, and offer a Blob-URL fallback.
     const w = window.open('', '_blank');
+    if (!w || !w.document) {
+      try {
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const fallback = window.open(url, '_blank');
+        if (!fallback) {
+          toast.error('Popup blocked — allow popups for MecSmart and try again.');
+          // As a last resort, hand the user a downloadable file.
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `BOM-${parentItem?.part_number || 'print'}.html`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+        } else {
+          // Print once the fallback document finishes loading.
+          fallback.addEventListener('load', () => fallback.print());
+        }
+      } catch (e) {
+        toast.error('Cannot open print window: ' + (e.message || e));
+      }
+      return;
+    }
     w.document.write(html);
     w.document.close();
     w.onload = () => w.print();
