@@ -94,10 +94,7 @@ export const SearchableItemSelect = ({
     setQuery('');
   };
 
-  // Decide whether to flip the panel above the input. The previous heuristic
-  // (need full panelMaxHeight above before flipping) felt sluggish — when the
-  // search box is in the middle/bottom of a long Dialog the panel would
-  // STILL render below and overlap the next rows. New rule: flip up whenever
+  // Decide whether to flip the panel above the input. Rule: flip up whenever
   // there's MORE room above than below. This keeps the dropdown comfortably
   // visible regardless of where the input sits inside the dialog.
   const panelMaxHeight = 320;
@@ -108,6 +105,15 @@ export const SearchableItemSelect = ({
     const spaceAbove = rect.inputTop - 16;
     flipUp = spaceAbove > spaceBelow && spaceBelow < panelMaxHeight;
     availableHeight = Math.min(panelMaxHeight, Math.max(120, flipUp ? spaceAbove : spaceBelow));
+  }
+  // Panel height: when there are matches, scale by row count (44px per row +
+  // 28px sticky header). When the list is empty (0 matches), reserve a fixed
+  // ~80px so the "No items found" empty state doesn't get clipped or — when
+  // flipped up — overlap the input above it.
+  const estimatedPanelHeight = list.length === 0 ? 80 : Math.min(availableHeight, list.length * 44 + 28);
+  let panelTop = rect ? rect.inputBottom + 4 : 0;
+  if (rect && flipUp) {
+    panelTop = rect.inputTop - estimatedPanelHeight - 4;
   }
 
   return (
@@ -146,10 +152,25 @@ export const SearchableItemSelect = ({
             onFocus={() => setFocused(true)}
             placeholder={placeholder}
             disabled={disabled}
-            className="h-10 w-full rounded-sm border border-[#D1D5DB] bg-white pl-8 pr-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#1D3557] disabled:opacity-50"
+            className={`h-10 w-full rounded-sm border border-[#D1D5DB] bg-white pl-8 ${query ? 'pr-9' : 'pr-3'} py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#1D3557] disabled:opacity-50`}
             data-testid={testId}
             autoComplete="off"
           />
+          {/* In-input clear button — visible whenever the user has typed
+              something but hasn't picked a match yet. Solves the "0 results
+              and panel blocks me from editing" complaint by giving a single
+              click to wipe the query and start over. */}
+          {query && !disabled && (
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); setQuery(''); inputRef.current?.focus(); }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-[#9CA3AF] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"
+              title="Clear search"
+              data-testid={`${testId || 'ss'}-clear-input`}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       )}
 
@@ -159,7 +180,7 @@ export const SearchableItemSelect = ({
           className="bg-white border border-[#E5E7EB] rounded-sm shadow-lg overflow-y-auto"
           style={{
             position: 'fixed',
-            top: flipUp ? rect.inputTop - Math.min(availableHeight, list.length * 44 + 28) - 4 : rect.inputBottom + 4,
+            top: panelTop,
             left: rect.left,
             width: rect.width,
             maxHeight: availableHeight,

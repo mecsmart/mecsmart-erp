@@ -1211,10 +1211,10 @@ export default function WarehousesPage() {
                           <tr className="bg-[#1D3557] text-white text-xs">
                             <th className="text-left p-2">Item</th>
                             <th className="text-left p-2">HSN</th>
-                            <th className="text-right p-2">{selectedJW ? 'Ordered' : 'Ordered'}</th>
-                            <th className="text-right p-2">Already Recd</th>
-                            <th className="text-right p-2">Pending</th>
-                            <th className="text-right p-2">Recd Now</th>
+                            <th className="text-right p-2" title={selectedJW ? 'Total qty originally sent for job work' : 'Original PO ordered qty'}>{selectedJW ? 'Sent' : 'PO Qty'}</th>
+                            <th className="text-right p-2" title="Cumulative qty already received via earlier GRNs">Already Recd</th>
+                            <th className="text-right p-2 bg-[#723B13]" title="Remaining qty pending for this GRN">Pending (this GRN)</th>
+                            <th className="text-right p-2 bg-[#03543F]" title="Editable: how much you actually received in this delivery — pre-filled with pending">Recd Now</th>
                             <th className="text-left p-2">UOM</th>
                             <th className="text-right p-2">{selectedJW ? 'SC Price' : 'PO Price'}</th>
                             <th className="text-right p-2">Cost/Unit</th>

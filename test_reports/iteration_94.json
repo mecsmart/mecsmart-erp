@@ -1,0 +1,96 @@
+{
+  "summary": "Iteration 94 - Testing 2 UX fixes: (1) BOM Create/Edit dialog breathing room + SearchableItemSelect X clear button, (2) GRN partial qty clarity with renamed columns and colored headers. ALL FIXES VERIFIED WORKING.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only testing)",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None - used existing data (PO000019 with partial status)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Two UX fixes verified: (1) BOM dialog has 280px spacer at bottom for dropdown breathing room, SearchableItemSelect has X clear button when query has no matches, panel position fixed with 80px floor for empty state. (2) GRN dialog columns renamed for clarity with colored headers (brown for Pending, green for Recd Now) and tooltips.",
+  "tests_executed": {
+    "frontend": [
+      {
+        "test": "BOM SearchableItemSelect X Clear Button",
+        "status": "PASSED",
+        "description": "Typed 'XYZQQQ123NOMATCH' in parent item search. X clear button appeared inside input (data-testid='bom-parent-item-select-clear-input'). Clicking X cleared the input text and re-focused the input."
+      },
+      {
+        "test": "BOM SearchableItemSelect Empty State Panel Position",
+        "status": "PASSED",
+        "description": "'No items found' panel displayed below input without overlapping. Panel positioned at y=197, input bottom at y=193. Uses 80px floor for empty state height calculation."
+      },
+      {
+        "test": "BOM Dialog 280px Breathing Room Spacer",
+        "status": "PASSED",
+        "description": "280px spacer div found in BOM dialog (class h-[280px], aria-hidden=true). Provides vertical breathing room for search dropdown of last component row."
+      },
+      {
+        "test": "BOM Component Row SearchableItemSelect",
+        "status": "PASSED",
+        "description": "X clear button found on component row search input (data-testid='component-item-select-2-clear-input'). Panel positioned correctly below input."
+      },
+      {
+        "test": "GRN Dialog Column Headers Renamed",
+        "status": "PASSED",
+        "description": "Column headers now read: Item, HSN, PO Qty, Already Recd, Pending (this GRN), Recd Now, UOM, PO Price, Cost/Unit, Total Cost, Status. 'Ordered' renamed to 'PO Qty'."
+      },
+      {
+        "test": "GRN Dialog Colored Headers",
+        "status": "PASSED",
+        "description": "'Pending (this GRN)' has brown background (rgb(114, 59, 19)). 'Recd Now' has green background (rgb(3, 84, 63))."
+      },
+      {
+        "test": "GRN Dialog Header Tooltips",
+        "status": "PASSED",
+        "description": "Tooltips found: 'Original PO ordered qty' (PO Qty), 'Cumulative qty already received via earlier GRNs' (Already Recd), 'Remaining qty pending for this GRN' (Pending), 'Editable: how much you actually received in this delivery — pre-filled with pending' (Recd Now)."
+      },
+      {
+        "test": "GRN Partial PO Logic",
+        "status": "PASSED",
+        "description": "PO000019 (partial status): PO Qty=10, Already Recd=3, Pending=7, Recd Now=7 (pre-filled with pending qty). Logic correctly shows remaining qty for this GRN."
+      }
+    ]
+  },
+  "feature_verification": {
+    "bom_searchable_x_clear_button": {
+      "status": "IMPLEMENTED",
+      "implementation": "SearchableItemSelect.jsx lines 163-173: X button rendered when query is non-empty and not disabled. Uses onMouseDown to clear query and refocus input. Input has pr-9 padding when query present.",
+      "code_location": "/app/frontend/src/components/SearchableItemSelect.jsx"
+    },
+    "bom_searchable_panel_position": {
+      "status": "IMPLEMENTED",
+      "implementation": "SearchableItemSelect.jsx lines 110-117: estimatedPanelHeight uses 80px floor for empty state (list.length === 0). Prevents panel from overlapping input when flipped up.",
+      "code_location": "/app/frontend/src/components/SearchableItemSelect.jsx"
+    },
+    "bom_dialog_spacer": {
+      "status": "IMPLEMENTED",
+      "implementation": "BOMPage.js line 1008: <div className='h-[280px]' aria-hidden='true' /> after componentsEndRef. Provides breathing room for last component's search dropdown.",
+      "code_location": "/app/frontend/src/pages/BOMPage.js"
+    },
+    "grn_column_clarity": {
+      "status": "IMPLEMENTED",
+      "implementation": "WarehousesPage.js lines 1209-1224: Column headers updated with new labels, title attributes for tooltips, and bg-[#723B13] (brown) for Pending, bg-[#03543F] (green) for Recd Now.",
+      "code_location": "/app/frontend/src/pages/WarehousesPage.js"
+    }
+  },
+  "code_review": {
+    "SearchableItemSelect.jsx": "Clean implementation of X clear button with proper event handling (onMouseDown to prevent blur race). Panel position calculation correctly uses 80px floor for empty state.",
+    "BOMPage.js": "280px spacer provides adequate breathing room. Scroll behavior with componentsEndRef and dialogScrollRef ensures new rows are visible.",
+    "WarehousesPage.js": "GRN table headers clearly labeled with tooltips. Brown/green color coding helps users identify editable vs informational columns."
+  }
+}
