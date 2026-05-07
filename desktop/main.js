@@ -36,9 +36,48 @@ const isDev = process.argv.includes('--dev');
 // electron-updater fires events for every step of the silent update lifecycle.
 // We only surface the user-visible bits ("update available" / "ready to install")
 // so the agent stays out of the way.
+//
+// IMPORTANT: The publish URL in `package.json` (`updates.mecsmart.local`) is a
+// PLACEHOLDER. Until the customer stands up a real update host (an HTTPS server
+// hosting `latest.yml` + the `.exe`), auto-update is effectively disabled — we
+// detect DNS/connection failures and show a friendly "not configured" message
+// instead of a raw `net::ERR_NAME_NOT_RESOLVED`. To enable real updates, point
+// `package.json → build.publish[0].url` at the real host and rebuild, OR set
+// the `MECSMART_UPDATE_URL` environment variable on the client at runtime
+// (overrides the baked-in feed via `autoUpdater.setFeedURL`).
+
+// `ERR_NAME_NOT_RESOLVED` (DNS), `ENOTFOUND`, `ECONNREFUSED`, `ETIMEDOUT` and
+// generic "net::" prefixes all indicate the update host is unreachable rather
+// than a real "update broken" condition. Surface a friendly message in that case.
+function isNetworkError(err) {
+  const m = String((err && (err.message || err.code)) || '').toLowerCase();
+  return [
+    'err_name_not_resolved',
+    'enotfound',
+    'econnrefused',
+    'etimedout',
+    'err_internet_disconnected',
+    'err_connection_refused',
+    'err_connection_timed_out',
+    'getaddrinfo',
+    'net::',
+  ].some(s => m.includes(s));
+}
+
 function configureAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+
+  // Allow runtime override of the feed URL — handy for IT admins who want to
+  // point a fleet at a private update host without rebuilding the installer.
+  const overrideUrl = process.env.MECSMART_UPDATE_URL || store.get('updateFeedUrl') || '';
+  if (overrideUrl) {
+    try {
+      autoUpdater.setFeedURL({ provider: 'generic', url: overrideUrl, channel: 'latest' });
+    } catch (e) {
+      console.error('[auto-updater] invalid MECSMART_UPDATE_URL:', e.message);
+    }
+  }
 
   autoUpdater.on('update-available', (info) => {
     if (mainWindow) {
@@ -61,12 +100,15 @@ function configureAutoUpdater() {
 
   autoUpdater.on('error', (err) => {
     // Silent failure — auto-updater should never break the app even if the
-    // update server is unreachable.
+    // update server is unreachable. We log to console for diagnostics only.
     console.error('[auto-updater]', err && err.message);
   });
 
-  if (!isDev) {
-    // Slight delay so the main window mounts first.
+  // Auto-check on launch ONLY if a real update host is configured. The default
+  // `updates.mecsmart.local` host doesn't resolve, so checking it just spams
+  // DNS and the console. Once a real URL is set (env var or stored config),
+  // the silent background check resumes.
+  if (!isDev && overrideUrl) {
     setTimeout(() => autoUpdater.checkForUpdatesAndNotify().catch(() => {}), 6000);
   }
 }
@@ -112,13 +154,25 @@ function buildMenu() {
         {
           label: 'Check for Updates…',
           click: async () => {
+            const overrideUrl = process.env.MECSMART_UPDATE_URL || store.get('updateFeedUrl') || '';
             try {
               const r = await autoUpdater.checkForUpdates();
               if (!r || !r.updateInfo) {
                 dialog.showMessageBox({ type: 'info', message: 'You are on the latest version.' });
               }
             } catch (e) {
-              dialog.showMessageBox({ type: 'error', message: 'Update check failed.', detail: e.message });
+              if (isNetworkError(e)) {
+                dialog.showMessageBox({
+                  type: 'info',
+                  title: 'Auto-update not configured',
+                  message: 'Auto-update is not available on this installation.',
+                  detail: overrideUrl
+                    ? `Could not reach the update server (${overrideUrl}). Please check your internet connection or contact your IT admin.`
+                    : 'No update server has been configured yet. Please contact your IT admin or MecSmart support to set the update feed URL.',
+                });
+              } else {
+                dialog.showMessageBox({ type: 'error', message: 'Update check failed.', detail: e.message });
+              }
             }
           },
         },
