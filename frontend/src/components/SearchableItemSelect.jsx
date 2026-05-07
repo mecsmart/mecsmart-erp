@@ -113,7 +113,10 @@ export const SearchableItemSelect = ({
   const estimatedPanelHeight = list.length === 0 ? 80 : Math.min(availableHeight, list.length * 44 + 28);
   let panelTop = rect ? rect.inputBottom + 4 : 0;
   if (rect && flipUp) {
-    panelTop = rect.inputTop - estimatedPanelHeight - 4;
+    // Don't allow negative top (would push panel above viewport, hidden);
+    // clamp at 8px from top edge so it stays usable even when the input is
+    // near the top of the viewport with little space below it.
+    panelTop = Math.max(8, rect.inputTop - estimatedPanelHeight - 4);
   }
 
   return (
@@ -177,7 +180,7 @@ export const SearchableItemSelect = ({
       {!selected && focused && query.trim() && rect && createPortal(
         <div
           ref={panelRef}
-          className="bg-white border border-[#E5E7EB] rounded-sm shadow-lg overflow-y-auto"
+          className="bg-white border border-[#E5E7EB] rounded-sm shadow-lg overflow-y-auto overscroll-contain"
           style={{
             position: 'fixed',
             top: panelTop,
@@ -201,6 +204,13 @@ export const SearchableItemSelect = ({
           // clicks truly outside both the dialog and this panel.
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
+          // Keep wheel-scroll INSIDE the panel — without this, scrolling the
+          // results list also scrolls the parent BOM/CRM dialog beneath it,
+          // which feels like "scroll doesn't work on the dropdown".
+          // `overscroll-contain` (above) prevents bounce-out at the edges;
+          // stopPropagation prevents the dialog from receiving any wheel
+          // events while the dropdown is what the user is interacting with.
+          onWheel={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-1 text-[10px] text-[#6B7280] uppercase tracking-wide border-b border-[#F3F4F6] sticky top-0 bg-white">
             {list.length} match{list.length !== 1 ? 'es' : ''} for "{query}"

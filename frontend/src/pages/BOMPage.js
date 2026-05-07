@@ -1003,9 +1003,9 @@ export default function BOMPage() {
                   {/* Comfort spacer — gives the search dropdown of the LAST
                       component row vertical breathing room so the panel
                       doesn't overflow the dialog's bottom edge or get clipped
-                      by the Save / Cancel button bar. ~280px is enough for a
-                      panel showing 6-7 matches without flipping upwards. */}
-                  <div className="h-[280px]" aria-hidden="true" />
+                      by the Save / Cancel button bar. ~500px is enough for a
+                      panel showing 8-10 matches without flipping upwards. */}
+                  <div className="h-[500px]" aria-hidden="true" />
                 </div>
 
                 <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
