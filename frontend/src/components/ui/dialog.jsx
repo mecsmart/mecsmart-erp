@@ -23,11 +23,28 @@ const DialogOverlay = React.forwardRef(({ className, ...props }, ref) => (
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
-const DialogContent = React.forwardRef(({ className, children, ...props }, ref) => (
+/**
+ * Reusable dialog content. By default, MecSmart dialogs do NOT close on ESC
+ * or outside-click — most dialogs in the app are CRUD forms (PO, Quotation,
+ * GRN, BOM, etc.) where an accidental ESC or background click was wiping
+ * unsaved work. Users close via the built-in X button (top-right) or an
+ * explicit Cancel/Save button in the dialog footer.
+ *
+ * Opt back in to native Radix dismiss behavior with `dismissible={true}` for
+ * lightweight popups (selectors, image previewers, simple info dialogs).
+ */
+const DialogContent = React.forwardRef(({ className, children, dismissible = false, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      // Block ESC + outside click unless caller opts in. We call
+      // `e.preventDefault()` so Radix doesn't fire `onOpenChange(false)` —
+      // the X button still works because it uses DialogPrimitive.Close which
+      // is not affected by these handlers.
+      onEscapeKeyDown={dismissible ? undefined : (e) => e.preventDefault()}
+      onPointerDownOutside={dismissible ? undefined : (e) => e.preventDefault()}
+      onInteractOutside={dismissible ? undefined : (e) => e.preventDefault()}
       className={cn(
         "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
         className
