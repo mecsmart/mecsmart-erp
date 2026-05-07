@@ -274,8 +274,13 @@ export default function ItemsPage() {
     });
   };
 
-  // Groups matching current category, including "(any)" groups
-  const filteredGroupsForForm = itemGroups.filter(g => !g.parent_category || g.parent_category === formData.category);
+  // Item-group dropdown — previously filtered groups by `parent_category`,
+  // which hid groups defined for other categories. Users complained the
+  // "full item group list" wasn't showing. We now render ALL groups so the
+  // user can pick any group; a small category badge in the option label
+  // keeps the context (so a "Bearings (component)" group is clearly tagged
+  // even on a raw-material item form).
+  const filteredGroupsForForm = itemGroups;
   const selectedGroup = itemGroups.find(g => g.id === formData.group_id);
   const groupLocksHsn = !!(selectedGroup && (selectedGroup.default_hsn_code || selectedGroup.default_gst_rate != null));
 
@@ -554,7 +559,10 @@ export default function ItemsPage() {
                           <div className="px-3 py-2 text-xs text-[#6B7280]">No groups defined for this category — create one in Settings → Item Groups</div>
                         ) : filteredGroupsForForm.map(g => (
                           <SelectItem key={g.id} value={g.id}>
-                            {g.name}{g.default_hsn_code ? ` · HSN ${g.default_hsn_code}` : ''}{g.default_gst_rate != null ? ` · ${g.default_gst_rate}%` : ''}
+                            {g.name}
+                            {g.parent_category ? ` · ${g.parent_category.replace('_', ' ')}` : ''}
+                            {g.default_hsn_code ? ` · HSN ${g.default_hsn_code}` : ''}
+                            {g.default_gst_rate != null ? ` · ${g.default_gst_rate}%` : ''}
                           </SelectItem>
                         ))}
                       </SelectContent>

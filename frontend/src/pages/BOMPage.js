@@ -364,21 +364,26 @@ export default function BOMPage() {
       ...fd,
       components: [...fd.components, { item_id: '', quantity: 1, unit_of_measure: 'pcs', is_alternate: false, routings: [] }],
     }));
-    // After the new row mounts, scroll the Dialog's scroll container all the
-    // way to the bottom. Use a dual strategy: rAF → scrollIntoView on the
-    // sentinel, AND directly bump dialogScrollRef.scrollTop to scrollHeight.
-    // The previous one-shot scrollIntoView under-shot when the sentinel hadn't
-    // finished laying out (only one item's worth of distance moved), leaving
-    // the new row partly off-screen.
+    // After the new row mounts, scroll the Dialog so the new component sits
+    // near the TOP of the visible area — that way the 500px breathing-room
+    // spacer below it stays fully visible, giving the search dropdown its
+    // promised room. (Previously we scrolled to the absolute bottom, which
+    // squashed the new row's available dropdown space.)
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        if (dialogScrollRef.current) {
-          dialogScrollRef.current.scrollTo({
-            top: dialogScrollRef.current.scrollHeight,
-            behavior: 'smooth',
-          });
-        }
-        if (componentsEndRef.current) {
+        // Find the newly-mounted last component row by data-testid pattern.
+        const scrollEl = dialogScrollRef.current;
+        if (!scrollEl) return;
+        const rows = scrollEl.querySelectorAll('[data-testid^="component-item-select-"]');
+        const lastRow = rows[rows.length - 1];
+        if (lastRow) {
+          // Position the new row ~80px from the top of the dialog viewport
+          // (leaves the dialog header / sticky top untouched, but the row
+          // itself + ALL 500px of bottom space stays below the fold).
+          const rowTop = lastRow.getBoundingClientRect().top;
+          const dialogTop = scrollEl.getBoundingClientRect().top;
+          scrollEl.scrollBy({ top: rowTop - dialogTop - 80, behavior: 'smooth' });
+        } else if (componentsEndRef.current) {
           componentsEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
         }
       });
