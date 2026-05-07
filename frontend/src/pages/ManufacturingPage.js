@@ -27,6 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
+import { fmtAmt } from '../utils/numberFormat';
 
 // Patch a single WO row in the flat array — used after preview-confirmed
 // MO start so we can update status without a heavy refetch (which would
@@ -700,7 +701,7 @@ export default function ManufacturingPage() {
           <td class="text-right mono">${sym}${(m.unit_cost || 0).toFixed(2)}</td>
           <td class="text-right mono">${sym}${(m.quantity * (m.unit_cost || 0)).toFixed(2)}</td>
         </tr>`).join('')}
-        <tr class="total-row"><td colspan="5" class="text-right">Total Material Cost</td><td class="text-right mono">${sym}${totalMaterialCost.toFixed(2)}</td></tr>
+        <tr class="total-row"><td colspan="5" class="text-right">Total Material Cost</td><td class="text-right mono">${sym}${fmtAmt(totalMaterialCost)}</td></tr>
         </tbody>
       </table>` : '<p style="color:#888;margin:10px 0;">No materials consumed yet.</p>'}
       ${childMos.length > 0 ? `
@@ -791,7 +792,7 @@ export default function ManufacturingPage() {
             <td class="center mono">${startStr}</td>
             <td class="center mono">${endStr}</td>
             <td class="center mono">${mins ? mins.toFixed(0) : '-'}</td>
-            <td class="right mono">${cost ? cost.toFixed(2) : '-'}</td>
+            <td class="right mono">${cost ? fmtAmt(cost) : '-'}</td>
             <td class="sig"></td>
           </tr>`;
         }).join('');

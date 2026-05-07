@@ -1,0 +1,86 @@
+{
+  "summary": "Iteration 90 - Testing 3 user-reported fixes: PDF filename prefill, thousand separators in PDF amounts, and BOM page print button visibility. All fixes verified working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only testing)",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None - used existing data (225 active BOMs, 31 quotations, 52 POs)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Three fixes verified: (1) PDF filename prefill via doc.title in pdfPrint.js, (2) Thousand separators via fmtAmt/fmtAmtForCurrency in numberFormat.js, (3) BOM print buttons visible immediately without waiting for explosions via skipExplosions:true and ensureExplosion lazy loading.",
+  "tests_executed": {
+    "frontend": [
+      {
+        "test": "BOM Page Load Speed",
+        "status": "PASSED",
+        "description": "BOM page with 225 active BOMs loads in ~2.8 seconds. All 222 print buttons visible immediately without waiting for /explode API calls."
+      },
+      {
+        "test": "BOM Print Button Visibility",
+        "status": "PASSED",
+        "description": "Print buttons (data-testid='print-bom-*') appear RIGHT AWAY for every BOM panel. Previously gated on explosion data, now always visible."
+      },
+      {
+        "test": "BOM Print Button Lazy Load",
+        "status": "PASSED",
+        "description": "Clicking print button on unexpanded BOM triggers ensureExplosion() to lazy-fetch explosion data, then opens print dialog. No errors."
+      },
+      {
+        "test": "Thousand Separators - Quotations",
+        "status": "PASSED",
+        "description": "Quotation amounts display with Indian-style thousand separators: ₹1,003, ₹1,062, ₹10,620, ₹94,325. Summary cards also formatted correctly."
+      },
+      {
+        "test": "Thousand Separators - Purchase Orders",
+        "status": "PASSED",
+        "description": "PO amounts display with thousand separators: ₹1,000.00, ₹1,180.00. PO print dialog shows formatted amounts."
+      },
+      {
+        "test": "PDF Filename Prefill - Code Verification",
+        "status": "PASSED",
+        "description": "pdfPrint.js sets doc.title = titleNoExt (line 154) which browsers use for 'Save as PDF' filename. Filenames follow pattern: Quotation-QUO000043.pdf, PO-PO000039.pdf, BOM-FG-001.pdf"
+      },
+      {
+        "test": "PO Print Dialog",
+        "status": "PASSED",
+        "description": "PO print dialog opens correctly with template options (Standard, Detailed GST, Compact, Modern), paper size, and display options."
+      }
+    ]
+  },
+  "feature_verification": {
+    "filename_prefill": {
+      "status": "IMPLEMENTED",
+      "implementation": "pdfPrint.js line 153-154: doc.title = titleNoExt (removes .pdf extension). Browser uses document title for Save as PDF filename.",
+      "examples": ["Quotation-QUO000043.pdf", "PO-PO000039.pdf", "BOM-FG-001.pdf", "GRN-GRN-000006.pdf"]
+    },
+    "thousand_separators": {
+      "status": "IMPLEMENTED",
+      "implementation": "numberFormat.js exports fmtAmt (Indian locale en-IN) and fmtAmtForCurrency (en-IN for INR, en-US for USD/EUR). Used in CRMPage.js, PrintDialogs.js, BOMPage.js, ManufacturingPage.js, JobWorkPage.js",
+      "examples": ["₹1,23,456.78 (INR)", "$123,456.78 (USD)"]
+    },
+    "bom_print_button_visibility": {
+      "status": "IMPLEMENTED",
+      "implementation": "BOMPage.js: fetchBoms({skipExplosions:true}) on initial load. Print button always visible (gated on activeBom, not explosion). ensureExplosion(bomId) lazy-fetches on print click or panel expand.",
+      "performance": "222 print buttons visible in 2.8 seconds (previously waited for 225+ /explode calls)"
+    }
+  },
+  "code_review": {
+    "pdfPrint.js": "Clean implementation. Sets iframe.title and doc.title for filename prefill. A4 width (794px) for proper print layout.",
+    "numberFormat.js": "Proper use of Intl.NumberFormat with en-IN locale for Indian grouping (1,23,456.78) and en-US for Western grouping.",
+    "BOMPage.js": "Good lazy loading pattern with ensureExplosion(). Print button visibility no longer blocked by explosion data loading."
+  }
+}

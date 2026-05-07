@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
+import { fmtAmt } from '../utils/numberFormat';
 
 export default function JobWorkPage() {
   const { user, hasPermission } = useAuth();
@@ -512,11 +513,11 @@ export default function JobWorkPage() {
         const body = rows.map((r, i) => {
           const totalCharges = r.qty * r.charges;
           const totalAmount = r.qty * r.rmCost;
-          return `<tr><td>${i+1}</td><td>${r.it.part_number || '-'}, ${r.it.name || '-'}</td><td>${r.it.hsn_code || '-'}</td><td class="text-right mono">${r.qty}</td><td>${r.it.unit_of_measure || 'Nos'}</td><td class="text-right mono">${currencySymbol}${r.charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${totalCharges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${r.rmCost.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${totalAmount.toFixed(2)}</td></tr>`;
+          return `<tr><td>${i+1}</td><td>${r.it.part_number || '-'}, ${r.it.name || '-'}</td><td>${r.it.hsn_code || '-'}</td><td class="text-right mono">${r.qty}</td><td>${r.it.unit_of_measure || 'Nos'}</td><td class="text-right mono">${currencySymbol}${fmtAmt(r.charges)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalCharges)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(r.rmCost)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalAmount)}</td></tr>`;
         }).join('');
         const grandCharges = rows.reduce((s, r) => s + r.qty * r.charges, 0);
         const grandAmount = rows.reduce((s, r) => s + r.qty * r.rmCost, 0);
-        const totalRow = `<tr class="total-row"><td colspan="6" class="text-right">Total Process Charges</td><td class="text-right mono">${currencySymbol}${grandCharges.toFixed(2)}</td><td class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${grandAmount.toFixed(2)}</td></tr>`;
+        const totalRow = `<tr class="total-row"><td colspan="6" class="text-right">Total Process Charges</td><td class="text-right mono">${currencySymbol}${fmtAmt(grandCharges)}</td><td class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${fmtAmt(grandAmount)}</td></tr>`;
         return body + totalRow;
       })()}
       </tbody>
@@ -531,9 +532,9 @@ export default function JobWorkPage() {
         const pit = p.item || items.find(it => it.id === p.item_id) || {};
         const charges = p.charges || 0;
         const total = (p.quantity || 0) * charges;
-        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td>${p.process_name || (p.process_names || []).join(', ') || '-'}</td><td>${pit.hsn_code || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td class="text-right mono">${currencySymbol}${charges.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${total.toFixed(2)}</td></tr>`;
+        return `<tr><td>${i+1}</td><td>${pit.part_number || '-'}, ${pit.name || '-'}</td><td>${p.process_name || (p.process_names || []).join(', ') || '-'}</td><td>${pit.hsn_code || '-'}</td><td class="text-right mono">${p.quantity || 0}</td><td class="text-right mono">${currencySymbol}${fmtAmt(charges)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(total)}</td></tr>`;
       }).join('')}
-      <tr class="total-row"><td colspan="6" class="text-right">Total Job Work Cost</td><td class="text-right mono">${currencySymbol}${totalJobWorkCost.toFixed(2)}</td></tr>
+      <tr class="total-row"><td colspan="6" class="text-right">Total Job Work Cost</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalJobWorkCost)}</td></tr>
       </tbody>
     </table>
     ` : ''}
@@ -546,9 +547,9 @@ export default function JobWorkPage() {
         const it = l.item || {};
         const rate = it.unit_cost || l.rate || 0;
         const cost = l.quantity * rate;
-        return `<tr><td>${i+1}</td><td>${it.part_number || '-'}, ${it.name || '-'}</td><td>${it.hsn_code || '-'}</td><td class="text-right mono">${l.quantity}</td><td class="text-right mono">${currencySymbol}${rate.toFixed(2)}</td><td class="text-right mono">${currencySymbol}${cost.toFixed(2)}</td></tr>`;
+        return `<tr><td>${i+1}</td><td>${it.part_number || '-'}, ${it.name || '-'}</td><td>${it.hsn_code || '-'}</td><td class="text-right mono">${l.quantity}</td><td class="text-right mono">${currencySymbol}${fmtAmt(rate)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(cost)}</td></tr>`;
       }).join('')}
-      <tr class="total-row"><td colspan="5" class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${totalRMCost.toFixed(2)}</td></tr>
+      <tr class="total-row"><td colspan="5" class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalRMCost)}</td></tr>
       </tbody>
     </table>`}
     

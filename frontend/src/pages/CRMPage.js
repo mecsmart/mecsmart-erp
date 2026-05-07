@@ -14,6 +14,7 @@ import { SearchableSelect } from '../components/SearchableSelect';
 import { SearchableItemSelect } from '../components/SearchableItemSelect';
 import { useDraggableRows } from '../hooks/useDraggableRows';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
+import { fmtAmtForCurrency } from '../utils/numberFormat';
 import { toast } from 'sonner';
 
 // Stage definitions per pipeline — aligned to the customer's CRM diagram:
@@ -3813,6 +3814,10 @@ function printInvoiceDoc(doc, opts) {
   const isExportDoc = docCurrency !== 'INR';
   const CUR_SYMBOLS = { INR: '₹', USD: '$', EUR: '€', GBP: '£', AED: 'د.إ' };
   const sym = CUR_SYMBOLS[docCurrency] || '₹';
+  // Doc-currency-aware amount formatter: INR uses Indian grouping (1,23,456.78);
+  // USD/EUR/etc. use Western grouping (123,456.78). Applies thousand separators
+  // everywhere amounts appear in this print template.
+  const fa = (v) => fmtAmtForCurrency(v, docCurrency);
   // Accent: Quotation #444853 (slate), PI #E0C09A (tan/beige), TI → plain #2D3E50 used ONLY for
   // emphasised text (company name, invoice no, TAX INVOICE title, grand total, T&C heading, item header bg).
   // Everything else on TI stays plain black text on white — no filled info bars / no bars on bill-to etc.
@@ -3845,22 +3850,22 @@ function printInvoiceDoc(doc, opts) {
         ${desc ? `<div class="item-desc">${esc(desc)}</div>` : ''}
       </td>
       <td class="center mono">${esc(l.hsn_code || l.item?.hsn_code || '-')}</td>
-      <td class="right">${qty.toFixed(2)}</td>
+      <td class="right">${fa(qty)}</td>
       <td class="center">${esc(l.uom || '')}</td>
-      <td class="right">${rate.toFixed(2)}</td>
+      <td class="right">${fa(rate)}</td>
       <td class="right">${discPct > 0 ? discPct.toFixed(2) + '%' : '-'}</td>
-      <td class="right">${basic.toFixed(2)}</td>
-      <td class="right">${gstRate.toFixed(1)}%<div class="subamt">${gstAmt.toFixed(2)}</div></td>
-      <td class="right total-cell">${total.toFixed(2)}</td>
+      <td class="right">${fa(basic)}</td>
+      <td class="right">${gstRate.toFixed(1)}%<div class="subamt">${fa(gstAmt)}</div></td>
+      <td class="right total-cell">${fa(total)}</td>
     </tr>`;
   }).join('');
 
   const hsnRows = isTaxInvoice ? (doc.hsn_summary || []).map(h => `<tr>
     <td class="mono">${esc(h.hsn)}</td>
     <td class="right">${(h.rate || 0).toFixed(1)}%</td>
-    <td class="right">${(h.taxable || 0).toFixed(2)}</td>
-    ${isInter ? `<td class="right">${(h.igst || 0).toFixed(2)}</td>` : `<td class="right">${(h.cgst || 0).toFixed(2)}</td><td class="right">${(h.sgst || 0).toFixed(2)}</td>`}
-    <td class="right"><strong>${((h.igst || 0) + (h.cgst || 0) + (h.sgst || 0)).toFixed(2)}</strong></td>
+    <td class="right">${fa(h.taxable || 0)}</td>
+    ${isInter ? `<td class="right">${fa(h.igst || 0)}</td>` : `<td class="right">${fa(h.cgst || 0)}</td><td class="right">${fa(h.sgst || 0)}</td>`}
+    <td class="right"><strong>${fa((h.igst || 0) + (h.cgst || 0) + (h.sgst || 0))}</strong></td>
   </tr>`).join('') : '';
 
   const docNo = doc[opts.numberKey] || '';

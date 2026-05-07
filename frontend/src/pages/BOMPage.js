@@ -6,6 +6,7 @@ import { useCompanySettings } from '../context/CompanySettingsContext';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 import { formatQty } from '../utils/uomFormat';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
+import { fmtAmt } from '../utils/numberFormat';
 import { 
   Plus, 
   FileStack, 
@@ -110,10 +111,27 @@ export default function BOMPage() {
   const [routingOptions, setRoutingOptions] = useState([]);
 
   useEffect(() => {
-    fetchBoms();
+    fetchBoms({ skipExplosions: true });
     fetchItems();
     fetchRoutings();
   }, [statusFilter]);
+
+  // Lazy-load explosion data for a single BOM (used by inline rollup cost,
+  // panel expansion, and the Print button). Caches in `allExplosions` so
+  // repeated views don't refetch.
+  const ensureExplosion = async (bomId) => {
+    if (!bomId) return null;
+    if (allExplosions[bomId]) return allExplosions[bomId];
+    try {
+      const { data } = await api.get(`/api/bom/${bomId}/explode`);
+      setAllExplosions(prev => ({ ...prev, [bomId]: data }));
+      return data;
+    } catch {
+      const empty = { explosion: [], total_rollup_cost: 0 };
+      setAllExplosions(prev => ({ ...prev, [bomId]: empty }));
+      return empty;
+    }
+  };
 
   const fetchRoutings = async () => {
     try {
@@ -494,7 +512,7 @@ export default function BOMPage() {
         const routingsText = (node.routings || []).map(r => {
           const n = typeof r === 'string' ? r : r.name;
           const c = typeof r === 'string' ? 0 : (r.cost || 0);
-          return canSeeProcessCost && c > 0 ? `${n} (${c.toFixed(2)})` : n;
+          return canSeeProcessCost && c > 0 ? `${n} (${fmtAmt(c)})` : n;
         }).join(', ') || '-';
         html += `<tr style="background:${bgColor}">
           <td style="padding:4px 8px;padding-left:${indent + 8}px;font-size:10px;font-weight:600;">${catLabel(item.category || '')}</td>
@@ -503,9 +521,9 @@ export default function BOMPage() {
           <td style="padding:4px 8px;font-size:10px;color:#1E429F;">${routingsText}</td>
           <td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;">${node.quantity}</td>
           <td style="padding:4px 8px;font-size:11px;">${item.unit_of_measure || '-'}</td>
-          ${canSeeRollupCost ? `<td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;">${node.unit_cost != null ? node.unit_cost.toFixed(2) : '-'}</td>` : ''}
-          ${canSeeProcessCost ? `<td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;color:#723B13;">${node.process_cost_per_unit != null && node.process_cost_per_unit > 0 ? node.process_cost_per_unit.toFixed(2) : '-'}</td>` : ''}
-          ${canSeeRollupCost ? `<td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;font-weight:600;">${node.extended_cost != null ? node.extended_cost.toFixed(2) : '-'}</td>` : ''}
+          ${canSeeRollupCost ? `<td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;">${node.unit_cost != null ? fmtAmt(node.unit_cost) : '-'}</td>` : ''}
+          ${canSeeProcessCost ? `<td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;color:#723B13;">${node.process_cost_per_unit != null && node.process_cost_per_unit > 0 ? fmtAmt(node.process_cost_per_unit) : '-'}</td>` : ''}
+          ${canSeeRollupCost ? `<td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;font-weight:600;">${node.extended_cost != null ? fmtAmt(node.extended_cost) : '-'}</td>` : ''}
         </tr>`;
         if (node.children && node.children.length > 0) {
           html += renderPrintRows(node.children, level + 1);
@@ -516,7 +534,7 @@ export default function BOMPage() {
     const parentRoutingsText = (bomInfo?.parent_routings || []).map(r => {
       const n = typeof r === 'string' ? r : r.name;
       const c = typeof r === 'string' ? 0 : (r.cost || 0);
-      return c > 0 ? `${n} (${c.toFixed(2)})` : n;
+      return c > 0 ? `${n} (${fmtAmt(c)})` : n;
     }).join(', ');
     const html = `<!DOCTYPE html><html><head><title>BOM - ${parentItem?.part_number || ''}</title>
     <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',sans-serif;font-size:11px;padding:20px}
@@ -1205,7 +1223,14 @@ export default function BOMPage() {
                           parentItem?.category === 'raw_material' ? 'rgba(37, 99, 235, 0.85)' :     // Blue
                           'rgba(75, 85, 99, 0.85)',                                                  // Gray fallback
                       }}
-                      onClick={() => setExpandedBomPanels(p => ({ ...p, [pid]: !p[pid] }))}
+                      onClick={() => {
+                        const willOpen = !expandedBomPanels[pid];
+                        setExpandedBomPanels(p => ({ ...p, [pid]: willOpen }));
+                        // Lazy-load explosion data the first time a panel is
+                        // opened so the BOM list page paints immediately
+                        // instead of waiting on hundreds of /explode calls.
+                        if (willOpen && activeBom) ensureExplosion(activeBom.id);
+                      }}
                       data-testid={`bom-panel-toggle-${pid}`}
                     >
                       <div className="flex items-center gap-3">
@@ -1221,7 +1246,29 @@ export default function BOMPage() {
                         )}
                         {canSeeRollupCost && <span className="mono text-sm font-bold">Total: {formatCurrency(totalCost)}</span>}
                         {activeBom && <button onClick={(e) => { e.stopPropagation(); fetchBomExplosion(activeBom.id); }} className="p-1 hover:bg-white/20 rounded" title="Refresh Costs (re-pull from BOM)" data-testid={`refresh-bom-${pid}`}><RefreshCw className="w-4 h-4" /></button>}
-                        {explosion && <button onClick={(e) => { e.stopPropagation(); printBomExplosion(parentItem, explosion.explosion, totalCost, activeBom, explosion.fg_process_cost_per_unit || 0, explosion.components_cost || 0); }} className="p-1 hover:bg-white/20 rounded" title="Print BOM" data-testid={`print-bom-${pid}`}><Printer className="w-4 h-4" /></button>}
+                        {activeBom && (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              // Lazy-load explosion data on click — the parallel
+                              // batch fetch on page load can take seconds for
+                              // catalogues with many active BOMs, and previously
+                              // hid the Print button until it finished. Now the
+                              // button is always visible; we fetch (or reuse the
+                              // cached explosion) right when the user clicks.
+                              const exp = await ensureExplosion(activeBom.id);
+                              if (!exp) {
+                                toast.error('Could not load BOM data for printing.');
+                                return;
+                              }
+                              const total = exp?.total_rollup_cost || 0;
+                              printBomExplosion(parentItem, exp.explosion || [], total, activeBom, exp.fg_process_cost_per_unit || 0, exp.components_cost || 0);
+                            }}
+                            className="p-1 hover:bg-white/20 rounded"
+                            title="Print BOM"
+                            data-testid={`print-bom-${pid}`}
+                          ><Printer className="w-4 h-4" /></button>
+                        )}
                         {activeBom && <button onClick={(e) => { e.stopPropagation(); handleBomExport(activeBom.id); }} className="p-1 hover:bg-white/20 rounded" title="Export this BOM" data-testid={`export-bom-${pid}`}><Download className="w-4 h-4" /></button>}
                         <button onClick={(e) => { e.stopPropagation(); handleView(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="View"><Eye className="w-4 h-4" /></button>
                         {canEdit && <button onClick={(e) => { e.stopPropagation(); handleEdit(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>}

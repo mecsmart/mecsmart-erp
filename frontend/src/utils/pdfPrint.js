@@ -144,6 +144,16 @@ export async function downloadHtmlAsPdf(html, filename, options = {}) {
     doc.write(finalHtml);
     doc.close();
 
+    // Override the iframe document's <title> to our chosen filename (without
+    // the `.pdf` extension — the browser appends it). This is what Chrome,
+    // Edge, Firefox and Safari prefill in the "Save as PDF" dialog when the
+    // user picks the PDF destination, so our naming convention (PO-XXX,
+    // Quotation-XXX, BOM-XXX, etc.) carries through end-to-end.
+    try {
+      const titleNoExt = cleanFilename.replace(/\.pdf$/i, '');
+      doc.title = titleNoExt;
+    } catch { /* noop */ }
+
     // Wait for fonts + images inside the iframe.
     await new Promise((resolve) => {
       const finish = () => resolve();

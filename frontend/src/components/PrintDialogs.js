@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
+import { fmtAmtForCurrency } from '../utils/numberFormat';
 
 const TEMPLATES = [
   { id: 'standard', name: 'Standard', desc: 'Clean layout with item table and totals' },
@@ -215,13 +216,16 @@ export function POPrintDialog({ po, open, onClose }) {
       ${d.delivery_address ? `<div class="info-block"><div class="label">Delivery Address</div><div class="detail">${d.delivery_address}</div></div>` : ''}
     </div>`;
 
-    // Item table
+    // Item table — `fa` is a doc-currency-aware amount formatter so totals
+    // and per-line amounts get the right thousand separator (1,23,456.78 in
+    // INR, 123,456.78 for USD/EUR).
+    const fa = (v) => fmtAmtForCurrency(v, d.currency || 'INR');
     let tableHTML = '';
     if (opts.template === 'compact') {
       tableHTML = `<table><thead><tr><th style="width:30px">SN</th><th>Item</th><th class="text-right">Qty</th><th>UOM</th><th class="text-right">Rate</th><th class="text-right">Amount</th></tr></thead><tbody>`;
       lines.forEach((l, i) => {
         const net = l.line_amount || (l.quantity * l.unit_price);
-        tableHTML += `<tr><td>${i+1}</td><td><span class="mono">${l.item?.part_number || ''}</span> ${l.item?.name || ''}</td><td class="text-right mono">${l.quantity}</td><td>${l.uom || 'pcs'}</td><td class="text-right mono">${(l.unit_price||0).toFixed(2)}</td><td class="text-right mono">${net.toFixed(2)}</td></tr>`;
+        tableHTML += `<tr><td>${i+1}</td><td><span class="mono">${l.item?.part_number || ''}</span> ${l.item?.name || ''}</td><td class="text-right mono">${l.quantity}</td><td>${l.uom || 'pcs'}</td><td class="text-right mono">${fa(l.unit_price||0)}</td><td class="text-right mono">${fa(net)}</td></tr>`;
       });
       tableHTML += `</tbody></table>`;
     } else if (opts.template === 'detailed') {
@@ -245,11 +249,11 @@ export function POPrintDialog({ po, open, onClose }) {
           (extraDesc ? `<div style="color:#444;font-size:9px;margin-top:2px;font-style:italic;">${extraDesc}</div>` : '');
         let row = `<td>${i+1}</td><td>${itemCell}</td>`;
         if (opts.showHSN) row += `<td class="mono">${l.hsn_code||''}</td>`;
-        row += `<td class="text-right mono">${l.quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${(l.unit_price||0).toFixed(2)}</td>`;
-        if (opts.showDiscount) row += `<td class="text-right mono">${disc > 0 ? disc.toFixed(2) : '-'}</td>`;
-        row += `<td class="text-right mono">${net.toFixed(2)}</td>`;
-        if (opts.showGSTBreakup) row += `<td class="text-right">${l.gst_rate||0}%</td><td class="text-right mono">${tax.toFixed(2)}</td>`;
-        row += `<td class="text-right mono">${(net+tax).toFixed(2)}</td>`;
+        row += `<td class="text-right mono">${l.quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${fa(l.unit_price||0)}</td>`;
+        if (opts.showDiscount) row += `<td class="text-right mono">${disc > 0 ? fa(disc) : '-'}</td>`;
+        row += `<td class="text-right mono">${fa(net)}</td>`;
+        if (opts.showGSTBreakup) row += `<td class="text-right">${l.gst_rate||0}%</td><td class="text-right mono">${fa(tax)}</td>`;
+        row += `<td class="text-right mono">${fa(net+tax)}</td>`;
         tableHTML += `<tr>${row}</tr>`;
       });
       tableHTML += `</tbody></table>`;
@@ -271,9 +275,9 @@ export function POPrintDialog({ po, open, onClose }) {
           (extraDesc ? `<div style="color:#444;font-size:9px;margin-top:2px;font-style:italic;">${extraDesc}</div>` : '');
         let row = `<td>${i+1}</td><td>${itemCell}</td>`;
         if (opts.showHSN) row += `<td class="mono">${l.hsn_code||''}</td>`;
-        row += `<td class="text-right mono">${l.quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${(l.unit_price||0).toFixed(2)}</td>`;
-        if (opts.showDiscount) row += `<td class="text-right mono">${disc > 0 ? disc.toFixed(2) : '-'}</td>`;
-        row += `<td class="text-right mono">${net.toFixed(2)}</td>`;
+        row += `<td class="text-right mono">${l.quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${fa(l.unit_price||0)}</td>`;
+        if (opts.showDiscount) row += `<td class="text-right mono">${disc > 0 ? fa(disc) : '-'}</td>`;
+        row += `<td class="text-right mono">${fa(net)}</td>`;
         tableHTML += `<tr>${row}</tr>`;
       });
       tableHTML += `</tbody></table>`;
@@ -285,7 +289,7 @@ export function POPrintDialog({ po, open, onClose }) {
       chargesHTML = `<div class="section-title">Additional Charges</div>
         <table><thead><tr><th>Charge</th><th>HSN</th><th class="text-right">Amount</th>${opts.showGSTBreakup ? '<th class="text-right">GST%</th><th class="text-right">GST Amt</th>' : ''}</tr></thead><tbody>`;
       charges.forEach(c => {
-        chargesHTML += `<tr><td>${c.name||''}</td><td class="mono">${c.hsn_code||''}</td><td class="text-right mono">${(c.amount||0).toFixed(2)}</td>${opts.showGSTBreakup ? `<td class="text-right">${c.gst_rate||0}%</td><td class="text-right mono">${(c.tax_amount||0).toFixed(2)}</td>` : ''}</tr>`;
+        chargesHTML += `<tr><td>${c.name||''}</td><td class="mono">${c.hsn_code||''}</td><td class="text-right mono">${fa(c.amount||0)}</td>${opts.showGSTBreakup ? `<td class="text-right">${c.gst_rate||0}%</td><td class="text-right mono">${fa(c.tax_amount||0)}</td>` : ''}</tr>`;
       });
       chargesHTML += `</tbody></table>`;
     }
@@ -293,21 +297,21 @@ export function POPrintDialog({ po, open, onClose }) {
     // Totals — for export/import POs (non-INR), GST is not applicable.
     const isExportDoc = (d.currency || 'INR') !== 'INR';
     let totalsHTML = `<div class="totals-box"><table>
-      <tr><td class="label-cell">Subtotal</td><td class="val-cell">${sym}${(d.subtotal||0).toFixed(2)}</td></tr>`;
-    if ((d.charges_subtotal||0) > 0) totalsHTML += `<tr><td class="label-cell">Charges</td><td class="val-cell">${sym}${(d.charges_subtotal||0).toFixed(2)}</td></tr>`;
+      <tr><td class="label-cell">Subtotal</td><td class="val-cell">${sym}${fa(d.subtotal||0)}</td></tr>`;
+    if ((d.charges_subtotal||0) > 0) totalsHTML += `<tr><td class="label-cell">Charges</td><td class="val-cell">${sym}${fa(d.charges_subtotal||0)}</td></tr>`;
     if (!isExportDoc) {
       if (opts.showGSTBreakup) {
         if (d.is_inter_state) {
-          totalsHTML += `<tr><td class="label-cell">IGST</td><td class="val-cell">${sym}${(d.total_igst||0).toFixed(2)}</td></tr>`;
+          totalsHTML += `<tr><td class="label-cell">IGST</td><td class="val-cell">${sym}${fa(d.total_igst||0)}</td></tr>`;
         } else {
-          totalsHTML += `<tr><td class="label-cell">CGST</td><td class="val-cell">${sym}${(d.total_cgst||0).toFixed(2)}</td></tr>`;
-          totalsHTML += `<tr><td class="label-cell">SGST</td><td class="val-cell">${sym}${(d.total_sgst||0).toFixed(2)}</td></tr>`;
+          totalsHTML += `<tr><td class="label-cell">CGST</td><td class="val-cell">${sym}${fa(d.total_cgst||0)}</td></tr>`;
+          totalsHTML += `<tr><td class="label-cell">SGST</td><td class="val-cell">${sym}${fa(d.total_sgst||0)}</td></tr>`;
         }
       } else {
-        totalsHTML += `<tr><td class="label-cell">Tax</td><td class="val-cell">${sym}${(d.total_tax||0).toFixed(2)}</td></tr>`;
+        totalsHTML += `<tr><td class="label-cell">Tax</td><td class="val-cell">${sym}${fa(d.total_tax||0)}</td></tr>`;
       }
     }
-    totalsHTML += `<tr class="grand"><td class="label-cell grand-total">Grand Total</td><td class="val-cell grand-total">${sym}${(d.total_amount||0).toFixed(2)}</td></tr></table>${isExportDoc ? `<div style="font-size:9px;color:#6B7280;text-align:right;margin-top:4px;">Export/Import — GST not applicable. Currency: ${d.currency}</div>` : ''}</div>`;
+    totalsHTML += `<tr class="grand"><td class="label-cell grand-total">Grand Total</td><td class="val-cell grand-total">${sym}${fa(d.total_amount||0)}</td></tr></table>${isExportDoc ? `<div style="font-size:9px;color:#6B7280;text-align:right;margin-top:4px;">Export/Import — GST not applicable. Currency: ${d.currency}</div>` : ''}</div>`;
 
     // Amount in words
     let wordsHTML = '';
@@ -551,7 +555,7 @@ export function GRNPrintDialog({ grn, open, onClose }) {
         const verifiedPrice = isJW ? (l.verified_price || l.jw_rate || 0) : (l.verified_price || 0);
         const qM = l.received_quantity === sentQty;
         const pM = verifiedPrice === refPrice;
-        tableHTML += `<tr><td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${l.item?.name||''}</td><td class="mono">${l.hsn_code||''}</td><td class="text-right mono">${sentQty}</td><td class="text-right mono ${!qM?'mismatch':''}">${l.received_quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${refPrice.toFixed(2)}</td><td class="text-right mono ${!pM?'mismatch':''}">${verifiedPrice.toFixed(2)}</td><td class="text-center">${qM&&pM?'<span class="ok">OK</span>':'<span class="mismatch">Mismatch</span>'}</td></tr>`;
+        tableHTML += `<tr><td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${l.item?.name||''}</td><td class="mono">${l.hsn_code||''}</td><td class="text-right mono">${sentQty}</td><td class="text-right mono ${!qM?'mismatch':''}">${l.received_quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${fmtAmtForCurrency(refPrice)}</td><td class="text-right mono ${!pM?'mismatch':''}">${fmtAmtForCurrency(verifiedPrice)}</td><td class="text-center">${qM&&pM?'<span class="ok">OK</span>':'<span class="mismatch">Mismatch</span>'}</td></tr>`;
       });
       tableHTML += `</tbody></table>`;
     } else {
@@ -561,9 +565,9 @@ export function GRNPrintDialog({ grn, open, onClose }) {
         const price = isJW ? (l.jw_rate || l.verified_price || 0) : (l.verified_price || 0);
         const amt = l.received_quantity * price;
         total += amt;
-        tableHTML += `<tr><td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${l.item?.name||''}</td><td class="text-right mono">${l.received_quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${price.toFixed(2)}</td><td class="text-right mono">${amt.toFixed(2)}</td></tr>`;
+        tableHTML += `<tr><td>${i+1}</td><td class="mono">${l.item?.part_number||''}</td><td>${l.item?.name||''}</td><td class="text-right mono">${l.received_quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${fmtAmtForCurrency(price)}</td><td class="text-right mono">${fmtAmtForCurrency(amt)}</td></tr>`;
       });
-      tableHTML += `<tr class="total-row"><td colspan="6" class="text-right">Total</td><td class="text-right mono">${total.toFixed(2)}</td></tr></tbody></table>`;
+      tableHTML += `<tr class="total-row"><td colspan="6" class="text-right">Total</td><td class="text-right mono">${fmtAmtForCurrency(total)}</td></tr></tbody></table>`;
     }
 
     // Reference box — right side. Shows JW + DC numbers for JW GRNs, or PO for PO GRNs.
