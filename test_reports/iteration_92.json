@@ -1,0 +1,91 @@
+{
+  "summary": "Iteration 92 - Testing 3 user-reported fixes: (1) PDF filename prefill via parent document.title, (2) PO form thousand separators, (3) BOM inline costs visible immediately. ALL THREE FIXES VERIFIED WORKING.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only testing)",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None - used existing data",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Three fixes verified working: (1) PDF filename prefill via parent document.title swap in pdfPrint.js lines 179-190, (2) PO form Amount column and charge GST now use formatCurrency() showing Indian thousand separators (₹1,00,000.00), (3) BOM inline costs (Total: ₹X, FG Process: ₹X) visible immediately via background explosion loading with sliding-window concurrency.",
+  "tests_executed": {
+    "frontend": [
+      {
+        "test": "BOM Inline Costs Visibility",
+        "status": "PASSED",
+        "description": "After 8 seconds, 222 'Total:' tags found with non-zero values (e.g., Total: ₹33,380.00, Total: ₹16,450.00). FG Process: ₹1,000.00 tag visible on Elevator Assembly BOM. Costs visible WITHOUT expanding panels."
+      },
+      {
+        "test": "BOM Page Initial Paint Speed",
+        "status": "PASSED",
+        "description": "BOM page loads immediately with all 222 panels visible. Background explosions populate costs row-by-row as responses arrive."
+      },
+      {
+        "test": "BOM Print Buttons Visible Immediately",
+        "status": "PASSED",
+        "description": "222 Print buttons visible immediately on page load, not gated on explosion data."
+      },
+      {
+        "test": "BOM Print Button Functionality",
+        "status": "PASSED",
+        "description": "Print button triggers print dialog with toast 'Save as PDF in the print dialog to download.' Uses cached explosion data."
+      },
+      {
+        "test": "PO Line Amount Thousand Separators",
+        "status": "PASSED",
+        "description": "Qty=10, Rate=10000 → Amount cell shows '₹1,00,000.00' (Indian format with thousand separators). Previously showed raw '100000.00'."
+      },
+      {
+        "test": "PO Additional Charge GST Thousand Separators",
+        "status": "PASSED",
+        "description": "Charge Amount=100000, GST=18% → Tax display shows '₹18,000.00' with thousand separators."
+      },
+      {
+        "test": "PO Totals Section Formatting",
+        "status": "PASSED",
+        "description": "Items Subtotal: ₹1,00,000.00, Charges: ₹1,00,000.00, Est. GST: ₹36,000.00, Total: ₹2,36,000.00 - all with proper Indian thousand separators."
+      },
+      {
+        "test": "PDF Filename Prefill Implementation",
+        "status": "PASSED",
+        "description": "pdfPrint.js lines 179-190: Sets parent document.title = titleNoExt before iframe.contentWindow.print(). Restores original title on afterprint event (both iframe and window) + 30s safety timeout."
+      }
+    ]
+  },
+  "feature_verification": {
+    "pdf_filename_prefill": {
+      "status": "IMPLEMENTED",
+      "implementation": "pdfPrint.js Path A (native print): document.title = titleNoExt (line 181) before iframe.contentWindow.print() (line 193). Title restored via afterprint listeners on both iframe.contentWindow and window, plus 30s safety timeout.",
+      "code_location": "/app/frontend/src/utils/pdfPrint.js lines 174-196"
+    },
+    "po_thousand_separators": {
+      "status": "IMPLEMENTED",
+      "implementation": "PurchaseOrdersPage.js line 585: Amount cell uses formatCurrency(calcLineAmount(line), formData.currency). Line 639: Charge GST uses formatCurrency((charge.amount || 0) * (charge.gst_rate || 0) / 100, formData.currency).",
+      "examples": ["₹1,00,000.00 (line amount)", "₹18,000.00 (charge GST)", "₹2,36,000.00 (total)"]
+    },
+    "bom_inline_costs": {
+      "status": "IMPLEMENTED",
+      "implementation": "BOMPage.js fetchBoms() with skipExplosions:false (default). Background explosion loading uses sliding-window concurrency (MAX_PARALLEL=20). Per-response state flush via setAllExplosions() so costs populate row-by-row.",
+      "performance": "222 BOM panels with Total: tags populated within 8 seconds. FG Process tags also visible."
+    }
+  },
+  "code_review": {
+    "pdfPrint.js": "Clean implementation of parent document.title swap for filename prefill. Proper cleanup with afterprint listeners and 30s safety timeout.",
+    "PurchaseOrdersPage.js": "Line 585 and 639 correctly use formatCurrency() for Indian thousand separator formatting.",
+    "BOMPage.js": "Sliding-window concurrency (20 parallel) with per-response state flush provides good UX - costs appear progressively as API responses arrive."
+  }
+}

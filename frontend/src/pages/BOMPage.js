@@ -111,7 +111,7 @@ export default function BOMPage() {
   const [routingOptions, setRoutingOptions] = useState([]);
 
   useEffect(() => {
-    fetchBoms({ skipExplosions: true });
+    fetchBoms();
     fetchItems();
     fetchRoutings();
   }, [statusFilter]);
@@ -149,26 +149,35 @@ export default function BOMPage() {
 
       if (skipExplosions) return;
 
-      // Fire explosion requests in parallel (not sequential!) and cap to avoid huge concurrency.
-      // Only fire for BOMs currently visible in the default view. Explosions are optional UX data
-      // used by child-expanders; the main BOM rows don't need them to render.
+      // Background-load explosions for every active BOM so inline rollup +
+      // process-cost tags appear on each panel header without the user
+      // having to expand it. We cap concurrency with a sliding window
+      // (`MAX_PARALLEL` simultaneous in-flight requests) and update state
+      // as soon as EACH response arrives — UI fills in row-by-row instead of
+      // chunk-by-chunk, so the user sees progress immediately.
       const activeBoms = data.filter(b => b.status === 'active');
       const MAX_PARALLEL = 20;
+      let cursor = 0;
       const explosions = {};
-      for (let i = 0; i < activeBoms.length; i += MAX_PARALLEL) {
-        const chunk = activeBoms.slice(i, i + MAX_PARALLEL);
-        await Promise.all(chunk.map(async (bom) => {
+      const runOne = async () => {
+        while (cursor < activeBoms.length) {
+          const idx = cursor++;
+          const bom = activeBoms[idx];
           try {
             const { data: expData } = await api.get(`/api/bom/${bom.id}/explode`);
             explosions[bom.id] = expData;
           } catch {
-            // Mark as "loaded with no data" so UI stops showing "Loading…" spinner
             explosions[bom.id] = { explosion: [], total_rollup_cost: 0 };
           }
-        }));
-        // Flush partial progress to state — lets rows populate incrementally
-        setAllExplosions({ ...explosions });
-      }
+          // Flush per-BOM so inline costs paint as soon as the response
+          // lands instead of waiting for the whole chunk to settle.
+          setAllExplosions(prev => ({ ...prev, [bom.id]: explosions[bom.id] }));
+        }
+      };
+      const workers = Array.from({ length: Math.min(MAX_PARALLEL, activeBoms.length) }, runOne);
+      // Don't await — let workers run in the background while the user
+      // interacts with the page. Errors are already swallowed inside runOne.
+      Promise.all(workers).catch(() => {});
     } catch (error) {
       console.error('Failed to fetch BOMs:', error);
       setLoading(false);
