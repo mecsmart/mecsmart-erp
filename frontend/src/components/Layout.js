@@ -37,7 +37,7 @@ const storesGroupItems = [
   { name: 'Stock', href: '/warehouses?tab=stock', icon: Package, module: 'stores' },
   { name: 'Transfer History', href: '/warehouses?tab=transfers', icon: Truck, module: 'stores' },
   { name: 'GRN', href: '/warehouses?tab=grn', icon: FileText, module: 'stores' },
-  { name: 'Packing Lists', href: '/warehouses?tab=packing-lists', icon: Package, module: 'stores' },
+  { name: 'Packing Lists', href: '/warehouses?tab=packing-lists', icon: Package, module: 'stores_packing_list' },
 ];
 
 const jobWorkGroupItems = [

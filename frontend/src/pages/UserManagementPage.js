@@ -48,6 +48,7 @@ const MODULE_GROUPS = [
   ] },
   { main: 'Stores', subs: [
     { key: 'stores', label: 'Warehouses / Stock / Transfer History / GRN' },
+    { key: 'stores_packing_list', label: 'Packing Lists' },
     { key: 'delivery_challan', label: 'Delivery Challan' },
   ] },
   { main: 'Production', subs: [

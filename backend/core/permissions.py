@@ -18,7 +18,7 @@ ALL_MODULES = [
     "inventory_configuration",
     "suppliers", "customers",
     "purchase_orders", "purchase_invoices", "delivery_challan", "job_work",
-    "stores", "settings",
+    "stores", "stores_packing_list", "settings",
     "crm_marketing", "crm_support",
     "marketing_configuration", "support_configuration",
 ]
@@ -60,7 +60,7 @@ DEFAULT_PERMISSIONS = {
         "purchase_invoices": ["view", "create", "edit"],
         "delivery_challan": ["view", "create", "edit", "delete"],
         "job_work": ["view", "create", "edit", "delete"],
-        "stores": ["view"], "settings": ["view"],
+        "stores": ["view"], "stores_packing_list": ["view"], "settings": ["view"],
     },
     "quality_inspector": {
         "dashboard": ["view"], "items": ["view"], "bom": ["view"], "routings": ["view"],
@@ -70,7 +70,7 @@ DEFAULT_PERMISSIONS = {
         "inventory": ["view"], "suppliers": [],
         "customers": [], "purchase_orders": [], "purchase_invoices": [],
         "delivery_challan": ["view"], "job_work": ["view"],
-        "stores": ["view"], "settings": ["view"],
+        "stores": ["view"], "stores_packing_list": [], "settings": ["view"],
     },
     "inventory_manager": {
         "dashboard": ["view"], "items": ["view", "create", "edit"], "bom": ["view"], "routings": ["view"],
@@ -83,7 +83,9 @@ DEFAULT_PERMISSIONS = {
         "purchase_invoices": ["view", "create", "edit"],
         "delivery_challan": ["view", "create", "edit"],
         "job_work": ["view"],
-        "stores": ["view", "create", "edit", "delete"], "settings": ["view"],
+        "stores": ["view", "create", "edit", "delete"],
+        "stores_packing_list": ["view", "create", "edit", "delete"],
+        "settings": ["view"],
     },
 }
 

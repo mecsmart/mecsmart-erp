@@ -20,6 +20,10 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-05-07** — **Stores Packing List role-group permission + earlier BOM fixes verified:**
+  1. **New permission module `stores_packing_list`** added to `/app/backend/core/permissions.py` (full CRUD actions). Exposed via `/api/users/modules` and selectable in the Role Group matrix under the **Stores** group (`UserManagementPage.js`). The Stores → Packing Lists sidebar link (`Layout.js`) and tab content (`WarehousesPage.js`) now gate on `stores_packing_list.view`; Generate/Edit/Status-change controls require `create` or `edit`; Delete requires `delete` (existing logic via `canEdit`). The CRM-Marketing Packing List entry continues to use `crm_marketing` (kept untouched).
+  2. **BOM Print popup-blocker fallback** (previous session) — verified.
+  3. **BOM Process / Rollup cost visibility** now uses `hasPermission('bom_process_cost'|'bom_rollup_cost', 'view')` (previous session) — verified.
 - **2026-05-06 (very late)** — **Quotation Bulk + Global Discount + Items page scroll preservation:**
   1. **Bulk Line Discount.** New input next to "Add Line" in the Quotation form — typing a `%` value and pressing Enter (or blur) sets `discount_pct` on every existing line in one click and toasts the result. Saves time on "10% across the board" style quotes.
   2. **Global (footer) Discount.** Quotations now persist `global_discount_type` ("amount" | "percent") + `global_discount_value`. The discount is applied on the post-line-discount subtotal, BEFORE GST. CGST/SGST/IGST split is scaled proportionally so the printed GST split always sums back to the actual taxed amount. Print template shows new "Global Discount (X%)" + "Net Subtotal" rows when applicable. Backend clamps over-large discounts so grand_total can't go negative.

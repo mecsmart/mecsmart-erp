@@ -30,7 +30,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { toast } from 'sonner';
 
 export default function WarehousesPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { formatCurrency, currencySymbol } = useCompanySettings();
   const [searchParams, setSearchParams] = useSearchParams();
   const [warehouses, setWarehouses] = useState([]);
@@ -1285,13 +1285,24 @@ export default function WarehousesPage() {
         </TabsContent>
 
         <TabsContent value="packing-lists" className="mt-4 space-y-4" data-testid="stores-packing-lists-tab">
-          <div className="card-flat p-3 mb-2">
-            <div className="relative w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-              <input type="text" value={plSearch} onChange={(e) => setPlSearch(e.target.value)} placeholder="Search by PL #, invoice, customer..." className="search-input text-sm" data-testid="stores-pl-search" />
+          {hasPermission('stores_packing_list', 'view') ? (
+            <>
+              <div className="card-flat p-3 mb-2">
+                <div className="relative w-72">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+                  <input type="text" value={plSearch} onChange={(e) => setPlSearch(e.target.value)} placeholder="Search by PL #, invoice, customer..." className="search-input text-sm" data-testid="stores-pl-search" />
+                </div>
+              </div>
+              <PackingListsPanel
+                search={plSearch}
+                canEdit={hasPermission('stores_packing_list', 'create') || hasPermission('stores_packing_list', 'edit') || hasPermission('stores_packing_list', 'delete')}
+              />
+            </>
+          ) : (
+            <div className="card-flat p-6 text-center text-sm text-[#6B7280]" data-testid="stores-pl-no-access">
+              You do not have permission to view Packing Lists. Ask your admin to grant <code>stores_packing_list.view</code>.
             </div>
-          </div>
-          <PackingListsPanel search={plSearch} canEdit={true} />
+          )}
         </TabsContent>
       </Tabs>
 
