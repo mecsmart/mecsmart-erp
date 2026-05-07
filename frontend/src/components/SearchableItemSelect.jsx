@@ -83,6 +83,29 @@ export const SearchableItemSelect = ({
     };
   }, [focused, query]);
 
+  // Native non-passive wheel handler on the dropdown panel. Radix Dialog
+  // wraps its tree with `react-remove-scroll` which globally blocks wheel
+  // events outside the dialog content. Our panel is portal'd to
+  // document.body so it gets caught by that lock — without this, the user
+  // sees the list but the mouse-wheel does nothing. We bypass the lock by:
+  //   1. Attaching `wheel` as a NATIVE listener (React 19's JSX `onWheel`
+  //      is passive, so `preventDefault()` would be ignored).
+  //   2. Manually adjusting `panel.scrollTop += deltaY` and preventing the
+  //      default + propagation so `react-remove-scroll`'s body lock leaves
+  //      our scroll alone.
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return undefined;
+    const onWheel = (e) => {
+      if (el.scrollHeight <= el.clientHeight) return; // nothing to scroll
+      el.scrollTop += e.deltaY;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [focused, query, list.length]);
+
   const handleSelect = (item) => {
     onChange(item.id);
     setQuery('');
@@ -204,13 +227,9 @@ export const SearchableItemSelect = ({
           // clicks truly outside both the dialog and this panel.
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
-          // Keep wheel-scroll INSIDE the panel — without this, scrolling the
-          // results list also scrolls the parent BOM/CRM dialog beneath it,
-          // which feels like "scroll doesn't work on the dropdown".
-          // `overscroll-contain` (above) prevents bounce-out at the edges;
-          // stopPropagation prevents the dialog from receiving any wheel
-          // events while the dropdown is what the user is interacting with.
-          onWheel={(e) => e.stopPropagation()}
+          // Manual wheel handling is attached as a NATIVE non-passive
+          // listener via `useEffect` below — React 19 attaches JSX
+          // `onWheel` as PASSIVE which makes `preventDefault()` a no-op.
         >
           <div className="px-3 py-1 text-[10px] text-[#6B7280] uppercase tracking-wide border-b border-[#F3F4F6] sticky top-0 bg-white">
             {list.length} match{list.length !== 1 ? 'es' : ''} for "{query}"
