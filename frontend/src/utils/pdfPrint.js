@@ -171,9 +171,24 @@ export async function downloadHtmlAsPdf(html, filename, options = {}) {
     // ---- Path A: native print dialog (default) ------------------------------
     if (!options.forceDownload) {
       try {
-        // Browsers throw if blocked; we catch and fall back. Most kiosk
-        // configs allow same-origin iframe.contentWindow.print() because it
-        // doesn't open a new window — it shows the OS print dialog.
+        // FILENAME PREFILL: Most browsers use the PARENT document's title
+        // (not the iframe's title) as the default "Save as PDF" filename
+        // when a same-origin iframe calls `print()`. So we swap the parent
+        // page title to our desired filename, fire the print dialog, then
+        // restore the original title once the user closes the dialog.
+        const originalTitle = document.title;
+        const titleNoExt = cleanFilename.replace(/\.pdf$/i, '');
+        document.title = titleNoExt;
+        // Restore the parent title once the print dialog closes. Browsers
+        // fire `afterprint` on the iframe's window — and on Chromium /
+        // Firefox the parent window also receives it. We listen to BOTH so
+        // the title gets restored regardless of which fires first.
+        const restoreTitle = () => { try { document.title = originalTitle; } catch { /* noop */ } };
+        try { iframe.contentWindow.addEventListener('afterprint', restoreTitle, { once: true }); } catch { /* noop */ }
+        window.addEventListener('afterprint', restoreTitle, { once: true });
+        // Hard safety: regardless of afterprint reliability, restore after 30s.
+        setTimeout(restoreTitle, 30000);
+
         iframe.contentWindow.focus();
         iframe.contentWindow.print();
         toast.success('Save as PDF in the print dialog to download.', { duration: 3500 });

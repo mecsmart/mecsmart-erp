@@ -582,7 +582,7 @@ export default function PurchaseOrdersPage() {
                               {[0,5,12,18,28].map(r => <option key={r} value={String(r)}>{r}%</option>)}
                             </select>
                           </td>
-                          <td className="static-cell amount">{calcLineAmount(line).toFixed(2)}</td>
+                          <td className="static-cell amount">{formatCurrency(calcLineAmount(line), formData.currency)}</td>
                           <td className="remove-cell">
                             <button type="button" onClick={() => removeLine(index)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Remove line" data-testid={`po-line-remove-${index}`}><X className="w-3 h-3" /></button>
                           </td>
@@ -636,7 +636,7 @@ export default function PurchaseOrdersPage() {
                         </SelectContent>
                       </Select>
                       <input type="number" min="0" step="0.01" value={charge.amount} onChange={(e) => updateCharge(i, 'amount', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono" />
-                      <div className="text-right mono text-xs font-medium">{((charge.amount || 0) * (charge.gst_rate || 0) / 100).toFixed(2)}</div>
+                      <div className="text-right mono text-xs font-medium">{formatCurrency((charge.amount || 0) * (charge.gst_rate || 0) / 100, formData.currency)}</div>
                       <button type="button" onClick={() => removeCharge(i)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"><X className="w-3.5 h-3.5" /></button>
                     </div>
                   ))}
