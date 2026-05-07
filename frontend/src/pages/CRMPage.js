@@ -13,6 +13,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { SearchableItemSelect } from '../components/SearchableItemSelect';
 import { useDraggableRows } from '../hooks/useDraggableRows';
+import { downloadHtmlAsPdf } from '../utils/pdfPrint';
 import { toast } from 'sonner';
 
 // Stage definitions per pipeline — aligned to the customer's CRM diagram:
@@ -3640,11 +3641,8 @@ function printPackingListDoc(pl, company) {
 
   <div class="footer">This is a computer-generated document. ${esc(cfg.name)}</div>
 </div>
-<script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
 </body></html>`;
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = window.URL.createObjectURL(blob);
-  window.open(url, '_blank');
+  downloadHtmlAsPdf(html, `Packing-List-${pl.packing_list_no || 'document'}.pdf`);
 }
 
 /* ============================================================================
@@ -4174,15 +4172,20 @@ ${(isQuotation && opts.includeCover) ? `
   <div class="footer-note">This is a computer-generated document.${isTaxInvoice ? ' Subject to Jurisdiction as per Place of Supply.' : ''}</div>
 </div>
 
-<script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
 </body></html>`;
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = window.URL.createObjectURL(blob);
+  // Document number / filename — `docNo` was already computed earlier from
+  // `opts.numberKey`; reuse it for the filename so we don't shadow it.
+  const kindPrefix = isTaxInvoice ? 'Tax-Invoice' : isProforma ? 'Proforma' : isQuotation ? 'Quotation' : 'Document';
+  const filename = `${kindPrefix}-${docNo || doc.id}.pdf`;
   if (opts.openInSameTab) {
-    // Public share route: write into current window so the iframe/tab shows the print preview inline.
-    window.location.replace(url);
+    // Public share route: write inline so the printable page shows immediately.
+    // Falling back to a hidden iframe would break the PublicPrintPage flow,
+    // so we render the HTML directly into the current window.
+    document.open();
+    document.write(html);
+    document.close();
   } else {
-    window.open(url, '_blank');
+    downloadHtmlAsPdf(html, filename);
   }
 }
 

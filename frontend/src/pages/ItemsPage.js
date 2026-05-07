@@ -309,28 +309,19 @@ export default function ItemsPage() {
     const safeGrp = grpMeta ? `_${grpMeta.code || grpMeta.name}`.toLowerCase().replace(/[^a-z0-9]+/g, '_') : '';
     const downloadFilename = grpMeta ? `items${safeGrp}_${catMeta.filename}` : catMeta.filename;
 
-    // STRATEGY: open the API URL directly in a new top-level window.
-    // This delegates the entire download to the browser:
-    //  - Cookies (JWT) flow automatically because it's same-origin per CORS
-    //  - `Content-Disposition: attachment` header is honored natively
-    //  - No blob URL / iframe sandbox / popup-blocker issues
-    // We use window.top (not window.open) to escape the Emergent preview iframe.
+    // STRATEGY: trigger the download via a hidden iframe, which delegates the
+    // download to the browser without opening a new window/tab. Cookies (JWT)
+    // flow automatically because it's same-origin per CORS, and
+    // `Content-Disposition: attachment` is honored natively. This works even
+    // when the user's environment blocks popup windows entirely.
     const toastId = toast.loading(`Opening ${exportLabel} export…`);
     try {
-      const topWin = window.top || window;
-      const popup = topWin.open(directUrl, '_blank', 'noopener,noreferrer');
-      if (!popup) {
-        // Popup blocker hit — fall back to hidden iframe trick (keeps user on current page)
-        console.warn('[Export] popup blocked, falling back to hidden iframe');
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        iframe.src = directUrl;
-        document.body.appendChild(iframe);
-        setTimeout(() => { try { document.body.removeChild(iframe); } catch { /* noop */ } }, 10000);
-        toast.success(`${exportLabel} download triggered — check your browser's downloads`, { id: toastId, duration: 4000 });
-        return;
-      }
-      toast.success(`${exportLabel} export started — check your browser downloads`, { id: toastId, duration: 4000 });
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = directUrl;
+      document.body.appendChild(iframe);
+      setTimeout(() => { try { document.body.removeChild(iframe); } catch { /* noop */ } }, 10000);
+      toast.success(`${exportLabel} download triggered — check your browser's downloads`, { id: toastId, duration: 4000 });
     } catch (err) {
       console.error('[Export] direct open failed, falling back to blob download', err);
       // Fallback to blob download (original path) — keeps compatibility

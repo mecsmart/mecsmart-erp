@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 import { formatQty } from '../utils/uomFormat';
+import { downloadHtmlAsPdf } from '../utils/pdfPrint';
 import { 
   Plus, 
   FileStack, 
@@ -539,35 +540,7 @@ export default function BOMPage() {
     </div>` : ''}
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:30px">Printed on ${new Date().toLocaleString()}</p>
     </body></html>`;
-    // window.open returns null when popups are blocked (most browsers do this
-    // by default for non-user-initiated calls or in incognito with strict
-    // settings). Guard, surface a friendly toast, and offer a Blob-URL fallback.
-    const w = window.open('', '_blank');
-    if (!w || !w.document) {
-      try {
-        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const fallback = window.open(url, '_blank');
-        if (!fallback) {
-          toast.error('Popup blocked — allow popups for MecSmart and try again.');
-          // As a last resort, hand the user a downloadable file.
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `BOM-${parentItem?.part_number || 'print'}.html`;
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 5000);
-        } else {
-          // Print once the fallback document finishes loading.
-          fallback.addEventListener('load', () => fallback.print());
-        }
-      } catch (e) {
-        toast.error('Cannot open print window: ' + (e.message || e));
-      }
-      return;
-    }
-    w.document.write(html);
-    w.document.close();
-    w.onload = () => w.print();
+    downloadHtmlAsPdf(html, `BOM-${parentItem?.part_number || 'print'}.pdf`);
   };
 
   const renderExplosionTree = (items, parentKey = '', level = 0) => {

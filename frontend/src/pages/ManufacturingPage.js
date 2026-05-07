@@ -26,6 +26,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
+import { downloadHtmlAsPdf } from '../utils/pdfPrint';
 
 // Patch a single WO row in the flat array — used after preview-confirmed
 // MO start so we can update status without a heavy refetch (which would
@@ -723,11 +724,7 @@ export default function ManufacturingPage() {
       </div>
       <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
       </body></html>`;
-      const w = window.open('', '_blank', 'width=800,height=600');
-      w.document.write(html);
-      w.document.close();
-      w.focus();
-      w.print();
+      downloadHtmlAsPdf(html, `MO-${data.wo_number || 'document'}.pdf`);
     } catch (error) {
       alert('Failed to load print data');
     }
@@ -850,11 +847,7 @@ export default function ManufacturingPage() {
       </div>
       <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
       </body></html>`;
-      const w = window.open('', '_blank', 'width=900,height=700');
-      w.document.write(html);
-      w.document.close();
-      w.focus();
-      w.print();
+      downloadHtmlAsPdf(html, `JobCard-${data.wo_number || 'document'}.pdf`);
     } catch (error) {
       alert('Failed to load print data');
     }

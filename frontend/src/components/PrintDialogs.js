@@ -5,6 +5,7 @@ import { Printer, Eye, Settings2, FileText, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
+import { downloadHtmlAsPdf } from '../utils/pdfPrint';
 
 const TEMPLATES = [
   { id: 'standard', name: 'Standard', desc: 'Clean layout with item table and totals' },
@@ -361,18 +362,13 @@ export function POPrintDialog({ po, open, onClose }) {
 
   const handlePrint = () => {
     const html = buildHTML();
-    const w = window.open('', '_blank', 'width=900,height=700');
-    w.document.write(html);
-    w.document.close();
-    w.focus();
-    w.print();
+    downloadHtmlAsPdf(html, `PO-${po?.po_number || 'document'}.pdf`);
   };
 
   const handlePreview = () => {
+    // Same as Download — kept for backward compatibility with the dialog button.
     const html = buildHTML();
-    const w = window.open('', '_blank', 'width=900,height=700');
-    w.document.write(html);
-    w.document.close();
+    downloadHtmlAsPdf(html, `PO-${po?.po_number || 'document'}.pdf`);
   };
 
   if (!open) return null;
@@ -594,8 +590,8 @@ export function GRNPrintDialog({ grn, open, onClose }) {
       </div></body></html>`;
   };
 
-  const handlePrint = () => { const w = window.open('','_blank','width=900,height=700'); w.document.write(buildGRNHTML()); w.document.close(); w.focus(); w.print(); };
-  const handlePreview = () => { const w = window.open('','_blank','width=900,height=700'); w.document.write(buildGRNHTML()); w.document.close(); };
+  const handlePrint = () => { downloadHtmlAsPdf(buildGRNHTML(), `GRN-${grn?.grn_number || 'document'}.pdf`); };
+  const handlePreview = () => { downloadHtmlAsPdf(buildGRNHTML(), `GRN-${grn?.grn_number || 'document'}.pdf`); };
 
   if (!open) return null;
 

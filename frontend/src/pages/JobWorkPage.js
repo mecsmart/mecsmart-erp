@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
+import { downloadHtmlAsPdf } from '../utils/pdfPrint';
 
 export default function JobWorkPage() {
   const { user, hasPermission } = useAuth();
@@ -565,28 +566,7 @@ export default function JobWorkPage() {
     </div>
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
     </body></html>`;
-    // Use a Blob URL so the browser treats the new window as a same-origin document with
-    // a real URL. This avoids Chrome's behavior where a direct document.write() page
-    // sometimes fails to trigger window.print() reliably.
-    try {
-      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const w = window.open(url, '_blank');
-      if (!w) {
-        alert('Pop-up blocked. Please allow pop-ups for this site to print the DC.');
-        URL.revokeObjectURL(url);
-        return;
-      }
-      // Once the printable page loads, trigger print. revokeObjectURL after a delay so
-      // the browser's print preview has time to fetch the blob.
-      w.addEventListener('load', () => {
-        try { w.focus(); w.print(); } catch (e) { console.error('Print failed', e); }
-      });
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch (err) {
-      console.error('Print DC failed:', err);
-      alert('Unable to open print window: ' + err.message);
-    }
+    downloadHtmlAsPdf(html, `${dcTitle.replace(/\s+/g, '-')}-${dc.dc_number || 'document'}.pdf`);
   };
 
   const getStatusColor = (s) => {

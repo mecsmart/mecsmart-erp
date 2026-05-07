@@ -213,47 +213,22 @@ export default function PurchaseInvoicePage() {
   };
 
   // ========== Tally XML Export ==========
-  // Pattern: fetch XML → render a small viewer page in a new tab with a visible Download
-  // button. This is more reliable than programmatic `<a download>` clicks which Emergent
-  // preview iframes occasionally block.
+  // Direct download via `<a download>` — popup viewers are blocked in many
+  // enterprise environments, so we hand the user the .xml file straight away.
   const showTallyViewer = (xmlString, filename) => {
-    const escaped = xmlString.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${filename}</title>
-    <style>
-      body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; background: #F3F4F6; }
-      .topbar { position: sticky; top: 0; background: #1D3557; color: white; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-      .topbar h1 { font-size: 15px; font-weight: 600; margin: 0; }
-      .topbar .meta { font-size: 11px; opacity: 0.85; }
-      .topbar button, .topbar a { background: #DEF7EC; color: #03543F; border: none; padding: 6px 14px; border-radius: 3px; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
-      .topbar a:hover { background: #BCF0DA; }
-      pre { background: white; padding: 16px; margin: 0; overflow: auto; font-size: 11px; color: #111; white-space: pre-wrap; word-break: break-word; font-family: 'Consolas','Courier New',monospace; min-height: calc(100vh - 50px); }
-      .instructions { background: #FEF3C7; color: #723B13; padding: 10px 16px; font-size: 12px; border-bottom: 1px solid #F59E0B; }
-      .instructions code { background: rgba(0,0,0,0.08); padding: 1px 6px; border-radius: 2px; }
-    </style></head><body>
-    <div class="topbar">
-      <div>
-        <h1>${filename}</h1>
-        <div class="meta">Tally-compatible XML · ${xmlString.length.toLocaleString()} chars</div>
-      </div>
-      <a id="dl-btn" download="${filename}">⬇ Download XML</a>
-    </div>
-    <div class="instructions">
-      <strong>Import into Tally:</strong> Open Tally → Gateway of Tally → <code>F12 Configure</code> → set voucher type to Purchase → Import Data → Vouchers → select this downloaded XML.
-    </div>
-    <pre id="content"></pre>
-    <script>
-      const raw = document.getElementById('content');
-      raw.textContent = ${JSON.stringify(xmlString)};
-      const blob = new Blob([${JSON.stringify(xmlString)}], { type: 'application/xml' });
+    try {
+      const blob = new Blob([xmlString], { type: 'application/xml' });
       const url = URL.createObjectURL(blob);
-      const btn = document.getElementById('dl-btn');
-      btn.href = url;
-      // Auto-trigger download once on open
-      setTimeout(() => { try { btn.click(); } catch(e) {} }, 400);
-    <\/script></body></html>`;
-    const blob = new Blob([html], { type: 'text/html' });
-    const pageUrl = URL.createObjectURL(blob);
-    window.open(pageUrl, '_blank', 'width=1100,height=800');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) {
+      alert('Could not download XML: ' + (e.message || e));
+    }
   };
 
   const downloadTallyXML = async (inv) => {
