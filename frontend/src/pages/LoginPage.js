@@ -82,13 +82,18 @@ export default function LoginPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          {/* `name` + `autoComplete` are critical for the browser's built-in
+              password manager. Without them most browsers refuse to offer
+              "Save password?" or autofill on subsequent visits. */}
+          <form onSubmit={handleSubmit} className="space-y-5" autoComplete="on">
             <div>
               <label className="block text-sm font-semibold text-[#111827] mb-1">
                 Email Address
               </label>
               <input
                 type="email"
+                name="email"
+                autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="input-field"
@@ -105,6 +110,8 @@ export default function LoginPage() {
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
+                  name="password"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="input-field pr-10"

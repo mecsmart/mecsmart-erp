@@ -148,6 +148,10 @@ export const SearchableItemSelect = ({
         <div
           className="flex items-center justify-between h-10 w-full rounded-sm border border-[#D1D5DB] bg-[#F0F9FF] px-3 py-2 text-sm"
           data-testid={testId}
+          // Native tooltip on the chip — when the part number / name overflows
+          // its column, hovering reveals the full label so the user doesn't
+          // have to expand the dialog or scroll horizontally to read it.
+          title={`${selected.part_number || ''}${selected.part_number && selected.name ? ' · ' : ''}${selected.name || ''}${selected.description ? `\n${selected.description}` : ''}`}
         >
           <div className="flex items-center gap-2 truncate">
             <span className="mono text-xs font-semibold">{selected.part_number}</span>

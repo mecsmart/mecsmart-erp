@@ -257,32 +257,13 @@ export default function BOMPage() {
         }));
       }
 
-      // Auto-merge duplicate components — if the user added the same item
-      // twice (or more), collapse them into a single line and SUM the
-      // quantities. We treat alternates (`is_alternate=true`) as separate
-      // entries from primaries, since alternates serve a different supply
-      // role and should never be merged with their primary.
-      // Routings: union the per-line routing lists (de-duped).
+      // Auto-merge duplicate components as a final safety net before send.
+      // Same logic as `mergeDuplicateComponents` above (we re-run it here
+      // since the user may have added more duplicates AFTER opening the
+      // dialog and the load-time merge ran).
       if (payload.components && payload.components.length > 0) {
-        const merged = new Map(); // key: `${item_id}__${is_alternate?1:0}`
-        for (const c of payload.components) {
-          if (!c.item_id) continue;
-          const key = `${c.item_id}__${c.is_alternate ? 1 : 0}`;
-          const existing = merged.get(key);
-          if (existing) {
-            existing.quantity = (Number(existing.quantity) || 0) + (Number(c.quantity) || 0);
-            // Union routings by id; preserve order from the first occurrence.
-            const seen = new Set((existing.routings || []).map(r => r?.id || r?.routing_id || r));
-            for (const r of (c.routings || [])) {
-              const rid = r?.id || r?.routing_id || r;
-              if (!seen.has(rid)) { existing.routings.push(r); seen.add(rid); }
-            }
-          } else {
-            merged.set(key, { ...c, routings: [...(c.routings || [])] });
-          }
-        }
         const before = payload.components.length;
-        payload.components = Array.from(merged.values());
+        payload.components = mergeDuplicateComponents(payload.components);
         const after = payload.components.length;
         if (after < before) {
           toast.message(`Merged ${before - after} duplicate component row${before - after === 1 ? '' : 's'} (quantities summed).`);
@@ -347,8 +328,47 @@ export default function BOMPage() {
     });
   };
 
+  // ── Shared "merge duplicate components" helper ────────────────────────
+  // Returns a new array where rows with identical (item_id + is_alternate)
+  // are collapsed into a single line and quantities are SUMMED. Routings
+  // from each duplicate are unioned (de-duped by id). Used by both:
+  //   • handleEdit (auto-clean on dialog open so the user sees a tidy list
+  //     even for legacy BOMs that were saved before this client check)
+  //   • handleSubmit (safety net before sending to the server)
+  // We keep alternate components separate from primaries because they serve
+  // different supply roles (`is_alternate=true` vs `false`).
+  const mergeDuplicateComponents = (components) => {
+    if (!components || components.length === 0) return components || [];
+    const merged = new Map();
+    for (const c of components) {
+      if (!c.item_id) { continue; }
+      const key = `${c.item_id}__${c.is_alternate ? 1 : 0}`;
+      const existing = merged.get(key);
+      if (existing) {
+        existing.quantity = (Number(existing.quantity) || 0) + (Number(c.quantity) || 0);
+        const seen = new Set((existing.routings || []).map(r => r?.id || r?.routing_id || r));
+        for (const r of (c.routings || [])) {
+          const rid = r?.id || r?.routing_id || r;
+          if (!seen.has(rid)) { existing.routings.push(r); seen.add(rid); }
+        }
+      } else {
+        merged.set(key, { ...c, routings: [...(c.routings || [])] });
+      }
+    }
+    return Array.from(merged.values());
+  };
+
   const handleEdit = (bom) => {
     setEditingBom(bom);
+    // Auto-merge duplicates the moment we open an existing BOM for edit so
+    // legacy data created before client-side de-dupe was added gets cleaned
+    // immediately. Saving the form persists the merged set.
+    const sorted = sortBomComponentsForEdit(bom.components || [], items);
+    const beforeCount = sorted.length;
+    const cleaned = mergeDuplicateComponents(sorted);
+    if (cleaned.length < beforeCount) {
+      toast.message(`Merged ${beforeCount - cleaned.length} duplicate component row${beforeCount - cleaned.length === 1 ? '' : 's'} found in this BOM. Click Save to persist.`);
+    }
     setFormData({
       parent_item_id: bom.parent_item_id,
       name: bom.name,
@@ -356,7 +376,7 @@ export default function BOMPage() {
       revision: bom.revision,
       status: bom.status,
       effectivity_date: bom.effectivity_date ? bom.effectivity_date.split('T')[0] : '',
-      components: sortBomComponentsForEdit(bom.components || [], items),
+      components: cleaned,
       parent_routings: bom.parent_routings || [],
     });
     setIsDialogOpen(true);

@@ -195,6 +195,33 @@ def routings_total_cost(routings: Optional[List[Any]]) -> float:
     return sum(r.get("cost", 0) for r in normalize_routings(routings))
 
 
+def _merge_duplicate_components(components: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Merge duplicate component rows by `(item_id, is_alternate)` — sums
+    quantities and unions routings. Server-side safety net mirroring the
+    client's BOMPage.handleSubmit logic so malformed payloads (raw API,
+    Excel import) can't write duplicate components either."""
+    if not components:
+        return components or []
+    merged: Dict[str, Dict[str, Any]] = {}
+    for c in components:
+        item_id = c.get("item_id")
+        if not item_id:
+            continue
+        key = f"{item_id}__{1 if c.get('is_alternate') else 0}"
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = {**c, "routings": list(c.get("routings") or [])}
+        else:
+            existing["quantity"] = float(existing.get("quantity") or 0) + float(c.get("quantity") or 0)
+            seen_ids = {(r.get("name"), r.get("cost")) for r in (existing.get("routings") or [])}
+            for r in (c.get("routings") or []):
+                key_r = (r.get("name"), r.get("cost"))
+                if key_r not in seen_ids:
+                    existing["routings"].append(r)
+                    seen_ids.add(key_r)
+    return list(merged.values())
+
+
 async def compute_bom_costs(item_id: str, _depth: int = 0, _visited: Optional[set] = None) -> Dict[str, Any]:
     """Return {rm_cost, process_cost, process_names, fg_process_cost} for this item.
     Recursive: for each BOM component, if that component itself has a BOM, use its RECURSIVE
@@ -1350,6 +1377,11 @@ async def create_bom(bom_data: BOMCreate, request: Request):
         cd = c.model_dump()
         cd["routings"] = normalize_routings(cd.get("routings", []))
         normalized_components.append(cd)
+    # Server-side de-dupe safety net: collapse duplicate (item_id, is_alternate)
+    # rows and SUM their quantities. Mirrors the client-side logic in
+    # BOMPage.handleSubmit so duplicates can't slip in via Excel import or
+    # raw API calls.
+    normalized_components = _merge_duplicate_components(normalized_components)
     
     bom_doc = {
         "id": str(uuid.uuid4()),
@@ -1369,6 +1401,38 @@ async def create_bom(bom_data: BOMCreate, request: Request):
     bom_doc.pop("_id", None)
     return bom_doc
 
+
+@bom_router.post("/dedupe-all")
+async def dedupe_all_boms(request: Request):
+    """One-off admin sweep — walks every BOM in the database and merges any
+    duplicate component rows that were saved BEFORE client-side / server-side
+    de-dupe was added. Idempotent: running twice is a no-op once everything
+    is clean. Returns a summary of how many BOMs and rows were merged."""
+    user = await get_current_user(request)
+    _require_access(user, ["admin"], module="bom", action="edit")
+    cursor = db.boms.find({}, {"_id": 0})
+    boms_processed = 0
+    boms_modified = 0
+    rows_merged = 0
+    async for bom in cursor:
+        boms_processed += 1
+        comps = bom.get("components") or []
+        before = len(comps)
+        cleaned = _merge_duplicate_components(comps)
+        after = len(cleaned)
+        if after < before:
+            await db.boms.update_one(
+                {"id": bom["id"]},
+                {"$set": {"components": cleaned, "updated_at": datetime.now(timezone.utc)}},
+            )
+            boms_modified += 1
+            rows_merged += (before - after)
+    return {
+        "boms_processed": boms_processed,
+        "boms_modified": boms_modified,
+        "rows_merged": rows_merged,
+    }
+
 @bom_router.put("/{bom_id}")
 async def update_bom(bom_id: str, bom_data: BOMUpdate, request: Request):
     user = await get_current_user(request)
@@ -1382,7 +1446,8 @@ async def update_bom(bom_id: str, bom_data: BOMUpdate, request: Request):
                     cd = c.model_dump() if hasattr(c, 'model_dump') else dict(c)
                     cd["routings"] = normalize_routings(cd.get("routings", []))
                     normalized.append(cd)
-                update_data[k] = normalized
+                # Server-side de-dupe safety net (same as create_bom).
+                update_data[k] = _merge_duplicate_components(normalized)
             elif k == "parent_routings":
                 update_data[k] = normalize_routings(v)
             else:
