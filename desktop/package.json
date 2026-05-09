@@ -45,9 +45,7 @@
         }
       ],
       "icon": "build/icon.ico",
-      "signtoolOptions": {
-        "publisherName": "MecSmart"
-      }
+      "publisherName": "MecSmart"
     },
     "nsis": {
       "oneClick": false,
