@@ -7,6 +7,7 @@ import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 import { formatQty } from '../utils/uomFormat';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
 import { fmtAmt } from '../utils/numberFormat';
+import { ItemHoverCard } from '../components/ItemHoverCard';
 import { 
   Plus, 
   FileStack, 
@@ -254,6 +255,38 @@ export default function BOMPage() {
           ...c,
           routings: c.routings || [],
         }));
+      }
+
+      // Auto-merge duplicate components — if the user added the same item
+      // twice (or more), collapse them into a single line and SUM the
+      // quantities. We treat alternates (`is_alternate=true`) as separate
+      // entries from primaries, since alternates serve a different supply
+      // role and should never be merged with their primary.
+      // Routings: union the per-line routing lists (de-duped).
+      if (payload.components && payload.components.length > 0) {
+        const merged = new Map(); // key: `${item_id}__${is_alternate?1:0}`
+        for (const c of payload.components) {
+          if (!c.item_id) continue;
+          const key = `${c.item_id}__${c.is_alternate ? 1 : 0}`;
+          const existing = merged.get(key);
+          if (existing) {
+            existing.quantity = (Number(existing.quantity) || 0) + (Number(c.quantity) || 0);
+            // Union routings by id; preserve order from the first occurrence.
+            const seen = new Set((existing.routings || []).map(r => r?.id || r?.routing_id || r));
+            for (const r of (c.routings || [])) {
+              const rid = r?.id || r?.routing_id || r;
+              if (!seen.has(rid)) { existing.routings.push(r); seen.add(rid); }
+            }
+          } else {
+            merged.set(key, { ...c, routings: [...(c.routings || [])] });
+          }
+        }
+        const before = payload.components.length;
+        payload.components = Array.from(merged.values());
+        const after = payload.components.length;
+        if (after < before) {
+          toast.message(`Merged ${before - after} duplicate component row${before - after === 1 ? '' : 's'} (quantities summed).`);
+        }
       }
 
       if (editingBom) {
@@ -1256,8 +1289,12 @@ export default function BOMPage() {
                       <div className="flex items-center gap-3">
                         {expandedBomPanels[pid] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                         <span className="text-[10px] font-bold bg-white/20 px-2 py-0.5 rounded">{catLabel(parentItem?.category)}</span>
-                        <span className="mono font-bold text-sm">{parentItem?.part_number || '-'}</span>
-                        <span className="font-medium">{parentItem?.name || '-'}</span>
+                        <ItemHoverCard item={parentItem}>
+                          <span className="mono font-bold text-sm cursor-help underline decoration-dotted decoration-white/30 underline-offset-2">{parentItem?.part_number || '-'}</span>
+                        </ItemHoverCard>
+                        <ItemHoverCard item={parentItem}>
+                          <span className="font-medium cursor-help">{parentItem?.name || '-'}</span>
+                        </ItemHoverCard>
                         {activeBom && <span className="text-xs bg-white/15 px-2 py-0.5 rounded">Rev {activeBom.revision} - {activeBom.status}</span>}
                       </div>
                       <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
@@ -1342,9 +1379,15 @@ export default function BOMPage() {
                             <td className="py-2 px-2">
                               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${catBadge(row.cat)}`}>{catLabel(row.cat)}</span>
                             </td>
-                            <td className="py-2 px-2 mono font-semibold text-[#111827]">{row.item?.part_number || '?'}</td>
+                            <td className="py-2 px-2 mono font-semibold text-[#111827]">
+                              <ItemHoverCard item={row.item}>
+                                <span className="cursor-help underline decoration-dotted decoration-[#9CA3AF] underline-offset-2">{row.item?.part_number || '?'}</span>
+                              </ItemHoverCard>
+                            </td>
                             <td className="py-2 px-2 text-[#374151]">
-                              {row.item?.name || '-'}{row.is_alternate ? ' (alt)' : ''}
+                              <ItemHoverCard item={row.item}>
+                                <span className="cursor-help">{row.item?.name || '-'}{row.is_alternate ? ' (alt)' : ''}</span>
+                              </ItemHoverCard>
                               {row.child_bom_id && canEdit && (
                                 <button onClick={(e) => { e.stopPropagation(); const childBom = boms.find(b => b.id === row.child_bom_id); if (childBom) handleEdit(childBom); }} className="ml-2 inline-flex items-center gap-0.5 text-[10px] text-[#1E429F] hover:text-[#1D3557] bg-[#E1EFFE] hover:bg-[#C3DDFD] px-1.5 py-0.5 rounded" title={`Edit ${row.item?.part_number} BOM`} data-testid={`edit-child-bom-${row.key}`}>
                                   <Edit2 className="w-3 h-3" />Edit BOM

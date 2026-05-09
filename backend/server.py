@@ -2670,11 +2670,25 @@ async def create_supplier(supplier_data: SupplierCreate, request: Request):
     existing = await db.suppliers.find_one({"code": supplier_code})
     if existing:
         raise HTTPException(status_code=400, detail="Supplier code already exists")
+
+    # GST duplicate check — block creating a second supplier with the same
+    # GSTIN. GST numbers are statutory unique identifiers, so accidentally
+    # creating "ABC Industries" and "ABC Ind Pvt Ltd" with the same 27ABCDE...
+    # produces wrong PI/PO trails and breaks GSTR-2 reconciliation.
+    gstin_clean = (supplier_data.gstin or "").strip().upper()
+    if gstin_clean:
+        gst_dup = await db.suppliers.find_one({"gstin": gstin_clean}, {"name": 1, "code": 1})
+        if gst_dup:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A supplier with GSTIN {gstin_clean} already exists ({gst_dup.get('name','?')} · code {gst_dup.get('code','?')}). Please use the existing record."
+            )
     
     supplier_doc = {
         "id": str(uuid.uuid4()),
         **supplier_data.model_dump(),
         "code": supplier_code,
+        "gstin": gstin_clean or supplier_data.gstin,
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -2696,6 +2710,21 @@ async def update_supplier(supplier_id: str, supplier_data: SupplierUpdate, reque
     update_data = {k: v for k, v in supplier_data.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
+    # Same GST uniqueness rule as create — but exclude the supplier being
+    # edited so the user can save a record without changing the GSTIN.
+    if "gstin" in update_data:
+        gstin_clean = (update_data["gstin"] or "").strip().upper()
+        if gstin_clean:
+            gst_dup = await db.suppliers.find_one(
+                {"gstin": gstin_clean, "id": {"$ne": supplier_id}},
+                {"name": 1, "code": 1},
+            )
+            if gst_dup:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A supplier with GSTIN {gstin_clean} already exists ({gst_dup.get('name','?')} · code {gst_dup.get('code','?')}). GSTIN must be unique."
+                )
+            update_data["gstin"] = gstin_clean
     
     update_data["updated_at"] = datetime.now(timezone.utc)
     result = await db.suppliers.update_one({"id": supplier_id}, {"$set": update_data})
@@ -7500,11 +7529,24 @@ async def create_customer(data: CustomerCreate, request: Request):
     existing = await db.customers.find_one({"code": customer_code})
     if existing:
         raise HTTPException(status_code=400, detail="Customer code already exists")
+
+    # GST duplicate check — same rule as suppliers. Two customers with
+    # identical GSTIN means the wrong PAN ends up on a Tax Invoice, which
+    # the buyer's GSTR-2A reconciliation will then reject.
+    gstin_clean = (data.gstin or "").strip().upper()
+    if gstin_clean:
+        gst_dup = await db.customers.find_one({"gstin": gstin_clean}, {"name": 1, "code": 1})
+        if gst_dup:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A customer with GSTIN {gstin_clean} already exists ({gst_dup.get('name','?')} · code {gst_dup.get('code','?')}). Please use the existing record."
+            )
     
     customer_doc = {
         "id": str(uuid.uuid4()),
         **data.model_dump(),
         "code": customer_code,
+        "gstin": gstin_clean or data.gstin,
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -7565,6 +7607,20 @@ async def update_customer(customer_id: str, data: CustomerUpdate, request: Reque
     update_data = {k: v for k, v in data.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
+    # GST uniqueness — exclude self.
+    if "gstin" in update_data:
+        gstin_clean = (update_data["gstin"] or "").strip().upper()
+        if gstin_clean:
+            gst_dup = await db.customers.find_one(
+                {"gstin": gstin_clean, "id": {"$ne": customer_id}},
+                {"name": 1, "code": 1},
+            )
+            if gst_dup:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"A customer with GSTIN {gstin_clean} already exists ({gst_dup.get('name','?')} · code {gst_dup.get('code','?')}). GSTIN must be unique."
+                )
+            update_data["gstin"] = gstin_clean
     
     update_data["updated_at"] = datetime.now(timezone.utc)
     result = await db.customers.update_one({"id": customer_id}, {"$set": update_data})

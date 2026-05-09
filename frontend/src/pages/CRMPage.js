@@ -15,6 +15,7 @@ import { SearchableItemSelect } from '../components/SearchableItemSelect';
 import { useDraggableRows } from '../hooks/useDraggableRows';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
 import { fmtAmtForCurrency } from '../utils/numberFormat';
+import { QuickAddPartyDialog } from '../components/QuickAddPartyDialog';
 import { toast } from 'sonner';
 
 // Stage definitions per pipeline — aligned to the customer's CRM diagram:
@@ -937,6 +938,9 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, quotation: null });
   const [acceptConfirm, setAcceptConfirm] = useState({ open: false, quotation: null });
   const [proformaConfirm, setProformaConfirm] = useState({ open: false, quotation: null, advance: 30 });
+  // Inline + Add / ✎ Edit Customer (Odoo-style) — drives QuickAddPartyDialog.
+  const [quickPartyOpen, setQuickPartyOpen] = useState(false);
+  const [quickPartyEditing, setQuickPartyEditing] = useState(null);
 
   const openDialog = useCallback((q, fromLead) => {
     if (q) {
@@ -1270,20 +1274,44 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1">Existing Customer (optional)</label>
-                <SearchableSelect
-                  options={customers}
-                  value={form.customer_id}
-                  onChange={(v) => {
-                    if (!v) { setForm(f => ({ ...f, customer_id: '' })); return; }
-                    const c = customers.find(x => x.id === v);
-                    setForm(f => ({ ...f, customer_id: v, customer_name: c?.name || '', contact_person: c?.contact_person || '', email: c?.email || '', phone: c?.phone || '' }));
-                  }}
-                  getLabel={(c) => c.name || ''}
-                  getSecondary={(c) => c.customer_code || ''}
-                  matchFields={['name', 'customer_code', 'phone', 'email']}
-                  placeholder="Type customer code / name…"
-                  testId="quotation-customer-select"
-                />
+                <div className="flex gap-1.5 items-stretch">
+                  <div className="flex-1">
+                    <SearchableSelect
+                      options={customers}
+                      value={form.customer_id}
+                      onChange={(v) => {
+                        if (!v) { setForm(f => ({ ...f, customer_id: '' })); return; }
+                        const c = customers.find(x => x.id === v);
+                        setForm(f => ({ ...f, customer_id: v, customer_name: c?.name || '', contact_person: c?.contact_person || '', email: c?.email || '', phone: c?.phone || '' }));
+                      }}
+                      getLabel={(c) => c.name || ''}
+                      getSecondary={(c) => c.customer_code || ''}
+                      matchFields={['name', 'customer_code', 'phone', 'email']}
+                      placeholder="Type customer code / name…"
+                      testId="quotation-customer-select"
+                    />
+                  </div>
+                  {/* Inline + Add and ✎ Edit (Odoo-style) */}
+                  <button
+                    type="button"
+                    onClick={() => { setQuickPartyEditing(null); setQuickPartyOpen(true); }}
+                    className="px-2 bg-[#03543F] text-white rounded hover:bg-[#03493A] text-sm"
+                    title="Add new customer"
+                    data-testid="quotation-customer-add"
+                  >+</button>
+                  {form.customer_id && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const c = customers.find(x => x.id === form.customer_id);
+                        if (c) { setQuickPartyEditing(c); setQuickPartyOpen(true); }
+                      }}
+                      className="px-2 bg-[#1E429F] text-white rounded hover:bg-[#1D3557] text-xs"
+                      title="Edit selected customer"
+                      data-testid="quotation-customer-edit"
+                    >✎</button>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1">Customer Name *{form.customer_id && <span className="ml-1 text-[10px] text-[#6B7280]">(auto-synced from master)</span>}</label>
@@ -1594,6 +1622,30 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
         variant="primary"
         onConfirm={acceptQuotation}
         testidPrefix="quotation-accept-confirm"
+      />
+
+      {/* Inline customer create/edit — driven by + and ✎ icons inside the
+          Quotation form. After save we refresh the customers list (via
+          `onRefresh` so the parent's master data reloads) and auto-select
+          the saved record so the form continues with the new customer. */}
+      <QuickAddPartyDialog
+        open={quickPartyOpen}
+        onOpenChange={setQuickPartyOpen}
+        kind="customer"
+        editing={quickPartyEditing}
+        onSaved={async (saved) => {
+          if (onRefresh) await onRefresh();
+          if (saved?.id) {
+            setForm(f => ({
+              ...f,
+              customer_id: saved.id,
+              customer_name: saved.name || f.customer_name,
+              contact_person: saved.contact_person || f.contact_person,
+              email: saved.email || f.email,
+              phone: saved.phone || f.phone,
+            }));
+          }
+        }}
       />
 
       {/* Convert-to-Proforma Dialog */}

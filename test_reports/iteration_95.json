@@ -1,0 +1,138 @@
+{
+  "summary": "Iteration 95 - Testing 4 fixes: (1) GST duplicate block for Suppliers/Customers, (2) BOM duplicate component auto-merge, (3) Inline + Add / Edit party icons in PO and Quotation, (4) BOM hover tooltips. All 4 fixes verified working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_95_gst_duplicate_bom_merge.py",
+    "/app/test_reports/pytest/pytest_iteration_95.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_95_gst_duplicate_bom_merge.py"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8 tests passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None - used existing data",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "4 fixes verified: (1) GST duplicate block works for both suppliers and customers - create with duplicate GSTIN returns 400, update own GSTIN works, update to another's GSTIN blocked. (2) BOM duplicate merge logic in BOMPage.js handleSubmit lines 260-290 - merges by item_id+is_alternate key, sums quantities, unions routings, shows toast. (3) PO form has green '+' button (data-testid='po-supplier-add') and blue '✎' button (data-testid='po-supplier-edit') next to supplier dropdown. Quotation form has same for customer (data-testids 'quotation-customer-add' and 'quotation-customer-edit'). QuickAddPartyDialog opens with correct title and fields. (4) BOM hover tooltips work on parent part_number and line item part_numbers - shows part_number · name, description (or 'No description'), Current Stock with color coding.",
+  "tests_executed": {
+    "backend": [
+      {
+        "test": "test_create_supplier_with_unique_gstin_succeeds",
+        "status": "PASSED",
+        "description": "POST /api/suppliers with unique GSTIN 27AAACX1234A1Z5 returns 201"
+      },
+      {
+        "test": "test_create_supplier_with_duplicate_gstin_fails",
+        "status": "PASSED",
+        "description": "POST /api/suppliers with duplicate GSTIN returns 400 with error 'A supplier with GSTIN ... already exists'"
+      },
+      {
+        "test": "test_update_supplier_own_gstin_succeeds",
+        "status": "PASSED",
+        "description": "PUT /api/suppliers/{id} can update with its own GSTIN (no false positive)"
+      },
+      {
+        "test": "test_update_supplier_to_another_existing_gstin_fails",
+        "status": "PASSED",
+        "description": "PUT /api/suppliers/{id} trying to use another supplier's GSTIN returns 400"
+      },
+      {
+        "test": "test_create_customer_with_unique_gstin_succeeds",
+        "status": "PASSED",
+        "description": "POST /api/customers with unique GSTIN returns 201"
+      },
+      {
+        "test": "test_create_customer_with_duplicate_gstin_fails",
+        "status": "PASSED",
+        "description": "POST /api/customers with duplicate GSTIN returns 400"
+      },
+      {
+        "test": "test_update_customer_own_gstin_succeeds",
+        "status": "PASSED",
+        "description": "PUT /api/customers/{id} can update with its own GSTIN"
+      },
+      {
+        "test": "test_update_customer_to_another_existing_gstin_fails",
+        "status": "PASSED",
+        "description": "PUT /api/customers/{id} trying to use another customer's GSTIN returns 400"
+      }
+    ],
+    "frontend": [
+      {
+        "test": "FIX 3 PO - Inline + Add Supplier button",
+        "status": "PASSED",
+        "description": "Green '+' button found next to Supplier dropdown (data-testid='po-supplier-add'). Clicking opens QuickAddPartyDialog with title 'Add Supplier / Vendor'. Dialog has GSTIN with Fetch button, Name, Code, Contact Person, Email, Phone, Address, City, State, PIN Code, Payment Terms, Lead Time (days), Rating (1-5) fields."
+      },
+      {
+        "test": "FIX 3 PO - Edit Supplier button code verification",
+        "status": "PASSED",
+        "description": "Blue '✎' button (data-testid='po-supplier-edit') renders when formData.supplier_id is set. Code verified in PurchaseOrdersPage.js lines 450-461."
+      },
+      {
+        "test": "FIX 3 Quotation - Inline + Add Customer button",
+        "status": "PASSED",
+        "description": "Green '+' button found next to 'Existing Customer (optional)' dropdown (data-testid='quotation-customer-add'). Clicking opens QuickAddPartyDialog with title 'Add Customer'. Lead Time and Rating fields NOT present (correct for customer)."
+      },
+      {
+        "test": "FIX 3 Quotation - Edit Customer button code verification",
+        "status": "PASSED",
+        "description": "Blue '✎' button (data-testid='quotation-customer-edit') renders when form.customer_id is set. Code verified in CRMPage.js lines 1302-1313."
+      },
+      {
+        "test": "FIX 4 - BOM hover tooltip on parent",
+        "status": "PASSED",
+        "description": "Hovering over BOM panel header part_number shows hover card with: 'FG-0C565EC5_WOM · FINISHED GOOD 0C565EC5_WOM', 'No description' (italic), 'Current Stock: 10 pcs' (green for positive stock)."
+      },
+      {
+        "test": "FIX 4 - BOM hover tooltip on line items",
+        "status": "PASSED",
+        "description": "Hovering over component part_number in explosion table shows hover card with: 'RM-0C565EC5_WOM · RAW MATERIAL 0C565EC5_WOM', 'No description', 'Current Stock: 0 pcs' (red for zero stock)."
+      },
+      {
+        "test": "FIX 2 - BOM duplicate component merge code verification",
+        "status": "PASSED",
+        "description": "BOMPage.js handleSubmit (lines 260-290) contains merge logic: Map tracks components by key '${item_id}__${is_alternate?1:0}', duplicates have quantities summed, routings unioned, toast shows 'Merged X duplicate component row(s)'. Alternates (is_alternate=true) are NOT merged with primaries."
+      }
+    ]
+  },
+  "feature_verification": {
+    "fix1_gst_duplicate_block": {
+      "status": "IMPLEMENTED",
+      "supplier_create": "server.py lines 2674-2685: Checks db.suppliers.find_one({'gstin': gstin_clean}), returns 400 if exists",
+      "supplier_update": "server.py lines 2715-2727: Checks with {'gstin': gstin_clean, 'id': {'$ne': supplier_id}} to exclude self",
+      "customer_create": "server.py lines 7533-7543: Same pattern for customers",
+      "customer_update": "server.py lines 7611-7623: Same pattern for customers"
+    },
+    "fix2_bom_duplicate_merge": {
+      "status": "IMPLEMENTED",
+      "code_location": "/app/frontend/src/pages/BOMPage.js lines 260-290",
+      "implementation": "Frontend handleSubmit merges duplicate components by item_id+is_alternate key, sums quantities, unions routings, shows toast message"
+    },
+    "fix3_inline_party_dialogs": {
+      "status": "IMPLEMENTED",
+      "po_supplier_add": "PurchaseOrdersPage.js lines 442-448: Green '+' button with data-testid='po-supplier-add'",
+      "po_supplier_edit": "PurchaseOrdersPage.js lines 450-461: Blue '✎' button with data-testid='po-supplier-edit', shows when supplier selected",
+      "quotation_customer_add": "CRMPage.js lines 1295-1301: Green '+' button with data-testid='quotation-customer-add'",
+      "quotation_customer_edit": "CRMPage.js lines 1302-1313: Blue '✎' button with data-testid='quotation-customer-edit', shows when customer selected",
+      "dialog_component": "/app/frontend/src/components/QuickAddPartyDialog.jsx: Reusable dialog with GSTIN lookup, all party fields, supplier-only Lead Time + Rating"
+    },
+    "fix4_bom_hover_tooltips": {
+      "status": "IMPLEMENTED",
+      "component": "/app/frontend/src/components/ItemHoverCard.jsx",
+      "implementation": "HoverCard with 250ms openDelay, 80ms closeDelay. Shows part_number · name, description (or 'No description' italic), Current Stock with color coding (green for positive, red for zero/negative)"
+    }
+  }
+}

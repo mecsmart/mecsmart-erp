@@ -12,6 +12,7 @@ import { POPrintDialog } from '../components/PrintDialogs';
 import { SearchableItemSelect } from '../components/SearchableItemSelect';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { useDraggableRows } from '../hooks/useDraggableRows';
+import { QuickAddPartyDialog } from '../components/QuickAddPartyDialog';
 
 const statusOptions = [
   { value: 'draft', label: 'Draft' },
@@ -234,6 +235,9 @@ export default function PurchaseOrdersPage() {
 
   const [printPO, setPrintPO] = useState(null);
   const [shortCloseDialog, setShortCloseDialog] = useState({ open: false, po: null, reason: '' });
+  // Inline Add/Edit Supplier dialog (Odoo-style + button next to the dropdown).
+  const [quickPartyOpen, setQuickPartyOpen] = useState(false);
+  const [quickPartyEditing, setQuickPartyEditing] = useState(null);
 
   const handleCancelPO = async (po) => {
     if (!window.confirm(`Cancel ${po.po_number}? This action cannot be undone.`)) return;
@@ -420,16 +424,42 @@ export default function PurchaseOrdersPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier *</label>
-                <SearchableSelect
-                  options={suppliers}
-                  value={formData.supplier_id}
-                  onChange={(v) => setFormData({ ...formData, supplier_id: v })}
-                  getLabel={(s) => s.name || ''}
-                  getSecondary={(s) => s.code || ''}
-                  matchFields={['name', 'code', 'gstin']}
-                  placeholder="Type supplier code / name / GSTIN…"
-                  testId="po-supplier-select"
-                />
+                <div className="flex gap-1.5 items-stretch">
+                  <div className="flex-1">
+                    <SearchableSelect
+                      options={suppliers}
+                      value={formData.supplier_id}
+                      onChange={(v) => setFormData({ ...formData, supplier_id: v })}
+                      getLabel={(s) => s.name || ''}
+                      getSecondary={(s) => s.code || ''}
+                      matchFields={['name', 'code', 'gstin']}
+                      placeholder="Type supplier code / name / GSTIN…"
+                      testId="po-supplier-select"
+                    />
+                  </div>
+                  {/* Inline + Add (Odoo-style) — opens QuickAddPartyDialog so the
+                      user can create a new supplier without leaving the PO form. */}
+                  <button
+                    type="button"
+                    onClick={() => { setQuickPartyEditing(null); setQuickPartyOpen(true); }}
+                    className="px-2 bg-[#03543F] text-white rounded hover:bg-[#03493A] text-sm"
+                    title="Add new supplier"
+                    data-testid="po-supplier-add"
+                  >+</button>
+                  {/* Inline edit pencil — only when a supplier is selected. */}
+                  {formData.supplier_id && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const s = suppliers.find(x => x.id === formData.supplier_id);
+                        if (s) { setQuickPartyEditing(s); setQuickPartyOpen(true); }
+                      }}
+                      className="px-2 bg-[#1E429F] text-white rounded hover:bg-[#1D3557] text-xs"
+                      title="Edit selected supplier"
+                      data-testid="po-supplier-edit"
+                    >✎</button>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-[#111827] mb-1">Expected Date *</label>
@@ -764,6 +794,20 @@ export default function PurchaseOrdersPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Inline supplier create/edit — drives the + and pencil icons next to
+          the supplier dropdown. After save we reload the suppliers list and
+          auto-select the saved record so it's already chosen for the new PO. */}
+      <QuickAddPartyDialog
+        open={quickPartyOpen}
+        onOpenChange={setQuickPartyOpen}
+        kind="supplier"
+        editing={quickPartyEditing}
+        onSaved={async (saved) => {
+          await fetchSuppliers();
+          if (saved?.id) setFormData(fd => ({ ...fd, supplier_id: saved.id }));
+        }}
+      />
     </div>
   );
 }
