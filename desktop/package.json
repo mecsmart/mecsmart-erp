@@ -1,6 +1,6 @@
 {
   "name": "mecsmart-erp-desktop",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "MecSmart ERP — native Windows desktop wrapper.",
   "main": "main.js",

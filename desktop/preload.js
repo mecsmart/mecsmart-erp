@@ -19,4 +19,17 @@ contextBridge.exposeInMainWorld('mecsmart', {
   onUpdateAvailable: (cb) => {
     ipcRenderer.on('mecsmart:update-available', (_e, info) => cb(info));
   },
+
+  // ─── Login credential persistence (encrypted via OS keychain) ───────────
+  // Electron strips Chrome's built-in "Save password?" UI, so we provide
+  // our own "Remember me" feature backed by Electron's safeStorage which
+  // encrypts using the system keychain (Windows DPAPI / macOS Keychain /
+  // libsecret on Linux). The renderer (LoginPage) checks
+  // `window.mecsmart?.loadCredentials` on mount; if present, it pre-fills.
+  saveCredentials: (email, password) => ipcRenderer.invoke('mecsmart:save-credentials', { email, password }),
+  loadCredentials: () => ipcRenderer.invoke('mecsmart:load-credentials'),
+  clearCredentials: () => ipcRenderer.invoke('mecsmart:clear-credentials'),
+  // True when running inside Electron — used by the LoginPage to decide
+  // whether to render the "Remember me" checkbox at all.
+  isDesktopApp: true,
 });

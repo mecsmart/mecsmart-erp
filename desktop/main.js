@@ -11,7 +11,7 @@
 //      them silently in the background. User is prompted once the update is
 //      ready and the next launch installs it.
 
-const { app, BrowserWindow, ipcMain, Menu, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, dialog, shell, safeStorage } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
 const { autoUpdater } = require('electron-updater');
@@ -288,6 +288,50 @@ ipcMain.handle('mecsmart:save-server-url', (_event, url) => {
 });
 
 ipcMain.handle('mecsmart:get-app-version', () => app.getVersion());
+
+// ─── Credential persistence (Remember me) ───────────────────────────────
+// Electron strips Chrome's "Save password?" UI, so we DIY one using
+// `safeStorage` — Chromium's wrapper over the OS-native keychain.
+//   • Windows: DPAPI (per-user, machine-bound)
+//   • macOS: Keychain
+//   • Linux: libsecret / kwallet
+// We store the encrypted ciphertext in electron-store (config.json), keyed
+// by the current server URL so multi-server installs don't collide.
+const credKey = () => `creds:${store.get('serverUrl') || 'default'}`;
+
+ipcMain.handle('mecsmart:save-credentials', (_event, { email, password } = {}) => {
+  if (!email || !password) return { ok: false, error: 'email + password required' };
+  if (!safeStorage.isEncryptionAvailable()) {
+    return { ok: false, error: 'OS keychain not available — credentials cannot be saved.' };
+  }
+  try {
+    const cipher = safeStorage.encryptString(JSON.stringify({ email, password })).toString('base64');
+    store.set(credKey(), cipher);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('mecsmart:load-credentials', () => {
+  const cipher = store.get(credKey());
+  if (!cipher || !safeStorage.isEncryptionAvailable()) return null;
+  try {
+    const decrypted = safeStorage.decryptString(Buffer.from(cipher, 'base64'));
+    return JSON.parse(decrypted);
+  } catch {
+    // Cipher may have been encrypted under a different OS user / DPAPI
+    // master key (e.g. user copied config.json to another machine). Wipe
+    // it so the next save starts clean.
+    store.delete(credKey());
+    return null;
+  }
+});
+
+ipcMain.handle('mecsmart:clear-credentials', () => {
+  store.delete(credKey());
+  return { ok: true };
+});
 
 // ---------------------------------------------------------------- bootstrap
 app.whenReady().then(() => {

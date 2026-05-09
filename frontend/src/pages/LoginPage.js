@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Navigate } from 'react-router-dom';
 import { Eye, EyeOff, Factory, AlertCircle } from 'lucide-react';
@@ -10,6 +10,31 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // "Remember me" — only relevant inside the Electron desktop wrapper, since
+  // browsers already have their own native password manager. The flag is
+  // initialised from any previously-saved credentials so the user sees it
+  // pre-checked when their email/password were auto-filled on mount.
+  const isDesktop = typeof window !== 'undefined' && window.mecsmart?.isDesktopApp;
+  const [rememberMe, setRememberMe] = useState(false);
+
+  // On mount inside the desktop app, try to autofill last-saved credentials.
+  // Web browser users get nothing here — Chrome/Edge/Firefox autofill on
+  // their own via the autoComplete="username" / "current-password" attrs.
+  useEffect(() => {
+    if (!isDesktop) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const creds = await window.mecsmart.loadCredentials();
+        if (!cancelled && creds && creds.email) {
+          setEmail(creds.email);
+          setPassword(creds.password || '');
+          setRememberMe(true);
+        }
+      } catch { /* ignore — first launch / no creds yet */ }
+    })();
+    return () => { cancelled = true; };
+  }, [isDesktop]);
 
   if (loading) {
     return (
@@ -29,9 +54,20 @@ export default function LoginPage() {
     setIsLoading(true);
 
     const result = await login(email, password);
-    
+
     if (!result.success) {
       setError(result.error);
+    } else if (isDesktop) {
+      // Persist (or wipe) credentials AFTER a successful login so we never
+      // save bad creds. Encryption happens in the main process via OS-level
+      // safeStorage / DPAPI keychain.
+      try {
+        if (rememberMe) {
+          await window.mecsmart.saveCredentials(email, password);
+        } else {
+          await window.mecsmart.clearCredentials();
+        }
+      } catch { /* non-fatal */ }
     }
     setIsLoading(false);
   };
@@ -128,6 +164,23 @@ export default function LoginPage() {
                 </button>
               </div>
             </div>
+
+            {/* Remember me — Electron desktop only. Web browsers already
+                have a native password manager (with the autoComplete attrs
+                added on the inputs), so showing this in-browser would just
+                be visual noise. */}
+            {isDesktop && (
+              <label className="flex items-center gap-2 text-sm text-[#374151] cursor-pointer select-none" data-testid="login-remember-me-row">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="rounded border-[#D1D5DB] text-[#1D3557] focus:ring-[#1D3557]"
+                  data-testid="login-remember-me"
+                />
+                Remember me on this device
+              </label>
+            )}
 
             <button
               type="submit"

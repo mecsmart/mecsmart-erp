@@ -570,9 +570,41 @@ export default function BOMPage() {
       });
       return arr;
     };
+    // Sibling merge — same logic as the on-screen explosion view, applied
+    // to the PDF print HTML so duplicate rows (legacy BOMs saved before
+    // de-dupe) appear merged in the printout instead of repeating.
+    const mergePrintSiblings = (nodes) => {
+      if (!nodes || nodes.length === 0) return nodes || [];
+      const map = new Map();
+      const order = [];
+      for (const n of nodes) {
+        const itemId = n.item?.id || n.item_id || (n.item?.part_number || '');
+        const key = `${itemId}__${n.is_alternate ? 1 : 0}`;
+        if (!map.has(key)) {
+          map.set(key, { ...n, quantity: Number(n.quantity || 0), extended_cost: Number(n.extended_cost || 0), routings: [...(n.routings || [])], children: [...(n.children || [])] });
+          order.push(key);
+        } else {
+          const ex = map.get(key);
+          ex.quantity = (Number(ex.quantity) || 0) + Number(n.quantity || 0);
+          ex.extended_cost = (Number(ex.extended_cost) || 0) + Number(n.extended_cost || 0);
+          const seen = new Set((ex.routings || []).map(r => `${r?.name}|${r?.cost}`));
+          for (const r of (n.routings || [])) {
+            const rk = `${r?.name}|${r?.cost}`;
+            if (!seen.has(rk)) { ex.routings.push(r); seen.add(rk); }
+          }
+          ex.children = [...(ex.children || []), ...(n.children || [])];
+        }
+      }
+      return order.map(k => {
+        const m = map.get(k);
+        m.children = mergePrintSiblings(m.children || []);
+        return m;
+      });
+    };
+
     const renderPrintRows = (nodes, level = 0) => {
       let html = '';
-      sortPrintSiblings(nodes).forEach((node, idx) => {
+      sortPrintSiblings(mergePrintSiblings(nodes)).forEach((node, idx) => {
         const item = node.item || {};
         const indent = level * 20;
         const bgColor = item.category === 'sub_assembly' ? '#FEF3C7' : item.category === 'raw_material' ? '#DBEAFE' : item.category === 'component' ? '#FEE2E2' : '#F3F4F6';
@@ -1210,9 +1242,46 @@ export default function BOMPage() {
                 });
                 return arr;
               };
+              // Sibling-level duplicate merge: when the same item appears
+              // multiple times under the same parent (legacy multi-line BOMs
+              // before the de-dupe sweep), collapse them into one display
+              // row by SUMMING quantity + extended cost and unioning routings.
+              // Children sub-trees are merged too. Alternates are kept
+              // separate (different supply role). This only affects
+              // RENDERING — the underlying explosion data is left untouched.
+              const mergeSiblings = (nodes) => {
+                if (!nodes || nodes.length === 0) return nodes || [];
+                const map = new Map();
+                const order = [];
+                for (const n of nodes) {
+                  const itemId = n.item?.id || n.item_id || (n.item?.part_number || '');
+                  const key = `${itemId}__${n.is_alternate ? 1 : 0}`;
+                  if (!map.has(key)) {
+                    map.set(key, { ...n, quantity: Number(n.quantity || 0), extended_cost: Number(n.extended_cost || 0), routings: [...(n.routings || [])], children: [...(n.children || [])] });
+                    order.push(key);
+                  } else {
+                    const ex = map.get(key);
+                    ex.quantity = (Number(ex.quantity) || 0) + Number(n.quantity || 0);
+                    ex.extended_cost = (Number(ex.extended_cost) || 0) + Number(n.extended_cost || 0);
+                    const seen = new Set((ex.routings || []).map(r => `${r?.name}|${r?.cost}`));
+                    for (const r of (n.routings || [])) {
+                      const rk = `${r?.name}|${r?.cost}`;
+                      if (!seen.has(rk)) { ex.routings.push(r); seen.add(rk); }
+                    }
+                    ex.children = [...(ex.children || []), ...(n.children || [])];
+                  }
+                }
+                return order.map(k => {
+                  const m = map.get(k);
+                  // Recursively merge children at every level too.
+                  m.children = mergeSiblings(m.children || []);
+                  return m;
+                });
+              };
+
               const flattenRows = (nodes, level = 1, parentKey = '') => {
                 const rows = [];
-                sortSiblings(nodes).forEach((node, idx) => {
+                sortSiblings(mergeSiblings(nodes)).forEach((node, idx) => {
                   const item = node.item || {};
                   const cat = item.category || '';
                   const key = `${parentKey}-${idx}`;
