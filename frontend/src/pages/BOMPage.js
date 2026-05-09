@@ -661,7 +661,39 @@ export default function BOMPage() {
   };
 
   const renderExplosionTree = (items, parentKey = '', level = 0) => {
-    return items.map((item, index) => {
+    // Sibling-level duplicate merge — same logic as the inline expanded
+    // panel and the print HTML. Without this, the View BOM dialog still
+    // showed legacy duplicate rows side-by-side. We merge here at every
+    // recursion level so child sub-trees collapse too.
+    const mergeViewSiblings = (nodes) => {
+      if (!nodes || nodes.length === 0) return nodes || [];
+      const map = new Map();
+      const order = [];
+      for (const n of nodes) {
+        const itemId = n.item?.id || n.item_id || (n.item?.part_number || '');
+        const key = `${itemId}__${n.is_alternate ? 1 : 0}`;
+        if (!map.has(key)) {
+          map.set(key, { ...n, quantity: Number(n.quantity || 0), extended_cost: Number(n.extended_cost || 0), routings: [...(n.routings || [])], children: [...(n.children || [])] });
+          order.push(key);
+        } else {
+          const ex = map.get(key);
+          ex.quantity = (Number(ex.quantity) || 0) + Number(n.quantity || 0);
+          ex.extended_cost = (Number(ex.extended_cost) || 0) + Number(n.extended_cost || 0);
+          const seen = new Set((ex.routings || []).map(r => `${r?.name}|${r?.cost}`));
+          for (const r of (n.routings || [])) {
+            const rk = `${r?.name}|${r?.cost}`;
+            if (!seen.has(rk)) { ex.routings.push(r); seen.add(rk); }
+          }
+          ex.children = [...(ex.children || []), ...(n.children || [])];
+        }
+      }
+      return order.map(k => {
+        const m = map.get(k);
+        m.children = mergeViewSiblings(m.children || []);
+        return m;
+      });
+    };
+    return mergeViewSiblings(items).map((item, index) => {
       const key = `${parentKey}-${index}`;
       const isExpanded = expandedItems[key];
       const hasChildren = item.children && item.children.length > 0;
