@@ -625,7 +625,16 @@ export default function BOMPage() {
           ${canSeeRollupCost ? `<td style="padding:4px 8px;text-align:right;font-family:monospace;font-size:11px;font-weight:600;">${node.extended_cost != null ? fmtAmt(node.extended_cost) : '-'}</td>` : ''}
         </tr>`;
         if (node.children && node.children.length > 0) {
-          html += renderPrintRows(node.children, level + 1);
+          // TOP-LEVEL ONLY: when this node is itself a sub-assembly with its
+          // own BOM (`child_bom_id`), DON'T explode its sub-tree into the
+          // parent's print. The SG keeps its own one-line entry; the user
+          // exports the SG separately via the per-SG PDF button. Other
+          // children (e.g., raw materials grouped under a phantom parent)
+          // continue to render as before.
+          const skipSubTree = node.cat === 'sub_assembly' || (node.item?.category === 'sub_assembly') || node.child_bom_id;
+          if (!skipSubTree) {
+            html += renderPrintRows(node.children, level + 1);
+          }
         }
       });
       return html;

@@ -6442,9 +6442,20 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
     return results
 
 @bom_router.get("/export/excel")
-async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
+async def export_boms_excel(request: Request, bom_id: Optional[str] = None, top_level_only: bool = True):
     """
-    Export BOMs to Excel as a depth-first multi-level tree.
+    Export BOMs to Excel.
+
+    Args:
+      bom_id: optional single BOM to export (used by the "Export this BOM"
+              button in the UI). If omitted, every BOM in the database is
+              dumped (legacy bulk export).
+      top_level_only: when True (default), the parent's tree stops at its
+              direct children — sub-assemblies are NOT exploded into the
+              parent's sheet. SG users export each sub-assembly via its
+              own per-row Excel button (which calls this same endpoint with
+              the SG's bom_id). When False, the legacy multi-level
+              recursion behavior is preserved.
 
     Routings layout (per latest user spec):
       One column per master Routing (sourced from db.routings, status=active).
@@ -6617,10 +6628,14 @@ async def export_boms_excel(request: Request, bom_id: Optional[str] = None):
         else:
             for idx, comp in enumerate(components):
                 _emit_row(comp, idx == 0)
-                # Recurse into the component if it has its own BOM
-                child_bom = boms_by_parent.get(comp.get("item_id"))
-                if child_bom:
-                    _walk(child_bom, level + 1)
+                # Recurse only when the caller explicitly asked for a full
+                # multi-level dump. With `top_level_only=True` (the default
+                # for per-BOM exports), each sub-assembly stays as a one-line
+                # entry — the user downloads the SG's own Excel separately.
+                if not top_level_only:
+                    child_bom = boms_by_parent.get(comp.get("item_id"))
+                    if child_bom:
+                        _walk(child_bom, level + 1)
 
         visited_parents.discard(parent_id)
 
