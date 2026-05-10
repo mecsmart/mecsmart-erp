@@ -1500,19 +1500,47 @@ export default function BOMPage() {
                             <td className="py-2 px-2">
                               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${catBadge(row.cat)}`}>{catLabel(row.cat)}</span>
                             </td>
-                            <td className="py-2 px-2 mono font-semibold text-[#111827]">
-                              <ItemHoverCard item={row.item}>
-                                <span className="cursor-help underline decoration-dotted decoration-[#9CA3AF] underline-offset-2">{row.item?.part_number || '?'}</span>
-                              </ItemHoverCard>
-                            </td>
+                            <td className="py-2 px-2 mono font-semibold text-[#111827]">{row.item?.part_number || '?'}</td>
                             <td className="py-2 px-2 text-[#374151]">
-                              <ItemHoverCard item={row.item}>
-                                <span className="cursor-help">{row.item?.name || '-'}{row.is_alternate ? ' (alt)' : ''}</span>
-                              </ItemHoverCard>
+                              {row.item?.name || '-'}{row.is_alternate ? ' (alt)' : ''}
                               {row.child_bom_id && canEdit && (
                                 <button onClick={(e) => { e.stopPropagation(); const childBom = boms.find(b => b.id === row.child_bom_id); if (childBom) handleEdit(childBom); }} className="ml-2 inline-flex items-center gap-0.5 text-[10px] text-[#1E429F] hover:text-[#1D3557] bg-[#E1EFFE] hover:bg-[#C3DDFD] px-1.5 py-0.5 rounded" title={`Edit ${row.item?.part_number} BOM`} data-testid={`edit-child-bom-${row.key}`}>
                                   <Edit2 className="w-3 h-3" />Edit BOM
                                 </button>
+                              )}
+                              {/* Per-SG download buttons — only on sub-assembly
+                                  rows that have their own BOM. Lets the user
+                                  pull the SG's own components in PDF or Excel
+                                  without leaving the parent context. Buttons
+                                  are scoped to `row.cat === 'sub_assembly'`
+                                  AND `row.child_bom_id` (a BOM exists for it). */}
+                              {row.cat === 'sub_assembly' && row.child_bom_id && (
+                                <>
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      const childBom = boms.find(b => b.id === row.child_bom_id);
+                                      if (!childBom) { toast.error('SG BOM not found.'); return; }
+                                      const exp = await ensureExplosion(childBom.id);
+                                      if (!exp) { toast.error('Could not load SG BOM.'); return; }
+                                      const total = exp?.total_rollup_cost || 0;
+                                      printBomExplosion(row.item, exp.explosion || [], total, childBom, exp.fg_process_cost_per_unit || 0, exp.components_cost || 0);
+                                    }}
+                                    className="ml-1 inline-flex items-center gap-0.5 text-[10px] text-[#723B13] hover:text-[#5C2F0F] bg-[#FEF3C7] hover:bg-[#FDE68A] px-1.5 py-0.5 rounded"
+                                    title={`Download PDF of ${row.item?.part_number} SG BOM`}
+                                    data-testid={`sg-pdf-${row.key}`}
+                                  >
+                                    <Printer className="w-3 h-3" />PDF
+                                  </button>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleBomExport(row.child_bom_id); }}
+                                    className="ml-1 inline-flex items-center gap-0.5 text-[10px] text-[#03543F] hover:text-[#03493A] bg-[#DEF7EC] hover:bg-[#BCF0DA] px-1.5 py-0.5 rounded"
+                                    title={`Export ${row.item?.part_number} SG BOM to Excel`}
+                                    data-testid={`sg-excel-${row.key}`}
+                                  >
+                                    <Download className="w-3 h-3" />Excel
+                                  </button>
+                                </>
                               )}
                             </td>
                             <td className="py-2 px-2 text-right mono font-medium">{formatQty(row.quantity, row.item?.unit_of_measure, uoms)}</td>
