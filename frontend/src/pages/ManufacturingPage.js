@@ -232,6 +232,9 @@ export default function ManufacturingPage() {
         scheduled_start: workOrderForm.scheduled_start ? new Date(workOrderForm.scheduled_start).toISOString() : null,
         scheduled_end: workOrderForm.scheduled_end ? new Date(workOrderForm.scheduled_end).toISOString() : null,
       };
+      if (workOrderForm.variant_selection && Object.keys(workOrderForm.variant_selection).length > 0) {
+        payload.variant_selection = workOrderForm.variant_selection;
+      }
       if (otype === 'mto') {
         payload.production_order_id = workOrderForm.production_order_id;
         if (workOrderForm.source_so_line_id) {
@@ -626,6 +629,7 @@ export default function ManufacturingPage() {
       is_subcontract: false,
       subcontract_supplier_id: '',
       subcontract_type: 'with_material',
+      variant_selection: null,
     });
   };
 
@@ -1062,6 +1066,37 @@ export default function ManufacturingPage() {
                                 ))}
                               </div>
                             </>
+                          );
+                        })()}
+                        {/* ========== PHASE 2: MTS Variant Configurator ========== */}
+                        {(() => {
+                          const selectedItem = items.find(it => it.id === workOrderForm.item_id);
+                          const attrs = selectedItem?.variant_attributes || [];
+                          if (!selectedItem || attrs.length === 0) return null;
+                          return (
+                            <div className="mt-2 border border-[#FDE68A] rounded-sm bg-[#FFFBEB] px-2 py-1.5" data-testid="mo-mts-variant-block">
+                              <label className="block text-[10px] font-semibold text-[#723B13] mb-1 uppercase tracking-wide">Variant Configuration *</label>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {attrs.map((attr, ai) => (
+                                  <div key={ai}>
+                                    <label className="block text-[10px] font-semibold text-[#92400E] mb-0.5">{attr.name}</label>
+                                    <Select
+                                      value={(workOrderForm.variant_selection || {})[attr.name] || ''}
+                                      onValueChange={(v) => {
+                                        const next = { ...(workOrderForm.variant_selection || {}) };
+                                        next[attr.name] = v;
+                                        setWorkOrderForm({ ...workOrderForm, variant_selection: next });
+                                      }}
+                                    >
+                                      <SelectTrigger className="text-[11px] h-7 bg-white" data-testid={`mo-mts-variant-${ai}`}><SelectValue placeholder={`Pick ${attr.name}…`} /></SelectTrigger>
+                                      <SelectContent>
+                                        {(attr.values || []).map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
                           );
                         })()}
                       </div>

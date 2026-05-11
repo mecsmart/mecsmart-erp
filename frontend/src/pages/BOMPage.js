@@ -102,6 +102,11 @@ export default function BOMPage() {
     parent_routings: [],
   });
 
+  // Phase 2 — variant attributes for the parent FG/SG item.
+  // Edited inline in the BOM dialog. Persisted to the parent item via PUT /api/items/{id}.
+  const [parentVariantAttrs, setParentVariantAttrs] = useState([]);  // [{name, values: []}]
+  const [appliesToDialog, setAppliesToDialog] = useState({ open: false, componentIdx: -1 });
+
   // Permission gating — always trust the granular permissions object (falls
   // back to the legacy role list only when the user has NO permissions map set,
   // so seed/admin still works).
@@ -277,6 +282,21 @@ export default function BOMPage() {
         await api.post('/api/bom', payload);
         toast.success(`BOM "${payload.name}" created`, { id: toastId });
       }
+      // Phase 2 — persist variant_attributes to the parent item if changed.
+      try {
+        const parentItem = items.find(it => it.id === formData.parent_item_id);
+        const prev = JSON.stringify(parentItem?.variant_attributes || []);
+        const curr = JSON.stringify(parentVariantAttrs || []);
+        if (prev !== curr) {
+          // Strip out attributes with empty name or no values before saving.
+          const cleaned = (parentVariantAttrs || [])
+            .map(a => ({ name: (a.name || '').trim(), values: (a.values || []).map(v => String(v).trim()).filter(Boolean) }))
+            .filter(a => a.name && a.values.length > 0);
+          await api.put(`/api/items/${formData.parent_item_id}`, { variant_attributes: cleaned });
+        }
+      } catch (e) {
+        console.warn('Failed to save variant_attributes on parent item:', e);
+      }
       // If the user was editing a child BOM (via the "Edit <child> BOM" button
       // inside a parent edit), pop the stack and restore the parent's edit
       // state — keeping the dialog open. Only when the stack is empty do we
@@ -379,6 +399,9 @@ export default function BOMPage() {
       components: cleaned,
       parent_routings: bom.parent_routings || [],
     });
+    // Phase 2 — load variant_attributes from the parent item.
+    const parentItem = items.find(it => it.id === bom.parent_item_id);
+    setParentVariantAttrs(parentItem?.variant_attributes || []);
     setIsDialogOpen(true);
   };
 
@@ -543,6 +566,7 @@ export default function BOMPage() {
       components: [],
       parent_routings: [],
     });
+    setParentVariantAttrs([]);
   };
 
   const toggleExpanded = (key) => {
@@ -829,7 +853,12 @@ export default function BOMPage() {
                       <SearchableItemSelect
                         items={items}
                         value={formData.parent_item_id}
-                        onChange={(v) => setFormData({ ...formData, parent_item_id: v })}
+                        onChange={(v) => {
+                          setFormData({ ...formData, parent_item_id: v });
+                          // Phase 2 — pre-load existing variant_attributes when picking the parent.
+                          const it = items.find(i => i.id === v);
+                          setParentVariantAttrs(it?.variant_attributes || []);
+                        }}
                         placeholder={items.length === 0 ? 'Items still loading…' : 'Type part number or name to search…'}
                         testId="bom-parent-item-select"
                         disabled={items.length === 0}
@@ -901,6 +930,65 @@ export default function BOMPage() {
                     data-testid="bom-description-input"
                   />
                 </div>
+
+                {/* ========== PHASE 2: VARIANT ATTRIBUTES (parent item) ========== */}
+                {formData.parent_item_id && (
+                  <div className="border border-[#FDE68A] rounded-sm bg-[#FFFBEB] px-3 py-2.5" data-testid="bom-variant-attrs-block">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-sm font-semibold text-[#723B13]">
+                        Product Variant Attributes <span className="font-normal text-[#92400E]">(optional)</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setParentVariantAttrs(prev => [...(prev || []), { name: '', values: [] }])}
+                        className="text-[10px] px-2 py-0.5 rounded border border-[#723B13] text-[#723B13] hover:bg-[#FEF3C7]"
+                        data-testid="bom-add-variant-attr"
+                      >+ Add Attribute</button>
+                    </div>
+                    <p className="text-[10px] text-[#92400E] mb-2">Define configurable attributes (e.g. <i>Motor Power: 1HP, 2HP, 5HP</i>). When set, each component below gets an "Applies to" filter so a single master BOM can serve every variant.</p>
+                    {(parentVariantAttrs || []).length === 0 ? (
+                      <div className="text-[11px] text-[#9CA3AF] py-2 italic">No variants. This BOM is a single non-configurable build.</div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {(parentVariantAttrs || []).map((attr, ai) => (
+                          <div key={ai} className="flex items-start gap-2 bg-white border border-[#FDE68A] rounded-sm px-2 py-1.5" data-testid={`bom-variant-attr-row-${ai}`}>
+                            <input
+                              type="text"
+                              placeholder="Attribute name (e.g. Motor Power)"
+                              value={attr.name || ''}
+                              onChange={(e) => {
+                                const next = [...parentVariantAttrs];
+                                next[ai] = { ...next[ai], name: e.target.value };
+                                setParentVariantAttrs(next);
+                              }}
+                              className="input-field text-xs flex-1"
+                              data-testid={`bom-variant-attr-name-${ai}`}
+                            />
+                            <input
+                              type="text"
+                              placeholder="Comma-separated values (e.g. 1HP, 2HP, 5HP)"
+                              value={(attr.values || []).join(', ')}
+                              onChange={(e) => {
+                                const next = [...parentVariantAttrs];
+                                next[ai] = { ...next[ai], values: e.target.value.split(',').map(v => v.trim()).filter(Boolean) };
+                                setParentVariantAttrs(next);
+                              }}
+                              className="input-field text-xs flex-1"
+                              data-testid={`bom-variant-attr-values-${ai}`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setParentVariantAttrs(prev => prev.filter((_, i) => i !== ai))}
+                              className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded px-1"
+                              data-testid={`bom-variant-attr-remove-${ai}`}
+                              title="Remove attribute"
+                            ><X className="w-3.5 h-3.5" /></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Parent Item Routings */}
                 <div className="border-t border-[#E5E7EB] pt-4">
@@ -1002,6 +1090,21 @@ export default function BOMPage() {
                                 <input type="checkbox" checked={comp.is_alternate} onChange={(e) => updateComponent(index, 'is_alternate', e.target.checked)} className="rounded" />
                                 <span>Alt</span>
                               </label>
+                              {(parentVariantAttrs || []).length > 0 && (() => {
+                                const a = comp.applies_to || {};
+                                const hasFilter = Object.keys(a).length > 0;
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => setAppliesToDialog({ open: true, componentIdx: index })}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded border ${hasFilter ? 'text-[#1D3557] border-[#1D3557] bg-[#E1EFFE]' : 'text-[#6B7280] border-[#D1D5DB] hover:bg-[#F9FAFB]'}`}
+                                    data-testid={`component-applies-to-btn-${index}`}
+                                    title={hasFilter ? `Applies to: ${Object.entries(a).map(([k,v]) => `${k}=${v}`).join(', ')}` : 'Common to all variants — click to restrict'}
+                                  >
+                                    {hasFilter ? `${Object.keys(a).length} filter${Object.keys(a).length > 1 ? 's' : ''}` : 'All variants'}
+                                  </button>
+                                );
+                              })()}
                               <button type="button" onClick={() => removeComponent(index)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"><X className="w-4 h-4" /></button>
                             </div>
                             {/* Routings with per-operation cost (non-RM components only) */}
@@ -1169,6 +1272,66 @@ export default function BOMPage() {
         )}
         </div>
       </div>
+
+      {/* ========== APPLIES-TO PICKER DIALOG (Phase 2 — Variants) ========== */}
+      <Dialog open={appliesToDialog.open} onOpenChange={(o) => setAppliesToDialog(prev => ({ ...prev, open: o }))}>
+        <DialogContent onEscapeKeyDown={(e) => e.preventDefault()} onInteractOutside={(e) => e.preventDefault()} className="max-w-md">
+          <DialogHeader><DialogTitle className="text-sm">Applies to which variants?</DialogTitle></DialogHeader>
+          {(() => {
+            const idx = appliesToDialog.componentIdx;
+            if (idx < 0) return null;
+            const comp = formData.components[idx] || {};
+            const a = comp.applies_to || {};
+            const updateApplies = (newApplies) => {
+              const next = [...formData.components];
+              next[idx] = { ...next[idx], applies_to: newApplies };
+              setFormData({ ...formData, components: next });
+            };
+            return (
+              <div className="space-y-2 mt-2" data-testid="applies-to-dialog-body">
+                <p className="text-xs text-[#6B7280]">
+                  Leave every attribute blank (or pick <i>Any</i>) to keep this component <b>common to all variants</b>.
+                  Restrict to specific values to include this component only when those values are selected on SO/MO.
+                </p>
+                {(parentVariantAttrs || []).map((attr, ai) => (
+                  <div key={ai} className="flex items-center gap-2 border border-[#E5E7EB] rounded-sm px-2 py-1.5">
+                    <label className="text-xs font-semibold text-[#374151] w-32 truncate" title={attr.name}>{attr.name || `Attr #${ai + 1}`}</label>
+                    <Select value={a[attr.name] || '__any__'} onValueChange={(v) => {
+                      const next = { ...a };
+                      if (v === '__any__') {
+                        delete next[attr.name];
+                      } else {
+                        next[attr.name] = v;
+                      }
+                      updateApplies(next);
+                    }}>
+                      <SelectTrigger className="text-xs" data-testid={`applies-to-attr-${ai}`}><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__any__">— Any (no filter) —</SelectItem>
+                        {(attr.values || []).map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ))}
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => { updateApplies({}); setAppliesToDialog({ open: false, componentIdx: -1 }); }}
+                    className="btn-secondary text-xs"
+                    data-testid="applies-to-clear"
+                  >Clear (Common to all)</button>
+                  <button
+                    type="button"
+                    onClick={() => setAppliesToDialog({ open: false, componentIdx: -1 })}
+                    className="btn-primary text-xs"
+                    data-testid="applies-to-done"
+                  >Done</button>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
 
       {/* Status Filter & Search */}
       <div className="card-flat px-3 py-2">

@@ -109,6 +109,17 @@ class ItemCreate(BaseModel):
     reorder_point: int = 0
     hsn_code: Optional[str] = ""
     gst_rate: Optional[float] = 18.0
+    # ===== Phase 2: Attribute-driven variants =====
+    # When set on an FG/SG item, every BOM whose parent_item_id is this item
+    # MAY use the per-component `applies_to` map to filter components by
+    # variant selection at SO/MO creation time.
+    # Example:
+    #   variant_attributes = [
+    #     {"name": "Motor Power", "values": ["1HP", "2HP", "5HP"]},
+    #     {"name": "Voltage",     "values": ["220V", "440V"]}
+    #   ]
+    variant_attributes: Optional[List[Dict[str, Any]]] = None
+    auto_suffix_variant_sku: Optional[bool] = True
 
 class ItemUpdate(BaseModel):
     name: Optional[str] = None
@@ -125,6 +136,8 @@ class ItemUpdate(BaseModel):
     reorder_point: Optional[int] = None
     hsn_code: Optional[str] = None
     gst_rate: Optional[float] = None
+    variant_attributes: Optional[List[Dict[str, Any]]] = None
+    auto_suffix_variant_sku: Optional[bool] = None
 
 
 class ItemGroupCreate(BaseModel):
@@ -153,6 +166,10 @@ class BOMComponentCreate(BaseModel):
     alternate_for: Optional[str] = None
     position: Optional[int] = None
     routings: Optional[List[Any]] = []  # Each item: str (legacy) OR {name, cost}
+    # Variant filter — empty / null = common to ALL variants.
+    # Otherwise: AND-logic dict, only included when SO/MO variant selection matches.
+    # Example: {"Motor Power": "2HP"} → component used only when selection contains Motor Power=2HP.
+    applies_to: Optional[Dict[str, str]] = None
 
 class BOMCreate(BaseModel):
     parent_item_id: str
@@ -193,6 +210,38 @@ def normalize_routings(routings: Optional[List[Any]]) -> List[Dict[str, Any]]:
 def routings_total_cost(routings: Optional[List[Any]]) -> float:
     """Sum of cost across all routing entries."""
     return sum(r.get("cost", 0) for r in normalize_routings(routings))
+
+
+def _filter_components_by_variant(components: List[Dict[str, Any]], variant_selection: Optional[Dict[str, str]]) -> List[Dict[str, Any]]:
+    """Phase 2 — filter BOM components by variant_selection (AND-logic).
+
+    Rules:
+      • Components with no `applies_to` (None / empty dict) are ALWAYS included
+        (common to all variants).
+      • Components with an `applies_to` map are included ONLY if every (k, v)
+        in the map matches `variant_selection[k]`.
+      • If `variant_selection` is None / empty, only common-to-all components
+        are kept (legacy non-variant behaviour preserved as long as no BOM
+        component carries an `applies_to`).
+    """
+    if not components:
+        return []
+    if not variant_selection:
+        variant_selection = {}
+    out = []
+    for c in components:
+        applies = c.get("applies_to") or {}
+        if not applies:
+            out.append(c)
+            continue
+        match = True
+        for k, v in applies.items():
+            if str(variant_selection.get(k, "")).strip() != str(v).strip():
+                match = False
+                break
+        if match:
+            out.append(c)
+    return out
 
 
 def _merge_duplicate_components(components: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -366,6 +415,11 @@ class ProductionOrderLine(BaseModel):
     # When the SO line originated from a Quotation line, retain the mapping
     # so the quotation balance can be tracked.
     source_quotation_line_no: Optional[int] = None
+    # Phase 2 — variant selection for attribute-driven BOMs.
+    # Keyed by attribute name, value = chosen attribute value.
+    # Example: {"Motor Power": "2HP", "Voltage": "440V"}
+    # Empty/None = no variant filtering (legacy non-variant BOM).
+    variant_selection: Optional[Dict[str, str]] = None
     # Populated on confirm — how the qty was split:
     reserved_qty: Optional[int] = 0   # to be fulfilled from FG stock
     mo_qty: Optional[int] = 0         # to be manufactured via MO
@@ -720,6 +774,8 @@ class WorkOrderCreate(BaseModel):
     is_subcontract: Optional[bool] = False
     subcontract_supplier_id: Optional[str] = ""
     subcontract_type: Optional[str] = "with_material"  # with_material | without_material
+    # Phase 2 — variant selection. For MTO it's inherited from the SO line if not provided.
+    variant_selection: Optional[Dict[str, str]] = None
 
 class WorkOrderUpdate(BaseModel):
     status: Optional[str] = None
@@ -1611,6 +1667,7 @@ async def create_production_order(order_data: ProductionOrderCreate, request: Re
             "order_type": normalized_order_type,
             "notes": ln.notes or "",
             "source_quotation_line_no": ln.source_quotation_line_no,
+            "variant_selection": ln.variant_selection or None,
             "reserved_qty": 0,
             "mo_qty": 0,
             "status": "draft"
@@ -4868,6 +4925,22 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
     item = await db.items.find_one({"id": bom.get("parent_item_id")})
     if not item:
         raise HTTPException(status_code=404, detail="Item not found for BOM")
+
+    # ===== Phase 2: Resolve variant_selection for this MO =====
+    # Priority: explicit payload > inherited from SO line (MTO only) > None.
+    variant_sel_for_mo = wo_data.variant_selection or None
+    if not variant_sel_for_mo and so_line:
+        inherited = so_line.get("variant_selection")
+        if inherited:
+            variant_sel_for_mo = inherited
+    # Validate every attribute in the selection is defined on the parent item.
+    if variant_sel_for_mo:
+        defined_attrs = {a["name"]: set(a.get("values") or []) for a in (item.get("variant_attributes") or []) if a.get("name")}
+        for attr_name, attr_val in variant_sel_for_mo.items():
+            if attr_name not in defined_attrs:
+                raise HTTPException(status_code=400, detail=f"Variant attribute '{attr_name}' is not defined on this item")
+            if defined_attrs[attr_name] and attr_val not in defined_attrs[attr_name]:
+                raise HTTPException(status_code=400, detail=f"'{attr_val}' is not a valid value for '{attr_name}' (allowed: {sorted(defined_attrs[attr_name])})")
     
     created_work_orders = []
     
@@ -4967,6 +5040,7 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             "is_subcontract": wo_data.is_subcontract if is_main else False,
             "subcontract_supplier_id": wo_data.subcontract_supplier_id if is_main else "",
             "subcontract_type": wo_data.subcontract_type if is_main else "with_material",
+            "variant_selection": variant_sel_for_mo if is_main else None,
             "notes": wo_data.notes if is_main else f"Auto-created for {item_doc.get('category', 'child item')}",
             "materials_consumed": False,
             "created_at": datetime.now(timezone.utc),
@@ -4984,8 +5058,12 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
         bom = await db.boms.find_one({"parent_item_id": parent_item_id, "status": "active"})
         if not bom:
             return
-        
-        for component in bom.get("components", []):
+
+        # Phase 2 — filter components by variant_selection on the top-level MO.
+        # variant_selection is captured below at wo_doc time; here we use the helper.
+        applicable_components = _filter_components_by_variant(bom.get("components", []) or [], variant_sel_for_mo)
+
+        for component in applicable_components:
             if component.get("is_alternate"):
                 continue  # Skip alternate components
             

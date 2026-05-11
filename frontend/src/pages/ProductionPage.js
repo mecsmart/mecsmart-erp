@@ -718,6 +718,38 @@ export default function ProductionPage() {
                             </>
                           )}
                         </div>
+                        {/* ========== PHASE 2 — VARIANT CONFIGURATOR ========== */}
+                        {selected && selected.parent_item?.variant_attributes && selected.parent_item.variant_attributes.length > 0 && (
+                          <div className="border border-[#FDE68A] rounded-sm bg-[#FFFBEB] px-2 py-1.5" data-testid={`so-variant-block-${idx}`}>
+                            <label className="block text-[10px] font-semibold text-[#723B13] mb-1 uppercase tracking-wide">Variant Configuration *</label>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {selected.parent_item.variant_attributes.map((attr, ai) => (
+                                <div key={ai}>
+                                  <label className="block text-[10px] font-semibold text-[#92400E] mb-0.5">{attr.name}</label>
+                                  <Select
+                                    value={(line.variant_selection || {})[attr.name] || ''}
+                                    onValueChange={(v) => {
+                                      const next = { ...(line.variant_selection || {}) };
+                                      next[attr.name] = v;
+                                      updateLine(idx, { variant_selection: next });
+                                    }}
+                                  >
+                                    <SelectTrigger className="text-[11px] h-7 bg-white" data-testid={`so-variant-${idx}-${ai}`}><SelectValue placeholder={`Pick ${attr.name}…`} /></SelectTrigger>
+                                    <SelectContent>
+                                      {(attr.values || []).map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              ))}
+                            </div>
+                            {(() => {
+                              const missing = (selected.parent_item.variant_attributes || []).filter(a => !((line.variant_selection || {})[a.name]));
+                              return missing.length > 0 ? (
+                                <p className="text-[9px] text-[#9B1C1C] mt-1">Select all attributes: missing {missing.map(m => m.name).join(', ')}</p>
+                              ) : null;
+                            })()}
+                          </div>
+                        )}
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <label className="block text-xs font-semibold text-[#374151] mb-1">Qty *</label>

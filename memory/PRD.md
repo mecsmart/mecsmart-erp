@@ -20,6 +20,33 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-05-11 (final)** — **Phase 2: Attribute-Driven BOM Variants (P1):**
+  Single master BOM serves every configuration via `applies_to` filters on each component.
+
+  **Backend:**
+  - `Item.variant_attributes`: `[{name: str, values: [str, …]}]` — optional, set on FG/SG items.
+  - `BOMComponent.applies_to`: `Dict[str,str]` — when set, component is included only if SO/MO `variant_selection` matches every key/value (AND-logic). Missing/empty = common to all variants.
+  - `_filter_components_by_variant(components, variant_selection)` helper at module scope. Applied inside `create_child_work_orders` so child MO explosion and stock auto-reservation honour the variant filter.
+  - `ProductionOrderLine.variant_selection` (Dict[str,str]) — saved on each SO line.
+  - `WorkOrderCreate.variant_selection` + persisted on the main MO doc. MTO inherits from the SO line if payload omits it. Validation rejects unknown attribute names or invalid values with a clear error.
+  - `Item` model accepts `variant_attributes` on PUT — used by the BOM dialog to persist attrs on the parent item.
+
+  **Frontend:**
+  - **BOM dialog**: new yellow "Product Variant Attributes" block appears below Description once a parent item is picked. Inline editor for `[name, comma-separated values]` rows. Auto-saved to the parent item on BOM Save.
+  - **BOM dialog component row**: new "All variants" / "N filters" toggle button (yellow when filter is active). Opens a modal with one dropdown per attribute — "Any (no filter)" + each defined value. Stored in `component.applies_to`.
+  - **Sales Order line**: after picking a BOM, if the parent item has variant_attributes, a yellow "Variant Configuration" block shows dropdowns for each attribute. Selected combination saved on the SO line. Validation reminder shown if any attribute is unchosen.
+  - **Manufacturing Order MTS**: same Variant Configuration block when the picked item has variant_attributes. Stored in `workOrderForm.variant_selection` and sent in the MO payload.
+  - **Manufacturing Order MTO**: variant_selection automatically inherits from the linked SO line on the backend (no UI changes needed — user already chose it on the SO).
+
+  **Backward compat:** Non-variant BOMs/items keep working unchanged. `applies_to` is optional; missing = "common to all". Existing MOs created before this change have `variant_selection: None` which the filter treats as empty (only common-to-all components included — matches old behaviour).
+
+  **Tested end-to-end (curl):**
+  - Set variant_attributes on SA-001 (Motor Power + Voltage) ✅
+  - Add `applies_to={'Motor Power': '2HP'}` on one component ✅
+  - MTS MO with variant=1HP → filter excludes the 2HP-only component ✅
+  - MTS MO with variant=2HP → component included ✅
+  - Validation: `Motor Power='99HP'` → rejected with "not a valid value (allowed: ['1HP','2HP','5HP'])" ✅
+
 - **2026-05-11 (late)** — **Major SO/MO Workflow Restructure (P0):**
   1. **Sales Order simplified** — MTS/MTO removed from SO entirely. SO is now a pure customer-demand record. Step 1 = optional "From Quotation" picker; Step 2 = Order Lines. Customer details block appears readonly when quotation is linked.
   2. **SO line "Reserve / Release Stock" toggle** — new `POST /api/production/{id}/reserve-line` and `/release-line` endpoints. Reserves only the **parent FG/SG/CP item** on the line (NO BOM explosion, per user spec). Each SO line carries `is_reserved` + `reserved_qty` + `reserved_at`. Stock validated against `current_stock - reserved_stock` before booking. UI shows Lock/Unlock button per line with "RESERVED X" badge.
