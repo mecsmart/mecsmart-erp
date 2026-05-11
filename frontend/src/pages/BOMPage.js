@@ -275,18 +275,12 @@ export default function BOMPage() {
         }
       }
 
-      // Compute variant_attributes payload BEFORE the BOM save so we can run both in parallel.
-      let variantAttrsPayload = null;
-      try {
-        const parentItem = items.find(it => it.id === formData.parent_item_id);
-        const prev = JSON.stringify(parentItem?.variant_attributes || []);
-        const curr = JSON.stringify(parentVariantAttrs || []);
-        if (prev !== curr) {
-          variantAttrsPayload = (parentVariantAttrs || [])
-            .map(a => ({ name: (a.name || '').trim(), values: (a.values || []).map(v => String(v).trim()).filter(Boolean) }))
-            .filter(a => a.name && a.values.length > 0);
-        }
-      } catch (e) { /* ignore */ }
+      // Compute variant_attributes payload — ALWAYS send if there are non-empty entries
+      // (we previously gated on a diff vs the cached item, which could silently skip the
+      // save when the items cache was stale).
+      const cleanedAttrs = (parentVariantAttrs || [])
+        .map(a => ({ name: (a.name || '').trim(), values: (a.values || []).map(v => String(v).trim()).filter(Boolean) }))
+        .filter(a => a.name && a.values.length > 0);
 
       // Run BOM save AND variant-attrs update in parallel (saves ~300ms on slow networks).
       const promises = [];
@@ -295,11 +289,11 @@ export default function BOMPage() {
       } else {
         promises.push(api.post('/api/bom', payload));
       }
-      if (variantAttrsPayload !== null) {
-        promises.push(api.put(`/api/items/${formData.parent_item_id}`, { variant_attributes: variantAttrsPayload }));
-      }
+      // Always include variant_attributes (even empty array) so changes — including
+      // clearing all attributes — propagate to the parent item record.
+      promises.push(api.put(`/api/items/${formData.parent_item_id}`, { variant_attributes: cleanedAttrs }));
       await Promise.all(promises);
-      toast.success(`BOM "${payload.name}" ${editingBom ? 'updated' : 'created'}`, { id: toastId });
+      toast.success(`BOM "${payload.name}" ${editingBom ? 'updated' : 'created'}${cleanedAttrs.length > 0 ? ` · ${cleanedAttrs.length} variant attr${cleanedAttrs.length > 1 ? 's' : ''} saved` : ''}`, { id: toastId });
       // If the user was editing a child BOM (via the "Edit <child> BOM" button
       // inside a parent edit), pop the stack and restore the parent's edit
       // state — keeping the dialog open. Only when the stack is empty do we
@@ -407,8 +401,17 @@ export default function BOMPage() {
       parent_routings: bom.parent_routings || [],
     });
     // Phase 2 — load variant_attributes from the parent item.
-    const parentItem = items.find(it => it.id === bom.parent_item_id);
-    setParentVariantAttrs(parentItem?.variant_attributes || []);
+    // Fetch fresh from API to avoid stale lite-cache (older clients may have
+    // cached the items list before variant_attributes was projected).
+    (async () => {
+      try {
+        const { data: freshItem } = await api.get(`/api/items/${bom.parent_item_id}`);
+        setParentVariantAttrs(freshItem?.variant_attributes || []);
+      } catch {
+        const parentItem = items.find(it => it.id === bom.parent_item_id);
+        setParentVariantAttrs(parentItem?.variant_attributes || []);
+      }
+    })();
     setIsDialogOpen(true);
   };
 
@@ -1175,15 +1178,19 @@ export default function BOMPage() {
                               {(parentVariantAttrs || []).length > 0 && (() => {
                                 const a = comp.applies_to || {};
                                 const hasFilter = Object.keys(a).length > 0;
+                                // Show actual variant labels: "1HP" or "2HP·440V" instead of "N filter".
+                                const ribbon = hasFilter
+                                  ? Object.values(a).filter(v => v && String(v).trim() !== '').join(' · ')
+                                  : 'All variants';
                                 return (
                                   <button
                                     type="button"
                                     onClick={() => setAppliesToDialog({ open: true, componentIdx: index })}
-                                    className={`text-[10px] px-1.5 py-0.5 rounded border ${hasFilter ? 'text-[#1D3557] border-[#1D3557] bg-[#E1EFFE]' : 'text-[#6B7280] border-[#D1D5DB] hover:bg-[#F9FAFB]'}`}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded border ${hasFilter ? 'text-white bg-[#1D3557] border-[#1D3557] hover:bg-[#142A4A]' : 'text-[#6B7280] border-[#D1D5DB] hover:bg-[#F9FAFB]'}`}
                                     data-testid={`component-applies-to-btn-${index}`}
-                                    title={hasFilter ? `Applies to: ${Object.entries(a).map(([k,v]) => `${k}=${v}`).join(', ')}` : 'Common to all variants — click to restrict'}
+                                    title={hasFilter ? `Applies to: ${Object.entries(a).map(([k,v]) => `${k} = ${v}`).join(', ')}` : 'Common to all variants — click to restrict'}
                                   >
-                                    {hasFilter ? `${Object.keys(a).length} filter${Object.keys(a).length > 1 ? 's' : ''}` : 'All variants'}
+                                    {ribbon}
                                   </button>
                                 );
                               })()}
