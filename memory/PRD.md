@@ -20,6 +20,23 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-05-11 (later)** — **Item Variant Generation (Odoo-style) (P0 DONE & TESTED 23/23 ✅):**
+  Auto-generates child variant SKUs from a parent FG/SG item's `variant_attributes` so that every combination becomes an independent inventory item (stock, value, invoicing) while sharing one master BOM.
+
+  **Backend (server.py ~L1310-1436):**
+  - `POST /api/items/{item_id}/preview-variants` — dry-run; returns every combination + which already exist as children + existing/new counts.
+  - `POST /api/items/{item_id}/generate-variants` — creates missing children (inherits category/uom/unit_cost from parent), reactivates retired ones, retires children whose combo no longer exists (when an attribute value is removed). Payload `selected_skus` optional; empty → generate all.
+  - Variant child records carry `is_variant=true`, `parent_item_id`, `variant_short_codes` (`{Motor Power: '1HP', Voltage: '220V'}`), `variant_values` and a SKU like `SA-001-1HP-220V`.
+  - `variant_attributes` schema upgraded from `[str]` values to `[{value, short_code}]` (short_code = up to 4 chars, [A-Z0-9], auto-derived from value).
+  - Helpers: `_normalize_variant_attributes`, `_all_variant_combinations`, `_build_variant_sku_from_short_codes`.
+
+  **Frontend:**
+  - `BOMPage.js` — variant chip now has an inline short_code input (max 4 chars) next to each value. New **"Generate Variant Items"** button below the attribute block triggers preview → window.confirm → generate. Toast confirms count.
+  - `InventoryPage.js`, `ManufacturingPage.js`, `ProductionPage.js` — variant value rendering normalised to handle both legacy string values and new `{value, short_code}` objects (no more `[object Object]` chips).
+
+  **Tests:** 23/23 backend tests pass (preview, generate-create, idempotent, retire on removal, reactivate, inheritance, BOM/SO/MO regression). See `/app/backend/tests/test_iteration_98_variant_generation.py`.
+
+
 - **2026-05-11 (final)** — **Phase 2: Attribute-Driven BOM Variants (P1):**
   Single master BOM serves every configuration via `applies_to` filters on each component.
 
