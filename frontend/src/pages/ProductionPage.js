@@ -930,6 +930,9 @@ export default function ProductionPage() {
                               <div key={i} className="flex items-center justify-between gap-2 text-[10px]" data-testid={`so-line-row-${order.id}-${ln.line_no}`}>
                                 <div className="flex-1 min-w-0">
                                   <span className="text-[#6B7280]">L{ln.line_no}:</span>
+                                  {ln.variant_sku && (
+                                    <span className="ml-1 inline-block text-[9px] px-1 rounded bg-[#EEF2FF] text-[#3730A3] mono font-semibold" title={`Variant SKU — ${ln.variant_sku}`} data-testid={`so-variant-sku-${order.id}-${ln.line_no}`}>{ln.variant_sku}</span>
+                                  )}
                                   {hasAnyReserve && (
                                     <span className={`ml-1 inline-block text-[9px] px-1 rounded ${isFullyReserved ? 'bg-[#DEF7EC] text-[#03543F]' : 'bg-[#FEF3C7] text-[#723B13]'}`} data-testid={`so-line-reserved-badge-${order.id}-${ln.line_no}`}>
                                       {isFullyReserved ? `RESERVED ${reservedQty}` : `PARTIAL ${reservedQty}/${ln.quantity}`}

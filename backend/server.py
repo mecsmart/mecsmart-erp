@@ -212,6 +212,24 @@ def routings_total_cost(routings: Optional[List[Any]]) -> float:
     return sum(r.get("cost", 0) for r in normalize_routings(routings))
 
 
+def _build_variant_sku(part_number: str, variant_selection: Optional[Dict[str, str]]) -> str:
+    """Build a display SKU by suffixing the part number with selected variant values.
+    Example: ("FG-001", {"Motor Power":"2HP","Voltage":"440V"}) -> "FG-001-2HP-440V".
+    Values are normalised (spaces stripped) and joined in insertion order so the
+    same variant_selection always yields the same SKU.
+    """
+    if not variant_selection:
+        return part_number
+    parts = []
+    for v in variant_selection.values():
+        if v is None or str(v).strip() == "":
+            continue
+        parts.append(str(v).strip().replace(" ", ""))
+    if not parts:
+        return part_number
+    return f"{part_number}-{'-'.join(parts)}"
+
+
 def _filter_components_by_variant(components: List[Dict[str, Any]], variant_selection: Optional[Dict[str, str]]) -> List[Dict[str, Any]]:
     """Phase 2 — filter BOM components by variant_selection (AND-logic).
 
@@ -1064,6 +1082,7 @@ async def get_items(request: Request, category: Optional[str] = None, search: Op
             "unit_cost": 1, "sale_price": 1, "purchase_price": 1,
             "current_stock": 1, "safety_stock": 1, "reorder_point": 1,
             "lead_time_days": 1,
+            "variant_attributes": 1, "auto_suffix_variant_sku": 1,
         }
     else:
         projection = {"_id": 0}
@@ -1658,6 +1677,12 @@ async def create_production_order(order_data: ProductionOrderCreate, request: Re
         # Legacy "auto" is normalised to "mts" so downstream MRP/confirm flows
         # only ever see the two supported modes.
         normalized_order_type = "mts" if (ln.order_type or "mts") == "auto" else ln.order_type
+        # Phase 2 — compute display SKU (parent part_number + variant suffix).
+        variant_sku = None
+        if ln.variant_selection:
+            parent_item = await db.items.find_one({"id": bom.get("parent_item_id")}, {"_id": 0, "part_number": 1})
+            if parent_item:
+                variant_sku = _build_variant_sku(parent_item.get("part_number") or "", ln.variant_selection)
         enriched_lines.append({
             "line_id": str(uuid.uuid4()),
             "line_no": idx,
@@ -1668,6 +1693,7 @@ async def create_production_order(order_data: ProductionOrderCreate, request: Re
             "notes": ln.notes or "",
             "source_quotation_line_no": ln.source_quotation_line_no,
             "variant_selection": ln.variant_selection or None,
+            "variant_sku": variant_sku,
             "reserved_qty": 0,
             "mo_qty": 0,
             "status": "draft"
@@ -5041,6 +5067,7 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             "subcontract_supplier_id": wo_data.subcontract_supplier_id if is_main else "",
             "subcontract_type": wo_data.subcontract_type if is_main else "with_material",
             "variant_selection": variant_sel_for_mo if is_main else None,
+            "variant_sku": (_build_variant_sku(item_doc.get("part_number") or "", variant_sel_for_mo) if (is_main and variant_sel_for_mo) else None),
             "notes": wo_data.notes if is_main else f"Auto-created for {item_doc.get('category', 'child item')}",
             "materials_consumed": False,
             "created_at": datetime.now(timezone.utc),

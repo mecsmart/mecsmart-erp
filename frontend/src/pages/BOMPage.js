@@ -302,6 +302,9 @@ export default function BOMPage() {
       // state — keeping the dialog open. Only when the stack is empty do we
       // actually close the dialog.
       await reloadBomsBackground();
+      // Refresh items so the newly-saved variant_attributes is visible the next time
+      // this BOM is edited (and to other consumers like SO/MO pickers).
+      await fetchItems();
       if (bomEditStack.length > 0) {
         const parent = bomEditStack[bomEditStack.length - 1];
         setBomEditStack(s => s.slice(0, -1));
@@ -818,11 +821,19 @@ export default function BOMPage() {
             </DialogTrigger>
             <DialogContent
               ref={dialogScrollRef}
-              className="max-w-3xl max-h-[90vh] overflow-y-auto"
+              className="max-w-6xl max-h-[92vh] overflow-y-auto bom-dialog-scroll"
               onEscapeKeyDown={(e) => e.preventDefault()}
               onPointerDownOutside={(e) => e.preventDefault()}
               onInteractOutside={(e) => e.preventDefault()}
             >
+              {/* Visible scrollbar styling (Fix 3) — overrides ultra-thin default. */}
+              <style>{`
+                .bom-dialog-scroll::-webkit-scrollbar { width: 14px; height: 14px; }
+                .bom-dialog-scroll::-webkit-scrollbar-track { background: #E5E7EB; border-radius: 4px; }
+                .bom-dialog-scroll::-webkit-scrollbar-thumb { background: #6B7280; border-radius: 4px; border: 2px solid #E5E7EB; }
+                .bom-dialog-scroll::-webkit-scrollbar-thumb:hover { background: #374151; }
+                .bom-dialog-scroll { scrollbar-width: auto; scrollbar-color: #6B7280 #E5E7EB; }
+              `}</style>
               <DialogHeader>
                 <DialogTitle className="font-[Chivo]">{editingBom ? 'Edit BOM' : 'Create New BOM'}</DialogTitle>
                 {bomEditStack.length > 0 && (
@@ -843,6 +854,29 @@ export default function BOMPage() {
                 )}
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+                {/* Sticky top action bar — Save / Cancel always visible (Fix 4). */}
+                <div className="sticky top-0 z-20 -mx-6 px-6 py-2 bg-white/95 backdrop-blur border-b border-[#E5E7EB] flex justify-end space-x-2" data-testid="bom-sticky-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (bomEditStack.length > 0) {
+                        const parent = bomEditStack[bomEditStack.length - 1];
+                        setBomEditStack(s => s.slice(0, -1));
+                        setEditingBom(parent.bom);
+                        setFormData(parent.formData);
+                        return;
+                      }
+                      setIsDialogOpen(false);
+                    }}
+                    className="btn-secondary text-xs"
+                    data-testid="bom-cancel-btn-top"
+                  >
+                    {bomEditStack.length > 0 ? 'Back to Parent BOM' : 'Cancel'}
+                  </button>
+                  <button type="submit" className="btn-primary text-xs" data-testid="bom-save-btn-top">
+                    {editingBom ? 'Update BOM' : 'Create BOM'}
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold text-[#111827] mb-1">
