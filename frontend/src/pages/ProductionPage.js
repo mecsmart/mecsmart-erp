@@ -896,7 +896,7 @@ export default function ProductionPage() {
                       {(order.lines && order.lines.length >= 1) ? (
                         <div className="space-y-1">
                           {(order.lines || []).slice(0, 4).map((ln, i) => {
-                            const canReserveAction = canEdit && !['cancelled', 'partially_cancelled', 'completed'].includes(order.status);
+                            const canReserveAction = canEdit && !['draft', 'cancelled', 'partially_cancelled', 'completed'].includes(order.status);
                             return (
                               <div key={i} className="flex items-center justify-between gap-2 text-[10px]" data-testid={`so-line-row-${order.id}-${ln.line_no}`}>
                                 <div className="flex-1 min-w-0">

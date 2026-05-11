@@ -1927,6 +1927,9 @@ async def reserve_so_line(order_id: str, payload: dict = Body(default={}), reque
     order = await db.production_orders.find_one({"id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Sales order not found")
+    # Reserve is only allowed AFTER the SO is confirmed (i.e. not still in draft).
+    if order.get("status") in (None, "", "draft"):
+        raise HTTPException(status_code=400, detail="Sales Order must be confirmed before stock can be reserved")
     line_id = payload.get("line_id")
     line_no = payload.get("line_no")
     target_line = None

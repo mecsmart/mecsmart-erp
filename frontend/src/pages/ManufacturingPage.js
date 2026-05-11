@@ -1397,12 +1397,14 @@ export default function ManufacturingPage() {
                               {wo.status === 'released' && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#DEF7EC] text-[#03543F]" data-testid={`released-badge-${wo.id}`}>RELEASED</span>
                               )}
-                              {showReserve && (
-                                <button onClick={() => handleReserveMaterials(wo.id, false)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`reserve-wo-${wo.id}`}><PackageCheck className="w-3 h-3 inline mr-0.5" />Reserve</button>
+                              {canEdit && ['pending', 'released'].includes(wo.status) && !wo.parent_wo_id && (
+                                <button onClick={() => {
+                                  if (window.confirm(`Cancel Manufacturing Order ${wo.wo_number}?\n\nThis releases any reserved child stock back. Cannot be undone.`)) {
+                                    handleUpdateWorkOrderStatus(wo.id, 'cancelled');
+                                  }
+                                }} className="btn-secondary text-xs px-2 py-1 text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]" data-testid={`cancel-wo-${wo.id}`}><XCircle className="w-3 h-3 inline mr-0.5" />Cancel</button>
                               )}
-                              {showUnreserve && (
-                                <button onClick={() => handleReserveMaterials(wo.id, true)} className="btn-secondary text-xs px-2 py-1 text-[#9B1C1C] border-[#9B1C1C]" data-testid={`unreserve-wo-${wo.id}`}><PackageX className="w-3 h-3 inline mr-0.5" />Unreserve</button>
-                              )}
+                              {/* Reserve / Unreserve buttons removed — child reservation now happens automatically on /release. */}
                               {canEdit && wo.status === 'pending' && !wo.is_subcontract && <button onClick={() => handleUpdateWorkOrderStatus(wo.id, 'in_progress')} className="btn-secondary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Inhouse Start</button>}
                               {canEdit && wo.status === 'pending' && wo.is_subcontract && <button onClick={() => handleStartSC(wo.id)} className="btn-primary text-xs px-2 py-1" data-testid={`start-wo-${wo.id}`}><Play className="w-3 h-3 inline mr-0.5" />Start SC</button>}
                               {canEdit && wo.status === 'in_progress' && wo.is_subcontract && <span className="text-xs px-2 py-1 rounded bg-[#E5E7EB] text-[#6B7280] font-medium" data-testid={`sc-done-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />SC Done</span>}
