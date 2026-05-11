@@ -1942,41 +1942,53 @@ async def reserve_so_line(order_id: str, payload: dict = Body(default={}), reque
             break
     if not target_line:
         raise HTTPException(status_code=404, detail=f"Line not found (line_id={line_id}, line_no={line_no})")
-    if target_line.get("is_reserved"):
-        raise HTTPException(status_code=400, detail="Line is already reserved. Release it first to re-reserve.")
+    qty = int(target_line.get("quantity", 0) or 0)
+    if qty <= 0:
+        raise HTTPException(status_code=400, detail="Invalid line quantity")
+    if int(target_line.get("reserved_qty", 0) or 0) >= qty:
+        raise HTTPException(status_code=400, detail="Line is already fully reserved. Release it first to re-reserve.")
     bom = await db.boms.find_one({"id": target_line.get("bom_id")}, {"_id": 0, "parent_item_id": 1})
     if not bom or not bom.get("parent_item_id"):
         raise HTTPException(status_code=404, detail="BOM (or its parent item) not found for this line")
     parent_item_id = bom["parent_item_id"]
-    qty = int(target_line.get("quantity", 0) or 0)
-    if qty <= 0:
-        raise HTTPException(status_code=400, detail="Invalid line quantity")
     parent_item = await db.items.find_one({"id": parent_item_id}, {"_id": 0, "part_number": 1, "name": 1, "current_stock": 1, "reserved_stock": 1})
     if not parent_item:
         raise HTTPException(status_code=404, detail="Parent item missing in master")
     current_stock = int(parent_item.get("current_stock", 0) or 0)
     already_reserved = int(parent_item.get("reserved_stock", 0) or 0)
     free_stock = max(0, current_stock - already_reserved)
-    if free_stock < qty:
+    prev_line_reserved = int(target_line.get("reserved_qty", 0) or 0)
+    qty_still_needed = qty - prev_line_reserved
+    if free_stock <= 0:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot reserve {qty} units of {parent_item.get('part_number')} — only {free_stock} available (stock={current_stock}, already reserved={already_reserved}).",
+            detail=f"No FG stock available to reserve for {parent_item.get('part_number')} (stock={current_stock}, already reserved={already_reserved}). Create a Manufacturing Order to produce the qty.",
         )
+    # Partial reserve allowed — lock whatever is available (up to the still-needed qty on this line).
+    reserve_qty = min(qty_still_needed, free_stock)
     await db.items.update_one(
         {"id": parent_item_id},
-        {"$inc": {"reserved_stock": qty}},
+        {"$inc": {"reserved_stock": reserve_qty}},
     )
+    new_reserved = prev_line_reserved + reserve_qty
+    is_fully_reserved = new_reserved >= qty
     await db.production_orders.update_one(
         {"id": order_id, "lines.line_id": target_line.get("line_id")},
         {"$set": {
-            "lines.$.is_reserved": True,
-            "lines.$.reserved_qty": qty,
+            "lines.$.is_reserved": is_fully_reserved,
+            "lines.$.reserved_qty": new_reserved,
             "lines.$.reserved_at": datetime.now(timezone.utc),
         }},
     )
     return {
-        "message": f"Reserved {qty} units of {parent_item.get('part_number')}",
-        "reserved_qty": qty,
+        "message": (
+            f"Reserved {reserve_qty} of {qty_still_needed} units of {parent_item.get('part_number')}"
+            + (f" — line now fully reserved ({new_reserved}/{qty})" if is_fully_reserved else f" — line partial: {new_reserved}/{qty}. Click Reserve again when more FG arrives, or create an MO for the balance.")
+        ),
+        "reserved_qty": reserve_qty,
+        "line_reserved_total": new_reserved,
+        "line_quantity": qty,
+        "is_fully_reserved": is_fully_reserved,
         "item_part_number": parent_item.get("part_number"),
         "item_name": parent_item.get("name"),
     }
@@ -4935,13 +4947,29 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             
             if free_stock >= child_qty:
                 logger.info(f"Skipping child MO for {child_item.get('part_number')} — free stock {free_stock} (total {current_stock}, WIP {wip_qty}, reserved {already_reserved}) >= required {child_qty}")
-                # NOTE: child reservation is NOT incremented on MO create anymore.
-                # Reservation only happens on MO **Release** (see /api/work-orders/{id}/release).
+                # Auto-reserve the in-stock child qty against the parent MO (released on parent cancel).
+                await db.items.update_one(
+                    {"id": child_item_id},
+                    {"$inc": {"reserved_stock": child_qty}},
+                )
+                await db.work_orders.update_one(
+                    {"id": parent_wo_id},
+                    {"$push": {"child_reservations": {"item_id": child_item_id, "qty": child_qty}}},
+                )
                 continue
             
             # Create MO only for shortage qty (required - free stock).
-            # No reservation on create — that happens on Release.
+            # Auto-reserve the in-stock portion (free_stock) so it's locked for this MO.
             shortage_qty = child_qty - int(free_stock)
+            if free_stock > 0:
+                await db.items.update_one(
+                    {"id": child_item_id},
+                    {"$inc": {"reserved_stock": int(free_stock)}},
+                )
+                await db.work_orders.update_one(
+                    {"id": parent_wo_id},
+                    {"$push": {"child_reservations": {"item_id": child_item_id, "qty": int(free_stock)}}},
+                )
             
             # Create work orders for any item that can be manufactured — either has a
             # legacy routings doc OR its own BOM defines parent_routings.

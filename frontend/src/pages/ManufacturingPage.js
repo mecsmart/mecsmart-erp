@@ -1388,14 +1388,9 @@ export default function ManufacturingPage() {
                               <span className="text-xs text-[#6B7280]">Covered by parent SC</span>
                             ) : (
                             <div className="flex items-center flex-wrap gap-1">
-                              {canEdit && wo.status === 'pending' && !wo.is_subcontract && !wo.parent_wo_id && !(wo.child_reservations || []).length && (
-                                <button onClick={() => handleReleaseMO(wo.id)} className="btn-secondary text-xs px-2 py-1 text-[#1D3557] border-[#1D3557]" data-testid={`release-wo-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />Release</button>
-                              )}
-                              {(wo.child_reservations || []).length > 0 && wo.status === 'pending' && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#DEF7EC] text-[#03543F]" data-testid={`released-badge-${wo.id}`}>RELEASED · {(wo.child_reservations || []).length} resv</span>
-                              )}
-                              {wo.status === 'released' && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#DEF7EC] text-[#03543F]" data-testid={`released-badge-${wo.id}`}>RELEASED</span>
+                              {/* MO Release button removed — child stock auto-reserves on MO create. */}
+                              {(wo.child_reservations || []).length > 0 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#DEF7EC] text-[#03543F]" data-testid={`reserved-badge-${wo.id}`} title="Child stock reserved automatically">RESERVED · {(wo.child_reservations || []).length}</span>
                               )}
                               {canEdit && ['pending', 'released'].includes(wo.status) && !wo.parent_wo_id && (
                                 <button onClick={() => {
