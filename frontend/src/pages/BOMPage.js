@@ -275,25 +275,18 @@ export default function BOMPage() {
         }
       }
 
-      // Compute variant_attributes payload — ALWAYS send if there are non-empty entries
-      // (we previously gated on a diff vs the cached item, which could silently skip the
-      // save when the items cache was stale).
-      const cleanedAttrs = (parentVariantAttrs || [])
-        .map(a => ({ name: (a.name || '').trim(), values: (a.values || []).map(v => String(v).trim()).filter(Boolean) }))
-        .filter(a => a.name && a.values.length > 0);
-
-      // Run BOM save AND variant-attrs update in parallel (saves ~300ms on slow networks).
+      // Variant attributes are now managed exclusively on the Item itself
+      // (see ItemsPage variant block). BOM Save no longer touches the parent
+      // item's variant_attributes, so opening a BOM and saving never clobbers
+      // variants the user defined in the Item dialog.
       const promises = [];
       if (editingBom) {
         promises.push(api.put(`/api/bom/${editingBom.id}`, payload));
       } else {
         promises.push(api.post('/api/bom', payload));
       }
-      // Always include variant_attributes (even empty array) so changes — including
-      // clearing all attributes — propagate to the parent item record.
-      promises.push(api.put(`/api/items/${formData.parent_item_id}`, { variant_attributes: cleanedAttrs }));
       await Promise.all(promises);
-      toast.success(`BOM "${payload.name}" ${editingBom ? 'updated' : 'created'}${cleanedAttrs.length > 0 ? ` · ${cleanedAttrs.length} variant attr${cleanedAttrs.length > 1 ? 's' : ''} saved` : ''}`, { id: toastId });
+      toast.success(`BOM "${payload.name}" ${editingBom ? 'updated' : 'created'}`, { id: toastId });
       // If the user was editing a child BOM (via the "Edit <child> BOM" button
       // inside a parent edit), pop the stack and restore the parent's edit
       // state — keeping the dialog open. Only when the stack is empty do we
@@ -972,155 +965,31 @@ export default function BOMPage() {
                   />
                 </div>
 
-                {/* ========== PHASE 2: VARIANT ATTRIBUTES (parent item) ========== */}
-                {formData.parent_item_id && (
+                {/* ========== VARIANT ATTRIBUTES (read-only — managed on the Item itself) ========== */}
+                {formData.parent_item_id && (parentVariantAttrs || []).length > 0 && (
                   <div className="border border-[#FDE68A] rounded-sm bg-[#FFFBEB] px-3 py-2.5" data-testid="bom-variant-attrs-block">
                     <div className="flex items-center justify-between mb-2">
                       <label className="text-sm font-semibold text-[#723B13]">
-                        Product Variant Attributes <span className="font-normal text-[#92400E]">(optional)</span>
+                        Product Variants <span className="font-normal text-[#92400E]">(read-only — manage on the Item)</span>
                       </label>
-                      <button
-                        type="button"
-                        onClick={() => setParentVariantAttrs(prev => [...(prev || []), { name: '', values: [] }])}
-                        className="text-[10px] px-2 py-0.5 rounded border border-[#723B13] text-[#723B13] hover:bg-[#FEF3C7]"
-                        data-testid="bom-add-variant-attr"
-                      >+ Add Attribute</button>
+                      <span className="text-[10px] text-[#92400E]">Generate child SKUs from the Item edit dialog</span>
                     </div>
-                    {(parentVariantAttrs || []).length === 0 ? (
-                      <div className="text-[11px] text-[#9CA3AF] py-2 italic">No variants. This BOM is a single non-configurable build.</div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {(parentVariantAttrs || []).map((attr, ai) => {
-                          // Normalize each value to {value, short_code} shape so the UI is consistent.
-                          const norm = (attr.values || []).map(v => typeof v === 'string' ? { value: v, short_code: (v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) } : v);
-                          const updateVals = (newVals) => {
-                            const next = [...parentVariantAttrs];
-                            next[ai] = { ...next[ai], values: newVals };
-                            setParentVariantAttrs(next);
-                          };
-                          return (
-                          <div key={ai} className="flex items-start gap-2 bg-white border border-[#FDE68A] rounded-sm px-2 py-1.5" data-testid={`bom-variant-attr-row-${ai}`}>
-                            <input
-                              type="text"
-                              placeholder="Attribute name (e.g. Motor Power)"
-                              value={attr.name || ''}
-                              onChange={(e) => {
-                                const next = [...parentVariantAttrs];
-                                next[ai] = { ...next[ai], name: e.target.value };
-                                setParentVariantAttrs(next);
-                              }}
-                              className="input-field text-xs flex-1 self-start"
-                              data-testid={`bom-variant-attr-name-${ai}`}
-                            />
-                            <div className="flex-1 flex items-center flex-wrap gap-1 px-1.5 py-1 bg-white border border-[#D1D5DB] rounded-sm min-h-[28px]" data-testid={`bom-variant-attr-values-${ai}`}>
-                              {norm.map((vobj, vi) => (
-                                <span key={vi} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">
-                                  {vobj.value}
-                                  <input
-                                    type="text"
-                                    maxLength={4}
-                                    value={vobj.short_code || ''}
-                                    onChange={(e) => {
-                                      const sc = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
-                                      const newVals = norm.map((x, j) => j === vi ? { ...x, short_code: sc } : x);
-                                      updateVals(newVals);
-                                    }}
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="w-9 text-[9px] bg-white/20 text-white border-0 px-1 py-0 rounded outline-none placeholder-white/60 text-center"
-                                    title="Short code for SKU suffix (max 4 chars)"
-                                    placeholder="code"
-                                    data-testid={`bom-variant-attr-shortcode-${ai}-${vi}`}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => updateVals(norm.filter((_, i) => i !== vi))}
-                                    className="text-white hover:text-[#FECDD3]"
-                                  >×</button>
-                                </span>
+                    <div className="space-y-1.5">
+                      {(parentVariantAttrs || []).map((attr, ai) => {
+                        const vals = (attr.values || []).map(v => typeof v === 'string' ? v : (v?.value || v?.short_code || ''));
+                        return (
+                          <div key={ai} className="flex items-center gap-2 bg-white border border-[#FDE68A] rounded-sm px-2 py-1.5" data-testid={`bom-variant-attr-row-${ai}`}>
+                            <span className="text-xs font-semibold text-[#374151] w-40 truncate" title={attr.name}>{attr.name || '—'}</span>
+                            <div className="flex flex-wrap gap-1 flex-1">
+                              {vals.map((v, vi) => (
+                                <span key={vi} className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">{v}</span>
                               ))}
-                              <input
-                                type="text"
-                                placeholder={norm.length === 0 ? 'type value + comma (e.g. 1HP, 2HP)' : ''}
-                                onKeyDown={(e) => {
-                                  if (e.key === ',' || e.key === 'Enter' || e.key === 'Tab') {
-                                    const raw = (e.currentTarget.value || '').trim();
-                                    if (raw) {
-                                      e.preventDefault();
-                                      if (!norm.find(v => v.value === raw)) {
-                                        const sc = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
-                                        updateVals([...norm, { value: raw, short_code: sc }]);
-                                      }
-                                      e.currentTarget.value = '';
-                                    } else if (e.key === ',' || e.key === 'Enter') {
-                                      e.preventDefault();
-                                    }
-                                  } else if (e.key === 'Backspace' && !e.currentTarget.value) {
-                                    if (norm.length > 0) updateVals(norm.slice(0, -1));
-                                  }
-                                }}
-                                onBlur={(e) => {
-                                  const raw = (e.currentTarget.value || '').trim();
-                                  if (raw && !norm.find(v => v.value === raw)) {
-                                    const sc = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
-                                    updateVals([...norm, { value: raw, short_code: sc }]);
-                                  }
-                                  e.currentTarget.value = '';
-                                }}
-                                className="flex-1 min-w-[120px] outline-none text-xs bg-transparent border-0 p-0"
-                                data-testid={`bom-variant-attr-values-input-${ai}`}
-                              />
+                              {vals.length === 0 && <span className="text-[10px] text-[#9CA3AF] italic">no values</span>}
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => setParentVariantAttrs(prev => prev.filter((_, i) => i !== ai))}
-                              className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded px-1 self-start"
-                              data-testid={`bom-variant-attr-remove-${ai}`}
-                              title="Remove attribute"
-                            ><X className="w-3.5 h-3.5" /></button>
                           </div>
                         );
-                        })}
-                        {/* Generate Variants action */}
-                        {formData.parent_item_id && (parentVariantAttrs || []).some(a => (a.values || []).length > 0) && (
-                          <div className="pt-1.5 border-t border-[#FDE68A]">
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  // Save current variant_attributes first so backend has the latest.
-                                  const cleanedAttrs = (parentVariantAttrs || [])
-                                    .map(a => ({
-                                      name: (a.name || '').trim(),
-                                      values: (a.values || []).map(v => typeof v === 'string' ? { value: v.trim(), short_code: v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0,4) } : { value: v.value.trim(), short_code: (v.short_code || v.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0,4)).slice(0,4) }),
-                                    }))
-                                    .filter(a => a.name && a.values.length > 0);
-                                  await api.put(`/api/items/${formData.parent_item_id}`, { variant_attributes: cleanedAttrs });
-                                  // Preview
-                                  const { data: preview } = await api.post(`/api/items/${formData.parent_item_id}/preview-variants`);
-                                  const total = preview.combinations.length;
-                                  const newCount = preview.new_count;
-                                  const existingCount = preview.existing_count;
-                                  const sample = preview.combinations.slice(0, 6).map(r => `  • ${r.sku} — ${r.label}${r.exists ? ' (exists)' : ' (NEW)'}`).join('\n');
-                                  const more = total > 6 ? `\n  …and ${total - 6} more` : '';
-                                  if (window.confirm(`Generate ${total} variant${total > 1 ? 's' : ''}?\n\n${existingCount} already exist, ${newCount} would be created.\n\n${sample}${more}\n\nClick OK to proceed (all combinations).`)) {
-                                    const { data: result } = await api.post(`/api/items/${formData.parent_item_id}/generate-variants`, {});
-                                    toast.success(result.message);
-                                    fetchItems().catch(() => {});
-                                  }
-                                } catch (err) {
-                                  toast.error(err.response?.data?.detail || 'Failed to generate variants');
-                                }
-                              }}
-                              className="text-[11px] px-2 py-1 rounded border border-[#723B13] text-[#723B13] hover:bg-[#FEF3C7] font-semibold"
-                              data-testid="bom-generate-variants-btn"
-                            >
-                              Generate Variant Items
-                            </button>
-                            <span className="ml-2 text-[10px] text-[#92400E]">Creates child items per combination with SKU suffix (e.g. <span className="mono">FG-001-1HP-220V</span>).</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                      })}
+                    </div>
                   </div>
                 )}
 

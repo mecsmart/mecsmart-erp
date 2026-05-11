@@ -20,7 +20,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-11 (later)** — **Item Variant Generation (Odoo-style) (P0 DONE & TESTED 23/23 ✅):**
+- **2026-05-11 (latest)** — **Variant Generator moved to Item dialog (UX P0 DONE & TESTED ✅):**
+  Earlier the variant generator lived inside the BOM dialog, which conflated *item-master responsibilities* with *BOM responsibilities*. Moved to where it belongs:
+  - **ItemsPage.js**: Item Create/Edit dialog now shows a yellow **"Product Variants (optional)"** block whenever category is `finished_good` or `sub_assembly`. Inline editor with `[attribute name, value chip + 4-char short_code]` rows. A **"Generate Variant Items"** button appears once the item is saved (an item-id is required for the backend call) and the user has entered at least one attribute + value.
+  - **BOMPage.js**: Variant block is now **read-only** ("Product Variants (read-only — manage on the Item)") so users see which variants this BOM serves, but cannot accidentally clobber the master from a BOM save. BOM Save no longer issues a `PUT /api/items/{id}` for variant_attributes — separation of concerns is clean.
+  - End-to-end verified: Create FG → choose Finished Good → add `Color: Red(RED), Blue Sky(BLUE)` → Save → re-open → click **Generate Variant Items** → child SKUs `FG-XXX-RED`, `FG-XXX-BLUE` are created. Tested on `FG-VAR-TEST-*` items (cleaned up after).
+  - No SO/MO/Inventory changes needed — they already consume `parent_item.variant_attributes` and render the value/short_code-tolerant chips fixed earlier today.
+
+
   Auto-generates child variant SKUs from a parent FG/SG item's `variant_attributes` so that every combination becomes an independent inventory item (stock, value, invoicing) while sharing one master BOM.
 
   **Backend (server.py ~L1310-1436):**

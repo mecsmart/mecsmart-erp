@@ -73,6 +73,7 @@ export default function ItemsPage() {
     reorder_point: 0,
     hsn_code: '',
     gst_rate: 18,
+    variant_attributes: [],
   });
 
   const canEdit = user?.role === 'admin'
@@ -198,17 +199,25 @@ export default function ItemsPage() {
       toast.error('Unit of Measure (UOM) is required');
       return;
     }
+    // Clean variant_attributes — drop empty rows, trim values, derive short_code.
+    const cleanedVariantAttrs = (formData.variant_attributes || [])
+      .map(a => ({
+        name: (a.name || '').trim(),
+        values: (a.values || []).map(v => {
+          const value = (typeof v === 'string' ? v : (v?.value || '')).trim();
+          const sc = (typeof v === 'object' && v?.short_code) ? String(v.short_code) : value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+          return { value, short_code: sc.slice(0, 4) };
+        }).filter(v => v.value),
+      }))
+      .filter(a => a.name && a.values.length > 0);
+    const payload = { ...formData, variant_attributes: cleanedVariantAttrs };
     try {
       if (editingItem) {
-        // EDIT — patch the changed item in place instead of refetching the
-        // whole list. Saves bandwidth AND preserves scroll position so the
-        // user doesn't get bounced back to the top of the table.
-        const { data: updated } = await api.put(`/api/items/${editingItem.id}`, formData);
+        const { data: updated } = await api.put(`/api/items/${editingItem.id}`, payload);
         setItems(prev => prev.map(it => it.id === editingItem.id ? { ...it, ...updated } : it));
         toast.success(`Item ${updated?.part_number || ''} updated`);
       } else {
-        // CREATE — append the new row to the existing list (preserves scroll).
-        const { data: created } = await api.post('/api/items', formData);
+        const { data: created } = await api.post('/api/items', payload);
         setItems(prev => [created, ...prev]);
         toast.success(`Item ${created?.part_number || ''} created`);
       }
@@ -239,6 +248,13 @@ export default function ItemsPage() {
       reorder_point: item.reorder_point,
       hsn_code: item.hsn_code || '',
       gst_rate: item.gst_rate != null ? item.gst_rate : 18,
+      variant_attributes: (item.variant_attributes || []).map(a => ({
+        name: a.name || '',
+        values: (a.values || []).map(v => typeof v === 'string'
+          ? { value: v, short_code: (v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) }
+          : { value: v.value || '', short_code: (v.short_code || (v.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)) }
+        ),
+      })),
     });
     setIsDialogOpen(true);
   };
@@ -271,6 +287,7 @@ export default function ItemsPage() {
       reorder_point: 0,
       hsn_code: '',
       gst_rate: 18,
+      variant_attributes: [],
     });
   };
 
@@ -701,6 +718,161 @@ export default function ItemsPage() {
                     </Select>
                   </div>
                 </div>
+
+                {/* ====== Product Variants (FG / SG only) ====== */}
+                {(formData.category === 'finished_good' || formData.category === 'sub_assembly') && (
+                  <div className="border border-[#FDE68A] rounded-sm bg-[#FFFBEB] px-3 py-2.5 space-y-2" data-testid="item-variant-attrs-block">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-[#723B13] uppercase tracking-wide">
+                        Product Variants <span className="font-normal text-[#92400E]">(optional)</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setFormData(p => ({ ...p, variant_attributes: [...(p.variant_attributes || []), { name: '', values: [] }] }))}
+                        className="text-[10px] px-2 py-0.5 rounded border border-[#723B13] text-[#723B13] hover:bg-[#FEF3C7]"
+                        data-testid="item-add-variant-attr"
+                      >+ Add Attribute</button>
+                    </div>
+                    {(formData.variant_attributes || []).length === 0 ? (
+                      <div className="text-[11px] text-[#9CA3AF] py-1 italic">No variants. Add an attribute (e.g. Motor Power) and its values (1HP, 2HP) to generate child SKUs.</div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {(formData.variant_attributes || []).map((attr, ai) => {
+                          const updateAttr = (patch) => setFormData(p => {
+                            const next = [...(p.variant_attributes || [])];
+                            next[ai] = { ...next[ai], ...patch };
+                            return { ...p, variant_attributes: next };
+                          });
+                          const updateVals = (newVals) => updateAttr({ values: newVals });
+                          return (
+                            <div key={ai} className="flex items-start gap-2 bg-white border border-[#FDE68A] rounded-sm px-2 py-1.5" data-testid={`item-variant-attr-row-${ai}`}>
+                              <input
+                                type="text"
+                                placeholder="Attribute name (e.g. Motor Power)"
+                                value={attr.name || ''}
+                                onChange={(e) => updateAttr({ name: e.target.value })}
+                                className="input-field text-xs flex-1"
+                                data-testid={`item-variant-attr-name-${ai}`}
+                              />
+                              <div className="flex-1 flex items-center flex-wrap gap-1 px-1.5 py-1 bg-white border border-[#D1D5DB] rounded-sm min-h-[28px]">
+                                {(attr.values || []).map((v, vi) => (
+                                  <span key={vi} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">
+                                    {v.value}
+                                    <input
+                                      type="text"
+                                      maxLength={4}
+                                      value={v.short_code || ''}
+                                      onChange={(e) => {
+                                        const sc = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+                                        const newVals = (attr.values || []).map((x, j) => j === vi ? { ...x, short_code: sc } : x);
+                                        updateVals(newVals);
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="w-10 text-[9px] bg-white/20 text-white border-0 px-1 py-0 rounded outline-none placeholder-white/60 text-center"
+                                      title="Short code for SKU suffix (max 4 chars)"
+                                      placeholder="code"
+                                      data-testid={`item-variant-attr-shortcode-${ai}-${vi}`}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => updateVals((attr.values || []).filter((_, i) => i !== vi))}
+                                      className="text-white hover:text-[#FECDD3]"
+                                    >×</button>
+                                  </span>
+                                ))}
+                                <input
+                                  type="text"
+                                  placeholder={(attr.values || []).length === 0 ? 'type value + Enter (e.g. 1HP)' : ''}
+                                  onKeyDown={(e) => {
+                                    if (e.key === ',' || e.key === 'Enter' || e.key === 'Tab') {
+                                      const raw = (e.currentTarget.value || '').trim();
+                                      if (raw) {
+                                        e.preventDefault();
+                                        const cur = attr.values || [];
+                                        if (!cur.find(x => x.value === raw)) {
+                                          const sc = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+                                          updateVals([...cur, { value: raw, short_code: sc }]);
+                                        }
+                                        e.currentTarget.value = '';
+                                      } else if (e.key === ',' || e.key === 'Enter') {
+                                        e.preventDefault();
+                                      }
+                                    } else if (e.key === 'Backspace' && !e.currentTarget.value) {
+                                      const cur = attr.values || [];
+                                      if (cur.length > 0) updateVals(cur.slice(0, -1));
+                                    }
+                                  }}
+                                  onBlur={(e) => {
+                                    const raw = (e.currentTarget.value || '').trim();
+                                    const cur = attr.values || [];
+                                    if (raw && !cur.find(x => x.value === raw)) {
+                                      const sc = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+                                      updateVals([...cur, { value: raw, short_code: sc }]);
+                                    }
+                                    e.currentTarget.value = '';
+                                  }}
+                                  className="flex-1 min-w-[120px] outline-none text-xs bg-transparent border-0 p-0"
+                                  data-testid={`item-variant-attr-values-input-${ai}`}
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setFormData(p => ({ ...p, variant_attributes: (p.variant_attributes || []).filter((_, i) => i !== ai) }))}
+                                className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded px-1"
+                                data-testid={`item-variant-attr-remove-${ai}`}
+                                title="Remove attribute"
+                              ><X className="w-3.5 h-3.5" /></button>
+                            </div>
+                          );
+                        })}
+                        {/* Generate Variants — only when editing an existing item (need an id) */}
+                        {editingItem && (formData.variant_attributes || []).some(a => (a.name || '').trim() && (a.values || []).length > 0) && (
+                          <div className="pt-1.5 border-t border-[#FDE68A] flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  // Clean attrs the same way the BOM/Item save does.
+                                  const cleanedAttrs = (formData.variant_attributes || [])
+                                    .map(a => ({
+                                      name: (a.name || '').trim(),
+                                      values: (a.values || []).map(v => ({
+                                        value: (v.value || '').trim(),
+                                        short_code: (v.short_code || (v.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)).slice(0, 4),
+                                      })).filter(v => v.value),
+                                    }))
+                                    .filter(a => a.name && a.values.length > 0);
+                                  await api.put(`/api/items/${editingItem.id}`, { variant_attributes: cleanedAttrs });
+                                  const { data: preview } = await api.post(`/api/items/${editingItem.id}/preview-variants`);
+                                  const total = preview.combinations.length;
+                                  const sample = preview.combinations.slice(0, 6).map(r => `  • ${r.sku} — ${r.label}${r.exists ? ' (exists)' : ' (NEW)'}`).join('\n');
+                                  const more = total > 6 ? `\n  …and ${total - 6} more` : '';
+                                  if (window.confirm(`Generate ${total} variant${total > 1 ? 's' : ''}?\n\n${preview.existing_count} already exist, ${preview.new_count} would be created.\n\n${sample}${more}\n\nClick OK to proceed (all combinations).`)) {
+                                    const { data: result } = await api.post(`/api/items/${editingItem.id}/generate-variants`, {});
+                                    toast.success(result.message);
+                                    fetchItems().catch(() => {});
+                                  }
+                                } catch (err) {
+                                  toast.error(err.response?.data?.detail || 'Failed to generate variants');
+                                }
+                              }}
+                              className="text-[11px] px-2 py-1 rounded border border-[#723B13] text-[#723B13] hover:bg-[#FEF3C7] font-semibold"
+                              data-testid="item-generate-variants-btn"
+                            >
+                              Generate Variant Items
+                            </button>
+                            <span className="text-[10px] text-[#92400E]">Creates child SKUs per combination (e.g. <span className="mono">{formData.part_number || 'FG-001'}-1HP-220V</span>).</span>
+                          </div>
+                        )}
+                        {!editingItem && (formData.variant_attributes || []).some(a => (a.values || []).length > 0) && (
+                          <div className="pt-1.5 border-t border-[#FDE68A] text-[10px] text-[#92400E]">
+                            Save the item first — the <span className="font-semibold">"Generate Variant Items"</span> button will appear when you re-open this item for edit.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
                   <button type="button" onClick={() => setIsDialogOpen(false)} className="btn-secondary">
