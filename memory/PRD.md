@@ -20,6 +20,19 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-05-11** — **Phase 1 of MTS/MTO redesign + Quotation→SO prefill (P0 — 12/12 tests passed):**
+  1. **New `MTS/MTO` semantics enforced.** SO line `order_type` default flipped from `auto` → `mts`. Legacy `auto` is accepted on POST `/api/production` but normalised to `mts` (validation message: `mts | mto`). The `/confirm` flow already implemented the new rules in a prior fork: **MTS** ignores FG stock (always produces full SO qty, child SG/parts reserved at MO create), **MTO** uses available FG stock first (reserves it), MO covers the shortfall with child reservations on top.
+  2. **New `GET /api/crm/quotations/{qid}/balance` endpoint** — returns per-line balance qty = `original_qty - Σ(qty already issued via non-cancelled SOs)`, hydrated with active BOM, item details, and customer info. Powers the new "From Quotation" picker on the SO form.
+  3. **Per-line `source_quotation_line_no`** persisted on `ProductionOrderLine`. Tracks which quotation line each SO line came from so the balance helper can deduct correctly even when one quotation feeds multiple SOs.
+  4. **`source_quotation_id` + `source_quotation_no` on SO doc.** Stored when a user creates an SO via the new "From Quotation" dropdown (and by the existing CRM "Convert to SO" button). Surfaced as a small "from QUO-…" badge under the SO number in `/production` list view.
+  5. **Partial → Full conversion tracking.** `_refresh_quotation_conversion_status` is called after each SO create — it appends the SO id to `converted_so_ids[]` (kept in addition to legacy singular `converted_so_id`). Quotation status auto-flips to `converted` only when every line balance reaches 0. Cancelling a sourced SO restores the balance because cancelled SOs are excluded from the consumed_qty sum (no re-write of quotation status, but the next read of `/balance` returns the freed qty).
+  6. **`ProductionPage.js` UI:** New "From Quotation (optional)" yellow block above Order Lines on the Create dialog. Type-ahead search by quotation_no or customer name; clicking a quotation calls `/balance` and pre-fills:
+     - Customer (display only — the picked quotation's customer is shown as the linked pill)
+     - One SO line per balance-positive quotation line, with `bom_id` resolved from the active BOM, `quantity` = ceil(balance_qty), `due_date` = today (editable), `order_type` = `mts` (editable), `source_quotation_line_no` = quotation line_no
+     - Skips lines with no active BOM and toasts the skipped part_numbers
+     - "Clear link" pill button unlinks the quotation without wiping user-edited lines
+  7. **Tests:** `/app/backend/tests/test_iteration_97_quotation_so_prefill.py` — 12/12 PASS covering: balance endpoint, SO create with source quotation, partial vs full conversion status flip, cancel-restores-balance, MTS/MTO confirm rules, child reserved_stock increment/release, legacy auto compat, validation, SO list shows source_quotation_no. Frontend Playwright pass for prefill + dropdown + clear-link + badge.
+
 - **2026-05-07** — **Stores Packing List role-group permission + earlier BOM fixes verified:**
   1. **New permission module `stores_packing_list`** added to `/app/backend/core/permissions.py` (full CRUD actions). Exposed via `/api/users/modules` and selectable in the Role Group matrix under the **Stores** group (`UserManagementPage.js`). The Stores → Packing Lists sidebar link (`Layout.js`) and tab content (`WarehousesPage.js`) now gate on `stores_packing_list.view`; Generate/Edit/Status-change controls require `create` or `edit`; Delete requires `delete` (existing logic via `canEdit`). The CRM-Marketing Packing List entry continues to use `crm_marketing` (kept untouched).
   2. **BOM Print popup-blocker fallback** (previous session) — verified.
@@ -176,6 +189,7 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - Rebranded globally to **MecSmart ERP**.
 
 ## Roadmap / Backlog
+- **P1 (next)** Phase 2 — Attribute-driven BOM Variants. Add `variant_attributes` to FG items (e.g. Motor Power: 1HP/2HP, Voltage: 220V/440V). Add `applies_to` map on each BOM component so a single master BOM can serve every configuration. SO line picker chooses an attribute combination, which filters which components are required.
 - **P2** GSP e-Invoice integration (IRN + signed QR from GST portal).
 - **P3** Dispatch Manager panel.
 - **P4 (Phase 1 ✅ done 2026-04-27)** Extracted `db`, permissions, and auth utilities into `/app/backend/core/`.
