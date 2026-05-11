@@ -50,8 +50,10 @@ export default function ProductionPage() {
   const [quotationSearch, setQuotationSearch] = useState('');
   const [showQuotationDropdown, setShowQuotationDropdown] = useState(false);
   const [formData, setFormData] = useState({
-    // Multi-line SO: lines[] with { bom_id, bom_search, quantity, due_date, order_type, notes, source_quotation_line_no }
-    lines: [{ bom_id: '', bom_search: '', quantity: 1, due_date: '', order_type: 'mts', notes: '', source_quotation_line_no: null }],
+    // Multi-line SO: lines[] with { bom_id, bom_search, quantity, due_date, notes, source_quotation_line_no }
+    // order_type is set at the FORM level (MTS or MTO) and applied to every line.
+    order_type: 'mts',  // mts | mto — controls Quotation picker visibility
+    lines: [{ bom_id: '', bom_search: '', quantity: 1, due_date: '', notes: '', source_quotation_line_no: null }],
     priority: 'medium',
     notes: '',
     source_quotation_id: '',
@@ -134,7 +136,6 @@ export default function ProductionPage() {
           bom_search: '',
           quantity: Math.max(1, Math.ceil(ln.balance_qty || 0)),
           due_date: dueIso,
-          order_type: 'mts',
           notes: ln.description || '',
           source_quotation_line_no: ln.line_no,
         });
@@ -190,20 +191,22 @@ export default function ProductionPage() {
           notes: formData.notes,
         });
       } else {
-        // Create multi-line SO
+        // Create multi-line SO. order_type comes from the form-level selector.
+        const formOrderType = formData.order_type || 'mts';
         const payload = {
           lines: validLines.map(l => ({
             bom_id: l.bom_id,
             quantity: parseInt(l.quantity, 10),
             due_date: new Date(l.due_date).toISOString(),
-            order_type: l.order_type || 'mts',
+            order_type: formOrderType,
             notes: l.notes || '',
             source_quotation_line_no: l.source_quotation_line_no ?? null,
           })),
           priority: formData.priority,
           notes: formData.notes,
         };
-        if (formData.source_quotation_id) {
+        // Quotation link is only meaningful for MTO.
+        if (formOrderType === 'mto' && formData.source_quotation_id) {
           payload.source_quotation_id = formData.source_quotation_id;
           payload.source_quotation_no = formData.source_quotation_no || '';
         }
@@ -225,7 +228,7 @@ export default function ProductionPage() {
   const addLine = () => {
     setFormData(prev => ({
       ...prev,
-      lines: [...prev.lines, { bom_id: '', bom_search: '', quantity: 1, due_date: '', order_type: 'mts', notes: '', source_quotation_line_no: null }]
+      lines: [...prev.lines, { bom_id: '', bom_search: '', quantity: 1, due_date: '', notes: '', source_quotation_line_no: null }]
     }));
   };
 
@@ -248,12 +251,12 @@ export default function ProductionPage() {
     // Edit keeps a single line (first line) for simplicity; multi-line edit not yet supported.
     const firstLine = (order.lines && order.lines[0]) || { bom_id: order.bom_id, quantity: order.quantity, due_date: order.due_date, order_type: 'mts', notes: '' };
     setFormData({
+      order_type: firstLine.order_type || 'mts',
       lines: [{
         bom_id: firstLine.bom_id,
         bom_search: '',
         quantity: firstLine.quantity,
         due_date: firstLine.due_date ? String(firstLine.due_date).split('T')[0] : '',
-        order_type: firstLine.order_type || 'mts',
         notes: firstLine.notes || '',
         source_quotation_line_no: firstLine.source_quotation_line_no ?? null,
       }],
@@ -270,7 +273,8 @@ export default function ProductionPage() {
 
   const resetForm = () => {
     setFormData({
-      lines: [{ bom_id: '', bom_search: '', quantity: 1, due_date: '', order_type: 'mts', notes: '', source_quotation_line_no: null }],
+      order_type: 'mts',
+      lines: [{ bom_id: '', bom_search: '', quantity: 1, due_date: '', notes: '', source_quotation_line_no: null }],
       priority: 'medium',
       notes: '',
       source_quotation_id: '',
@@ -281,6 +285,30 @@ export default function ProductionPage() {
     setQuotationLoadInfo(null);
     setQuotationSearch('');
     setShowQuotationDropdown(false);
+  };
+
+  // Switching the form-level order type. When user picks MTS, drop the
+  // quotation link (MTS = build-for-stock, no customer source). Lines stay.
+  const handleOrderTypeChange = (newType) => {
+    setFormData(prev => {
+      if (newType === 'mts') {
+        return {
+          ...prev,
+          order_type: 'mts',
+          source_quotation_id: '',
+          source_quotation_no: '',
+          customer_id: '',
+          customer_name: '',
+          lines: (prev.lines || []).map(l => ({ ...l, source_quotation_line_no: null })),
+        };
+      }
+      return { ...prev, order_type: 'mto' };
+    });
+    if (newType === 'mts') {
+      setQuotationLoadInfo(null);
+      setQuotationSearch('');
+      setShowQuotationDropdown(false);
+    }
   };
 
   const handleConfirm = async (order) => {
@@ -375,13 +403,47 @@ export default function ProductionPage() {
                 <DialogTitle className="font-[Chivo]">{editingOrder ? 'Edit Sales Order' : 'Create Sales Order'}</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-                {/* ========== FROM QUOTATION (optional, create mode only) ========== */}
+                {/* ========== STEP 1: ORDER TYPE (top-level) ========== */}
                 {!editingOrder && (
+                  <div className="border border-[#E5E7EB] rounded-sm bg-[#F0F9FF] px-3 py-2.5" data-testid="so-order-type-block">
+                    <label className="block text-xs font-semibold text-[#1D3557] mb-1.5">
+                      Step 1 — Order Type *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOrderTypeChange('mts')}
+                        className={`text-left px-3 py-2 rounded-sm border-2 transition-colors ${formData.order_type === 'mts' ? 'border-[#1D3557] bg-white' : 'border-[#E5E7EB] bg-white hover:border-[#9CA3AF]'}`}
+                        data-testid="so-order-type-mts"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-block w-3 h-3 rounded-full border-2 ${formData.order_type === 'mts' ? 'border-[#1D3557] bg-[#1D3557]' : 'border-[#9CA3AF]'}`} />
+                          <span className="text-xs font-semibold text-[#111827]">MTS — Make to Stock</span>
+                        </div>
+                        <p className="text-[10px] text-[#6B7280] mt-1 leading-tight">Build for stock. Always produces full qty; ignores FG stock. No quotation link.</p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleOrderTypeChange('mto')}
+                        className={`text-left px-3 py-2 rounded-sm border-2 transition-colors ${formData.order_type === 'mto' ? 'border-[#1D3557] bg-white' : 'border-[#E5E7EB] bg-white hover:border-[#9CA3AF]'}`}
+                        data-testid="so-order-type-mto"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-block w-3 h-3 rounded-full border-2 ${formData.order_type === 'mto' ? 'border-[#1D3557] bg-[#1D3557]' : 'border-[#9CA3AF]'}`} />
+                          <span className="text-xs font-semibold text-[#111827]">MTO — Make to Order</span>
+                        </div>
+                        <p className="text-[10px] text-[#6B7280] mt-1 leading-tight">For a specific customer. Uses FG stock first; you can link a Quotation below.</p>
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {/* ========== STEP 2: FROM QUOTATION (MTO only) ========== */}
+                {!editingOrder && formData.order_type === 'mto' && (
                   <div className="border border-[#E5E7EB] rounded-sm bg-[#FFFBEB] px-3 py-2 space-y-2" data-testid="so-from-quotation-block">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex-1">
                         <label className="block text-xs font-semibold text-[#1D3557] mb-1">
-                          From Quotation <span className="font-normal text-[#6B7280]">(optional — pre-fills lines & customer)</span>
+                          Step 2 — From Quotation <span className="font-normal text-[#6B7280]">(optional — pre-fills lines & customer)</span>
                         </label>
                         {formData.source_quotation_id ? (
                           <div className="flex items-center justify-between bg-white border border-[#1D3557] rounded-sm px-2 py-1.5">
@@ -458,7 +520,9 @@ export default function ProductionPage() {
                 {/* ========== SO LINES ========== */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-[#1D3557]">Order Lines {!editingOrder && <span className="text-xs font-normal text-[#6B7280]">({(formData.lines || []).length})</span>}</h3>
+                    <h3 className="text-sm font-semibold text-[#1D3557]">
+                      {!editingOrder && (formData.order_type === 'mto' ? 'Step 3 — ' : 'Step 2 — ')}Order Lines {!editingOrder && <span className="text-xs font-normal text-[#6B7280]">({(formData.lines || []).length})</span>}
+                    </h3>
                     {!editingOrder && (
                       <button type="button" className="text-xs text-[#1D3557] hover:underline flex items-center gap-1" onClick={addLine} data-testid="so-add-line-btn">
                         <Plus className="w-3 h-3" /> Add Line
@@ -541,7 +605,7 @@ export default function ProductionPage() {
                             </>
                           )}
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-2 gap-2">
                           <div>
                             <label className="block text-xs font-semibold text-[#374151] mb-1">Qty *</label>
                             <input type="number" min="1" value={line.quantity} onChange={(e) => updateLine(idx, { quantity: parseInt(e.target.value) || 1 })} className="input-field mono text-xs" required data-testid={`so-line-qty-${idx}`} />
@@ -549,18 +613,6 @@ export default function ProductionPage() {
                           <div>
                             <label className="block text-xs font-semibold text-[#374151] mb-1">Due Date *</label>
                             <input type="date" value={line.due_date} onChange={(e) => updateLine(idx, { due_date: e.target.value })} className="input-field text-xs" required data-testid={`so-line-due-${idx}`} />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-[#374151] mb-1" title="MTS: always produce full SO qty, auto-reserve SG/parts. MTO: use FG stock first, MO for balance.">
-                              Order Type *
-                            </label>
-                            <Select value={line.order_type || 'mts'} onValueChange={(v) => updateLine(idx, { order_type: v })}>
-                              <SelectTrigger className="text-xs" data-testid={`so-line-type-${idx}`}><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="mts">MTS — Make to Stock</SelectItem>
-                                <SelectItem value="mto">MTO — Make to Order</SelectItem>
-                              </SelectContent>
-                            </Select>
                           </div>
                         </div>
                       </div>
