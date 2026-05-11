@@ -4671,8 +4671,17 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
                 child_wo = await create_wo_for_item(child_item_id, shortage_qty, parent_wo_id)
                 if child_wo:
                     created_work_orders.append(child_wo)
-                    # Recursively create work orders for this child's children
-                    await create_child_work_orders(child_item_id, child_qty, child_wo["id"])
+                    # Recursively create work orders for this child's children —
+                    # pass `shortage_qty`, NOT the full `child_qty`. Reason: the
+                    # in-stock portion of THIS SG already physically exists, so
+                    # we only need to manufacture sub-parts/sub-SGs to cover the
+                    # shortage. Previously passing `child_qty` over-produced
+                    # downstream MOs (the user-reported "MO for child SG & Parts
+                    # even though parent SG is in stock" symptom — the parent
+                    # was partially in stock, so the parent's own MO was
+                    # correctly sized to the shortage, but its sub-children
+                    # were being exploded against full required qty).
+                    await create_child_work_orders(child_item_id, shortage_qty, child_wo["id"])
     
     # For all cases (including subcontract): create MO first, SC order created at "Start SC"
     # Create main work order - use item from BOM (not routing)

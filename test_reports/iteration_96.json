@@ -1,0 +1,60 @@
+{
+  "summary": "Iteration 96 - Testing MTO/MTS Smart Resolution Bug Fix. The fix at line 4684 in server.py correctly passes shortage_qty (not child_qty) to recursive create_child_work_orders. All 4 test scenarios passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_mto_mts_shortage_qty_fix.py",
+    "/app/test_reports/pytest/pytest_iteration_96.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_mto_mts_shortage_qty_fix.py"
+  ],
+  "success_rate": {
+    "backend": "100% (4/4 tests passed)",
+    "frontend": "N/A - backend only testing"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Test creates temporary items, BOMs, customers, SOs, and WOs with TEST_MTO_ prefix, then cleans up after each test",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "MTO/MTS shortage qty fix verified. The bug was: when parent SG was partially in stock, child MOs were created with full BOM qty instead of shortage qty. Fix at line 4684 in server.py now passes shortage_qty to recursive create_child_work_orders call. Test file test_mto_mts_shortage_qty_fix.py covers all scenarios.",
+  "tests_executed": {
+    "backend": [
+      {
+        "test": "test_scenario_a_parent_sg_fully_in_stock",
+        "status": "PASSED",
+        "description": "FG needs SG1 qty=5, SG1 stock=5 (fully covers). Result: Only 1 MO for FG created. SG1 and children (SG1a, SG1b) correctly skipped."
+      },
+      {
+        "test": "test_scenario_b_parent_sg_partially_in_stock",
+        "status": "PASSED",
+        "description": "KEY BUG FIX TEST. FG needs SG1 qty=5, SG1 stock=3 (shortage=2). SG1 BOM: SG1a qty=2, SG1b qty=3. Result: MO for FG (qty=1), SG1 (qty=2), SG1a (qty=4 = 2×2, NOT 10), SG1b (qty=6 = 3×2, NOT 15). Child MOs correctly scaled to parent shortage."
+      },
+      {
+        "test": "test_scenario_c_parent_sg_not_in_stock",
+        "status": "PASSED",
+        "description": "FG needs SG1 qty=5, SG1 stock=0. Result: Full BOM explosion - MO for FG (qty=1), SG1 (qty=5), SG1a (qty=10), SG1b (qty=15)."
+      },
+      {
+        "test": "test_regression_non_sg_components_still_work",
+        "status": "PASSED",
+        "description": "Non-SG component (COMP1) with stock=2, FG needs qty=5. Result: MO for COMP1 with qty=3 (shortage). Regression test confirms general MO creation flow still works."
+      }
+    ]
+  },
+  "bug_fix_verification": {
+    "bug_description": "When parent SG is partially in stock, child MOs were being created with full BOM requirement (child_qty) instead of shortage quantity. E.g., if SG1 needs 5 but has 3 in stock (shortage=2), its children SG1a (BOM qty=2) and SG1b (BOM qty=3) were getting MOs for 10 and 15 respectively instead of 4 and 6.",
+    "fix_location": "/app/backend/server.py line 4684",
+    "fix_description": "Changed recursive call from create_child_work_orders(child_item_id, child_qty, ...) to create_child_work_orders(child_item_id, shortage_qty, ...). Now child MOs are correctly sized to the parent's shortage, not the full BOM requirement.",
+    "verification_result": "CONFIRMED WORKING - Scenario B test proves child MOs (SG1a=4, SG1b=6) are scaled to parent shortage (2), not full qty (5)"
+  }
+}
