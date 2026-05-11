@@ -20,7 +20,12 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-11 (newest)** — **Variant Inheritance Architecture (P0 DONE & TESTED 15/15 ✅):**
+- **2026-05-11 (latest)** — **BOM/Items UX polish (4 fixes — TESTED 4/4 ✅):**
+  1. **BOM dialog component rows**: Removed obsolete `applies_to` filter button ("All variants" / single-value chip). Replaced with read-only navy chips showing the COMPONENT item's own variant values (e.g. SA-001 row shows `1HP 2HP 220V 440V`). Data-testid `component-variant-chips-{index}`. (Fixes 1 & 2)
+  2. **Items dialog Generate Variant Items**: Both Generate buttons (CP/RM own and FG/SG inherited) now call a new `persistParentForGenerate()` helper that PUTs the full form payload (description/name/category/etc) before running variant preview/generate. Children now inherit the latest edits, not the cached parent record. (Fix 3)
+  3. **BOM → Items navigation speed**: Added `AbortController` scoped to BOMPage lifecycle. Background `/api/bom/{id}/explode` flood (up to 8 concurrent) is now aborted on unmount or `statusFilter` change. Items page's `/api/items?lite=1` no longer queues behind a hundred stale BOM explosion calls. Reduced MAX_PARALLEL from 20→8 for friendlier network usage. (Fix 4)
+
+
   Architectural pivot per user requirement. **Variants are now defined ONLY on Component / Raw Material items.** FG/SG items **inherit** their variant axes from variant-bearing BOM components (recursively walking SG sub-BOMs, union of attributes with first-seen short_code winning).
 
   **Backend (server.py):**
