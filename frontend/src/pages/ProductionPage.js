@@ -24,6 +24,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { fmtAmt as fmtINR } from '../utils/numberFormat';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
+import { letterheadCSS, buildLetterheadHTML, buildDocMetaHTML } from '../utils/printHeader';
 
 const priorityOptions = [
   { value: 'low', label: 'Low' },
@@ -355,13 +356,12 @@ export default function ProductionPage() {
   };
 
   // ========== PREVIEW / DOWNLOAD PDF ==========
-  // Renders the Sales Order HTML using the same compact template as Quotation prints.
+  // Renders the Sales Order HTML using the SHARED letterhead template (same as Quotations).
   const buildSoPrintHtml = (doc) => {
     const company = doc.company || {};
     const customer = doc.customer || {};
     const lines = doc.lines || [];
-    const dateStr = doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : '';
-    const dueStr = doc.due_date ? new Date(doc.due_date).toLocaleDateString('en-IN') : '';
+    const dueStr = doc.due_date ? new Date(doc.due_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
     const currencySym = (doc.source_quotation?.currency === 'USD') ? '$' :
                         (doc.source_quotation?.currency === 'EUR') ? '€' :
                         (doc.source_quotation?.currency === 'GBP') ? '£' :
@@ -373,7 +373,7 @@ export default function ProductionPage() {
       const amount = qty * rate;
       return `<tr>
         <td style="text-align:center">${idx + 1}</td>
-        <td><b>${item.part_number || '-'}</b><br/><span style="font-size:10px;color:#6B7280">${item.name || ''}</span></td>
+        <td><b>${item.part_number || '-'}</b><br/><span style="font-size:10px;color:#6B7280">${item.name || ''}</span>${l.description ? `<br/><span style="font-size:10px;color:#6B7280">${l.description}</span>` : ''}</td>
         <td>${l.hsn_code || item.hsn_code || '-'}</td>
         <td style="text-align:right">${qty}</td>
         <td>${item.unit_of_measure || 'Nos'}</td>
@@ -386,9 +386,7 @@ export default function ProductionPage() {
     return `<!doctype html><html><head><meta charset="utf-8"/><title>${doc.order_number || 'Sales Order'}</title>
       <style>
         body{font-family:'Helvetica Neue',Arial,sans-serif;color:#111827;padding:24px;font-size:12px}
-        h1{font-size:18px;margin:0 0 4px;text-transform:uppercase;letter-spacing:1px;color:#1D3557}
-        .header{display:flex;justify-content:space-between;border-bottom:2px solid #1D3557;padding-bottom:8px;margin-bottom:12px}
-        .company{font-size:11px;color:#374151;line-height:1.4}
+        ${letterheadCSS('#1D3557')}
         table{width:100%;border-collapse:collapse}
         th,td{border:1px solid #E5E7EB;padding:5px 7px}
         th{background:#F3F4F6;text-align:left;font-size:11px}
@@ -402,20 +400,9 @@ export default function ProductionPage() {
         .sig-line{border-top:1px solid #111827;margin-top:30px;padding-top:4px}
         .badge{display:inline-block;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600}
       </style></head><body>
-      <div class="header">
-        <div>
-          <h1>SALES ORDER</h1>
-          <div style="font-size:11px;color:#6B7280">No: <b style="color:#111827">${doc.order_number || ''}</b></div>
-          ${doc.source_quotation?.quotation_no ? `<div style="font-size:11px;color:#6B7280">From Quotation: <b style="color:#111827">${doc.source_quotation.quotation_no}</b></div>` : ''}
-        </div>
-        <div class="company">
-          <b style="font-size:13px;color:#1D3557">${company.name || 'MecSmart ERP'}</b><br/>
-          ${company.address ? `${company.address}<br/>` : ''}
-          ${company.city ? `${company.city}${company.state ? ', ' + company.state : ''}${company.pin_code ? ' - ' + company.pin_code : ''}<br/>` : ''}
-          ${company.gstin ? `GSTIN: ${company.gstin}<br/>` : ''}
-          ${company.phone ? `Phone: ${company.phone}` : ''} ${company.email ? `· ${company.email}` : ''}
-        </div>
-      </div>
+      ${buildLetterheadHTML(company)}
+      ${buildDocMetaHTML({ title: 'Sales Order', number: doc.order_number || '', date: doc.created_at })}
+      ${doc.source_quotation?.quotation_no ? `<div style="font-size:11px;color:#6B7280;margin-bottom:10px">Sourced from Quotation: <b style="color:#111827">${doc.source_quotation.quotation_no}</b></div>` : ''}
       <div class="meta">
         <div class="box">
           <div class="label">Customer / Buyer</div>
@@ -428,8 +415,7 @@ export default function ProductionPage() {
         </div>
         <div class="box">
           <div class="label">Order Details</div>
-          <div style="font-size:11px">Date: <b>${dateStr}</b></div>
-          <div style="font-size:11px">Due Date: <b>${dueStr}</b></div>
+          <div style="font-size:11px">Due Date: <b>${dueStr || '-'}</b></div>
           <div style="font-size:11px">Priority: <span class="badge" style="background:#FEF3C7;color:#723B13">${(doc.priority || 'medium').toUpperCase()}</span></div>
           <div style="font-size:11px">Status: <span class="badge" style="background:#E1EFFE;color:#1E429F">${(doc.status || 'draft').toUpperCase()}</span></div>
         </div>

@@ -1388,10 +1388,7 @@ export default function ManufacturingPage() {
                               <span className="text-xs text-[#6B7280]">Covered by parent SC</span>
                             ) : (
                             <div className="flex items-center flex-wrap gap-1">
-                              {/* MO Release button removed — child stock auto-reserves on MO create. */}
-                              {(wo.child_reservations || []).length > 0 && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#DEF7EC] text-[#03543F]" data-testid={`reserved-badge-${wo.id}`} title="Child stock reserved automatically">RESERVED · {(wo.child_reservations || []).length}</span>
-                              )}
+                              {/* RESERVED badge removed — auto-reserve on MO create is implicit; no need to clutter the UI. */}
                               {canEdit && ['pending', 'released'].includes(wo.status) && !wo.parent_wo_id && (
                                 <button onClick={() => {
                                   if (window.confirm(`Cancel Manufacturing Order ${wo.wo_number}?\n\nThis releases any reserved child stock back. Cannot be undone.`)) {

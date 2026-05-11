@@ -2046,8 +2046,12 @@ async def get_so_print_data(order_id: str, request: Request):
     order["customer"] = customer
     # Creator info for signature block
     order["created_by_user"] = await _lookup_creator(order.get("created_by"))
-    # Company settings (header)
-    company = await db.company_settings.find_one({"_id": "singleton"}, {"_id": 0}) or {}
+    # Company settings (header) — try both legacy keys for compatibility.
+    company = (
+        await db.company_settings.find_one({"type": "company"}, {"_id": 0})
+        or await db.company_settings.find_one({"_id": "singleton"}, {"_id": 0})
+        or {}
+    )
     order["company"] = company
     # Hydrate each line with the parent item + BOM (so PDF can show part_number / name / HSN / UOM)
     for ln in (order.get("lines") or []):
