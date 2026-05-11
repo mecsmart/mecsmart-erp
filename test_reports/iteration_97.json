@@ -1,0 +1,141 @@
+{
+  "summary": "Iteration 97 - Quotation→SO Prefill + MTS/MTO Redesign. All 12 backend tests passed. Frontend UI verified: 'From Quotation' dropdown, quotation search, BOM prefill, customer linking, balance tracking, and source quotation badge in SO list all working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Create Sales Order Dialog", "issues": ["Minor: Missing aria-describedby for DialogContent (accessibility warning)"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_97_quotation_so_prefill.py",
+    "/app/test_reports/pytest/pytest_iteration_97.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_97_quotation_so_prefill.py"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 tests passed)",
+    "frontend": "100% - All UI elements verified"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Tests create temporary items, BOMs, customers, quotations, and SOs with TEST_ prefix, then clean up after each test",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Quotation→SO prefill feature fully tested. Key test fixture: QUO-000023-R1 (id=4ca28139-2419-496b-b5dc-bb3a3b5f4d1f) with FG-001 item and BOM 75144c12-cdcd-4e85-abbe-c177b1762132. MTS/MTO confirm flow verified: MTS ignores FG stock (mo_qty=full qty), MTO uses FG stock first (reserved_qty=min(qty, stock), mo_qty=remainder). Child reservations on MO creation and release on SO cancel verified.",
+  "tests_executed": {
+    "backend": [
+      {
+        "test": "test_quotation_balance_endpoint_returns_per_line_balance",
+        "status": "PASSED",
+        "description": "GET /api/crm/quotations/{qid}/balance returns per-line balance with item/bom hydration and customer info"
+      },
+      {
+        "test": "test_create_so_from_quotation_increments_consumed_qty",
+        "status": "PASSED",
+        "description": "POST /api/production with source_quotation_id creates SO, increments quotation consumed_qty, decrements balance"
+      },
+      {
+        "test": "test_partial_conversion_keeps_quotation_status",
+        "status": "PASSED",
+        "description": "Partial conversion (consume < total qty): quotation status stays draft/sent, balance > 0, converted_so_ids appended"
+      },
+      {
+        "test": "test_full_conversion_flips_quotation_to_converted",
+        "status": "PASSED",
+        "description": "Full conversion (sum of all SOs == quotation line qty): quotation status flips to 'converted', converted_so_id set, converted_at set"
+      },
+      {
+        "test": "test_cancel_so_restores_quotation_balance",
+        "status": "PASSED",
+        "description": "Cancelling a sourced SO via POST /api/production/{id}/cancel restores the balance (cancelled SOs excluded from consumed_qty)"
+      },
+      {
+        "test": "test_mts_confirm_ignores_fg_stock",
+        "status": "PASSED",
+        "description": "MTS line sets reserved_qty=0 and mo_qty=quantity (ignoring FG stock entirely)"
+      },
+      {
+        "test": "test_mto_confirm_uses_fg_stock_first",
+        "status": "PASSED",
+        "description": "MTO line reserves min(qty, FG free stock) and produces MO for the remainder"
+      },
+      {
+        "test": "test_legacy_auto_order_type_normalizes_to_mts",
+        "status": "PASSED",
+        "description": "Legacy SOs with order_type='auto' normalize to 'mts' on create"
+      },
+      {
+        "test": "test_invalid_order_type_returns_400",
+        "status": "PASSED",
+        "description": "POST /api/production with invalid order_type returns 400"
+      },
+      {
+        "test": "test_child_reserved_stock_on_mo_creation",
+        "status": "PASSED",
+        "description": "When MO is created, child SG/parts get reserved_stock incremented by required qty"
+      },
+      {
+        "test": "test_mo_cancel_releases_child_reserved_stock",
+        "status": "PASSED",
+        "description": "When SO is cancelled, child reserved_stock decrements back (no orphan reservations)"
+      },
+      {
+        "test": "test_so_list_returns_source_quotation_no",
+        "status": "PASSED",
+        "description": "GET /api/production returns source_quotation_no for SOs created from quotations"
+      }
+    ],
+    "frontend": [
+      {
+        "test": "From Quotation block in Create SO dialog",
+        "status": "PASSED",
+        "description": "data-testid='so-from-quotation-block' present with search input and dropdown"
+      },
+      {
+        "test": "Quotation search and dropdown",
+        "status": "PASSED",
+        "description": "Search by quotation no/customer shows matching quotations with status badges"
+      },
+      {
+        "test": "Quotation prefill flow",
+        "status": "PASSED",
+        "description": "Selecting QUO-000023-R1 prefills BOM (FG-001), qty (10), due date, order type (MTS)"
+      },
+      {
+        "test": "Clear link button",
+        "status": "PASSED",
+        "description": "Clear link button restores quotation search input"
+      },
+      {
+        "test": "Source quotation badge in SO list",
+        "status": "PASSED",
+        "description": "SO list shows 'from QUO-...' badge under order number for SOs created from quotations"
+      },
+      {
+        "test": "No BOM error toast",
+        "status": "PASSED",
+        "description": "Selecting quotation with no BOM-attached items shows error toast and does NOT prefill"
+      }
+    ]
+  },
+  "features_verified": {
+    "quotation_balance_endpoint": "GET /api/crm/quotations/{qid}/balance returns per-line balance with item/bom hydration",
+    "so_from_quotation": "POST /api/production with source_quotation_id creates SO and tracks consumed_qty",
+    "partial_conversion": "Quotation status stays draft/sent until all lines fully consumed",
+    "full_conversion": "Quotation auto-marks 'converted' when every line balance reaches 0",
+    "cancel_restores_balance": "Cancelling sourced SO restores quotation balance",
+    "mts_confirm": "MTS ignores FG stock, always produces full SO qty via MO",
+    "mto_confirm": "MTO uses available FG stock first, MO only for shortfall",
+    "child_reservations": "Child SG/parts get reserved_stock on MO creation, released on cancel",
+    "legacy_auto_compat": "order_type='auto' normalizes to 'mts' for backward compatibility",
+    "validation": "Invalid order_type returns 400",
+    "frontend_prefill": "From Quotation dropdown prefills SO form with balance qty and active BOM"
+  }
+}

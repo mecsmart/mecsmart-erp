@@ -361,8 +361,11 @@ class ProductionOrderLine(BaseModel):
     bom_id: str
     quantity: int
     due_date: Optional[datetime] = None
-    order_type: str = "auto"  # auto | mts | mto
+    order_type: str = "mts"  # mts | mto  (legacy "auto" treated as mts)
     notes: Optional[str] = ""
+    # When the SO line originated from a Quotation line, retain the mapping
+    # so the quotation balance can be tracked.
+    source_quotation_line_no: Optional[int] = None
     # Populated on confirm — how the qty was split:
     reserved_qty: Optional[int] = 0   # to be fulfilled from FG stock
     mo_qty: Optional[int] = 0         # to be manufactured via MO
@@ -372,6 +375,10 @@ class ProductionOrderCreate(BaseModel):
     # New multi-line mode
     lines: Optional[List[ProductionOrderLine]] = None
     customer_id: Optional[str] = None
+    # Optional source-quotation link (when the user creates the SO via the
+    # "From Quotation" picker on the Production page).
+    source_quotation_id: Optional[str] = None
+    source_quotation_no: Optional[str] = None
     # Legacy single-line fields — used when `lines` is not provided
     bom_id: Optional[str] = None
     quantity: Optional[int] = None
@@ -1562,7 +1569,7 @@ async def create_production_order(order_data: ProductionOrderCreate, request: Re
             bom_id=order_data.bom_id,
             quantity=order_data.quantity,
             due_date=order_data.due_date,
-            order_type="auto",
+            order_type="mts",
             notes=order_data.notes or ""
         )]
 
@@ -1575,15 +1582,19 @@ async def create_production_order(order_data: ProductionOrderCreate, request: Re
         if not bom:
             raise HTTPException(status_code=404, detail=f"Line {idx}: BOM {ln.bom_id} not found")
         if ln.order_type not in ("auto", "mts", "mto"):
-            raise HTTPException(status_code=400, detail=f"Line {idx}: order_type must be auto | mts | mto")
+            raise HTTPException(status_code=400, detail=f"Line {idx}: order_type must be mts | mto")
+        # Legacy "auto" is normalised to "mts" so downstream MRP/confirm flows
+        # only ever see the two supported modes.
+        normalized_order_type = "mts" if (ln.order_type or "mts") == "auto" else ln.order_type
         enriched_lines.append({
             "line_id": str(uuid.uuid4()),
             "line_no": idx,
             "bom_id": ln.bom_id,
             "quantity": ln.quantity,
             "due_date": ln.due_date,
-            "order_type": ln.order_type or "auto",
+            "order_type": normalized_order_type,
             "notes": ln.notes or "",
+            "source_quotation_line_no": ln.source_quotation_line_no,
             "reserved_qty": 0,
             "mo_qty": 0,
             "status": "draft"
@@ -1613,8 +1624,17 @@ async def create_production_order(order_data: ProductionOrderCreate, request: Re
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
+    # Optional link back to the source quotation (when SO was built via the
+    # "From Quotation" picker on the Production page).
+    if order_data.source_quotation_id:
+        order_doc["source_quotation_id"] = order_data.source_quotation_id
+        order_doc["source_quotation_no"] = order_data.source_quotation_no or ""
     await db.production_orders.insert_one(order_doc)
     order_doc.pop("_id", None)
+    # If this SO is sourced from a quotation, update the quotation balance and
+    # mark it converted once every line is fully consumed.
+    if order_data.source_quotation_id:
+        await _refresh_quotation_conversion_status(order_data.source_quotation_id, order_doc["id"], order_number)
     return order_doc
 
 @production_router.put("/{order_id}")
@@ -10646,6 +10666,126 @@ async def _quotation_is_locked(q):
         return False  # SO vanished — unlock
     return so.get("status") not in ("cancelled",)
 
+
+async def _compute_quotation_balance(q):
+    """For each line of a quotation, compute the qty already consumed by
+    Sales Orders sourced from this quotation (excluding cancelled SOs) and
+    return the per-line balance.
+
+    Returns: list of dicts: { line_no, item_id, description, original_qty,
+                              consumed_qty, balance_qty, hsn_code }
+    """
+    qid = q.get("id")
+    lines = q.get("lines") or []
+    # Pull every SO that references this quotation as its source.
+    consumed_map = {}  # line_no -> consumed qty
+    if qid:
+        cur = db.production_orders.find(
+            {"source_quotation_id": qid, "status": {"$ne": "cancelled"}},
+            {"_id": 0, "lines": 1}
+        )
+        async for so in cur:
+            for sln in so.get("lines") or []:
+                sqln = sln.get("source_quotation_line_no")
+                if sqln is None:
+                    continue
+                try:
+                    sqln_int = int(sqln)
+                except (TypeError, ValueError):
+                    continue
+                consumed_map[sqln_int] = consumed_map.get(sqln_int, 0) + int(sln.get("quantity") or 0)
+    out = []
+    for ln in lines:
+        lno = ln.get("line_no")
+        try:
+            lno_int = int(lno) if lno is not None else None
+        except (TypeError, ValueError):
+            lno_int = None
+        original_qty = float(ln.get("quantity") or 0)
+        consumed = consumed_map.get(lno_int, 0) if lno_int is not None else 0
+        balance = max(0.0, original_qty - consumed)
+        out.append({
+            "line_no": lno_int,
+            "item_id": ln.get("item_id") or "",
+            "description": ln.get("description") or "",
+            "hsn_code": ln.get("hsn_code") or "",
+            "uom": ln.get("uom") or "",
+            "rate": float(ln.get("rate") or 0),
+            "original_qty": original_qty,
+            "consumed_qty": consumed,
+            "balance_qty": balance,
+        })
+    return out
+
+
+async def _refresh_quotation_conversion_status(qid: str, so_id: str, so_no: str):
+    """Called after a new SO is created with source_quotation_id set.
+    Marks the quotation 'converted' once every line's balance is zero;
+    otherwise leaves status untouched but always records the first/last
+    converted_so_id reference and appends to converted_so_ids[].
+    """
+    q = await db.crm_quotations.find_one({"id": qid})
+    if not q:
+        return
+    balance_rows = await _compute_quotation_balance(q)
+    total_balance = sum(r["balance_qty"] for r in balance_rows)
+    update = {
+        "updated_at": datetime.now(timezone.utc),
+    }
+    # Maintain a list of every SO sourced from this quotation.
+    converted_ids = list(q.get("converted_so_ids") or [])
+    converted_nos = list(q.get("converted_so_nos") or [])
+    if so_id and so_id not in converted_ids:
+        converted_ids.append(so_id)
+        converted_nos.append(so_no or "")
+    update["converted_so_ids"] = converted_ids
+    update["converted_so_nos"] = converted_nos
+    if total_balance <= 0:
+        # Fully consumed — flip to converted and set the primary SO link
+        # (mirrors convert_quotation_to_so for backward compat).
+        update["status"] = "converted"
+        update["converted_so_id"] = so_id
+        update["converted_so_no"] = so_no or ""
+        update["converted_at"] = datetime.now(timezone.utc)
+    await db.crm_quotations.update_one({"id": qid}, {"$set": update})
+
+
+@crm_router.get("/quotations/{qid}/balance")
+async def get_quotation_balance(qid: str, request: Request):
+    """Return per-line balance qty for a quotation (after deducting qty
+    already issued via prior Sales Orders). Used by the Production page
+    "From Quotation" picker to pre-fill the SO form with balance qty.
+    """
+    await get_current_user(request)
+    q = await db.crm_quotations.find_one({"id": qid})
+    if not q:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    balance = await _compute_quotation_balance(q)
+    # Hydrate item details + active BOM id per balance row so the SO form
+    # can pre-fill line.bom_id without an extra round-trip.
+    for row in balance:
+        if row["item_id"]:
+            it = await db.items.find_one({"id": row["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1})
+            row["item"] = it
+            bom = await db.boms.find_one({"parent_item_id": row["item_id"], "status": "active"}, {"_id": 0, "id": 1, "revision": 1, "name": 1})
+            if not bom:
+                bom = await db.boms.find_one({"parent_item_id": row["item_id"]}, {"_id": 0, "id": 1, "revision": 1, "name": 1})
+            row["bom"] = bom
+    customer = None
+    if q.get("customer_id"):
+        customer = await db.customers.find_one({"id": q["customer_id"]}, {"_id": 0, "id": 1, "name": 1})
+    return {
+        "id": q.get("id"),
+        "quotation_no": q.get("quotation_no"),
+        "status": q.get("status"),
+        "customer_id": q.get("customer_id") or "",
+        "customer": customer,
+        "customer_name": q.get("customer_name") or (customer or {}).get("name") or "",
+        "currency": q.get("currency") or "INR",
+        "lines": balance,
+    }
+
+
 @crm_router.put("/quotations/{qid}")
 async def update_quotation(qid: str, data: QuotationUpdate, request: Request):
     user = await get_current_user(request)
@@ -10801,7 +10941,7 @@ async def convert_quotation_to_so(qid: str, payload: dict = Body(default={}), re
     if not lines:
         raise HTTPException(status_code=400, detail="Quotation has no lines to convert")
     line_order_types = payload.get("line_order_types") or {}
-    default_order_type = payload.get("order_type") or "auto"
+    default_order_type = payload.get("order_type") or "mts"
     due_date_raw = payload.get("due_date")
     due_date = None
     if due_date_raw:
