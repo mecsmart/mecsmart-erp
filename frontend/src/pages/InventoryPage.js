@@ -587,11 +587,15 @@ export default function InventoryPage() {
                           </div>
                           {(item.variant_attributes || []).length > 0 && (
                             <div className="mt-1 flex flex-wrap gap-1" data-testid={`item-variants-${item.part_number}`}>
-                              {(item.variant_attributes || []).slice(0, 3).map((attr, ai) => (
-                                <span key={ai} className="text-[9px] inline-block px-1 py-0.5 rounded bg-[#EEF2FF] text-[#3730A3]" title={`${attr.name}: ${(attr.values || []).join(', ')}`}>
-                                  {attr.name}: {(attr.values || []).slice(0, 3).join('/')}{(attr.values || []).length > 3 ? '…' : ''}
-                                </span>
-                              ))}
+                              {(item.variant_attributes || []).slice(0, 3).map((attr, ai) => {
+                                // Values may be plain strings OR {value, short_code} objects.
+                                const vals = (attr.values || []).map(v => (typeof v === 'string' ? v : (v?.value || v?.short_code || '')));
+                                return (
+                                  <span key={ai} className="text-[9px] inline-block px-1 py-0.5 rounded bg-[#EEF2FF] text-[#3730A3]" title={`${attr.name}: ${vals.join(', ')}`}>
+                                    {attr.name}: {vals.slice(0, 3).join('/')}{vals.length > 3 ? '…' : ''}
+                                  </span>
+                                );
+                              })}
                               {(item.variant_attributes || []).length > 3 && (
                                 <span className="text-[9px] text-[#6B7280]">+{(item.variant_attributes || []).length - 3} more</span>
                               )}
@@ -864,9 +868,12 @@ export default function InventoryPage() {
                         <div key={ai} className="flex items-center gap-2 bg-white border border-[#FDE68A] rounded-sm px-2 py-1">
                           <span className="text-xs font-semibold text-[#374151] w-32 truncate" title={attr.name}>{attr.name}</span>
                           <div className="flex flex-wrap gap-1 flex-1">
-                            {(attr.values || []).map((v, vi) => (
-                              <span key={vi} className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">{v}</span>
-                            ))}
+                            {(attr.values || []).map((v, vi) => {
+                              const label = typeof v === 'string' ? v : (v?.value || v?.short_code || '');
+                              return (
+                                <span key={vi} className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">{label}</span>
+                              );
+                            })}
                           </div>
                         </div>
                       ))}

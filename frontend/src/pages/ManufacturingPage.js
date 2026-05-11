@@ -1090,7 +1090,10 @@ export default function ManufacturingPage() {
                                     >
                                       <SelectTrigger className="text-[11px] h-7 bg-white" data-testid={`mo-mts-variant-${ai}`}><SelectValue placeholder={`Pick ${attr.name}…`} /></SelectTrigger>
                                       <SelectContent>
-                                        {(attr.values || []).map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                                        {(attr.values || []).map(v => {
+                                          const val = typeof v === 'string' ? v : (v?.value || v?.short_code || '');
+                                          return <SelectItem key={val} value={val}>{val}</SelectItem>;
+                                        })}
                                       </SelectContent>
                                     </Select>
                                   </div>
