@@ -253,6 +253,31 @@ export default function InventoryPage() {
           <p className="text-sm text-[#4B5563]">Track stock levels and inventory transactions</p>
         </div>
         <div className="flex items-center gap-2">
+        {user?.role === 'admin' && (
+          <button
+            type="button"
+            onClick={async () => {
+              if (!window.confirm("Reconcile all `reserved_stock` values against active Sales Orders and Manufacturing Orders?\n\nThis is safe to run anytime — it removes orphan reservations left over from older cancellations. Click OK to proceed.")) return;
+              try {
+                const { data } = await api.post('/api/inventory/reconcile-reservations');
+                if (data.drift_count === 0) {
+                  toast.success(data.message);
+                } else {
+                  const summary = (data.drift || []).slice(0, 6).map(d => `${d.part_number}: ${d.before} → ${d.after}`).join('\n');
+                  toast.success(`${data.message}\n${summary}${data.drift_count > 6 ? `\n…and ${data.drift_count - 6} more` : ''}`, { duration: 8000 });
+                  fetchData();
+                }
+              } catch (err) {
+                toast.error(err.response?.data?.detail || 'Reconcile failed');
+              }
+            }}
+            className="btn-secondary flex items-center space-x-2 text-[#723B13] border-[#723B13] hover:bg-[#FEF3C7]"
+            data-testid="reconcile-reservations-btn"
+            title="Admin tool: recompute reserved_stock from active SOs + MOs"
+          >
+            <span>Reconcile Reservations</span>
+          </button>
+        )}
         {canCreateItem && (
           <button
             type="button"

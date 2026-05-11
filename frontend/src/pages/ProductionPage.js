@@ -334,15 +334,23 @@ export default function ProductionPage() {
     }
   };
 
-  // ========== RESERVE / RELEASE STOCK ON SO LINES ==========
+  // ========== RESERVE / RELEASE STOCK ON SO LINES (with confirmation) ==========
   const toggleReserveLine = async (order, line) => {
-    const action = line.is_reserved ? 'release-line' : 'reserve-line';
+    const isReserved = (parseInt(line.reserved_qty, 10) || 0) > 0;
+    const action = isReserved ? 'release-line' : 'reserve-line';
+    const itemLabel = `Line ${line.line_no}${line.item?.part_number ? ` (${line.item.part_number})` : ''}`;
+    const msg = isReserved
+      ? `Unreserve ${itemLabel}?\n\nThis will release ${line.reserved_qty} unit(s) back to free stock.\nClick OK to confirm.`
+      : `Reserve stock for ${itemLabel}?\n\nThis will lock as much available FG stock as possible (up to ${line.quantity} unit(s)) for this Sales Order.\nClick OK to confirm.`;
+    if (!window.confirm(msg)) {
+      return;
+    }
     try {
       const { data } = await api.post(`/api/production/${order.id}/${action}`, { line_id: line.line_id, line_no: line.line_no });
       toast.success(data.message);
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || `Failed to ${line.is_reserved ? 'release' : 'reserve'}`);
+      toast.error(error.response?.data?.detail || `Failed to ${isReserved ? 'release' : 'reserve'}`);
     }
   };
 
@@ -897,24 +905,29 @@ export default function ProductionPage() {
                         <div className="space-y-1">
                           {(order.lines || []).slice(0, 4).map((ln, i) => {
                             const canReserveAction = canEdit && !['draft', 'cancelled', 'partially_cancelled', 'completed'].includes(order.status);
+                            const reservedQty = parseInt(ln.reserved_qty, 10) || 0;
+                            const hasAnyReserve = reservedQty > 0;
+                            const isFullyReserved = hasAnyReserve && reservedQty >= (parseInt(ln.quantity, 10) || 0);
                             return (
                               <div key={i} className="flex items-center justify-between gap-2 text-[10px]" data-testid={`so-line-row-${order.id}-${ln.line_no}`}>
                                 <div className="flex-1 min-w-0">
                                   <span className="text-[#6B7280]">L{ln.line_no}:</span>
-                                  {ln.is_reserved && (
-                                    <span className="ml-1 inline-block text-[9px] px-1 rounded bg-[#DEF7EC] text-[#03543F]" data-testid={`so-line-reserved-badge-${order.id}-${ln.line_no}`}>RESERVED {ln.reserved_qty}</span>
+                                  {hasAnyReserve && (
+                                    <span className={`ml-1 inline-block text-[9px] px-1 rounded ${isFullyReserved ? 'bg-[#DEF7EC] text-[#03543F]' : 'bg-[#FEF3C7] text-[#723B13]'}`} data-testid={`so-line-reserved-badge-${order.id}-${ln.line_no}`}>
+                                      {isFullyReserved ? `RESERVED ${reservedQty}` : `PARTIAL ${reservedQty}/${ln.quantity}`}
+                                    </span>
                                   )}
                                 </div>
                                 {canReserveAction && ln.bom_id && (
                                   <button
                                     type="button"
                                     onClick={() => toggleReserveLine(order, ln)}
-                                    className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${ln.is_reserved ? 'text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]' : 'text-[#03543F] border-[#03543F] hover:bg-[#DEF7EC]'}`}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${hasAnyReserve ? 'text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]' : 'text-[#03543F] border-[#03543F] hover:bg-[#DEF7EC]'}`}
                                     data-testid={`so-reserve-toggle-${order.id}-${ln.line_no}`}
-                                    title={ln.is_reserved ? 'Release reservation' : 'Reserve stock'}
+                                    title={hasAnyReserve ? `Unreserve ${reservedQty} unit(s)` : 'Reserve available stock'}
                                   >
-                                    {ln.is_reserved ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-                                    {ln.is_reserved ? 'Release' : 'Reserve'}
+                                    {hasAnyReserve ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                                    {hasAnyReserve ? 'Unreserve' : 'Reserve'}
                                   </button>
                                 )}
                               </div>

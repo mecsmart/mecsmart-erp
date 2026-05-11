@@ -2014,23 +2014,22 @@ async def release_so_line(order_id: str, payload: dict = Body(default={}), reque
             break
     if not target_line:
         raise HTTPException(status_code=404, detail="Line not found")
-    if not target_line.get("is_reserved"):
-        raise HTTPException(status_code=400, detail="Line is not reserved")
+    reserved_qty = int(target_line.get("reserved_qty", 0) or 0)
+    if reserved_qty <= 0:
+        raise HTTPException(status_code=400, detail="Line has no reservation to release")
     bom = await db.boms.find_one({"id": target_line.get("bom_id")}, {"_id": 0, "parent_item_id": 1})
     if not bom or not bom.get("parent_item_id"):
         raise HTTPException(status_code=404, detail="BOM (or its parent item) not found for this line")
     parent_item_id = bom["parent_item_id"]
-    qty = int(target_line.get("reserved_qty", 0) or target_line.get("quantity", 0) or 0)
-    if qty > 0:
-        await db.items.update_one(
-            {"id": parent_item_id},
-            {"$inc": {"reserved_stock": -qty}},
-        )
+    await db.items.update_one(
+        {"id": parent_item_id},
+        {"$inc": {"reserved_stock": -reserved_qty}},
+    )
     await db.production_orders.update_one(
         {"id": order_id, "lines.line_id": target_line.get("line_id")},
         {"$set": {"lines.$.is_reserved": False, "lines.$.reserved_qty": 0}},
     )
-    return {"message": f"Released {qty} units", "released_qty": qty}
+    return {"message": f"Released {reserved_qty} unit(s)", "released_qty": reserved_qty}
 
 
 @production_router.get("/{order_id}/print-data")
@@ -2564,6 +2563,78 @@ async def get_inventory_transactions(request: Request, item_id: Optional[str] = 
         item = await db.items.find_one({"id": tx.get("item_id")}, {"_id": 0})
         tx["item"] = item
     return transactions
+
+@inventory_router.post("/reconcile-reservations")
+async def reconcile_reservations(request: Request):
+    """Admin tool: scan every item's `reserved_stock` and recompute it from the
+    canonical source-of-truth — active SO line reservations + active MO child reservations.
+    
+    Reasons drift can happen:
+      • A cancellation path missed releasing some reservation (e.g. older partial fix)
+      • Direct DB edits
+      • Bug in a previous code revision
+    
+    This endpoint is idempotent and safe to run repeatedly.
+    """
+    user = await get_current_user(request)
+    _require_access(user, ["admin"], module="inventory", action="edit")
+    
+    # Build the canonical map: item_id -> expected reserved_stock.
+    expected = {}
+    
+    # Source 1: SO lines that are reserved (status != cancelled)
+    so_cur = db.production_orders.find(
+        {"status": {"$nin": ["cancelled"]}},
+        {"_id": 0, "lines": 1, "id": 1}
+    )
+    async for so in so_cur:
+        for ln in so.get("lines") or []:
+            if not ln.get("is_reserved") and int(ln.get("reserved_qty", 0) or 0) <= 0:
+                continue
+            bom = await db.boms.find_one({"id": ln.get("bom_id")}, {"_id": 0, "parent_item_id": 1})
+            if not bom or not bom.get("parent_item_id"):
+                continue
+            qty = int(ln.get("reserved_qty", 0) or 0)
+            if qty <= 0:
+                continue
+            expected[bom["parent_item_id"]] = expected.get(bom["parent_item_id"], 0) + qty
+    
+    # Source 2: MO child_reservations (status not cancelled / completed)
+    mo_cur = db.work_orders.find(
+        {"status": {"$nin": ["cancelled", "completed"]}, "child_reservations": {"$exists": True, "$ne": []}},
+        {"_id": 0, "child_reservations": 1, "id": 1}
+    )
+    async for mo in mo_cur:
+        for resv in (mo.get("child_reservations") or []):
+            iid = resv.get("item_id")
+            qty = int(resv.get("qty", 0) or 0)
+            if iid and qty > 0:
+                expected[iid] = expected.get(iid, 0) + qty
+    
+    # Now compare against every item and reset drift.
+    drift_records = []
+    items_cur = db.items.find({}, {"_id": 0, "id": 1, "part_number": 1, "reserved_stock": 1, "current_stock": 1})
+    async for it in items_cur:
+        current = int(it.get("reserved_stock", 0) or 0)
+        canonical = expected.get(it["id"], 0)
+        if current != canonical:
+            await db.items.update_one(
+                {"id": it["id"]},
+                {"$set": {"reserved_stock": canonical}},
+            )
+            drift_records.append({
+                "item_id": it["id"],
+                "part_number": it.get("part_number"),
+                "before": current,
+                "after": canonical,
+                "delta": canonical - current,
+            })
+    return {
+        "message": f"Reconciled {len(drift_records)} item(s)" if drift_records else "All items already in sync — no drift found.",
+        "drift_count": len(drift_records),
+        "drift": drift_records,
+    }
+
 
 @inventory_router.post("/transactions")
 async def create_inventory_transaction(tx_data: InventoryTransactionCreate, request: Request):
