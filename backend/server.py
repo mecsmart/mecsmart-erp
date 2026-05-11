@@ -110,16 +110,18 @@ class ItemCreate(BaseModel):
     hsn_code: Optional[str] = ""
     gst_rate: Optional[float] = 18.0
     # ===== Phase 2: Attribute-driven variants =====
-    # When set on an FG/SG item, every BOM whose parent_item_id is this item
-    # MAY use the per-component `applies_to` map to filter components by
-    # variant selection at SO/MO creation time.
-    # Example:
-    #   variant_attributes = [
-    #     {"name": "Motor Power", "values": ["1HP", "2HP", "5HP"]},
-    #     {"name": "Voltage",     "values": ["220V", "440V"]}
-    #   ]
+    # variant_attributes shape:
+    #   [{name: str, values: [{value: str, short_code: str(max 4)}]}, ...]
+    # Backward-compat: legacy values as list[str] still accepted; short_code defaults
+    # to the first 4 chars of the value (uppercased, alnum only).
     variant_attributes: Optional[List[Dict[str, Any]]] = None
     auto_suffix_variant_sku: Optional[bool] = True
+    # When the item is itself a generated variant of a parent.
+    parent_item_id: Optional[str] = None      # link to the master item
+    is_variant: Optional[bool] = False        # marks a generated variant child
+    variant_short_codes: Optional[Dict[str, str]] = None   # { "Motor Power": "1HP", "Voltage": "220V" } — the chosen short codes
+    variant_values: Optional[Dict[str, str]] = None        # { "Motor Power": "1HP", "Voltage": "220V" } — display labels
+    is_active: Optional[bool] = True                       # variants get is_active=False when an attribute value is removed
 
 class ItemUpdate(BaseModel):
     name: Optional[str] = None
@@ -138,6 +140,11 @@ class ItemUpdate(BaseModel):
     gst_rate: Optional[float] = None
     variant_attributes: Optional[List[Dict[str, Any]]] = None
     auto_suffix_variant_sku: Optional[bool] = None
+    parent_item_id: Optional[str] = None
+    is_variant: Optional[bool] = None
+    variant_short_codes: Optional[Dict[str, str]] = None
+    variant_values: Optional[Dict[str, str]] = None
+    is_active: Optional[bool] = None
 
 
 class ItemGroupCreate(BaseModel):
@@ -1083,6 +1090,8 @@ async def get_items(request: Request, category: Optional[str] = None, search: Op
             "current_stock": 1, "safety_stock": 1, "reorder_point": 1,
             "lead_time_days": 1,
             "variant_attributes": 1, "auto_suffix_variant_sku": 1,
+            "parent_item_id": 1, "is_variant": 1,
+            "variant_short_codes": 1, "variant_values": 1, "is_active": 1,
         }
     else:
         projection = {"_id": 0}
@@ -1163,6 +1172,9 @@ async def update_item(item_id: str, item_data: ItemUpdate, request: Request):
         update_data["gst_rate"] = merged.get("gst_rate", update_data.get("gst_rate"))
     
     update_data["updated_at"] = datetime.now(timezone.utc)
+    # Normalize variant_attributes to canonical shape (List[{name, values:[{value,short_code}]}]).
+    if "variant_attributes" in update_data:
+        update_data["variant_attributes"] = _normalize_variant_attributes(update_data["variant_attributes"])
     result = await db.items.update_one({"id": item_id}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -1209,6 +1221,219 @@ async def delete_item(item_id: str, request: Request):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
     return {"message": "Item deleted"}
+
+
+
+def _normalize_variant_attributes(raw: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """Normalize variant_attributes from frontend to the canonical shape:
+       [{name: str, values: [{value: str, short_code: str(<=4)}]}, ...]
+
+    Accepts legacy formats:
+      • values as List[str] → coerce to [{value:'x', short_code:'X'}].
+      • short_code missing → default to first 4 alnum-upper chars of value.
+    """
+    if not raw:
+        return []
+    out = []
+    for attr in raw:
+        if not isinstance(attr, dict):
+            continue
+        name = (attr.get("name") or "").strip()
+        if not name:
+            continue
+        raw_vals = attr.get("values") or []
+        norm_vals = []
+        for v in raw_vals:
+            if isinstance(v, str):
+                val = v.strip()
+                if not val:
+                    continue
+                sc = "".join(ch for ch in val.upper() if ch.isalnum())[:4]
+                norm_vals.append({"value": val, "short_code": sc or val[:4]})
+            elif isinstance(v, dict):
+                val = (v.get("value") or "").strip()
+                if not val:
+                    continue
+                sc = (v.get("short_code") or "").strip()
+                if not sc:
+                    sc = "".join(ch for ch in val.upper() if ch.isalnum())[:4]
+                sc = sc[:4]
+                norm_vals.append({"value": val, "short_code": sc})
+        if norm_vals:
+            out.append({"name": name, "values": norm_vals})
+    return out
+
+
+def _all_variant_combinations(variant_attributes: List[Dict[str, Any]]) -> List[Dict[str, Dict[str, str]]]:
+    """Return every possible (attribute → {value, short_code}) combination.
+    Order follows the attribute order in `variant_attributes`."""
+    if not variant_attributes:
+        return []
+    # Build a list of [(attr_name, [value_dict, ...]), ...]
+    axes = [(a["name"], a["values"]) for a in variant_attributes if a.get("values")]
+    if not axes:
+        return []
+    import itertools
+    combos = []
+    for tup in itertools.product(*[vals for _, vals in axes]):
+        combo = {}
+        for (attr_name, _), val in zip(axes, tup):
+            combo[attr_name] = {"value": val["value"], "short_code": val["short_code"]}
+        combos.append(combo)
+    return combos
+
+
+def _build_variant_sku_from_short_codes(parent_sku: str, combo: Dict[str, Dict[str, str]]) -> str:
+    """Build SKU from parent + short_codes joined.
+    Example: ('FG-001', {Motor Power:{short_code:'1HP'}, Voltage:{short_code:'220V'}}) -> 'FG-001-1HP-220V'."""
+    parts = [c.get("short_code", "").strip() for c in combo.values()]
+    parts = [p for p in parts if p]
+    if not parts:
+        return parent_sku
+    return f"{parent_sku}-{'-'.join(parts)}"
+
+
+@items_router.get("/{item_id}/variants")
+async def list_item_variants(item_id: str, request: Request):
+    """List every generated variant child of a parent item."""
+    await get_current_user(request)
+    parent = await db.items.find_one({"id": item_id})
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent item not found")
+    variants = await db.items.find(
+        {"parent_item_id": item_id, "is_variant": True},
+        {"_id": 0}
+    ).sort("part_number", 1).to_list(500)
+    return variants
+
+
+@items_router.post("/{item_id}/preview-variants")
+async def preview_item_variants(item_id: str, request: Request):
+    """Compute every combination from the parent's variant_attributes and report
+    which already exist as child items vs which would be NEW."""
+    await get_current_user(request)
+    parent = await db.items.find_one({"id": item_id})
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent item not found")
+    norm_attrs = _normalize_variant_attributes(parent.get("variant_attributes") or [])
+    if not norm_attrs:
+        return {"combinations": [], "existing_skus": [], "summary": "No variant attributes defined on this item."}
+    parent_sku = parent.get("part_number") or ""
+    combos = _all_variant_combinations(norm_attrs)
+    # Existing children: map by sku for fast lookup
+    existing = await db.items.find(
+        {"parent_item_id": item_id, "is_variant": True},
+        {"_id": 0, "part_number": 1, "id": 1, "is_active": 1, "current_stock": 1}
+    ).to_list(1000)
+    existing_by_sku = {e["part_number"]: e for e in existing}
+    rows = []
+    for combo in combos:
+        sku = _build_variant_sku_from_short_codes(parent_sku, combo)
+        ex = existing_by_sku.get(sku)
+        rows.append({
+            "sku": sku,
+            "combination": combo,
+            "exists": bool(ex),
+            "is_active": ex.get("is_active", True) if ex else True,
+            "current_stock": ex.get("current_stock", 0) if ex else 0,
+            "label": ", ".join(f"{k}: {v['value']}" for k, v in combo.items()),
+        })
+    return {
+        "parent_item_id": item_id,
+        "parent_sku": parent_sku,
+        "combinations": rows,
+        "existing_count": sum(1 for r in rows if r["exists"]),
+        "new_count": sum(1 for r in rows if not r["exists"]),
+    }
+
+
+@items_router.post("/{item_id}/generate-variants")
+async def generate_item_variants(item_id: str, payload: dict = Body(default={}), request: Request = None):
+    """Generate variant child items based on `selected_skus` from /preview-variants.
+
+    Payload shape:
+      { "selected_skus": ["FG-001-1HP-220V", "FG-001-2HP-440V", ...] }
+
+    For each requested SKU not already present, a new item record is created
+    inheriting key fields from the parent. Existing variant items are left as-is.
+
+    Also: any existing variant SKU NOT in the current combination set is marked
+    `is_active=False` (so removing an attribute value safely retires variants
+    without losing stock history).
+    """
+    user = await get_current_user(request)
+    _require_access(user, ["admin", "production_manager"], module="items", action="create")
+    parent = await db.items.find_one({"id": item_id})
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent item not found")
+    norm_attrs = _normalize_variant_attributes(parent.get("variant_attributes") or [])
+    if not norm_attrs:
+        raise HTTPException(status_code=400, detail="Parent item has no variant attributes — define them first.")
+    parent_sku = parent.get("part_number") or ""
+    combos = _all_variant_combinations(norm_attrs)
+    selected_skus = set(payload.get("selected_skus") or [])
+    # Index all valid combos by sku.
+    combo_by_sku = {
+        _build_variant_sku_from_short_codes(parent_sku, c): c for c in combos
+    }
+    if not selected_skus:
+        # Default to generating ALL combos.
+        selected_skus = set(combo_by_sku.keys())
+    # Fetch existing variants of this parent.
+    existing = await db.items.find(
+        {"parent_item_id": item_id, "is_variant": True},
+        {"_id": 0, "part_number": 1, "id": 1}
+    ).to_list(1000)
+    existing_by_sku = {e["part_number"]: e for e in existing}
+    created = []
+    reactivated = []
+    deactivated = []
+    valid_skus_in_combos = set(combo_by_sku.keys())
+    for sku in selected_skus:
+        if sku not in combo_by_sku:
+            continue  # SKU not in current combination set — ignore
+        ex = existing_by_sku.get(sku)
+        if ex:
+            # Reactivate if it was retired.
+            await db.items.update_one({"id": ex["id"]}, {"$set": {"is_active": True}})
+            reactivated.append(sku)
+            continue
+        # Build child item from parent.
+        combo = combo_by_sku[sku]
+        short_codes = {k: v["short_code"] for k, v in combo.items()}
+        values_map = {k: v["value"] for k, v in combo.items()}
+        # Copy + override.
+        child = {k: v for k, v in parent.items() if k not in ("_id", "id", "variant_attributes", "auto_suffix_variant_sku")}
+        child["id"] = str(uuid.uuid4())
+        child["part_number"] = sku
+        child["name"] = parent.get("name", "") + " · " + ", ".join(f"{k}: {v}" for k, v in values_map.items())
+        child["parent_item_id"] = item_id
+        child["is_variant"] = True
+        child["variant_short_codes"] = short_codes
+        child["variant_values"] = values_map
+        child["variant_attributes"] = None  # only the master holds attrs
+        child["is_active"] = True
+        child["current_stock"] = 0
+        child["reserved_stock"] = 0
+        child["safety_stock"] = parent.get("safety_stock", 0) or 0
+        child["reorder_point"] = parent.get("reorder_point", 0) or 0
+        child["created_at"] = datetime.now(timezone.utc)
+        child["created_by"] = user["id"]
+        await db.items.insert_one(child)
+        child.pop("_id", None)
+        created.append(child)
+    # Retire any pre-existing variant whose SKU is no longer in the valid combos
+    # (i.e. an attribute value was removed).
+    for sku, ex in existing_by_sku.items():
+        if sku not in valid_skus_in_combos:
+            await db.items.update_one({"id": ex["id"]}, {"$set": {"is_active": False}})
+            deactivated.append(sku)
+    return {
+        "message": f"Generated {len(created)} new variant(s)" + (f", reactivated {len(reactivated)}" if reactivated else "") + (f", retired {len(deactivated)} obsolete" if deactivated else ""),
+        "created": created,
+        "reactivated_skus": reactivated,
+        "deactivated_skus": deactivated,
+    }
 
 
 # ================== ITEM GROUPS ROUTES ==================

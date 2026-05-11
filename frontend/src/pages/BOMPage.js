@@ -990,7 +990,15 @@ export default function BOMPage() {
                       <div className="text-[11px] text-[#9CA3AF] py-2 italic">No variants. This BOM is a single non-configurable build.</div>
                     ) : (
                       <div className="space-y-1.5">
-                        {(parentVariantAttrs || []).map((attr, ai) => (
+                        {(parentVariantAttrs || []).map((attr, ai) => {
+                          // Normalize each value to {value, short_code} shape so the UI is consistent.
+                          const norm = (attr.values || []).map(v => typeof v === 'string' ? { value: v, short_code: (v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) } : v);
+                          const updateVals = (newVals) => {
+                            const next = [...parentVariantAttrs];
+                            next[ai] = { ...next[ai], values: newVals };
+                            setParentVariantAttrs(next);
+                          };
+                          return (
                           <div key={ai} className="flex items-start gap-2 bg-white border border-[#FDE68A] rounded-sm px-2 py-1.5" data-testid={`bom-variant-attr-row-${ai}`}>
                             <input
                               type="text"
@@ -1001,61 +1009,62 @@ export default function BOMPage() {
                                 next[ai] = { ...next[ai], name: e.target.value };
                                 setParentVariantAttrs(next);
                               }}
-                              className="input-field text-xs flex-1"
+                              className="input-field text-xs flex-1 self-start"
                               data-testid={`bom-variant-attr-name-${ai}`}
                             />
                             <div className="flex-1 flex items-center flex-wrap gap-1 px-1.5 py-1 bg-white border border-[#D1D5DB] rounded-sm min-h-[28px]" data-testid={`bom-variant-attr-values-${ai}`}>
-                              {(attr.values || []).map((v, vi) => (
-                                <span key={vi} className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">
-                                  {v}
+                              {norm.map((vobj, vi) => (
+                                <span key={vi} className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">
+                                  {vobj.value}
+                                  <input
+                                    type="text"
+                                    maxLength={4}
+                                    value={vobj.short_code || ''}
+                                    onChange={(e) => {
+                                      const sc = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+                                      const newVals = norm.map((x, j) => j === vi ? { ...x, short_code: sc } : x);
+                                      updateVals(newVals);
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="w-9 text-[9px] bg-white/20 text-white border-0 px-1 py-0 rounded outline-none placeholder-white/60 text-center"
+                                    title="Short code for SKU suffix (max 4 chars)"
+                                    placeholder="code"
+                                    data-testid={`bom-variant-attr-shortcode-${ai}-${vi}`}
+                                  />
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      const next = [...parentVariantAttrs];
-                                      next[ai] = { ...next[ai], values: (next[ai].values || []).filter((_, i) => i !== vi) };
-                                      setParentVariantAttrs(next);
-                                    }}
-                                    className="ml-1 text-white hover:text-[#FECDD3]"
+                                    onClick={() => updateVals(norm.filter((_, i) => i !== vi))}
+                                    className="text-white hover:text-[#FECDD3]"
                                   >×</button>
                                 </span>
                               ))}
                               <input
                                 type="text"
-                                placeholder={(attr.values || []).length === 0 ? 'type value + comma (e.g. 1HP, 2HP)' : ''}
+                                placeholder={norm.length === 0 ? 'type value + comma (e.g. 1HP, 2HP)' : ''}
                                 onKeyDown={(e) => {
                                   if (e.key === ',' || e.key === 'Enter' || e.key === 'Tab') {
                                     const raw = (e.currentTarget.value || '').trim();
                                     if (raw) {
                                       e.preventDefault();
-                                      const next = [...parentVariantAttrs];
-                                      const existing = next[ai].values || [];
-                                      if (!existing.includes(raw)) {
-                                        next[ai] = { ...next[ai], values: [...existing, raw] };
-                                        setParentVariantAttrs(next);
+                                      if (!norm.find(v => v.value === raw)) {
+                                        const sc = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+                                        updateVals([...norm, { value: raw, short_code: sc }]);
                                       }
                                       e.currentTarget.value = '';
                                     } else if (e.key === ',' || e.key === 'Enter') {
                                       e.preventDefault();
                                     }
                                   } else if (e.key === 'Backspace' && !e.currentTarget.value) {
-                                    const next = [...parentVariantAttrs];
-                                    if ((next[ai].values || []).length > 0) {
-                                      next[ai] = { ...next[ai], values: (next[ai].values || []).slice(0, -1) };
-                                      setParentVariantAttrs(next);
-                                    }
+                                    if (norm.length > 0) updateVals(norm.slice(0, -1));
                                   }
                                 }}
                                 onBlur={(e) => {
                                   const raw = (e.currentTarget.value || '').trim();
-                                  if (raw) {
-                                    const next = [...parentVariantAttrs];
-                                    const existing = next[ai].values || [];
-                                    if (!existing.includes(raw)) {
-                                      next[ai] = { ...next[ai], values: [...existing, raw] };
-                                      setParentVariantAttrs(next);
-                                    }
-                                    e.currentTarget.value = '';
+                                  if (raw && !norm.find(v => v.value === raw)) {
+                                    const sc = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+                                    updateVals([...norm, { value: raw, short_code: sc }]);
                                   }
+                                  e.currentTarget.value = '';
                                 }}
                                 className="flex-1 min-w-[120px] outline-none text-xs bg-transparent border-0 p-0"
                                 data-testid={`bom-variant-attr-values-input-${ai}`}
@@ -1064,12 +1073,52 @@ export default function BOMPage() {
                             <button
                               type="button"
                               onClick={() => setParentVariantAttrs(prev => prev.filter((_, i) => i !== ai))}
-                              className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded px-1"
+                              className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded px-1 self-start"
                               data-testid={`bom-variant-attr-remove-${ai}`}
                               title="Remove attribute"
                             ><X className="w-3.5 h-3.5" /></button>
                           </div>
-                        ))}
+                        );
+                        })}
+                        {/* Generate Variants action */}
+                        {formData.parent_item_id && (parentVariantAttrs || []).some(a => (a.values || []).length > 0) && (
+                          <div className="pt-1.5 border-t border-[#FDE68A]">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  // Save current variant_attributes first so backend has the latest.
+                                  const cleanedAttrs = (parentVariantAttrs || [])
+                                    .map(a => ({
+                                      name: (a.name || '').trim(),
+                                      values: (a.values || []).map(v => typeof v === 'string' ? { value: v.trim(), short_code: v.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0,4) } : { value: v.value.trim(), short_code: (v.short_code || v.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0,4)).slice(0,4) }),
+                                    }))
+                                    .filter(a => a.name && a.values.length > 0);
+                                  await api.put(`/api/items/${formData.parent_item_id}`, { variant_attributes: cleanedAttrs });
+                                  // Preview
+                                  const { data: preview } = await api.post(`/api/items/${formData.parent_item_id}/preview-variants`);
+                                  const total = preview.combinations.length;
+                                  const newCount = preview.new_count;
+                                  const existingCount = preview.existing_count;
+                                  const sample = preview.combinations.slice(0, 6).map(r => `  • ${r.sku} — ${r.label}${r.exists ? ' (exists)' : ' (NEW)'}`).join('\n');
+                                  const more = total > 6 ? `\n  …and ${total - 6} more` : '';
+                                  if (window.confirm(`Generate ${total} variant${total > 1 ? 's' : ''}?\n\n${existingCount} already exist, ${newCount} would be created.\n\n${sample}${more}\n\nClick OK to proceed (all combinations).`)) {
+                                    const { data: result } = await api.post(`/api/items/${formData.parent_item_id}/generate-variants`, {});
+                                    toast.success(result.message);
+                                    fetchItems().catch(() => {});
+                                  }
+                                } catch (err) {
+                                  toast.error(err.response?.data?.detail || 'Failed to generate variants');
+                                }
+                              }}
+                              className="text-[11px] px-2 py-1 rounded border border-[#723B13] text-[#723B13] hover:bg-[#FEF3C7] font-semibold"
+                              data-testid="bom-generate-variants-btn"
+                            >
+                              Generate Variant Items
+                            </button>
+                            <span className="ml-2 text-[10px] text-[#92400E]">Creates child items per combination with SKU suffix (e.g. <span className="mono">FG-001-1HP-220V</span>).</span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
