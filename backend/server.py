@@ -1681,7 +1681,11 @@ async def confirm_production_order(order_id: str, request: Request):
     summary_lines = []
     for ln in lines:
         qty = int(ln.get("quantity", 0) or 0)
-        order_type = ln.get("order_type", "auto")
+        order_type = ln.get("order_type", "mto")
+        # Backward compatibility: legacy SOs may still have order_type='auto'.
+        # Map it to mto (the closer match — uses FG stock to reduce MO qty).
+        if order_type == "auto":
+            order_type = "mto"
         # FG parent item from the BOM
         bom = await db.boms.find_one({"id": ln.get("bom_id")}, {"_id": 0})
         fg_item_id = bom.get("parent_item_id") if bom else None
@@ -1693,11 +1697,13 @@ async def confirm_production_order(order_id: str, request: Request):
         reserved_qty = 0
         mo_qty = 0
         if order_type == "mts":
-            reserved_qty = min(qty, effective_stock)
-            # Warn but don't block if insufficient — MTS should be honoured only from stock.
-        elif order_type == "mto":
+            # NEW MTS: never use FG stock — always produce full SO qty. Child
+            # SG/parts are auto-reserved when the MO is created (see
+            # `create_child_work_orders` below).
             mo_qty = qty
-        else:  # auto (smart split)
+        elif order_type == "mto":
+            # NEW MTO: FG stock IS used. Reserve what's available, MO covers
+            # only the balance. Child SG/parts auto-reserve at MO create time.
             reserved_qty = min(qty, effective_stock)
             mo_qty = max(0, qty - reserved_qty)
 
@@ -1711,6 +1717,7 @@ async def confirm_production_order(order_id: str, request: Request):
 
         ln["reserved_qty"] = reserved_qty
         ln["mo_qty"] = mo_qty
+        ln["order_type"] = order_type
         ln["status"] = "confirmed"
         summary_lines.append({
             "line_no": ln.get("line_no"),
@@ -1785,6 +1792,19 @@ async def cancel_production_order(order_id: str, request: Request):
             if mo_status == "completed":
                 skipped_completed_mos.append(mo_number)
             continue
+
+        # Release child-level reservations recorded when this MO was created.
+        # Each entry in `child_reservations` decrements the corresponding
+        # item's `reserved_stock` by the booked qty so subsequent SOs/MOs
+        # see the freed stock available again.
+        for resv in (mo.get("child_reservations") or []):
+            resv_item = resv.get("item_id")
+            resv_qty = int(resv.get("qty", 0) or 0)
+            if resv_item and resv_qty > 0:
+                await db.items.update_one(
+                    {"id": resv_item},
+                    {"$inc": {"reserved_stock": -resv_qty}},
+                )
         
         # 1. Reverse consumed materials (if MO was started and materials were consumed)
         if mo.get("materials_consumed") and mo.get("consumed_materials"):
@@ -4650,14 +4670,41 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
                     wip_qty += child_mo.get("quantity_completed", child_mo.get("quantity", 0))
             
             current_stock = child_item.get("current_stock", 0)
-            free_stock = max(0, current_stock - wip_qty)
+            already_reserved = int(child_item.get("reserved_stock", 0) or 0)
+            # free_stock = physical stock minus WIP committed to other active
+            # parent MOs minus already-reserved-for-other-pending-MOs. This
+            # is the qty we can safely reserve for the CURRENT parent MO.
+            free_stock = max(0, current_stock - wip_qty - already_reserved)
             
             if free_stock >= child_qty:
-                logger.info(f"Skipping child MO for {child_item.get('part_number')} — free stock {free_stock} (total {current_stock}, WIP {wip_qty}) >= required {child_qty}")
+                logger.info(f"Skipping child MO for {child_item.get('part_number')} — free stock {free_stock} (total {current_stock}, WIP {wip_qty}, reserved {already_reserved}) >= required {child_qty}")
+                # Auto-reserve at child level — increment reserved_stock by the
+                # parent's full requirement so subsequent MOs / SOs see a
+                # smaller free_stock. Reverse on MO cancel.
+                await db.items.update_one(
+                    {"id": child_item_id},
+                    {"$inc": {"reserved_stock": child_qty}},
+                )
+                # Record reservation on the PARENT MO so cancellation can release it.
+                await db.work_orders.update_one(
+                    {"id": parent_wo_id},
+                    {"$push": {"child_reservations": {"item_id": child_item_id, "qty": child_qty}}},
+                )
                 continue
             
             # Create MO only for shortage qty (required - free stock)
             shortage_qty = child_qty - int(free_stock)
+            # Auto-reserve the IN-STOCK portion (free_stock) so it's not
+            # double-allocated to a parallel MO before this one consumes it.
+            if free_stock > 0:
+                await db.items.update_one(
+                    {"id": child_item_id},
+                    {"$inc": {"reserved_stock": int(free_stock)}},
+                )
+                await db.work_orders.update_one(
+                    {"id": parent_wo_id},
+                    {"$push": {"child_reservations": {"item_id": child_item_id, "qty": int(free_stock)}}},
+                )
             
             # Create work orders for any item that can be manufactured — either has a
             # legacy routings doc OR its own BOM defines parent_routings.
@@ -5511,6 +5558,22 @@ async def start_work_order(wo_id: str, request: Request, preview: bool = False):
                         "uom": comp_item.get("unit_of_measure", "pcs"),
                         "unit_cost": comp_item.get("unit_cost", 0)
                     })
+                    # Release any reservation tied to THIS MO for this component.
+                    # The stock is now physically consumed (decremented above),
+                    # so the booking is no longer needed. Without this, the
+                    # reserved_stock counter would over-count after material
+                    # consumption (`current_stock - reserved_stock` would go
+                    # negative for future MOs of the same component).
+                    if not preview:
+                        for resv in (wo.get("child_reservations") or []):
+                            if resv.get("item_id") == comp_item_id:
+                                resv_qty = int(resv.get("qty", 0) or 0)
+                                if resv_qty > 0:
+                                    await db.items.update_one(
+                                        {"id": comp_item_id},
+                                        {"$inc": {"reserved_stock": -resv_qty}},
+                                    )
+                                break
     
     if insufficient_materials:
         return {

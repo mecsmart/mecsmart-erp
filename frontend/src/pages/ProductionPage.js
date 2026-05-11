@@ -121,7 +121,7 @@ export default function ProductionPage() {
             bom_id: l.bom_id,
             quantity: parseInt(l.quantity, 10),
             due_date: new Date(l.due_date).toISOString(),
-            order_type: l.order_type || 'auto',
+            order_type: l.order_type || 'mts',
             notes: l.notes || ''
           })),
           priority: formData.priority,
@@ -142,7 +142,7 @@ export default function ProductionPage() {
   const addLine = () => {
     setFormData(prev => ({
       ...prev,
-      lines: [...prev.lines, { bom_id: '', bom_search: '', quantity: 1, due_date: '', order_type: 'auto', notes: '' }]
+      lines: [...prev.lines, { bom_id: '', bom_search: '', quantity: 1, due_date: '', order_type: 'mts', notes: '' }]
     }));
   };
 
@@ -163,14 +163,14 @@ export default function ProductionPage() {
   const handleEdit = (order) => {
     setEditingOrder(order);
     // Edit keeps a single line (first line) for simplicity; multi-line edit not yet supported.
-    const firstLine = (order.lines && order.lines[0]) || { bom_id: order.bom_id, quantity: order.quantity, due_date: order.due_date, order_type: 'auto', notes: '' };
+    const firstLine = (order.lines && order.lines[0]) || { bom_id: order.bom_id, quantity: order.quantity, due_date: order.due_date, order_type: 'mts', notes: '' };
     setFormData({
       lines: [{
         bom_id: firstLine.bom_id,
         bom_search: '',
         quantity: firstLine.quantity,
         due_date: firstLine.due_date ? String(firstLine.due_date).split('T')[0] : '',
-        order_type: firstLine.order_type || 'auto',
+        order_type: firstLine.order_type || 'mts',
         notes: firstLine.notes || '',
       }],
       priority: order.priority,
@@ -182,7 +182,7 @@ export default function ProductionPage() {
 
   const resetForm = () => {
     setFormData({
-      lines: [{ bom_id: '', bom_search: '', quantity: 1, due_date: '', order_type: 'auto', notes: '' }],
+      lines: [{ bom_id: '', bom_search: '', quantity: 1, due_date: '', order_type: 'mts', notes: '' }],
       priority: 'medium',
       notes: '',
     });
@@ -376,15 +376,14 @@ export default function ProductionPage() {
                             <input type="date" value={line.due_date} onChange={(e) => updateLine(idx, { due_date: e.target.value })} className="input-field text-xs" required data-testid={`so-line-due-${idx}`} />
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-[#374151] mb-1" title="Auto = smart split; MTS = from stock only; MTO = manufacture only">
+                            <label className="block text-xs font-semibold text-[#374151] mb-1" title="MTS: always produce full SO qty, auto-reserve SG/parts. MTO: use FG stock first, MO for balance.">
                               Order Type *
                             </label>
-                            <Select value={line.order_type || 'auto'} onValueChange={(v) => updateLine(idx, { order_type: v })}>
+                            <Select value={line.order_type || 'mts'} onValueChange={(v) => updateLine(idx, { order_type: v })}>
                               <SelectTrigger className="text-xs" data-testid={`so-line-type-${idx}`}><SelectValue /></SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="auto">Auto (smart split)</SelectItem>
-                                <SelectItem value="mts">MTS (from stock)</SelectItem>
-                                <SelectItem value="mto">MTO (make to order)</SelectItem>
+                                <SelectItem value="mts">MTS — Make to Stock</SelectItem>
+                                <SelectItem value="mto">MTO — Make to Order</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
@@ -544,7 +543,7 @@ export default function ProductionPage() {
                       {(order.lines && order.lines.length > 1) ? (
                         <div className="text-[10px] text-[#6B7280]">
                           {order.lines.slice(0, 3).map((ln, i) => (
-                            <div key={i}>L{ln.line_no}: <span className={`inline-block text-[9px] px-1 ml-1 rounded ${ln.order_type === 'mts' ? 'bg-[#DEF7EC] text-[#03543F]' : ln.order_type === 'mto' ? 'bg-[#FDE8E8] text-[#9B1C1C]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>{(ln.order_type || 'auto').toUpperCase()}</span></div>
+                            <div key={i}>L{ln.line_no}: <span className={`inline-block text-[9px] px-1 ml-1 rounded ${ln.order_type === 'mts' ? 'bg-[#DEF7EC] text-[#03543F]' : ln.order_type === 'mto' ? 'bg-[#FDE8E8] text-[#9B1C1C]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>{(ln.order_type || 'mts').toUpperCase()}</span></div>
                           ))}
                           {order.lines.length > 3 && <div className="text-[#9CA3AF]">+{order.lines.length - 3} more</div>}
                         </div>
