@@ -116,10 +116,24 @@ export default function BOMPage() {
   const canDelete = (hasPermission ? hasPermission('bom', 'delete') : false) || isAdmin;
   const [routingOptions, setRoutingOptions] = useState([]);
 
+  // AbortController scoped to the BOM page lifecycle. Cancels the background
+  // /explode flood when the user navigates away — otherwise hundreds of
+  // in-flight requests saturate the network and the next page (e.g. Items)
+  // waits in line for its /api/items?lite=1 call. Recreated on each
+  // statusFilter change so a refilter still works.
+  const fetchAbortRef = useRef(null);
+
   useEffect(() => {
+    // Abort any prior background fetches when statusFilter changes OR unmount.
+    fetchAbortRef.current?.abort();
+    fetchAbortRef.current = new AbortController();
     fetchBoms();
     fetchItems();
     fetchRoutings();
+    return () => {
+      // On unmount (navigation away), kill all in-flight explosion calls.
+      fetchAbortRef.current?.abort();
+    };
   }, [statusFilter]);
 
   // Lazy-load explosion data for a single BOM (used by inline rollup cost,
@@ -149,7 +163,8 @@ export default function BOMPage() {
   const fetchBoms = async ({ skipExplosions = false } = {}) => {
     try {
       const params = statusFilter ? `?status=${statusFilter}` : '';
-      const { data } = await api.get(`/api/bom${params}`);
+      const signal = fetchAbortRef.current?.signal;
+      const { data } = await api.get(`/api/bom${params}`, { signal });
       setBoms(data);
       setLoading(false); // Show the table immediately — don't block on explosions
 
@@ -161,20 +176,26 @@ export default function BOMPage() {
       // (`MAX_PARALLEL` simultaneous in-flight requests) and update state
       // as soon as EACH response arrives — UI fills in row-by-row instead of
       // chunk-by-chunk, so the user sees progress immediately.
+      // Workers abort early if the AbortController has been triggered (user
+      // navigated away), so the next page's API calls aren't blocked behind
+      // a flood of stale explosion calls.
       const activeBoms = data.filter(b => b.status === 'active');
-      const MAX_PARALLEL = 20;
+      const MAX_PARALLEL = 8;
       let cursor = 0;
       const explosions = {};
       const runOne = async () => {
         while (cursor < activeBoms.length) {
+          if (signal?.aborted) return;
           const idx = cursor++;
           const bom = activeBoms[idx];
           try {
-            const { data: expData } = await api.get(`/api/bom/${bom.id}/explode`);
+            const { data: expData } = await api.get(`/api/bom/${bom.id}/explode`, { signal });
             explosions[bom.id] = expData;
-          } catch {
+          } catch (e) {
+            if (signal?.aborted || e?.code === 'ERR_CANCELED') return; // Bail entire worker.
             explosions[bom.id] = { explosion: [], total_rollup_cost: 0 };
           }
+          if (signal?.aborted) return;
           // Flush per-BOM so inline costs paint as soon as the response
           // lands instead of waiting for the whole chunk to settle.
           setAllExplosions(prev => ({ ...prev, [bom.id]: explosions[bom.id] }));
@@ -185,6 +206,7 @@ export default function BOMPage() {
       // interacts with the page. Errors are already swallowed inside runOne.
       Promise.all(workers).catch(() => {});
     } catch (error) {
+      if (error?.code === 'ERR_CANCELED') return;
       console.error('Failed to fetch BOMs:', error);
       setLoading(false);
     }
@@ -1092,23 +1114,30 @@ export default function BOMPage() {
                                 <input type="checkbox" checked={comp.is_alternate} onChange={(e) => updateComponent(index, 'is_alternate', e.target.checked)} className="rounded" />
                                 <span>Alt</span>
                               </label>
-                              {(parentVariantAttrs || []).length > 0 && (() => {
-                                const a = comp.applies_to || {};
-                                const hasFilter = Object.keys(a).length > 0;
-                                // Show actual variant labels: "1HP" or "2HP·440V" instead of "N filter".
-                                const ribbon = hasFilter
-                                  ? Object.values(a).filter(v => v && String(v).trim() !== '').join(' · ')
-                                  : 'All variants';
+                              {/* Show the COMPONENT ITEM's own variant values (read-only, from
+                                  Item.variant_attributes). In the new architecture, components
+                                  define their own variants and the production picker (MO/SO)
+                                  chooses which variant to consume — no per-row BOM filter needed. */}
+                              {(() => {
+                                const cAttrs = compItem?.variant_attributes;
+                                if (!cAttrs || cAttrs.length === 0) return null;
+                                // Flatten all values into chips: "16GT 24GT 30GT" (across attrs).
+                                const chips = [];
+                                for (const a of cAttrs) {
+                                  for (const v of (a.values || [])) {
+                                    const label = typeof v === 'string' ? v : (v?.value || v?.short_code || '');
+                                    if (label) chips.push(label);
+                                  }
+                                }
+                                if (chips.length === 0) return null;
+                                const title = cAttrs.map(a => `${a.name}: ${(a.values || []).map(v => typeof v === 'string' ? v : (v?.value || v?.short_code || '')).join(', ')}`).join(' · ');
                                 return (
-                                  <button
-                                    type="button"
-                                    onClick={() => setAppliesToDialog({ open: true, componentIdx: index })}
-                                    className={`text-[10px] px-1.5 py-0.5 rounded border ${hasFilter ? 'text-white bg-[#1D3557] border-[#1D3557] hover:bg-[#142A4A]' : 'text-[#6B7280] border-[#D1D5DB] hover:bg-[#F9FAFB]'}`}
-                                    data-testid={`component-applies-to-btn-${index}`}
-                                    title={hasFilter ? `Applies to: ${Object.entries(a).map(([k,v]) => `${k} = ${v}`).join(', ')}` : 'Common to all variants — click to restrict'}
-                                  >
-                                    {ribbon}
-                                  </button>
+                                  <div className="flex flex-wrap gap-1 max-w-[180px]" title={title} data-testid={`component-variant-chips-${index}`}>
+                                    {chips.slice(0, 6).map((c, ci) => (
+                                      <span key={ci} className="text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">{c}</span>
+                                    ))}
+                                    {chips.length > 6 && <span className="text-[10px] text-[#6B7280]">+{chips.length - 6}</span>}
+                                  </div>
                                 );
                               })()}
                               <button type="button" onClick={() => removeComponent(index)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"><X className="w-4 h-4" /></button>

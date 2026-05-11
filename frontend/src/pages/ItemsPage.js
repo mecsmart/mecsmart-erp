@@ -197,6 +197,28 @@ export default function ItemsPage() {
     }
   };
 
+  // Persist the current form state to the parent item BEFORE running the
+  // variant generator. Without this, edits to description/name/category
+  // would NOT be reflected in the newly-created variant children (which
+  // copy fields from the persisted parent record).
+  const persistParentForGenerate = async () => {
+    if (!editingItem) return;
+    const cleanedVariantAttrs = (formData.variant_attributes || [])
+      .map(a => ({
+        name: (a.name || '').trim(),
+        values: (a.values || []).map(v => {
+          const value = (typeof v === 'string' ? v : (v?.value || '')).trim();
+          const sc = (typeof v === 'object' && v?.short_code) ? String(v.short_code) : value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+          return { value, short_code: sc.slice(0, 4) };
+        }).filter(v => v.value),
+      }))
+      .filter(a => a.name && a.values.length > 0);
+    const payload = { ...formData, variant_attributes: cleanedVariantAttrs };
+    const { data: updated } = await api.put(`/api/items/${editingItem.id}`, payload);
+    setItems(prev => prev.map(it => it.id === editingItem.id ? { ...it, ...updated } : it));
+    return updated;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     // Mandatory: UOM (matches backend validation so the user gets immediate feedback).
@@ -851,17 +873,9 @@ export default function ItemsPage() {
                               type="button"
                               onClick={async () => {
                                 try {
-                                  // Clean attrs the same way the BOM/Item save does.
-                                  const cleanedAttrs = (formData.variant_attributes || [])
-                                    .map(a => ({
-                                      name: (a.name || '').trim(),
-                                      values: (a.values || []).map(v => ({
-                                        value: (v.value || '').trim(),
-                                        short_code: (v.short_code || (v.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)).slice(0, 4),
-                                      })).filter(v => v.value),
-                                    }))
-                                    .filter(a => a.name && a.values.length > 0);
-                                  await api.put(`/api/items/${editingItem.id}`, { variant_attributes: cleanedAttrs });
+                                  // Save full form first so description/name/etc edits propagate
+                                  // to newly-generated variant children (which copy from parent).
+                                  await persistParentForGenerate();
                                   const { data: preview } = await api.post(`/api/items/${editingItem.id}/preview-variants`);
                                   const total = preview.combinations.length;
                                   const sample = preview.combinations.slice(0, 6).map(r => `  • ${r.sku} — ${r.label}${r.exists ? ' (exists)' : ' (NEW)'}`).join('\n');
@@ -908,6 +922,9 @@ export default function ItemsPage() {
                           type="button"
                           onClick={async () => {
                             try {
+                              // Save full form first so description/name/etc edits propagate
+                              // to newly-generated variant children (which copy from parent).
+                              await persistParentForGenerate();
                               const { data: preview } = await api.post(`/api/items/${editingItem.id}/preview-variants`);
                               const total = preview.combinations.length;
                               const sample = preview.combinations.slice(0, 6).map(r => `  • ${r.sku} — ${r.label}${r.exists ? ' (exists)' : ' (NEW)'}`).join('\n');
