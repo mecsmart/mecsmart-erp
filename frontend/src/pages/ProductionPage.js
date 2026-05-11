@@ -13,10 +13,17 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
-  Search
+  Search,
+  Lock,
+  Unlock,
+  FileText,
+  Eye,
+  Download
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { fmtAmt as fmtINR } from '../utils/numberFormat';
+import { downloadHtmlAsPdf } from '../utils/pdfPrint';
 
 const priorityOptions = [
   { value: 'low', label: 'Low' },
@@ -50,9 +57,8 @@ export default function ProductionPage() {
   const [quotationSearch, setQuotationSearch] = useState('');
   const [showQuotationDropdown, setShowQuotationDropdown] = useState(false);
   const [formData, setFormData] = useState({
-    // Multi-line SO: lines[] with { bom_id, bom_search, quantity, due_date, notes, source_quotation_line_no }
-    // order_type is set at the FORM level (MTS or MTO) and applied to every line.
-    order_type: 'mts',  // mts | mto — controls Quotation picker visibility
+    // Multi-line SO. order_type is no longer chosen by the user — SO is just a customer
+    // demand record. MTS/MTO has moved to the Manufacturing Order level.
     lines: [{ bom_id: '', bom_search: '', quantity: 1, due_date: '', notes: '', source_quotation_line_no: null }],
     priority: 'medium',
     notes: '',
@@ -191,22 +197,22 @@ export default function ProductionPage() {
           notes: formData.notes,
         });
       } else {
-        // Create multi-line SO. order_type comes from the form-level selector.
-        const formOrderType = formData.order_type || 'mts';
+        // Create multi-line SO. SO is a pure customer demand record now —
+        // MTS/MTO has moved to the Manufacturing Order level. order_type stays as
+        // a backward-compat default of 'mts' on each line (server normalises).
         const payload = {
           lines: validLines.map(l => ({
             bom_id: l.bom_id,
             quantity: parseInt(l.quantity, 10),
             due_date: new Date(l.due_date).toISOString(),
-            order_type: formOrderType,
+            order_type: 'mts',
             notes: l.notes || '',
             source_quotation_line_no: l.source_quotation_line_no ?? null,
           })),
           priority: formData.priority,
           notes: formData.notes,
         };
-        // Quotation link is only meaningful for MTO.
-        if (formOrderType === 'mto' && formData.source_quotation_id) {
+        if (formData.source_quotation_id) {
           payload.source_quotation_id = formData.source_quotation_id;
           payload.source_quotation_no = formData.source_quotation_no || '';
         }
@@ -251,7 +257,6 @@ export default function ProductionPage() {
     // Edit keeps a single line (first line) for simplicity; multi-line edit not yet supported.
     const firstLine = (order.lines && order.lines[0]) || { bom_id: order.bom_id, quantity: order.quantity, due_date: order.due_date, order_type: 'mts', notes: '' };
     setFormData({
-      order_type: firstLine.order_type || 'mts',
       lines: [{
         bom_id: firstLine.bom_id,
         bom_search: '',
@@ -273,7 +278,6 @@ export default function ProductionPage() {
 
   const resetForm = () => {
     setFormData({
-      order_type: 'mts',
       lines: [{ bom_id: '', bom_search: '', quantity: 1, due_date: '', notes: '', source_quotation_line_no: null }],
       priority: 'medium',
       notes: '',
@@ -285,30 +289,6 @@ export default function ProductionPage() {
     setQuotationLoadInfo(null);
     setQuotationSearch('');
     setShowQuotationDropdown(false);
-  };
-
-  // Switching the form-level order type. When user picks MTS, drop the
-  // quotation link (MTS = build-for-stock, no customer source). Lines stay.
-  const handleOrderTypeChange = (newType) => {
-    setFormData(prev => {
-      if (newType === 'mts') {
-        return {
-          ...prev,
-          order_type: 'mts',
-          source_quotation_id: '',
-          source_quotation_no: '',
-          customer_id: '',
-          customer_name: '',
-          lines: (prev.lines || []).map(l => ({ ...l, source_quotation_line_no: null })),
-        };
-      }
-      return { ...prev, order_type: 'mto' };
-    });
-    if (newType === 'mts') {
-      setQuotationLoadInfo(null);
-      setQuotationSearch('');
-      setShowQuotationDropdown(false);
-    }
   };
 
   const handleConfirm = async (order) => {
@@ -351,6 +331,157 @@ export default function ProductionPage() {
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to cancel order');
       setCancelConfirm({ open: false, order: null });
+    }
+  };
+
+  // ========== RESERVE / RELEASE STOCK ON SO LINES ==========
+  const toggleReserveLine = async (order, line) => {
+    const action = line.is_reserved ? 'release-line' : 'reserve-line';
+    try {
+      const { data } = await api.post(`/api/production/${order.id}/${action}`, { line_id: line.line_id, line_no: line.line_no });
+      toast.success(data.message);
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || `Failed to ${line.is_reserved ? 'release' : 'reserve'}`);
+    }
+  };
+
+  // ========== PREVIEW / DOWNLOAD PDF ==========
+  // Renders the Sales Order HTML using the same compact template as Quotation prints.
+  const buildSoPrintHtml = (doc) => {
+    const company = doc.company || {};
+    const customer = doc.customer || {};
+    const lines = doc.lines || [];
+    const dateStr = doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-IN') : '';
+    const dueStr = doc.due_date ? new Date(doc.due_date).toLocaleDateString('en-IN') : '';
+    const currencySym = (doc.source_quotation?.currency === 'USD') ? '$' :
+                        (doc.source_quotation?.currency === 'EUR') ? '€' :
+                        (doc.source_quotation?.currency === 'GBP') ? '£' :
+                        (doc.source_quotation?.currency === 'AED') ? 'AED ' : '₹';
+    const linesHtml = lines.map((l, idx) => {
+      const item = l.item || {};
+      const qty = l.quantity || 0;
+      const rate = l.rate || 0;
+      const amount = qty * rate;
+      return `<tr>
+        <td style="text-align:center">${idx + 1}</td>
+        <td><b>${item.part_number || '-'}</b><br/><span style="font-size:10px;color:#6B7280">${item.name || ''}</span></td>
+        <td>${l.hsn_code || item.hsn_code || '-'}</td>
+        <td style="text-align:right">${qty}</td>
+        <td>${item.unit_of_measure || 'Nos'}</td>
+        <td style="text-align:right">${rate ? currencySym + fmtINR(rate) : '-'}</td>
+        <td style="text-align:right">${rate ? currencySym + fmtINR(amount) : '-'}</td>
+      </tr>`;
+    }).join('');
+    const subtotal = lines.reduce((sum, l) => sum + ((l.quantity || 0) * (l.rate || 0)), 0);
+    const signer = doc.created_by_user || {};
+    return `<!doctype html><html><head><meta charset="utf-8"/><title>${doc.order_number || 'Sales Order'}</title>
+      <style>
+        body{font-family:'Helvetica Neue',Arial,sans-serif;color:#111827;padding:24px;font-size:12px}
+        h1{font-size:18px;margin:0 0 4px;text-transform:uppercase;letter-spacing:1px;color:#1D3557}
+        .header{display:flex;justify-content:space-between;border-bottom:2px solid #1D3557;padding-bottom:8px;margin-bottom:12px}
+        .company{font-size:11px;color:#374151;line-height:1.4}
+        table{width:100%;border-collapse:collapse}
+        th,td{border:1px solid #E5E7EB;padding:5px 7px}
+        th{background:#F3F4F6;text-align:left;font-size:11px}
+        .meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+        .box{border:1px solid #E5E7EB;padding:6px 8px;background:#F9FAFB}
+        .label{font-size:10px;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px}
+        .totals{margin-top:10px;display:flex;justify-content:flex-end}
+        .totals table{width:auto;min-width:260px}
+        .sig{margin-top:36px;display:flex;justify-content:space-between;font-size:11px}
+        .sig-block{text-align:center;width:200px}
+        .sig-line{border-top:1px solid #111827;margin-top:30px;padding-top:4px}
+        .badge{display:inline-block;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600}
+      </style></head><body>
+      <div class="header">
+        <div>
+          <h1>SALES ORDER</h1>
+          <div style="font-size:11px;color:#6B7280">No: <b style="color:#111827">${doc.order_number || ''}</b></div>
+          ${doc.source_quotation?.quotation_no ? `<div style="font-size:11px;color:#6B7280">From Quotation: <b style="color:#111827">${doc.source_quotation.quotation_no}</b></div>` : ''}
+        </div>
+        <div class="company">
+          <b style="font-size:13px;color:#1D3557">${company.name || 'MecSmart ERP'}</b><br/>
+          ${company.address ? `${company.address}<br/>` : ''}
+          ${company.city ? `${company.city}${company.state ? ', ' + company.state : ''}${company.pin_code ? ' - ' + company.pin_code : ''}<br/>` : ''}
+          ${company.gstin ? `GSTIN: ${company.gstin}<br/>` : ''}
+          ${company.phone ? `Phone: ${company.phone}` : ''} ${company.email ? `· ${company.email}` : ''}
+        </div>
+      </div>
+      <div class="meta">
+        <div class="box">
+          <div class="label">Customer / Buyer</div>
+          <div><b>${customer.name || '-'}</b></div>
+          ${customer.address ? `<div style="font-size:11px">${customer.address}</div>` : ''}
+          ${customer.city ? `<div style="font-size:11px">${customer.city}${customer.state ? ', ' + customer.state : ''}${customer.pin_code ? ' - ' + customer.pin_code : ''}</div>` : ''}
+          ${customer.gstin ? `<div style="font-size:11px">GSTIN: <b>${customer.gstin}</b></div>` : ''}
+          ${customer.phone ? `<div style="font-size:11px">Phone: ${customer.phone}</div>` : ''}
+          ${customer.email ? `<div style="font-size:11px">${customer.email}</div>` : ''}
+        </div>
+        <div class="box">
+          <div class="label">Order Details</div>
+          <div style="font-size:11px">Date: <b>${dateStr}</b></div>
+          <div style="font-size:11px">Due Date: <b>${dueStr}</b></div>
+          <div style="font-size:11px">Priority: <span class="badge" style="background:#FEF3C7;color:#723B13">${(doc.priority || 'medium').toUpperCase()}</span></div>
+          <div style="font-size:11px">Status: <span class="badge" style="background:#E1EFFE;color:#1E429F">${(doc.status || 'draft').toUpperCase()}</span></div>
+        </div>
+      </div>
+      <table>
+        <thead><tr>
+          <th style="width:5%">#</th>
+          <th style="width:35%">Item</th>
+          <th style="width:10%">HSN/SAC</th>
+          <th style="width:8%;text-align:right">Qty</th>
+          <th style="width:8%">UOM</th>
+          <th style="width:15%;text-align:right">Rate</th>
+          <th style="width:19%;text-align:right">Amount</th>
+        </tr></thead>
+        <tbody>${linesHtml}</tbody>
+      </table>
+      ${subtotal > 0 ? `
+      <div class="totals">
+        <table>
+          <tr><td><b>Subtotal</b></td><td style="text-align:right"><b>${currencySym}${fmtINR(subtotal)}</b></td></tr>
+        </table>
+      </div>
+      <p style="font-size:10px;color:#6B7280;margin-top:6px">Rates carried over from linked quotation. GST will be applied on the Tax Invoice at dispatch.</p>
+      ` : '<p style="font-size:10px;color:#6B7280;margin-top:6px">No pricing — this Sales Order is a production demand record only.</p>'}
+      ${doc.notes ? `<div style="margin-top:10px"><div class="label">Notes</div><div style="font-size:11px">${doc.notes}</div></div>` : ''}
+      <div class="sig">
+        <div class="sig-block"><div class="sig-line">Customer Signature</div></div>
+        <div class="sig-block">
+          ${signer.signature_url ? `<img src="${signer.signature_url}" style="max-height:40px;max-width:160px" alt="signature"/>` : ''}
+          <div class="sig-line">${signer.name ? `Prepared by: <b>${signer.name}</b>` : 'Authorised Signatory'}</div>
+        </div>
+      </div>
+      </body></html>`;
+  };
+
+  const previewSO = async (order) => {
+    try {
+      const { data } = await api.get(`/api/production/${order.id}/print-data`);
+      const html = buildSoPrintHtml(data);
+      // Open in a new tab for preview (window.open is allowed if triggered from user click)
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+        w.focus();
+      } else {
+        toast.error('Preview blocked — please allow popups, then click PDF to download.');
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to load print data');
+    }
+  };
+
+  const downloadSoPdf = async (order) => {
+    try {
+      const { data } = await api.get(`/api/production/${order.id}/print-data`);
+      const html = buildSoPrintHtml(data);
+      await downloadHtmlAsPdf(html, `${order.order_number || 'SalesOrder'}.pdf`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to download PDF');
     }
   };
 
@@ -403,47 +534,13 @@ export default function ProductionPage() {
                 <DialogTitle className="font-[Chivo]">{editingOrder ? 'Edit Sales Order' : 'Create Sales Order'}</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-                {/* ========== STEP 1: ORDER TYPE (top-level) ========== */}
+                {/* ========== STEP 1: FROM QUOTATION (optional) ========== */}
                 {!editingOrder && (
-                  <div className="border border-[#E5E7EB] rounded-sm bg-[#F0F9FF] px-3 py-2.5" data-testid="so-order-type-block">
-                    <label className="block text-xs font-semibold text-[#1D3557] mb-1.5">
-                      Step 1 — Order Type *
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleOrderTypeChange('mts')}
-                        className={`text-left px-3 py-2 rounded-sm border-2 transition-colors ${formData.order_type === 'mts' ? 'border-[#1D3557] bg-white' : 'border-[#E5E7EB] bg-white hover:border-[#9CA3AF]'}`}
-                        data-testid="so-order-type-mts"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-block w-3 h-3 rounded-full border-2 ${formData.order_type === 'mts' ? 'border-[#1D3557] bg-[#1D3557]' : 'border-[#9CA3AF]'}`} />
-                          <span className="text-xs font-semibold text-[#111827]">MTS — Make to Stock</span>
-                        </div>
-                        <p className="text-[10px] text-[#6B7280] mt-1 leading-tight">Build for stock. Always produces full qty; ignores FG stock. No quotation link.</p>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleOrderTypeChange('mto')}
-                        className={`text-left px-3 py-2 rounded-sm border-2 transition-colors ${formData.order_type === 'mto' ? 'border-[#1D3557] bg-white' : 'border-[#E5E7EB] bg-white hover:border-[#9CA3AF]'}`}
-                        data-testid="so-order-type-mto"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-block w-3 h-3 rounded-full border-2 ${formData.order_type === 'mto' ? 'border-[#1D3557] bg-[#1D3557]' : 'border-[#9CA3AF]'}`} />
-                          <span className="text-xs font-semibold text-[#111827]">MTO — Make to Order</span>
-                        </div>
-                        <p className="text-[10px] text-[#6B7280] mt-1 leading-tight">For a specific customer. Uses FG stock first; you can link a Quotation below.</p>
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {/* ========== STEP 2: FROM QUOTATION (MTO only) ========== */}
-                {!editingOrder && formData.order_type === 'mto' && (
                   <div className="border border-[#E5E7EB] rounded-sm bg-[#FFFBEB] px-3 py-2 space-y-2" data-testid="so-from-quotation-block">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex-1">
                         <label className="block text-xs font-semibold text-[#1D3557] mb-1">
-                          Step 2 — From Quotation <span className="font-normal text-[#6B7280]">(optional — pre-fills lines & customer)</span>
+                          Step 1 — From Quotation <span className="font-normal text-[#6B7280]">(optional — pre-fills lines & customer)</span>
                         </label>
                         {formData.source_quotation_id ? (
                           <div className="flex items-center justify-between bg-white border border-[#1D3557] rounded-sm px-2 py-1.5">
@@ -517,11 +614,33 @@ export default function ProductionPage() {
                     )}
                   </div>
                 )}
+                {/* ========== CUSTOMER DETAILS (readonly when picked from quotation) ========== */}
+                {!editingOrder && formData.customer_name && (
+                  <div className="border border-[#E5E7EB] rounded-sm bg-[#F9FAFB] px-3 py-2" data-testid="so-customer-details-block">
+                    <label className="block text-xs font-semibold text-[#1D3557] mb-1">Customer Details</label>
+                    <div className="text-xs text-[#111827]">
+                      <span className="font-semibold">{formData.customer_name}</span>
+                      {(() => {
+                        // Pull readonly fields from the linked quotation (loadFromQuotation stashed only customer_id+name).
+                        // Look up the picked quotation from the cached quotations list to expand a one-line summary.
+                        const linkedQ = quotations.find(qx => qx.id === formData.source_quotation_id);
+                        const cust = linkedQ?.customer;
+                        if (!cust) return null;
+                        const bits = [];
+                        if (cust.gstin) bits.push(`GSTIN: ${cust.gstin}`);
+                        if (cust.state_code || cust.state) bits.push(`State: ${cust.state_code || cust.state}`);
+                        if (cust.phone) bits.push(`Phone: ${cust.phone}`);
+                        if (cust.email) bits.push(cust.email);
+                        return bits.length > 0 ? <span className="text-[#6B7280] ml-2">{bits.join(' · ')}</span> : null;
+                      })()}
+                    </div>
+                  </div>
+                )}
                 {/* ========== SO LINES ========== */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-[#1D3557]">
-                      {!editingOrder && (formData.order_type === 'mto' ? 'Step 3 — ' : 'Step 2 — ')}Order Lines {!editingOrder && <span className="text-xs font-normal text-[#6B7280]">({(formData.lines || []).length})</span>}
+                      {!editingOrder && 'Step 2 — '}Order Lines {!editingOrder && <span className="text-xs font-normal text-[#6B7280]">({(formData.lines || []).length})</span>}
                     </h3>
                     {!editingOrder && (
                       <button type="button" className="text-xs text-[#1D3557] hover:underline flex items-center gap-1" onClick={addLine} data-testid="so-add-line-btn">
@@ -774,12 +893,34 @@ export default function ProductionPage() {
                       )}
                     </td>
                     <td>
-                      {(order.lines && order.lines.length > 1) ? (
-                        <div className="text-[10px] text-[#6B7280]">
-                          {order.lines.slice(0, 3).map((ln, i) => (
-                            <div key={i}>L{ln.line_no}: <span className={`inline-block text-[9px] px-1 ml-1 rounded ${ln.order_type === 'mts' ? 'bg-[#DEF7EC] text-[#03543F]' : ln.order_type === 'mto' ? 'bg-[#FDE8E8] text-[#9B1C1C]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>{(ln.order_type || 'mts').toUpperCase()}</span></div>
-                          ))}
-                          {order.lines.length > 3 && <div className="text-[#9CA3AF]">+{order.lines.length - 3} more</div>}
+                      {(order.lines && order.lines.length >= 1) ? (
+                        <div className="space-y-1">
+                          {(order.lines || []).slice(0, 4).map((ln, i) => {
+                            const canReserveAction = canEdit && !['cancelled', 'partially_cancelled', 'completed'].includes(order.status);
+                            return (
+                              <div key={i} className="flex items-center justify-between gap-2 text-[10px]" data-testid={`so-line-row-${order.id}-${ln.line_no}`}>
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-[#6B7280]">L{ln.line_no}:</span>
+                                  {ln.is_reserved && (
+                                    <span className="ml-1 inline-block text-[9px] px-1 rounded bg-[#DEF7EC] text-[#03543F]" data-testid={`so-line-reserved-badge-${order.id}-${ln.line_no}`}>RESERVED {ln.reserved_qty}</span>
+                                  )}
+                                </div>
+                                {canReserveAction && ln.bom_id && (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleReserveLine(order, ln)}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${ln.is_reserved ? 'text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]' : 'text-[#03543F] border-[#03543F] hover:bg-[#DEF7EC]'}`}
+                                    data-testid={`so-reserve-toggle-${order.id}-${ln.line_no}`}
+                                    title={ln.is_reserved ? 'Release reservation' : 'Reserve stock'}
+                                  >
+                                    {ln.is_reserved ? <Unlock className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                                    {ln.is_reserved ? 'Release' : 'Reserve'}
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {order.lines.length > 4 && <div className="text-[10px] text-[#9CA3AF]">+{order.lines.length - 4} more</div>}
                         </div>
                       ) : (
                         <>
@@ -816,6 +957,24 @@ export default function ProductionPage() {
                     </td>
                     <td>
                       <div className="flex items-center space-x-1">
+                        {/* Preview button — always visible */}
+                        <button
+                          onClick={() => previewSO(order)}
+                          className="p-1.5 text-[#1D3557] hover:bg-[#E1EFFE] rounded"
+                          data-testid={`preview-so-${order.id}`}
+                          title="Preview"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        {/* PDF download button — always visible */}
+                        <button
+                          onClick={() => downloadSoPdf(order)}
+                          className="p-1.5 text-[#1D3557] hover:bg-[#E1EFFE] rounded"
+                          data-testid={`pdf-so-${order.id}`}
+                          title="Download PDF"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
                         {/* Confirm button - only for draft */}
                         {canEdit && order.status === 'draft' && (
                           <button

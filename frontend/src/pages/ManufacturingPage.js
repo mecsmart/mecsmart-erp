@@ -92,9 +92,14 @@ export default function ManufacturingPage() {
   });
   
   const [workOrderForm, setWorkOrderForm] = useState({
-    production_order_id: '',
+    order_type: 'mto',  // 'mts' | 'mto'  — top-level choice
+    production_order_id: '',  // MTO only
+    source_so_line_id: '',    // MTO only — picked SO line
+    item_id: '',              // MTS only — direct item pick
+    item_search: '',
     routing_id: '',
     quantity: 1,
+    due_date: '',
     scheduled_start: '',
     scheduled_end: '',
     notes: '',
@@ -205,11 +210,36 @@ export default function ManufacturingPage() {
   const handleWorkOrderSubmit = async (e) => {
     e.preventDefault();
     try {
+      // Build payload — drop search-only field; backend uses order_type to choose path.
+      const otype = workOrderForm.order_type || 'mto';
+      if (otype === 'mts' && !workOrderForm.item_id) {
+        alert('Please select an item to manufacture.');
+        return;
+      }
+      if (otype === 'mto' && !workOrderForm.production_order_id) {
+        alert('Please select a Sales Order.');
+        return;
+      }
       const payload = {
-        ...workOrderForm,
+        order_type: otype,
+        quantity: parseInt(workOrderForm.quantity, 10) || 1,
+        notes: workOrderForm.notes || '',
+        is_subcontract: !!workOrderForm.is_subcontract,
+        subcontract_supplier_id: workOrderForm.subcontract_supplier_id || '',
+        subcontract_type: workOrderForm.subcontract_type || 'with_material',
+        routing_id: workOrderForm.routing_id || '',
+        due_date: workOrderForm.due_date ? new Date(workOrderForm.due_date).toISOString() : null,
         scheduled_start: workOrderForm.scheduled_start ? new Date(workOrderForm.scheduled_start).toISOString() : null,
         scheduled_end: workOrderForm.scheduled_end ? new Date(workOrderForm.scheduled_end).toISOString() : null,
       };
+      if (otype === 'mto') {
+        payload.production_order_id = workOrderForm.production_order_id;
+        if (workOrderForm.source_so_line_id) {
+          payload.source_so_line_id = workOrderForm.source_so_line_id;
+        }
+      } else {
+        payload.item_id = workOrderForm.item_id;
+      }
       const { data } = await api.post('/api/work-orders', payload);
       setIsWorkOrderDialogOpen(false);
       resetWorkOrderForm();
@@ -229,6 +259,18 @@ export default function ManufacturingPage() {
     } catch (error) {
       console.error('Failed to save work order:', error);
       alert(error.response?.data?.detail || 'Failed to save manufacturing order');
+    }
+  };
+
+  // ===== Release a pending MO (commits child stock reservation) =====
+  const handleReleaseMO = async (woId) => {
+    try {
+      const { data } = await api.post(`/api/work-orders/${woId}/release`);
+      const count = (data.reservations || []).length;
+      alert(`${data.message}\n${count} child component reservation${count !== 1 ? 's' : ''} booked.`);
+      fetchData();
+    } catch (error) {
+      alert(error.response?.data?.detail || 'Failed to release Manufacturing Order');
     }
   };
 
@@ -570,9 +612,14 @@ export default function ManufacturingPage() {
 
   const resetWorkOrderForm = () => {
     setWorkOrderForm({
+      order_type: 'mto',
       production_order_id: '',
+      source_so_line_id: '',
+      item_id: '',
+      item_search: '',
       routing_id: '',
       quantity: 1,
+      due_date: '',
       scheduled_start: '',
       scheduled_end: '',
       notes: '',
@@ -930,8 +977,100 @@ export default function ManufacturingPage() {
                     <DialogTitle className="font-[Chivo]">Create Manufacturing Order</DialogTitle>
                   </DialogHeader>
                   <form onSubmit={handleWorkOrderSubmit} className="space-y-4 mt-4">
+                    {/* ========== STEP 1: ORDER TYPE ========== */}
+                    <div className="border border-[#E5E7EB] rounded-sm bg-[#F0F9FF] px-3 py-2.5" data-testid="mo-order-type-block">
+                      <label className="block text-xs font-semibold text-[#1D3557] mb-1.5">Step 1 — Order Type *</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setWorkOrderForm({ ...workOrderForm, order_type: 'mts', production_order_id: '', source_so_line_id: '', so_search: '' })}
+                          className={`text-left px-3 py-2 rounded-sm border-2 transition-colors ${workOrderForm.order_type === 'mts' ? 'border-[#1D3557] bg-white' : 'border-[#E5E7EB] bg-white hover:border-[#9CA3AF]'}`}
+                          data-testid="mo-order-type-mts"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-block w-3 h-3 rounded-full border-2 ${workOrderForm.order_type === 'mts' ? 'border-[#1D3557] bg-[#1D3557]' : 'border-[#9CA3AF]'}`} />
+                            <span className="text-xs font-semibold text-[#111827]">MTS — Make to Stock</span>
+                          </div>
+                          <p className="text-[10px] text-[#6B7280] mt-1 leading-tight">Pick an item directly. No SO link. Stock-replenishment run.</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setWorkOrderForm({ ...workOrderForm, order_type: 'mto', item_id: '', item_search: '' })}
+                          className={`text-left px-3 py-2 rounded-sm border-2 transition-colors ${workOrderForm.order_type === 'mto' ? 'border-[#1D3557] bg-white' : 'border-[#E5E7EB] bg-white hover:border-[#9CA3AF]'}`}
+                          data-testid="mo-order-type-mto"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-block w-3 h-3 rounded-full border-2 ${workOrderForm.order_type === 'mto' ? 'border-[#1D3557] bg-[#1D3557]' : 'border-[#9CA3AF]'}`} />
+                            <span className="text-xs font-semibold text-[#111827]">MTO — Make to Order</span>
+                          </div>
+                          <p className="text-[10px] text-[#6B7280] mt-1 leading-tight">Tie this MO to a specific Sales Order line. Auto-fills item / qty / due.</p>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* ========== STEP 2 (MTS): ITEM PICKER ========== */}
+                    {workOrderForm.order_type === 'mts' && (
+                      <div data-testid="mo-mts-item-block">
+                        <label className="block text-sm font-semibold text-[#111827] mb-1">Step 2 — Item to Manufacture *</label>
+                        {(() => {
+                          const q = (workOrderForm.item_search || '').trim().toLowerCase();
+                          const eligible = (items || []).filter(it => ['finished_good', 'sub_assembly', 'component'].includes(it.category));
+                          const filtered = q ? eligible.filter(it => {
+                            const code = (it.part_number || '').toLowerCase();
+                            const name = (it.name || '').toLowerCase();
+                            return code.includes(q) || name.includes(q);
+                          }) : eligible.slice(0, 50);
+                          const selected = items.find(it => it.id === workOrderForm.item_id);
+                          return selected ? (
+                            <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-3 py-2" data-testid="mo-mts-item-selected">
+                              <div className="text-xs">
+                                <span className="mono font-semibold">{selected.part_number}</span>
+                                <span className="mx-2">—</span>
+                                <span>{selected.name}</span>
+                                <span className="ml-2 text-[10px] text-[#6B7280]">{selected.category}</span>
+                              </div>
+                              <button type="button" className="text-xs text-[#9B1C1C] hover:underline" onClick={() => setWorkOrderForm({ ...workOrderForm, item_id: '', item_search: '' })} data-testid="mo-mts-item-clear">Clear</button>
+                            </div>
+                          ) : (
+                            <>
+                              <input
+                                type="text"
+                                placeholder="Search by part number or name (FG / SG / Component only)…"
+                                value={workOrderForm.item_search || ''}
+                                onChange={(e) => setWorkOrderForm({ ...workOrderForm, item_search: e.target.value })}
+                                className="input-field"
+                                data-testid="mo-mts-item-search"
+                                autoFocus
+                              />
+                              <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-56 overflow-auto bg-white" data-testid="mo-mts-item-list">
+                                {filtered.length === 0 && (
+                                  <div className="px-3 py-4 text-center text-xs text-[#6B7280]">No matching items.</div>
+                                )}
+                                {filtered.slice(0, 100).map(it => (
+                                  <button
+                                    key={it.id}
+                                    type="button"
+                                    onClick={() => setWorkOrderForm({ ...workOrderForm, item_id: it.id, item_search: '' })}
+                                    data-testid={`mo-mts-item-option-${it.id}`}
+                                    className="w-full text-left px-3 py-2 text-xs border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]"
+                                  >
+                                    <span className="mono font-semibold">{it.part_number}</span>
+                                    <span className="mx-2">—</span>
+                                    <span>{it.name}</span>
+                                    <span className="ml-2 text-[10px] text-[#6B7280]">{it.category}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {/* ========== STEP 2 (MTO): SO PICKER + LINE PICKER ========== */}
+                    {workOrderForm.order_type === 'mto' && (
                     <div>
-                      <label className="block text-sm font-semibold text-[#111827] mb-1">Sales Order *</label>
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Step 2 — Sales Order *</label>
                       {(() => {
                         const filteredSOs = productionOrders
                           .filter(po => ['confirmed', 'planned'].includes(po.status))
@@ -954,7 +1093,26 @@ export default function ManufacturingPage() {
                                   <span className="mono">{selected.item?.part_number || '-'}</span>
                                   <span className="ml-1">{selected.item?.name}</span>
                                 </div>
-                                <button type="button" className="text-xs text-[#9B1C1C] hover:underline" onClick={() => setWorkOrderForm({ ...workOrderForm, production_order_id: '', so_search: '', quantity: 1 })} data-testid="wo-so-clear">Clear</button>
+                                <button type="button" className="text-xs text-[#9B1C1C] hover:underline" onClick={() => setWorkOrderForm({ ...workOrderForm, production_order_id: '', source_so_line_id: '', so_search: '', quantity: 1 })} data-testid="wo-so-clear">Clear</button>
+                              </div>
+                            )}
+                            {selected && (selected.lines && selected.lines.length > 1) && (
+                              <div className="border border-[#E5E7EB] rounded-sm bg-[#FFFBEB] px-3 py-2 mb-2" data-testid="wo-so-line-block">
+                                <label className="block text-xs font-semibold text-[#111827] mb-1">SO Line *</label>
+                                <Select value={workOrderForm.source_so_line_id || ''} onValueChange={(v) => {
+                                  const ln = (selected.lines || []).find(l => l.line_id === v);
+                                  const balQty = ln ? Math.max((ln.quantity || 0) - 0, 1) : 1;
+                                  setWorkOrderForm({ ...workOrderForm, source_so_line_id: v, quantity: balQty });
+                                }}>
+                                  <SelectTrigger className="text-xs" data-testid="wo-so-line-select"><SelectValue placeholder="Pick a line from this SO…" /></SelectTrigger>
+                                  <SelectContent>
+                                    {(selected.lines || []).map(ln => (
+                                      <SelectItem key={ln.line_id} value={ln.line_id}>
+                                        L{ln.line_no}: {ln.item?.part_number || '-'} — {ln.item?.name || ''} (Qty {ln.quantity})
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                               </div>
                             )}
                             {!selected && (
@@ -983,7 +1141,9 @@ export default function ManufacturingPage() {
                                         onClick={() => {
                                           const soQty = po.quantity || 1;
                                           const balanceQty = Math.max(soQty - (po.mo_qty_created || 0), 1);
-                                          setWorkOrderForm({ ...workOrderForm, production_order_id: po.id, quantity: balanceQty, so_search: '' });
+                                          // If single-line SO, auto-pick that line.
+                                          const singleLineId = (po.lines && po.lines.length === 1) ? po.lines[0].line_id : '';
+                                          setWorkOrderForm({ ...workOrderForm, production_order_id: po.id, source_so_line_id: singleLineId, quantity: balanceQty, so_search: '' });
                                         }}
                                         data-testid={`wo-so-option-${po.id}`}
                                         className={`w-full text-left px-3 py-2 text-xs border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB] ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -1003,6 +1163,7 @@ export default function ManufacturingPage() {
                         );
                       })()}
                     </div>
+                    )}
 
                     <div>
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Quantity *</label>
@@ -1205,6 +1366,15 @@ export default function ManufacturingPage() {
                               <span className="text-xs text-[#6B7280]">Covered by parent SC</span>
                             ) : (
                             <div className="flex items-center flex-wrap gap-1">
+                              {canEdit && wo.status === 'pending' && !wo.is_subcontract && !wo.parent_wo_id && !(wo.child_reservations || []).length && (
+                                <button onClick={() => handleReleaseMO(wo.id)} className="btn-secondary text-xs px-2 py-1 text-[#1D3557] border-[#1D3557]" data-testid={`release-wo-${wo.id}`}><CheckCircle2 className="w-3 h-3 inline mr-0.5" />Release</button>
+                              )}
+                              {(wo.child_reservations || []).length > 0 && wo.status === 'pending' && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#DEF7EC] text-[#03543F]" data-testid={`released-badge-${wo.id}`}>RELEASED · {(wo.child_reservations || []).length} resv</span>
+                              )}
+                              {wo.status === 'released' && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#DEF7EC] text-[#03543F]" data-testid={`released-badge-${wo.id}`}>RELEASED</span>
+                              )}
                               {showReserve && (
                                 <button onClick={() => handleReserveMaterials(wo.id, false)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`reserve-wo-${wo.id}`}><PackageCheck className="w-3 h-3 inline mr-0.5" />Reserve</button>
                               )}

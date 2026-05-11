@@ -705,9 +705,15 @@ class RoutingUpdate(BaseModel):
     status: Optional[str] = None
 
 class WorkOrderCreate(BaseModel):
-    production_order_id: str
+    # MTS: pick an item directly (production_order_id not required).
+    # MTO: pick an existing Sales Order (and optionally a specific line).
+    order_type: Optional[str] = "mto"   # "mts" | "mto" (legacy callers default to MTO)
+    production_order_id: Optional[str] = ""   # required for MTO
+    source_so_line_id: Optional[str] = ""     # MTO line id when SO has multiple lines
+    item_id: Optional[str] = ""               # required for MTS (item with active BOM)
     routing_id: Optional[str] = ""  # Optional - routing now comes from BOM
     quantity: int
+    due_date: Optional[datetime] = None       # MO due date (used by both modes)
     scheduled_start: Optional[datetime] = None
     scheduled_end: Optional[datetime] = None
     notes: Optional[str] = ""
@@ -1896,6 +1902,162 @@ async def cancel_production_order(order_id: str, request: Request):
         "reversed_materials": reversed_materials,
         "released_reservations": released_reservations
     }
+
+
+@production_router.post("/{order_id}/reserve-line")
+async def reserve_so_line(order_id: str, payload: dict = Body(default={}), request: Request = None):
+    """Reserve stock on a Sales Order line's PARENT item (FG/SG/CP).
+
+    This is the user-driven 'Reserve' button on the SO line. It does NOT explode the
+    BOM — it only increments `reserved_stock` on the BOM's parent item by the
+    full line quantity. Pair with `/release-line` to undo.
+    """
+    user = await get_current_user(request)
+    _require_access(user, ["admin", "production_manager"], module="production", action="edit")
+    order = await db.production_orders.find_one({"id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sales order not found")
+    line_id = payload.get("line_id")
+    line_no = payload.get("line_no")
+    target_line = None
+    for ln in order.get("lines") or []:
+        if line_id and ln.get("line_id") == line_id:
+            target_line = ln
+            break
+        if line_no is not None and str(ln.get("line_no")) == str(line_no):
+            target_line = ln
+            break
+    if not target_line:
+        raise HTTPException(status_code=404, detail=f"Line not found (line_id={line_id}, line_no={line_no})")
+    if target_line.get("is_reserved"):
+        raise HTTPException(status_code=400, detail="Line is already reserved. Release it first to re-reserve.")
+    bom = await db.boms.find_one({"id": target_line.get("bom_id")}, {"_id": 0, "parent_item_id": 1})
+    if not bom or not bom.get("parent_item_id"):
+        raise HTTPException(status_code=404, detail="BOM (or its parent item) not found for this line")
+    parent_item_id = bom["parent_item_id"]
+    qty = int(target_line.get("quantity", 0) or 0)
+    if qty <= 0:
+        raise HTTPException(status_code=400, detail="Invalid line quantity")
+    parent_item = await db.items.find_one({"id": parent_item_id}, {"_id": 0, "part_number": 1, "name": 1, "current_stock": 1, "reserved_stock": 1})
+    if not parent_item:
+        raise HTTPException(status_code=404, detail="Parent item missing in master")
+    current_stock = int(parent_item.get("current_stock", 0) or 0)
+    already_reserved = int(parent_item.get("reserved_stock", 0) or 0)
+    free_stock = max(0, current_stock - already_reserved)
+    if free_stock < qty:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot reserve {qty} units of {parent_item.get('part_number')} — only {free_stock} available (stock={current_stock}, already reserved={already_reserved}).",
+        )
+    await db.items.update_one(
+        {"id": parent_item_id},
+        {"$inc": {"reserved_stock": qty}},
+    )
+    await db.production_orders.update_one(
+        {"id": order_id, "lines.line_id": target_line.get("line_id")},
+        {"$set": {
+            "lines.$.is_reserved": True,
+            "lines.$.reserved_qty": qty,
+            "lines.$.reserved_at": datetime.now(timezone.utc),
+        }},
+    )
+    return {
+        "message": f"Reserved {qty} units of {parent_item.get('part_number')}",
+        "reserved_qty": qty,
+        "item_part_number": parent_item.get("part_number"),
+        "item_name": parent_item.get("name"),
+    }
+
+
+@production_router.post("/{order_id}/release-line")
+async def release_so_line(order_id: str, payload: dict = Body(default={}), request: Request = None):
+    """Release a previously-reserved Sales Order line's parent stock."""
+    user = await get_current_user(request)
+    _require_access(user, ["admin", "production_manager"], module="production", action="edit")
+    order = await db.production_orders.find_one({"id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sales order not found")
+    line_id = payload.get("line_id")
+    line_no = payload.get("line_no")
+    target_line = None
+    for ln in order.get("lines") or []:
+        if line_id and ln.get("line_id") == line_id:
+            target_line = ln
+            break
+        if line_no is not None and str(ln.get("line_no")) == str(line_no):
+            target_line = ln
+            break
+    if not target_line:
+        raise HTTPException(status_code=404, detail="Line not found")
+    if not target_line.get("is_reserved"):
+        raise HTTPException(status_code=400, detail="Line is not reserved")
+    bom = await db.boms.find_one({"id": target_line.get("bom_id")}, {"_id": 0, "parent_item_id": 1})
+    if not bom or not bom.get("parent_item_id"):
+        raise HTTPException(status_code=404, detail="BOM (or its parent item) not found for this line")
+    parent_item_id = bom["parent_item_id"]
+    qty = int(target_line.get("reserved_qty", 0) or target_line.get("quantity", 0) or 0)
+    if qty > 0:
+        await db.items.update_one(
+            {"id": parent_item_id},
+            {"$inc": {"reserved_stock": -qty}},
+        )
+    await db.production_orders.update_one(
+        {"id": order_id, "lines.line_id": target_line.get("line_id")},
+        {"$set": {"lines.$.is_reserved": False, "lines.$.reserved_qty": 0}},
+    )
+    return {"message": f"Released {qty} units", "released_qty": qty}
+
+
+@production_router.get("/{order_id}/print-data")
+async def get_so_print_data(order_id: str, request: Request):
+    """Return Sales Order document hydrated for PDF/Preview rendering."""
+    await get_current_user(request)
+    order = await db.production_orders.find_one({"id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Sales order not found")
+    # Customer
+    customer = None
+    if order.get("customer_id"):
+        customer = await db.customers.find_one({"id": order["customer_id"]}, {"_id": 0})
+    order["customer"] = customer
+    # Creator info for signature block
+    order["created_by_user"] = await _lookup_creator(order.get("created_by"))
+    # Company settings (header)
+    company = await db.company_settings.find_one({"_id": "singleton"}, {"_id": 0}) or {}
+    order["company"] = company
+    # Hydrate each line with the parent item + BOM (so PDF can show part_number / name / HSN / UOM)
+    for ln in (order.get("lines") or []):
+        bom_doc = await db.boms.find_one({"id": ln.get("bom_id")}, {"_id": 0})
+        if bom_doc:
+            ln["bom"] = bom_doc
+            item = await db.items.find_one({"id": bom_doc.get("parent_item_id")}, {"_id": 0})
+            ln["item"] = item
+    # If sourced from a quotation, pull rate/HSN/description per line for the PDF
+    if order.get("source_quotation_id"):
+        sq = await db.crm_quotations.find_one({"id": order["source_quotation_id"]}, {"_id": 0})
+        if sq:
+            order["source_quotation"] = {
+                "id": sq.get("id"),
+                "quotation_no": sq.get("quotation_no"),
+                "currency": sq.get("currency", "INR"),
+                "valid_until": sq.get("valid_until"),
+            }
+            for ln in (order.get("lines") or []):
+                sqln_no = ln.get("source_quotation_line_no")
+                if sqln_no is None:
+                    continue
+                qln = next(
+                    (q_ln for q_ln in (sq.get("lines") or []) if str(q_ln.get("line_no")) == str(sqln_no)),
+                    None,
+                )
+                if qln:
+                    ln["rate"] = qln.get("rate", 0)
+                    ln["discount_pct"] = qln.get("discount_pct", 0)
+                    ln["gst_rate"] = qln.get("gst_rate", 0)
+                    ln["hsn_code"] = qln.get("hsn_code") or (ln.get("item") or {}).get("hsn_code", "")
+                    ln["description"] = qln.get("description") or ""
+    return order
+
 
 # ================== MRP ROUTES ==================
 
@@ -4530,19 +4692,53 @@ async def get_work_order(wo_id: str, request: Request):
 async def create_work_order(wo_data: WorkOrderCreate, request: Request):
     user = await get_current_user(request)
     _require_access(user, ["admin", "production_manager"], module="manufacturing", action="create")
-    prod_order = await db.production_orders.find_one({"id": wo_data.production_order_id})
-    if not prod_order:
-        raise HTTPException(status_code=404, detail="Production order not found")
-    
+
+    # Resolve order type: MTS (build to stock — no SO) or MTO (against an SO line).
+    order_type = (wo_data.order_type or "mto").lower()
+    if order_type not in ("mts", "mto"):
+        raise HTTPException(status_code=400, detail="order_type must be 'mts' or 'mto'")
+
+    prod_order = None
+    so_line = None
+    bom = None
+    if order_type == "mto":
+        # MTO requires a Sales Order link.
+        if not wo_data.production_order_id:
+            raise HTTPException(status_code=400, detail="MTO Manufacturing Order requires a Sales Order")
+        prod_order = await db.production_orders.find_one({"id": wo_data.production_order_id})
+        if not prod_order:
+            raise HTTPException(status_code=404, detail="Sales Order not found")
+        # When the SO has multiple lines, the caller must pick which line this MO covers.
+        so_lines = prod_order.get("lines") or []
+        if wo_data.source_so_line_id:
+            so_line = next((l for l in so_lines if l.get("line_id") == wo_data.source_so_line_id), None)
+            if not so_line:
+                raise HTTPException(status_code=404, detail="Selected SO line not found on the Sales Order")
+            bom = await db.boms.find_one({"id": so_line.get("bom_id")})
+        elif len(so_lines) == 1:
+            so_line = so_lines[0]
+            bom = await db.boms.find_one({"id": so_line.get("bom_id")})
+        else:
+            # Multi-line SO without a line selection — fall back to legacy top-level bom_id.
+            bom = await db.boms.find_one({"id": prod_order.get("bom_id")})
+        if not bom:
+            raise HTTPException(status_code=404, detail="BOM not found for the selected Sales Order line")
+    else:
+        # MTS — pick the item directly. The item must have an active BOM (otherwise nothing
+        # to manufacture). Production_order_id is left blank so MRP/SO flows ignore this MO.
+        if not wo_data.item_id:
+            raise HTTPException(status_code=400, detail="MTS Manufacturing Order requires an item")
+        bom = await db.boms.find_one({"parent_item_id": wo_data.item_id, "status": "active"})
+        if not bom:
+            # Fall back to any BOM for the item (e.g. legacy 'draft' status).
+            bom = await db.boms.find_one({"parent_item_id": wo_data.item_id})
+        if not bom:
+            raise HTTPException(status_code=404, detail="No BOM found for the selected item. Create a BOM before manufacturing.")
+
     routing = None
     if wo_data.routing_id:
         routing = await db.routings.find_one({"id": wo_data.routing_id})
-    
-    # Get the BOM for this production order to find the item to manufacture
-    bom = await db.boms.find_one({"id": prod_order.get("bom_id")})
-    if not bom:
-        raise HTTPException(status_code=404, detail="BOM not found for production order")
-    
+
     # Get the item from BOM's parent_item_id (the item to manufacture)
     item = await db.items.find_one({"id": bom.get("parent_item_id")})
     if not item:
@@ -4630,11 +4826,14 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
         wo_doc = {
             "id": str(uuid.uuid4()),
             "wo_number": wo_number,
-            "production_order_id": wo_data.production_order_id,
+            "production_order_id": wo_data.production_order_id or "",
+            "source_so_line_id": wo_data.source_so_line_id or "",
+            "order_type": order_type if is_main else "mts",  # children of MTO parents are still MTS-style (build sub-items)
             "routing_id": item_routing.get("id"),
             "item_id": item_id,
             "quantity": qty_to_manufacture,
             "quantity_completed": 0,
+            "due_date": wo_data.due_date if is_main else None,
             "scheduled_start": wo_data.scheduled_start,
             "scheduled_end": wo_data.scheduled_end,
             "status": "pending",
@@ -4693,38 +4892,18 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             already_reserved = int(child_item.get("reserved_stock", 0) or 0)
             # free_stock = physical stock minus WIP committed to other active
             # parent MOs minus already-reserved-for-other-pending-MOs. This
-            # is the qty we can safely reserve for the CURRENT parent MO.
+            # is the qty we can safely consider available for the CURRENT parent MO.
             free_stock = max(0, current_stock - wip_qty - already_reserved)
             
             if free_stock >= child_qty:
                 logger.info(f"Skipping child MO for {child_item.get('part_number')} — free stock {free_stock} (total {current_stock}, WIP {wip_qty}, reserved {already_reserved}) >= required {child_qty}")
-                # Auto-reserve at child level — increment reserved_stock by the
-                # parent's full requirement so subsequent MOs / SOs see a
-                # smaller free_stock. Reverse on MO cancel.
-                await db.items.update_one(
-                    {"id": child_item_id},
-                    {"$inc": {"reserved_stock": child_qty}},
-                )
-                # Record reservation on the PARENT MO so cancellation can release it.
-                await db.work_orders.update_one(
-                    {"id": parent_wo_id},
-                    {"$push": {"child_reservations": {"item_id": child_item_id, "qty": child_qty}}},
-                )
+                # NOTE: child reservation is NOT incremented on MO create anymore.
+                # Reservation only happens on MO **Release** (see /api/work-orders/{id}/release).
                 continue
             
-            # Create MO only for shortage qty (required - free stock)
+            # Create MO only for shortage qty (required - free stock).
+            # No reservation on create — that happens on Release.
             shortage_qty = child_qty - int(free_stock)
-            # Auto-reserve the IN-STOCK portion (free_stock) so it's not
-            # double-allocated to a parallel MO before this one consumes it.
-            if free_stock > 0:
-                await db.items.update_one(
-                    {"id": child_item_id},
-                    {"$inc": {"reserved_stock": int(free_stock)}},
-                )
-                await db.work_orders.update_one(
-                    {"id": parent_wo_id},
-                    {"$push": {"child_reservations": {"item_id": child_item_id, "qty": int(free_stock)}}},
-                )
             
             # Create work orders for any item that can be manufactured — either has a
             # legacy routings doc OR its own BOM defines parent_routings.
@@ -4949,6 +5128,74 @@ async def bulk_subcontract(request: Request, data: dict = Body(...)):
         "message": f"Created SC Order {sc_doc['order_number']}" + (f" + DC {dc_doc['dc_number']}" if dc_doc else "") + f" for {len(wo_ids)} MOs",
         "sc_order": sc_doc,
         "dc": dc_doc
+    }
+
+
+@work_orders_router.post("/{wo_id}/release")
+async def release_work_order(wo_id: str, request: Request):
+    """Release an MO — transitions status from 'pending' to 'released' and
+    increments `reserved_stock` on every required child component by the
+    full required quantity (one BOM-explosion level).
+
+    This is the explicit user action that commits child stock to this MO.
+    Subsequent /start (consume materials) decrements both current_stock AND
+    the reservation booked here.
+
+    On MO cancel, the recorded `child_reservations` are released.
+    """
+    user = await get_current_user(request)
+    _require_access(user, ["admin", "production_manager"], module="manufacturing", action="edit")
+    wo = await db.work_orders.find_one({"id": wo_id})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Manufacturing order not found")
+    if wo.get("status") not in ("pending",):
+        raise HTTPException(status_code=400, detail=f"Can only release MOs in 'pending' status (current: {wo.get('status')})")
+    if wo.get("child_reservations"):
+        raise HTTPException(status_code=400, detail="MO already has child reservations — already released")
+
+    item_id = wo.get("item_id")
+    qty = int(wo.get("quantity", 0) or 0)
+    if not item_id or qty <= 0:
+        raise HTTPException(status_code=400, detail="MO has no item or zero qty — cannot release")
+
+    bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
+    if not bom:
+        bom = await db.boms.find_one({"parent_item_id": item_id}, {"_id": 0})
+    if not bom:
+        raise HTTPException(status_code=404, detail="No BOM found for this MO's item")
+
+    reservations = []
+    for component in bom.get("components", []) or []:
+        if component.get("is_alternate"):
+            continue
+        child_item_id = component.get("item_id")
+        if not child_item_id:
+            continue
+        per_unit = float(component.get("quantity", 0) or 0)
+        if per_unit <= 0:
+            continue
+        required_qty = int(per_unit * qty)
+        if required_qty <= 0:
+            continue
+        # Increment reserved_stock on the child item.
+        await db.items.update_one(
+            {"id": child_item_id},
+            {"$inc": {"reserved_stock": required_qty}},
+        )
+        reservations.append({"item_id": child_item_id, "qty": required_qty})
+
+    await db.work_orders.update_one(
+        {"id": wo_id},
+        {"$set": {
+            "status": "released",
+            "released_at": datetime.now(timezone.utc),
+            "released_by": user["id"],
+            "child_reservations": reservations,
+        }},
+    )
+    return {
+        "message": f"Released MO {wo.get('wo_number')} — reserved {len(reservations)} child component(s).",
+        "reservations": reservations,
     }
 
 
@@ -5691,6 +5938,20 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
             status_code=400, 
             detail="Use POST /api/work-orders/{wo_id}/start to start a work order (this will consume materials)"
         )
+
+    # If cancelling, release any child stock reservations recorded against this MO.
+    if update_data.get("status") == "cancelled" and wo.get("status") != "cancelled":
+        for resv in (wo.get("child_reservations") or []):
+            resv_item = resv.get("item_id")
+            resv_qty = int(resv.get("qty", 0) or 0)
+            if resv_item and resv_qty > 0:
+                await db.items.update_one(
+                    {"id": resv_item},
+                    {"$inc": {"reserved_stock": -resv_qty}},
+                )
+        if wo.get("child_reservations"):
+            update_data["child_reservations"] = []
+            update_data["reservation_released_at"] = datetime.now(timezone.utc)
     
     # If completing the work order, update finished goods stock
     if update_data.get("status") == "completed" and wo.get("status") == "in_progress":

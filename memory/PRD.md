@@ -20,6 +20,19 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
+- **2026-05-11 (late)** — **Major SO/MO Workflow Restructure (P0):**
+  1. **Sales Order simplified** — MTS/MTO removed from SO entirely. SO is now a pure customer-demand record. Step 1 = optional "From Quotation" picker; Step 2 = Order Lines. Customer details block appears readonly when quotation is linked.
+  2. **SO line "Reserve / Release Stock" toggle** — new `POST /api/production/{id}/reserve-line` and `/release-line` endpoints. Reserves only the **parent FG/SG/CP item** on the line (NO BOM explosion, per user spec). Each SO line carries `is_reserved` + `reserved_qty` + `reserved_at`. Stock validated against `current_stock - reserved_stock` before booking. UI shows Lock/Unlock button per line with "RESERVED X" badge.
+  3. **SO Preview + PDF download** — new `GET /api/production/{id}/print-data` endpoint hydrates customer + company + creator + line items + linked-quotation rates. New Eye + Download icon buttons on every SO row. PDF renders SALES ORDER template with company header, customer block (GSTIN, address), order details, line table (Qty, UOM, Rate, Amount), subtotal, signature block. Uses existing `downloadHtmlAsPdf` helper. Currency symbol pulled from linked quotation.
+  4. **Manufacturing Order MTS/MTO selector** — Step 1 = Order Type (MTS/MTO radio cards). 
+     - **MTS**: direct item picker (FG / SG / Component items with active BOM). No SO link. `production_order_id` = "".
+     - **MTO**: SO picker → SO line picker (for multi-line SOs). Auto-fills qty (SO balance) + due date.
+     - Backend: `WorkOrderCreate.production_order_id` is now Optional; new `order_type`, `item_id`, `source_so_line_id`, `due_date` fields.
+  5. **Removed auto-reservation on MO create** — `create_child_work_orders` no longer increments `reserved_stock` on creation. The old in-stock auto-reserve / shortage auto-reserve blocks deleted.
+  6. **New `POST /api/work-orders/{id}/release` endpoint** — user-driven "Release" button on pending main MOs. Explodes one BOM level on the MO's item and reserves all required child components (`$inc reserved_stock`). Records `child_reservations[]` on the WO. Status flips `pending` → `released`. UI shows "RELEASED" badge after reserve.
+  7. **MO Cancel via PUT status=cancelled** now also releases `child_reservations` (previously only the SO-cascade-cancel path did this).
+  8. **Material consumption on `/start`** continues to release per-component reservations (already implemented in a prior iteration).
+
 - **2026-05-11** — **Phase 1 of MTS/MTO redesign + Quotation→SO prefill (P0 — 12/12 tests passed):**
   1. **New `MTS/MTO` semantics enforced.** SO line `order_type` default flipped from `auto` → `mts`. Legacy `auto` is accepted on POST `/api/production` but normalised to `mts` (validation message: `mts | mto`). The `/confirm` flow already implemented the new rules in a prior fork: **MTS** ignores FG stock (always produces full SO qty, child SG/parts reserved at MO create), **MTO** uses available FG stock first (reserves it), MO covers the shortfall with child reservations on top.
   2. **New `GET /api/crm/quotations/{qid}/balance` endpoint** — returns per-line balance qty = `original_qty - Σ(qty already issued via non-cancelled SOs)`, hydrated with active BOM, item details, and customer info. Powers the new "From Quotation" picker on the SO form.
