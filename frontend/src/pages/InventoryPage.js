@@ -585,6 +585,18 @@ export default function InventoryPage() {
                             {isLowStock(item) && <AlertTriangle className="w-4 h-4 text-[#9B1C1C]" />}
                             <span>{item.name}</span>
                           </div>
+                          {(item.variant_attributes || []).length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1" data-testid={`item-variants-${item.part_number}`}>
+                              {(item.variant_attributes || []).slice(0, 3).map((attr, ai) => (
+                                <span key={ai} className="text-[9px] inline-block px-1 py-0.5 rounded bg-[#EEF2FF] text-[#3730A3]" title={`${attr.name}: ${(attr.values || []).join(', ')}`}>
+                                  {attr.name}: {(attr.values || []).slice(0, 3).join('/')}{(attr.values || []).length > 3 ? '…' : ''}
+                                </span>
+                              ))}
+                              {(item.variant_attributes || []).length > 3 && (
+                                <span className="text-[9px] text-[#6B7280]">+{(item.variant_attributes || []).length - 3} more</span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td>
                           <span className={`status-badge ${
@@ -836,6 +848,28 @@ export default function InventoryPage() {
                           </div>
                         )
                       )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Variant Attributes — read-only display (managed from BOM dialog) */}
+                {(stockEditDialog.item?.variant_attributes || []).length > 0 && (
+                  <div className="border border-[#FDE68A] bg-[#FFFBEB] rounded-sm p-3 space-y-2" data-testid="stock-edit-variants-block">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-semibold text-[#723B13] uppercase tracking-wide">Product Variants</div>
+                      <span className="text-[10px] text-[#92400E]">Managed from the BOM editor</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {(stockEditDialog.item?.variant_attributes || []).map((attr, ai) => (
+                        <div key={ai} className="flex items-center gap-2 bg-white border border-[#FDE68A] rounded-sm px-2 py-1">
+                          <span className="text-xs font-semibold text-[#374151] w-32 truncate" title={attr.name}>{attr.name}</span>
+                          <div className="flex flex-wrap gap-1 flex-1">
+                            {(attr.values || []).map((v, vi) => (
+                              <span key={vi} className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">{v}</span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}

@@ -275,36 +275,40 @@ export default function BOMPage() {
         }
       }
 
-      if (editingBom) {
-        await api.put(`/api/bom/${editingBom.id}`, payload);
-        toast.success(`BOM "${payload.name}" updated`, { id: toastId });
-      } else {
-        await api.post('/api/bom', payload);
-        toast.success(`BOM "${payload.name}" created`, { id: toastId });
-      }
-      // Phase 2 — persist variant_attributes to the parent item if changed.
+      // Compute variant_attributes payload BEFORE the BOM save so we can run both in parallel.
+      let variantAttrsPayload = null;
       try {
         const parentItem = items.find(it => it.id === formData.parent_item_id);
         const prev = JSON.stringify(parentItem?.variant_attributes || []);
         const curr = JSON.stringify(parentVariantAttrs || []);
         if (prev !== curr) {
-          // Strip out attributes with empty name or no values before saving.
-          const cleaned = (parentVariantAttrs || [])
+          variantAttrsPayload = (parentVariantAttrs || [])
             .map(a => ({ name: (a.name || '').trim(), values: (a.values || []).map(v => String(v).trim()).filter(Boolean) }))
             .filter(a => a.name && a.values.length > 0);
-          await api.put(`/api/items/${formData.parent_item_id}`, { variant_attributes: cleaned });
         }
-      } catch (e) {
-        console.warn('Failed to save variant_attributes on parent item:', e);
+      } catch (e) { /* ignore */ }
+
+      // Run BOM save AND variant-attrs update in parallel (saves ~300ms on slow networks).
+      const promises = [];
+      if (editingBom) {
+        promises.push(api.put(`/api/bom/${editingBom.id}`, payload));
+      } else {
+        promises.push(api.post('/api/bom', payload));
       }
+      if (variantAttrsPayload !== null) {
+        promises.push(api.put(`/api/items/${formData.parent_item_id}`, { variant_attributes: variantAttrsPayload }));
+      }
+      await Promise.all(promises);
+      toast.success(`BOM "${payload.name}" ${editingBom ? 'updated' : 'created'}`, { id: toastId });
       // If the user was editing a child BOM (via the "Edit <child> BOM" button
       // inside a parent edit), pop the stack and restore the parent's edit
       // state — keeping the dialog open. Only when the stack is empty do we
       // actually close the dialog.
-      await reloadBomsBackground();
-      // Refresh items so the newly-saved variant_attributes is visible the next time
-      // this BOM is edited (and to other consumers like SO/MO pickers).
-      await fetchItems();
+      // Background refresh — don't block the dialog close.
+      reloadBomsBackground().catch(() => {});
+      // Refresh items in the BACKGROUND (non-blocking) so the dialog closes immediately.
+      // The next time a BOM is edited, items will already be fresh.
+      fetchItems().catch(() => {});
       if (bomEditStack.length > 0) {
         const parent = bomEditStack[bomEditStack.length - 1];
         setBomEditStack(s => s.slice(0, -1));
@@ -979,7 +983,6 @@ export default function BOMPage() {
                         data-testid="bom-add-variant-attr"
                       >+ Add Attribute</button>
                     </div>
-                    <p className="text-[10px] text-[#92400E] mb-2">Define configurable attributes (e.g. <i>Motor Power: 1HP, 2HP, 5HP</i>). When set, each component below gets an "Applies to" filter so a single master BOM can serve every variant.</p>
                     {(parentVariantAttrs || []).length === 0 ? (
                       <div className="text-[11px] text-[#9CA3AF] py-2 italic">No variants. This BOM is a single non-configurable build.</div>
                     ) : (
@@ -998,18 +1001,63 @@ export default function BOMPage() {
                               className="input-field text-xs flex-1"
                               data-testid={`bom-variant-attr-name-${ai}`}
                             />
-                            <input
-                              type="text"
-                              placeholder="Comma-separated values (e.g. 1HP, 2HP, 5HP)"
-                              value={(attr.values || []).join(', ')}
-                              onChange={(e) => {
-                                const next = [...parentVariantAttrs];
-                                next[ai] = { ...next[ai], values: e.target.value.split(',').map(v => v.trim()).filter(Boolean) };
-                                setParentVariantAttrs(next);
-                              }}
-                              className="input-field text-xs flex-1"
-                              data-testid={`bom-variant-attr-values-${ai}`}
-                            />
+                            <div className="flex-1 flex items-center flex-wrap gap-1 px-1.5 py-1 bg-white border border-[#D1D5DB] rounded-sm min-h-[28px]" data-testid={`bom-variant-attr-values-${ai}`}>
+                              {(attr.values || []).map((v, vi) => (
+                                <span key={vi} className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">
+                                  {v}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const next = [...parentVariantAttrs];
+                                      next[ai] = { ...next[ai], values: (next[ai].values || []).filter((_, i) => i !== vi) };
+                                      setParentVariantAttrs(next);
+                                    }}
+                                    className="ml-1 text-white hover:text-[#FECDD3]"
+                                  >×</button>
+                                </span>
+                              ))}
+                              <input
+                                type="text"
+                                placeholder={(attr.values || []).length === 0 ? 'type value + comma (e.g. 1HP, 2HP)' : ''}
+                                onKeyDown={(e) => {
+                                  if (e.key === ',' || e.key === 'Enter' || e.key === 'Tab') {
+                                    const raw = (e.currentTarget.value || '').trim();
+                                    if (raw) {
+                                      e.preventDefault();
+                                      const next = [...parentVariantAttrs];
+                                      const existing = next[ai].values || [];
+                                      if (!existing.includes(raw)) {
+                                        next[ai] = { ...next[ai], values: [...existing, raw] };
+                                        setParentVariantAttrs(next);
+                                      }
+                                      e.currentTarget.value = '';
+                                    } else if (e.key === ',' || e.key === 'Enter') {
+                                      e.preventDefault();
+                                    }
+                                  } else if (e.key === 'Backspace' && !e.currentTarget.value) {
+                                    const next = [...parentVariantAttrs];
+                                    if ((next[ai].values || []).length > 0) {
+                                      next[ai] = { ...next[ai], values: (next[ai].values || []).slice(0, -1) };
+                                      setParentVariantAttrs(next);
+                                    }
+                                  }
+                                }}
+                                onBlur={(e) => {
+                                  const raw = (e.currentTarget.value || '').trim();
+                                  if (raw) {
+                                    const next = [...parentVariantAttrs];
+                                    const existing = next[ai].values || [];
+                                    if (!existing.includes(raw)) {
+                                      next[ai] = { ...next[ai], values: [...existing, raw] };
+                                      setParentVariantAttrs(next);
+                                    }
+                                    e.currentTarget.value = '';
+                                  }
+                                }}
+                                className="flex-1 min-w-[120px] outline-none text-xs bg-transparent border-0 p-0"
+                                data-testid={`bom-variant-attr-values-input-${ai}`}
+                              />
+                            </div>
                             <button
                               type="button"
                               onClick={() => setParentVariantAttrs(prev => prev.filter((_, i) => i !== ai))}
