@@ -76,6 +76,11 @@ export default function ItemsPage() {
     variant_attributes: [],
   });
 
+  // Inherited (read-only) variant view for FG/SG items — fetched from
+  // /api/items/{id}/effective-variants when the user opens an existing FG/SG.
+  const [inheritedVariants, setInheritedVariants] = useState([]);
+  const [inheritedSource, setInheritedSource] = useState('none');
+
   const canEdit = user?.role === 'admin'
     || hasPermission('items', 'create')
     || hasPermission('items', 'edit')
@@ -257,6 +262,16 @@ export default function ItemsPage() {
       })),
     });
     setIsDialogOpen(true);
+    // For FG/SG, also load inherited variants from BOM components so the
+    // user can see what variant SKUs they can produce.
+    setInheritedVariants([]);
+    setInheritedSource('none');
+    if (item.category === 'finished_good' || item.category === 'sub_assembly') {
+      api.get(`/api/items/${item.id}/effective-variants`).then(({ data }) => {
+        setInheritedVariants(data?.variant_attributes || []);
+        setInheritedSource(data?.source || 'none');
+      }).catch(() => { /* non-blocking */ });
+    }
   };
 
   const handleDelete = async (item) => {
@@ -719,8 +734,12 @@ export default function ItemsPage() {
                   </div>
                 </div>
 
-                {/* ====== Product Variants (FG / SG only) ====== */}
-                {(formData.category === 'finished_good' || formData.category === 'sub_assembly') && (
+                {/* ====== Product Variants ====== */}
+                {/* Editable: only for Component / Raw Material (the leaf items
+                    whose physical variants drive parent BOMs).
+                    Read-only inherited view: for Finished Good / Sub-Assembly
+                    — variants flow up from their variant-bearing BOM components. */}
+                {(formData.category === 'component' || formData.category === 'raw_material') && (
                   <div className="border border-[#FDE68A] rounded-sm bg-[#FFFBEB] px-3 py-2.5 space-y-2" data-testid="item-variant-attrs-block">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] font-semibold text-[#723B13] uppercase tracking-wide">
@@ -734,7 +753,7 @@ export default function ItemsPage() {
                       >+ Add Attribute</button>
                     </div>
                     {(formData.variant_attributes || []).length === 0 ? (
-                      <div className="text-[11px] text-[#9CA3AF] py-1 italic">No variants. Add an attribute (e.g. Motor Power) and its values (1HP, 2HP) to generate child SKUs.</div>
+                      <div className="text-[11px] text-[#9CA3AF] py-1 italic">No variants. Add an attribute (e.g. Grit Size) and its values (16GT, 24GT) to generate child SKUs.</div>
                     ) : (
                       <div className="space-y-1.5">
                         {(formData.variant_attributes || []).map((attr, ai) => {
@@ -869,6 +888,59 @@ export default function ItemsPage() {
                             Save the item first — the <span className="font-semibold">"Generate Variant Items"</span> button will appear when you re-open this item for edit.
                           </div>
                         )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ====== Inherited Variants (FG / SG — read-only) ====== */}
+                {(formData.category === 'finished_good' || formData.category === 'sub_assembly') && editingItem && (
+                  <div className="border border-[#FDE68A] rounded-sm bg-[#FFFBEB] px-3 py-2.5 space-y-2" data-testid="item-inherited-variants-block">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-semibold text-[#723B13] uppercase tracking-wide">
+                        Product Variants
+                        <span className="ml-1 font-normal text-[#92400E]">
+                          ({inheritedSource === 'own' ? 'legacy — defined on this item' : 'inherited from BOM components — read-only'})
+                        </span>
+                      </label>
+                      {inheritedVariants.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const { data: preview } = await api.post(`/api/items/${editingItem.id}/preview-variants`);
+                              const total = preview.combinations.length;
+                              const sample = preview.combinations.slice(0, 6).map(r => `  • ${r.sku} — ${r.label}${r.exists ? ' (exists)' : ' (NEW)'}`).join('\n');
+                              const more = total > 6 ? `\n  …and ${total - 6} more` : '';
+                              if (window.confirm(`Generate ${total} variant${total > 1 ? 's' : ''}?\n\n${preview.existing_count} already exist, ${preview.new_count} would be created.\n\n${sample}${more}\n\nClick OK to proceed (all combinations).`)) {
+                                const { data: result } = await api.post(`/api/items/${editingItem.id}/generate-variants`, {});
+                                toast.success(result.message);
+                                fetchItems().catch(() => {});
+                              }
+                            } catch (err) {
+                              toast.error(err.response?.data?.detail || 'Failed to generate variants');
+                            }
+                          }}
+                          className="text-[10px] px-2 py-0.5 rounded border border-[#723B13] text-[#723B13] hover:bg-[#FEF3C7] font-semibold"
+                          data-testid="item-generate-variants-from-inherited-btn"
+                        >Generate FG Variant SKUs</button>
+                      )}
+                    </div>
+                    {inheritedVariants.length === 0 ? (
+                      <div className="text-[11px] text-[#9CA3AF] py-1 italic">No variants found. Variants flow up from BOM components that have their own variants — define them on the Component / Raw Material items.</div>
+                    ) : (
+                      <div className="space-y-1">
+                        {inheritedVariants.map((attr, ai) => (
+                          <div key={ai} className="flex items-center gap-2 bg-white border border-[#FDE68A] rounded-sm px-2 py-1.5" data-testid={`item-inherited-variant-row-${ai}`}>
+                            <span className="text-xs font-semibold text-[#374151] w-40 truncate" title={attr.name}>{attr.name}</span>
+                            <div className="flex flex-wrap gap-1 flex-1">
+                              {(attr.values || []).map((v, vi) => (
+                                <span key={vi} className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">{v.value || v}</span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                        <div className="text-[10px] text-[#92400E] pt-1">Producing this item with a variant selection (in MO/SO) will save stock against the variant SKU (e.g. <span className="mono">{formData.part_number || 'FG-1'}-16GT</span>).</div>
                       </div>
                     )}
                   </div>

@@ -72,6 +72,19 @@ export default function ManufacturingPage() {
   
   // Bulk SC selection
   const [selectedMOs, setSelectedMOs] = useState({});
+  // Cache of effective_variants per item — fetched lazily for the picked
+  // FG/SG so the MTS variant picker can render the right axes (UNION of
+  // variant-bearing BOM components in the new architecture).
+  const [effectiveVariantsByItem, setEffectiveVariantsByItem] = useState({});
+  const fetchEffectiveVariants = async (itemId) => {
+    if (!itemId || effectiveVariantsByItem[itemId] !== undefined) return;
+    try {
+      const { data } = await api.get(`/api/items/${itemId}/effective-variants`);
+      setEffectiveVariantsByItem(prev => ({ ...prev, [itemId]: data?.variant_attributes || [] }));
+    } catch {
+      setEffectiveVariantsByItem(prev => ({ ...prev, [itemId]: [] }));
+    }
+  };
   const [bulkSCDialog, setBulkSCDialog] = useState(false);
   const [bulkSCSupplier, setBulkSCSupplier] = useState('');
   const [bulkSCType, setBulkSCType] = useState('with_material');
@@ -1068,11 +1081,16 @@ export default function ManufacturingPage() {
                             </>
                           );
                         })()}
-                        {/* ========== PHASE 2: MTS Variant Configurator ========== */}
+                        {/* ========== MTS Variant Configurator (uses effective_variants — inherited from BOM components) ========== */}
                         {(() => {
                           const selectedItem = items.find(it => it.id === workOrderForm.item_id);
-                          const attrs = selectedItem?.variant_attributes || [];
-                          if (!selectedItem || attrs.length === 0) return null;
+                          if (!selectedItem) return null;
+                          // Lazy fetch effective variants for this item.
+                          if (effectiveVariantsByItem[selectedItem.id] === undefined) {
+                            fetchEffectiveVariants(selectedItem.id);
+                          }
+                          const attrs = effectiveVariantsByItem[selectedItem.id] || selectedItem.variant_attributes || [];
+                          if (attrs.length === 0) return null;
                           return (
                             <div className="mt-2 border border-[#FDE68A] rounded-sm bg-[#FFFBEB] px-2 py-1.5" data-testid="mo-mts-variant-block">
                               <label className="block text-[10px] font-semibold text-[#723B13] mb-1 uppercase tracking-wide">Variant Configuration *</label>

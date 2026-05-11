@@ -57,6 +57,20 @@ export default function ProductionPage() {
   const [quotationLoadInfo, setQuotationLoadInfo] = useState(null); // { qNo, customer_name, currency }
   const [quotationSearch, setQuotationSearch] = useState('');
   const [showQuotationDropdown, setShowQuotationDropdown] = useState(false);
+  // Cache of effective_variants per BOM parent_item_id, fetched lazily when a
+  // line picks a BOM. For FG/SG this returns the UNION of variant_attributes
+  // from variant-bearing BOM components (the new architecture); for
+  // legacy items with own variant_attributes it returns those.
+  const [effectiveVariantsByItem, setEffectiveVariantsByItem] = useState({});
+  const fetchEffectiveVariants = async (itemId) => {
+    if (!itemId || effectiveVariantsByItem[itemId]) return;
+    try {
+      const { data } = await api.get(`/api/items/${itemId}/effective-variants`);
+      setEffectiveVariantsByItem(prev => ({ ...prev, [itemId]: data?.variant_attributes || [] }));
+    } catch {
+      setEffectiveVariantsByItem(prev => ({ ...prev, [itemId]: [] }));
+    }
+  };
   const [formData, setFormData] = useState({
     // Multi-line SO. order_type is no longer chosen by the user — SO is just a customer
     // demand record. MTS/MTO has moved to the Manufacturing Order level.
@@ -718,12 +732,21 @@ export default function ProductionPage() {
                             </>
                           )}
                         </div>
-                        {/* ========== PHASE 2 — VARIANT CONFIGURATOR ========== */}
-                        {selected && selected.parent_item?.variant_attributes && selected.parent_item.variant_attributes.length > 0 && (
+                        {/* ========== VARIANT CONFIGURATOR (uses effective_variants — own or inherited from BOM components) ========== */}
+                        {selected && (() => {
+                          const itemId = selected.parent_item_id || selected.parent_item?.id;
+                          if (!itemId) return null;
+                          // Lazily fetch once per item; fall back to legacy own attrs on the BOM payload.
+                          if (effectiveVariantsByItem[itemId] === undefined) {
+                            fetchEffectiveVariants(itemId);
+                          }
+                          const effective = effectiveVariantsByItem[itemId] || selected.parent_item?.variant_attributes || [];
+                          if (!effective || effective.length === 0) return null;
+                          return (
                           <div className="border border-[#FDE68A] rounded-sm bg-[#FFFBEB] px-2 py-1.5" data-testid={`so-variant-block-${idx}`}>
                             <label className="block text-[10px] font-semibold text-[#723B13] mb-1 uppercase tracking-wide">Variant Configuration *</label>
                             <div className="grid grid-cols-2 gap-1.5">
-                              {selected.parent_item.variant_attributes.map((attr, ai) => (
+                              {effective.map((attr, ai) => (
                                 <div key={ai}>
                                   <label className="block text-[10px] font-semibold text-[#92400E] mb-0.5">{attr.name}</label>
                                   <Select
@@ -746,13 +769,14 @@ export default function ProductionPage() {
                               ))}
                             </div>
                             {(() => {
-                              const missing = (selected.parent_item.variant_attributes || []).filter(a => !((line.variant_selection || {})[a.name]));
+                              const missing = effective.filter(a => !((line.variant_selection || {})[a.name]));
                               return missing.length > 0 ? (
                                 <p className="text-[9px] text-[#9B1C1C] mt-1">Select all attributes: missing {missing.map(m => m.name).join(', ')}</p>
                               ) : null;
                             })()}
                           </div>
-                        )}
+                          );
+                        })()}
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <label className="block text-xs font-semibold text-[#374151] mb-1">Qty *</label>

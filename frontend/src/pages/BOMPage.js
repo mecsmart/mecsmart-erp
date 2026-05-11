@@ -393,13 +393,12 @@ export default function BOMPage() {
       components: cleaned,
       parent_routings: bom.parent_routings || [],
     });
-    // Phase 2 — load variant_attributes from the parent item.
-    // Fetch fresh from API to avoid stale lite-cache (older clients may have
-    // cached the items list before variant_attributes was projected).
+    // Load EFFECTIVE variants for display — own (legacy) for CP/RM items,
+    // INHERITED (union from variant-bearing BOM components) for FG/SG.
     (async () => {
       try {
-        const { data: freshItem } = await api.get(`/api/items/${bom.parent_item_id}`);
-        setParentVariantAttrs(freshItem?.variant_attributes || []);
+        const { data } = await api.get(`/api/items/${bom.parent_item_id}/effective-variants`);
+        setParentVariantAttrs(data?.variant_attributes || []);
       } catch {
         const parentItem = items.find(it => it.id === bom.parent_item_id);
         setParentVariantAttrs(parentItem?.variant_attributes || []);
@@ -970,7 +969,7 @@ export default function BOMPage() {
                   <div className="border border-[#FDE68A] rounded-sm bg-[#FFFBEB] px-3 py-2.5" data-testid="bom-variant-attrs-block">
                     <div className="flex items-center justify-between mb-2">
                       <label className="text-sm font-semibold text-[#723B13]">
-                        Product Variants <span className="font-normal text-[#92400E]">(read-only — manage on the Item)</span>
+                        Product Variants <span className="font-normal text-[#92400E]">(inherited from BOM components — read-only)</span>
                       </label>
                       <span className="text-[10px] text-[#92400E]">Generate child SKUs from the Item edit dialog</span>
                     </div>

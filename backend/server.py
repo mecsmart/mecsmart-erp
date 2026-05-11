@@ -1293,6 +1293,83 @@ def _build_variant_sku_from_short_codes(parent_sku: str, combo: Dict[str, Dict[s
     return f"{parent_sku}-{'-'.join(parts)}"
 
 
+async def _compute_inherited_variants(item_id: str) -> List[Dict[str, Any]]:
+    """For an FG/SG, walk its active BOM and aggregate `variant_attributes`
+    from every variant-bearing component. Attributes with the same name are
+    merged: union of values, dedup by value, first-seen short_code wins.
+
+    Returns the canonical normalised list — same shape as Item.variant_attributes.
+    """
+    bom = await db.boms.find_one(
+        {"parent_item_id": item_id, "status": "active"},
+        {"_id": 0, "components": 1},
+    ) or await db.boms.find_one(
+        {"parent_item_id": item_id},
+        {"_id": 0, "components": 1},
+    )
+    if not bom:
+        return []
+    merged: Dict[str, Dict[str, Dict[str, str]]] = {}
+    order: List[str] = []
+    for comp in (bom.get("components") or []):
+        cid = comp.get("item_id")
+        if not cid:
+            continue
+        citem = await db.items.find_one({"id": cid}, {"_id": 0, "variant_attributes": 1, "category": 1})
+        if not citem:
+            continue
+        attrs = _normalize_variant_attributes(citem.get("variant_attributes") or [])
+        # Walk into SG sub-BOMs so deeper variant components also surface.
+        if citem.get("category") == "sub_assembly":
+            attrs = attrs + (await _compute_inherited_variants(cid))
+        for a in attrs:
+            name = a["name"]
+            if name not in merged:
+                merged[name] = {}
+                order.append(name)
+            for v in a["values"]:
+                key = v["value"]
+                if key not in merged[name]:
+                    merged[name][key] = {"value": v["value"], "short_code": v["short_code"]}
+    return [{"name": n, "values": list(merged[n].values())} for n in order]
+
+
+async def _get_effective_variants(item: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return the effective variant_attributes used for variant generation,
+    SO/MO selectors, and FG-stock-by-variant credit.
+
+    - Component / Raw Material: their own `variant_attributes` (manually defined).
+    - Finished Good / Sub-Assembly: legacy own `variant_attributes` if present
+      (kept for backward compatibility), otherwise INHERITED from their BOM components.
+    """
+    own = _normalize_variant_attributes(item.get("variant_attributes") or [])
+    if own:
+        return own
+    if item.get("category") in ("finished_good", "sub_assembly"):
+        return await _compute_inherited_variants(item["id"])
+    return []
+
+
+@items_router.get("/{item_id}/effective-variants")
+async def get_effective_variants(item_id: str, request: Request):
+    """Return the variant axes that drive variant SKUs for this item.
+    For CP/RM this is the item's own `variant_attributes`. For FG/SG it
+    is the UNION of variant_attributes from variant-bearing BOM components
+    (recursively walking SG sub-BOMs), or the legacy own value if set.
+    """
+    await get_current_user(request)
+    item = await db.items.find_one({"id": item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    effective = await _get_effective_variants(item)
+    return {
+        "item_id": item_id,
+        "category": item.get("category"),
+        "source": "own" if item.get("variant_attributes") else ("inherited" if effective else "none"),
+        "variant_attributes": effective,
+    }
+
+
 @items_router.get("/{item_id}/variants")
 async def list_item_variants(item_id: str, request: Request):
     """List every generated variant child of a parent item."""
@@ -1309,15 +1386,16 @@ async def list_item_variants(item_id: str, request: Request):
 
 @items_router.post("/{item_id}/preview-variants")
 async def preview_item_variants(item_id: str, request: Request):
-    """Compute every combination from the parent's variant_attributes and report
-    which already exist as child items vs which would be NEW."""
+    """Compute every combination from the parent's *effective* variant_attributes
+    (own for CP/RM, inherited from BOM components for FG/SG) and report which
+    already exist as child items vs which would be NEW."""
     await get_current_user(request)
     parent = await db.items.find_one({"id": item_id})
     if not parent:
         raise HTTPException(status_code=404, detail="Parent item not found")
-    norm_attrs = _normalize_variant_attributes(parent.get("variant_attributes") or [])
+    norm_attrs = await _get_effective_variants(parent)
     if not norm_attrs:
-        return {"combinations": [], "existing_skus": [], "summary": "No variant attributes defined on this item."}
+        return {"combinations": [], "existing_skus": [], "summary": "No variant attributes defined or inherited for this item."}
     parent_sku = parent.get("part_number") or ""
     combos = _all_variant_combinations(norm_attrs)
     # Existing children: map by sku for fast lookup
@@ -1366,9 +1444,9 @@ async def generate_item_variants(item_id: str, payload: dict = Body(default={}),
     parent = await db.items.find_one({"id": item_id})
     if not parent:
         raise HTTPException(status_code=404, detail="Parent item not found")
-    norm_attrs = _normalize_variant_attributes(parent.get("variant_attributes") or [])
+    norm_attrs = await _get_effective_variants(parent)
     if not norm_attrs:
-        raise HTTPException(status_code=400, detail="Parent item has no variant attributes — define them first.")
+        raise HTTPException(status_code=400, detail="Parent item has no variant attributes (own or inherited from BOM components).")
     parent_sku = parent.get("part_number") or ""
     combos = _all_variant_combinations(norm_attrs)
     selected_skus = set(payload.get("selected_skus") or [])
@@ -5185,11 +5263,14 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
         if inherited:
             variant_sel_for_mo = inherited
     # Validate every attribute in the selection is defined on the parent item.
+    # Uses EFFECTIVE variants (own for CP/RM, inherited from BOM components for FG/SG)
+    # so MOs for FG/SG with variants flowing up from BOM components are accepted.
     if variant_sel_for_mo:
-        defined_attrs = {a["name"]: set(a.get("values") or []) for a in (item.get("variant_attributes") or []) if a.get("name")}
+        effective_attrs = await _get_effective_variants(item)
+        defined_attrs = {a["name"]: set(v["value"] for v in (a.get("values") or [])) for a in effective_attrs if a.get("name")}
         for attr_name, attr_val in variant_sel_for_mo.items():
             if attr_name not in defined_attrs:
-                raise HTTPException(status_code=400, detail=f"Variant attribute '{attr_name}' is not defined on this item")
+                raise HTTPException(status_code=400, detail=f"Variant attribute '{attr_name}' is not defined or inherited on this item")
             if defined_attrs[attr_name] and attr_val not in defined_attrs[attr_name]:
                 raise HTTPException(status_code=400, detail=f"'{attr_val}' is not a valid value for '{attr_name}' (allowed: {sorted(defined_attrs[attr_name])})")
     
@@ -6968,10 +7049,55 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
         
         item = await db.items.find_one({"id": wo.get("item_id")})
         if item:
+            # If the WO has a variant_selection, credit stock to the FG/SG variant
+            # child SKU instead of the parent. Auto-create the child SKU if it
+            # doesn't exist yet (e.g. user added a new BOM-component variant after
+            # the parent was first set up).
+            variant_sel = wo.get("variant_selection") or None
+            target_item_id = item["id"]
+            target_sku = item.get("part_number") or ""
+            if variant_sel:
+                eff = await _get_effective_variants(item)
+                # Build the {attr -> {value, short_code}} combo from the selection.
+                combo: Dict[str, Dict[str, str]] = {}
+                for attr in eff:
+                    v = variant_sel.get(attr["name"])
+                    if v is None:
+                        continue
+                    match = next((x for x in attr["values"] if x["value"] == v), None)
+                    if match:
+                        combo[attr["name"]] = {"value": match["value"], "short_code": match["short_code"]}
+                if combo:
+                    variant_sku = _build_variant_sku_from_short_codes(item.get("part_number") or "", combo)
+                    existing = await db.items.find_one({"part_number": variant_sku}, {"_id": 0})
+                    if not existing:
+                        # Auto-create the variant child item (mirrors generate_item_variants logic).
+                        short_codes = {k: v["short_code"] for k, v in combo.items()}
+                        values_map = {k: v["value"] for k, v in combo.items()}
+                        child = {k: v for k, v in item.items() if k not in ("_id", "id", "variant_attributes", "auto_suffix_variant_sku")}
+                        child["id"] = str(uuid.uuid4())
+                        child["part_number"] = variant_sku
+                        child["name"] = (item.get("name", "") or "") + " · " + ", ".join(f"{k}: {v}" for k, v in values_map.items())
+                        child["parent_item_id"] = item["id"]
+                        child["is_variant"] = True
+                        child["variant_short_codes"] = short_codes
+                        child["variant_values"] = values_map
+                        child["variant_attributes"] = None
+                        child["is_active"] = True
+                        child["current_stock"] = 0
+                        child["reserved_stock"] = 0
+                        child["created_at"] = datetime.now(timezone.utc)
+                        await db.items.insert_one(child)
+                        target_item_id = child["id"]
+                    else:
+                        target_item_id = existing["id"]
+                    target_sku = variant_sku
             await db.items.update_one(
-                {"id": item["id"]},
+                {"id": target_item_id},
                 {"$inc": {"current_stock": final_accepted}}
             )
+            update_fields["fg_credited_item_id"] = target_item_id
+            update_fields["fg_credited_sku"] = target_sku
         update_fields["actual_end"] = datetime.now(timezone.utc)
         update_fields["quantity_completed"] = final_accepted
     

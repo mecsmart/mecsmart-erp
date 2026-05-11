@@ -1,0 +1,73 @@
+{
+  "summary": "Iteration 100 - Verified main agent's fix for MO creation with inherited variant_selection. The fix uses _get_effective_variants() to validate variant_selection against inherited variants from BOM components. 14 tests passed, 1 skipped (WO completion flow blocked by /start endpoint not handling BOM-based routings).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/work-orders/{wo_id}/start",
+        "issue": "Returns 404 'Routing not found' when MO has routing_id=None (routing is in BOM's parent_routings, not legacy routings collection). This blocks the full WO completion flow for MOs created with BOM-based routings.",
+        "priority": "MEDIUM"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_99_variant_inheritance.py",
+    "/app/test_reports/pytest/pytest_iteration_100.xml"
+  ],
+  "action_items": [
+    "Fix POST /api/work-orders/{wo_id}/start to handle MOs with routing_id=None where routing is in BOM's parent_routings (line ~6233-6244 in server.py)"
+  ],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_99_variant_inheritance.py"
+  ],
+  "success_rate": {
+    "backend": "93% (14/15 tests passed, 1 skipped)",
+    "frontend": "N/A - Backend only testing requested"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Tests create temporary items with TEST_VAR_99_ prefix, BOMs with parent_routings, then clean up after each test class",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Main fix verified: POST /api/work-orders with variant_selection on FG with INHERITED variants from BOM components now works (was returning 'Variant attribute is not defined' before). The fix changed validation to use _get_effective_variants() which returns inherited variants for FG/SG items. Response shape is {message, work_orders: [...]} - extract first WO from array. Remaining issue: /start endpoint needs fix to handle BOM-based routings (routing_id=None).",
+  "tests_executed": {
+    "backend": [
+      {"test": "test_effective_variants_component_returns_own", "status": "PASSED"},
+      {"test": "test_effective_variants_fg_returns_inherited", "status": "PASSED"},
+      {"test": "test_effective_variants_item_without_variants_returns_none", "status": "PASSED"},
+      {"test": "test_effective_variants_nonexistent_item_returns_404", "status": "PASSED"},
+      {"test": "test_preview_variants_fg_with_inherited", "status": "PASSED"},
+      {"test": "test_generate_variants_fg_with_inherited", "status": "PASSED"},
+      {"test": "test_fg_inherits_from_sg_sub_bom", "status": "PASSED"},
+      {"test": "test_inherited_variants_merged_and_deduplicated", "status": "PASSED"},
+      {"test": "test_wo_completion_credits_variant_child_sku", "status": "SKIPPED", "reason": "MO /start endpoint needs fix to handle BOM-based routings (routing_id=None)"},
+      {"test": "test_legacy_fg_effective_variants_returns_own", "status": "PASSED"},
+      {"test": "test_legacy_fg_preview_uses_own", "status": "PASSED"},
+      {"test": "test_legacy_fg_generate_uses_own", "status": "PASSED"},
+      {"test": "test_bom_crud_still_works", "status": "PASSED"},
+      {"test": "test_so_crud_with_variant_selection", "status": "PASSED"},
+      {"test": "test_item_crud_still_works", "status": "PASSED"}
+    ],
+    "frontend": []
+  },
+  "features_verified": {
+    "mo_creation_with_inherited_variants": "POST /api/work-orders with variant_selection on FG with inherited variants from BOM components now works correctly",
+    "variant_validation": "Invalid variant attributes and values are correctly rejected with appropriate error messages",
+    "effective_variants_endpoint": "GET /api/items/{id}/effective-variants returns inherited variants for FG/SG items",
+    "preview_variants_with_inheritance": "POST /api/items/{id}/preview-variants works for FG with inherited variants",
+    "generate_variants_with_inheritance": "POST /api/items/{id}/generate-variants works for FG with inherited variants",
+    "recursive_inheritance": "FG inherits variants from component in SG's sub-BOM",
+    "merge_deduplicate_variants": "Inherited variants from multiple components are merged and deduplicated"
+  },
+  "rca_of_the_issue": {
+    "original_issue": "POST /api/work-orders with variant_selection on FG with inherited variants was returning 400 'Variant attribute is not defined on this item'",
+    "root_cause": "The MO creation validation was checking item.variant_attributes directly instead of using _get_effective_variants() which returns inherited variants for FG/SG items",
+    "fix_applied": "Changed validation at line ~5269-5275 to use effective_attrs = await _get_effective_variants(item) and set(v['value'] for v in (a.get('values') or [])) to handle the {value, short_code} schema",
+    "verification": "MO creation with inherited variant_selection now works. Invalid attributes/values are correctly rejected."
+  }
+}
