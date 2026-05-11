@@ -1533,18 +1533,28 @@ async def get_production_orders(request: Request, status: Optional[str] = None):
             order["bom"] = bom
             item = await db.items.find_one({"id": bom.get("parent_item_id")}, {"_id": 0})
             order["item"] = item
+        # Per-line MO consumption: pull every non-cancelled MO referencing this SO and bucket by source_so_line_id.
+        mos = await db.work_orders.find(
+            {"production_order_id": order["id"], "parent_wo_id": None, "status": {"$ne": "cancelled"}},
+            {"quantity": 1, "source_so_line_id": 1, "_id": 0}
+        ).to_list(1000)
+        per_line_mo = {}
+        for mo in mos:
+            lid = mo.get("source_so_line_id") or ""
+            per_line_mo[lid] = per_line_mo.get(lid, 0) + int(mo.get("quantity", 0) or 0)
         # Hydrate each line with its BOM + parent_item for the multi-line display
         for ln in (order.get("lines") or []):
             ln_bom = await db.boms.find_one({"id": ln.get("bom_id")}, {"_id": 0})
             if ln_bom:
                 ln["bom"] = ln_bom
                 ln["item"] = await db.items.find_one({"id": ln_bom.get("parent_item_id")}, {"_id": 0})
-        # Calculate total MO quantity already created for this SO
-        mos = await db.work_orders.find(
-            {"production_order_id": order["id"], "parent_wo_id": None, "status": {"$ne": "cancelled"}},
-            {"quantity": 1, "_id": 0}
-        ).to_list(1000)
-        order["mo_qty_created"] = sum(mo.get("quantity", 0) for mo in mos)
+            # mo_qty_created on this specific line (tracked via source_so_line_id on MOs).
+            ln["mo_qty_created"] = per_line_mo.get(ln.get("line_id"), 0)
+            ln_qty = int(ln.get("quantity", 0) or 0)
+            ln_resv = int(ln.get("reserved_qty", 0) or 0)
+            # available_for_mo = qty - reserved (already in FG stock) - MOs already created.
+            ln["available_for_mo"] = max(0, ln_qty - ln_resv - ln["mo_qty_created"])
+        order["mo_qty_created"] = sum(per_line_mo.values())
     return orders
 
 @production_router.get("/{order_id}")
@@ -4723,6 +4733,31 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             bom = await db.boms.find_one({"id": prod_order.get("bom_id")})
         if not bom:
             raise HTTPException(status_code=404, detail="BOM not found for the selected Sales Order line")
+
+        # Safeguard: an MTO MO cannot exceed the line's still-available quantity
+        # (line.quantity - reserved_qty - already-created non-cancelled MO qty).
+        if so_line:
+            existing_mos = await db.work_orders.find(
+                {
+                    "production_order_id": wo_data.production_order_id,
+                    "source_so_line_id": so_line.get("line_id", ""),
+                    "parent_wo_id": None,
+                    "status": {"$ne": "cancelled"},
+                },
+                {"quantity": 1, "_id": 0},
+            ).to_list(1000)
+            already_mo_qty = sum(int(m.get("quantity", 0) or 0) for m in existing_mos)
+            ln_qty = int(so_line.get("quantity", 0) or 0)
+            ln_resv = int(so_line.get("reserved_qty", 0) or 0)
+            balance = ln_qty - ln_resv - already_mo_qty
+            if int(wo_data.quantity or 0) > max(0, balance):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Cannot create MO for {wo_data.quantity} units — SO line balance is only {max(0, balance)} "
+                        f"(line qty {ln_qty}, reserved {ln_resv}, MOs already created {already_mo_qty})."
+                    ),
+                )
     else:
         # MTS — pick the item directly. The item must have an active BOM (otherwise nothing
         # to manufacture). Production_order_id is left blank so MRP/SO flows ignore this MO.

@@ -1075,6 +1075,12 @@ export default function ManufacturingPage() {
                         const filteredSOs = productionOrders
                           .filter(po => ['confirmed', 'planned'].includes(po.status))
                           .filter(po => {
+                            // Hide SOs whose every line is already fully reserved / MO-created.
+                            const lineBalances = (po.lines || []).map(ln => parseInt(ln.available_for_mo, 10) || 0);
+                            const totalAvailable = lineBalances.length > 0 ? lineBalances.reduce((a, b) => a + b, 0) : (po.quantity - (po.mo_qty_created || 0));
+                            return totalAvailable > 0;
+                          })
+                          .filter(po => {
                             const q = (workOrderForm.so_search || '').trim().toLowerCase();
                             if (!q) return true;
                             const code = (po.item?.part_number || '').toLowerCase();
@@ -1101,18 +1107,32 @@ export default function ManufacturingPage() {
                                 <label className="block text-xs font-semibold text-[#111827] mb-1">SO Line *</label>
                                 <Select value={workOrderForm.source_so_line_id || ''} onValueChange={(v) => {
                                   const ln = (selected.lines || []).find(l => l.line_id === v);
-                                  const balQty = ln ? Math.max((ln.quantity || 0) - 0, 1) : 1;
+                                  // Default qty = remaining balance available for an MO (line qty − already reserved FG − already-created MOs).
+                                  const balQty = ln ? Math.max(parseInt(ln.available_for_mo, 10) || 0, 1) : 1;
                                   setWorkOrderForm({ ...workOrderForm, source_so_line_id: v, quantity: balQty });
                                 }}>
                                   <SelectTrigger className="text-xs" data-testid="wo-so-line-select"><SelectValue placeholder="Pick a line from this SO…" /></SelectTrigger>
                                   <SelectContent>
-                                    {(selected.lines || []).map(ln => (
-                                      <SelectItem key={ln.line_id} value={ln.line_id}>
-                                        L{ln.line_no}: {ln.item?.part_number || '-'} — {ln.item?.name || ''} (Qty {ln.quantity})
-                                      </SelectItem>
-                                    ))}
+                                    {(selected.lines || [])
+                                      .filter(ln => (parseInt(ln.available_for_mo, 10) || 0) > 0)
+                                      .map(ln => {
+                                        const bal = parseInt(ln.available_for_mo, 10) || 0;
+                                        const resv = parseInt(ln.reserved_qty, 10) || 0;
+                                        const moCreated = parseInt(ln.mo_qty_created, 10) || 0;
+                                        const extras = [];
+                                        if (resv > 0) extras.push(`reserved ${resv}`);
+                                        if (moCreated > 0) extras.push(`MO ${moCreated}`);
+                                        return (
+                                          <SelectItem key={ln.line_id} value={ln.line_id}>
+                                            L{ln.line_no}: {ln.item?.part_number || '-'} — {ln.item?.name || ''} (Available {bal} of {ln.quantity}{extras.length ? ` · ${extras.join(', ')}` : ''})
+                                          </SelectItem>
+                                        );
+                                      })}
                                   </SelectContent>
                                 </Select>
+                                {(selected.lines || []).filter(ln => (parseInt(ln.available_for_mo, 10) || 0) > 0).length === 0 && (
+                                  <p className="text-[10px] text-[#9B1C1C] mt-1">All lines of this SO are fully reserved or already covered by existing MOs.</p>
+                                )}
                               </div>
                             )}
                             {!selected && (
@@ -1131,19 +1151,21 @@ export default function ManufacturingPage() {
                                     <div className="px-3 py-4 text-center text-xs text-[#6B7280]">No matching sales orders. Try a different search.</div>
                                   )}
                                   {filteredSOs.map(po => {
-                                    const balance = po.quantity - (po.mo_qty_created || 0);
-                                    const disabled = balance <= 0;
+                                    const lineBalances = (po.lines || []).map(ln => parseInt(ln.available_for_mo, 10) || 0);
+                                    const totalBalance = lineBalances.length > 0 ? lineBalances.reduce((a, b) => a + b, 0) : (po.quantity - (po.mo_qty_created || 0));
+                                    const disabled = totalBalance <= 0;
                                     return (
                                       <button
                                         key={po.id}
                                         type="button"
                                         disabled={disabled}
                                         onClick={() => {
-                                          const soQty = po.quantity || 1;
-                                          const balanceQty = Math.max(soQty - (po.mo_qty_created || 0), 1);
-                                          // If single-line SO, auto-pick that line.
-                                          const singleLineId = (po.lines && po.lines.length === 1) ? po.lines[0].line_id : '';
-                                          setWorkOrderForm({ ...workOrderForm, production_order_id: po.id, source_so_line_id: singleLineId, quantity: balanceQty, so_search: '' });
+                                          // If single line, prefill qty = available_for_mo. Multi-line: defer to line picker.
+                                          const isSingle = (po.lines && po.lines.length === 1);
+                                          const singleLine = isSingle ? po.lines[0] : null;
+                                          const singleLineId = singleLine ? singleLine.line_id : '';
+                                          const qtyDefault = singleLine ? (parseInt(singleLine.available_for_mo, 10) || 1) : 1;
+                                          setWorkOrderForm({ ...workOrderForm, production_order_id: po.id, source_so_line_id: singleLineId, quantity: Math.max(1, qtyDefault), so_search: '' });
                                         }}
                                         data-testid={`wo-so-option-${po.id}`}
                                         className={`w-full text-left px-3 py-2 text-xs border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB] ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -1152,7 +1174,7 @@ export default function ManufacturingPage() {
                                         <span className="mx-2">—</span>
                                         <span className="mono">{po.item?.part_number || '-'}</span>
                                         <span className="ml-1">{po.item?.name || 'Unknown'}</span>
-                                        <span className="ml-2 text-[#6B7280]">Qty: {po.quantity}{balance < po.quantity ? ` · Balance: ${balance}` : ''}</span>
+                                        <span className="ml-2 text-[#6B7280]">Available: {totalBalance} of {po.quantity}</span>
                                       </button>
                                     );
                                   })}
