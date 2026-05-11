@@ -20,7 +20,26 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-11 (latest)** — **Variant Generator moved to Item dialog (UX P0 DONE & TESTED ✅):**
+- **2026-05-11 (newest)** — **Variant Inheritance Architecture (P0 DONE & TESTED 15/15 ✅):**
+  Architectural pivot per user requirement. **Variants are now defined ONLY on Component / Raw Material items.** FG/SG items **inherit** their variant axes from variant-bearing BOM components (recursively walking SG sub-BOMs, union of attributes with first-seen short_code winning).
+
+  **Backend (server.py):**
+  - `_compute_inherited_variants(item_id)` — walks the active BOM, aggregates variant_attributes from variant-bearing components, recursing into SG sub-BOMs.
+  - `_get_effective_variants(item)` — returns own (CP/RM) or inherited (FG/SG with no own attrs) or legacy own (FG/SG with legacy attrs).
+  - **New endpoint** `GET /api/items/{id}/effective-variants` → `{source: "own"|"inherited"|"none", variant_attributes}`.
+  - `preview-variants` and `generate-variants` now use `_get_effective_variants` so FG/SG with inherited variants can generate child SKUs (e.g. `FG-1-16GT`).
+  - MO creation (`POST /api/work-orders`) validates `variant_selection` against effective variants (fixed bug where inherited attrs were rejected).
+  - **MO completion path now credits FG stock to the variant child SKU**: if the WO has a `variant_selection`, the system finds (or auto-creates) the corresponding variant child item and increments `current_stock` there instead of the parent. Sets `fg_credited_item_id` and `fg_credited_sku` on the WO doc for auditability.
+  - **Fixed pre-existing bug**: `POST /api/work-orders/{wo_id}/start` was returning 404 "Routing not found" for MOs whose routing lives inside `BOM.parent_routings` (routing_id=None). Now resolves the BOM by item_id when the WO has embedded `operations_status`.
+
+  **Frontend:**
+  - `ItemsPage.js` — variant editor visible only for `component` / `raw_material`. For `finished_good` / `sub_assembly`, a read-only "**Inherited from BOM components**" block lists the union axes plus a **Generate FG Variant SKUs** button.
+  - `BOMPage.js` — read-only variant chips now sourced from `/effective-variants` (so the BOM dialog also shows inherited variants).
+  - `ProductionPage.js` (SO) and `ManufacturingPage.js` (MO MTS) — variant selectors now driven by a per-item `effectiveVariantsByItem` cache, lazily fetched from `/effective-variants`.
+
+  **Tests:** `/app/backend/tests/test_iteration_99_variant_inheritance.py` — 15/15 passing (TestEffectiveVariantsEndpoint, TestPreviewVariantsWithInheritance, TestGenerateVariantsWithInheritance, TestRecursiveInheritance, TestMergeDeduplicateVariants, TestWOCompletionVariantCredit, TestLegacyOwnVariantsRegression, TestBOMCRUDRegression, TestSOCRUDRegression, TestItemCRUDRegression).
+
+
   Earlier the variant generator lived inside the BOM dialog, which conflated *item-master responsibilities* with *BOM responsibilities*. Moved to where it belongs:
   - **ItemsPage.js**: Item Create/Edit dialog now shows a yellow **"Product Variants (optional)"** block whenever category is `finished_good` or `sub_assembly`. Inline editor with `[attribute name, value chip + 4-char short_code]` rows. A **"Generate Variant Items"** button appears once the item is saved (an item-id is required for the backend call) and the user has entered at least one attribute + value.
   - **BOMPage.js**: Variant block is now **read-only** ("Product Variants (read-only — manage on the Item)") so users see which variants this BOM serves, but cannot accidentally clobber the master from a BOM save. BOM Save no longer issues a `PUT /api/items/{id}` for variant_attributes — separation of concerns is clean.

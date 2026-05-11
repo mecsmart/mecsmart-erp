@@ -6240,6 +6240,13 @@ async def start_work_order(wo_id: str, request: Request, preview: bool = False):
             # Child MO (SG/Part) — no routing; use its own BOM (if any) for material consumption
             item_id = wo.get("item_id")
             bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}) if item_id else None
+        elif wo.get("operations_status"):
+            # Main MO whose routing lives inside BOM.parent_routings (no legacy
+            # `routings` row). The WO was created with operations already embedded
+            # from those parent_routings, so we just need the BOM for material
+            # consumption.
+            item_id = wo.get("item_id")
+            bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}) if item_id else None
         else:
             raise HTTPException(status_code=404, detail="Routing not found")
     else:
