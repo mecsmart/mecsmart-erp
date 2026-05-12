@@ -20,7 +20,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-11 (latest)** — **3 quick fixes — MO-driven MRP + UX (DONE & TESTED 24/24 ✅):**
+- **2026-05-12 (latest)** — **Per-component variant breakdown + variant-child walkup (DONE & TESTED 29/29 ✅):**
+  Investigation of user's production BOM (`CRW0I8000001` Rice Whitener) revealed two issues with how inherited variants were displayed in the BOM dialog:
+  1. **Per-component breakdown**: When two variant-bearing components share an axis name OR contribute different axes, the merged union didn't make it clear WHICH component contributed WHICH variants. Added `variant_sources: [{component_id, component_part_number, component_name, variant_attributes}]` to the `/effective-variants` response. BOM dialog now renders **per-component** (e.g. `SA-001 — Pump Assembly: Motor Power [1HP][2HP], Voltage [220V][440V]`) when variants are inherited.
+  2. **Variant-CHILD reference walkup**: If a BOM line points at a variant child (e.g. `CRW0E8000091-30GT`) instead of the parent component, the helper now walks `is_variant=true → parent_item_id` and uses the parent's `variant_attributes`. Previously the variant axes silently disappeared because variant children carry `variant_attributes=None`.
+  3. **FG/SG recursive walk**: `_compute_inherited_variants` now recurses through both `sub_assembly` and `finished_good` BOM components (was only SG before), so deeply nested variant components surface correctly.
+  4. **Tests**: `/app/backend/tests/test_iteration_104_variant_sources_breakdown.py` — 5 new tests + 24 regression from iter-99/102/103 = **29/29 passing**.
+
+
   1. **Fix 1 (MRP from MOs not SOs)**: `GET /api/mrp/demand` now sources demand from open Manufacturing Orders (status pending/in_progress, materials_reserved≠true, parent_wo_id=null) instead of from Sales Orders. SOs without a created MO generate no MRP demand. MTS MOs without an SO are also captured. Variant-aware: uses `_resolve_variant_child_item` so demand goes against the variant child SKU when the MO has a `variant_selection`.
   2. **Fix 2 (SO Quotation dropdown)**: Quotation picker on SO creation no longer dumps the full list when the dropdown opens. Empty state prompts "Type a quotation # or customer name to search…" — results render only once user types.
   3. **Fix 3 (MTS WO item picker)**: Restricted to items that have an ACTIVE BOM. Avoids creating WOs against items that have no operations/components defined. Driven by a new `itemsWithBom` Set loaded alongside items on mount (single `/api/bom?status=active` fetch).
