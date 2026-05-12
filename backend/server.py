@@ -1477,6 +1477,30 @@ async def _get_effective_variants(item: Dict[str, Any]) -> List[Dict[str, Any]]:
     return _normalize_variant_attributes(item.get("variant_attributes") or [])
 
 
+async def _filter_variant_selection_for_item(item_id: str, variant_selection: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    """Return the subset of `variant_selection` whose attribute names actually
+    appear in this item's effective variants (own for CP/RM, inherited for
+    FG/SG via BOM walk). If none match, returns None — caller treats this
+    as a "plain" WO (no variant_selection).
+
+    Used when auto-creating child WOs from a parent MO: a child SG whose BOM
+    tree has no variant-bearing components should run as a plain WO; a child
+    SG whose tree DOES have variants gets only the matching axes.
+    """
+    if not variant_selection:
+        return None
+    item = await db.items.find_one({"id": item_id}, {"_id": 0})
+    if not item:
+        return None
+    effective = await _get_effective_variants(item)
+    if not effective:
+        return None
+    relevant_names = {a.get("name") for a in effective if a.get("name")}
+    filtered = {k: v for k, v in variant_selection.items() if k in relevant_names}
+    return filtered or None
+
+
+
 async def _resolve_variant_child_item(comp_item: Dict[str, Any], variant_selection: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
     """For a BOM component whose item carries its OWN variant_attributes,
     pick the matching variant child item based on the MO's variant_selection.
@@ -5566,13 +5590,16 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             "is_subcontract": wo_data.is_subcontract if is_main else False,
             "subcontract_supplier_id": wo_data.subcontract_supplier_id if is_main else "",
             "subcontract_type": wo_data.subcontract_type if is_main else "with_material",
-            # Propagate the MO's variant_selection to child WOs too so the
-            # variant-aware consumption logic (`_resolve_variant_child_item`)
-            # can match against variant-bearing components deep in the BOM
-            # tree (e.g. SG → RM leaf carrying Grit Size). Without this,
-            # only the main MO consumes variant children; SG-level consumption
-            # silently falls back to parent items.
-            "variant_selection": variant_sel_for_mo or None,
+            # Filter parent's variant_selection to ONLY the axes that this
+            # WO's BOM tree actually contains. A child SG with no
+            # variant-bearing leaves gets variant_selection=None (runs plain);
+            # a child SG that has a variant-bearing leaf gets only the
+            # matching axes. This implements the user's contextual variant
+            # propagation rule: variants follow the BOM tree, not the parent MO.
+            "variant_selection": (
+                (await _filter_variant_selection_for_item(item_id, variant_sel_for_mo))
+                if variant_sel_for_mo else None
+            ),
             "variant_sku": (_build_variant_sku(item_doc.get("part_number") or "", variant_sel_for_mo) if (is_main and variant_sel_for_mo) else None),
             "notes": wo_data.notes if is_main else f"Auto-created for {item_doc.get('category', 'child item')}",
             "materials_consumed": False,

@@ -1,0 +1,105 @@
+{
+  "summary": "Iteration 107 - Verified contextual variant propagation fix: Parent MO's variant_selection now ONLY propagates to child WOs whose BOM tree actually contains the corresponding variant axes. Children with no variant-bearing components get variant_selection=None (run plain). All 4 new tests passed + 44 regression tests from iter-99/102/103/104/105/106 passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_107_contextual_variant_propagation.py",
+    "/app/test_reports/pytest/pytest_iteration_107.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "New helper _filter_variant_selection_for_item at L1480 correctly filters variant_selection to only axes present in item's effective variants",
+    "Usage at L5599-5601 in create_wo_for_item properly applies contextual filtering for all child WOs"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_107_contextual_variant_propagation.py"
+  ],
+  "success_rate": {
+    "backend": "100% (4/4 new tests + 44/44 regression tests)",
+    "frontend": "N/A - Backend only testing"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST_CTX_107_ prefixed items during tests, all cleaned up after each test class",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Contextual variant propagation verified working. Child WOs now get variant_selection filtered to only axes present in their BOM tree. SG with variant-bearing components gets matching axes; SG with only plain RMs gets variant_selection=None.",
+  "tests_executed": {
+    "backend": [
+      {
+        "test": "TestContextualVariantPropagation::test_contextual_variant_propagation",
+        "status": "PASSED",
+        "details": "Created BOM tree FG → [SG_A (with CP_VAR variant component), SG_B (with RM_PLAIN only)]. Created MO for FG with variant_selection={'Grit Size': '16GT'}. Verified: (a) FG main WO has variant_selection={'Grit Size': '16GT'}; (b) SG_A child WO has variant_selection={'Grit Size': '16GT'} (axis present in its tree); (c) SG_B child WO has variant_selection=None (no variant-bearing components)."
+      },
+      {
+        "test": "TestAxisFiltering::test_axis_filtering_multi_axis_mo",
+        "status": "PASSED",
+        "details": "Created MO with variant_selection={'Grit Size':'16GT', 'Color':'Red'} where SG_A only has Grit Size and SG_C only has Color. Verified: FG main WO keeps both axes; SG_A child WO gets only {'Grit Size':'16GT'}; SG_C child WO gets only {'Color':'Red'}."
+      },
+      {
+        "test": "TestRegressionExistingTests::test_basic_api_health",
+        "status": "PASSED",
+        "details": "Items, BOMs, Work Orders APIs all return 200."
+      },
+      {
+        "test": "TestRegressionExistingTests::test_auth_me_endpoint",
+        "status": "PASSED",
+        "details": "/auth/me returns user info with email and permissions."
+      }
+    ],
+    "regression": [
+      {
+        "test_file": "test_iteration_99_variant_inheritance.py",
+        "tests_passed": 15,
+        "tests_failed": 0,
+        "details": "All 15 variant inheritance tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_102_variant_consumption.py",
+        "tests_passed": 4,
+        "tests_failed": 0,
+        "details": "All 4 variant consumption tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_103_mrp_mo_driven.py",
+        "tests_passed": 5,
+        "tests_failed": 0,
+        "details": "All 5 MO-driven MRP demand tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_104_variant_sources_breakdown.py",
+        "tests_passed": 5,
+        "tests_failed": 0,
+        "details": "All 5 variant sources breakdown tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_105_wo_variant_tax_invoice_stock.py",
+        "tests_passed": 6,
+        "tests_failed": 0,
+        "details": "All 6 child WO variant + tax invoice stock tests passed - no regression (especially test_child_wo_inherits_variant_selection which tested SG-level variant consumption)"
+      },
+      {
+        "test_file": "test_iteration_106_mo_cancel_cascade_preview_permission.py",
+        "tests_passed": 9,
+        "tests_failed": 0,
+        "details": "All 9 MO cancel cascade + preview permission tests passed - no regression"
+      }
+    ]
+  },
+  "features_verified": {
+    "contextual_variant_propagation": "Child WOs whose BOM tree contains variant-bearing components get the matching variant_selection axes from parent MO",
+    "plain_child_wo": "Child WOs whose BOM tree has NO variant-bearing components get variant_selection=None (run plain)",
+    "axis_filtering": "When parent MO has multiple axes (e.g., Grit Size + Color), each child WO gets only the axes present in its own BOM tree",
+    "regression_iter_105": "SG-level variant consumption still works - test_child_wo_inherits_variant_selection passed (SG with Grit in its BOM tree still gets variant_selection propagated)"
+  },
+  "code_review_notes": {
+    "server.py_line_1480": "_filter_variant_selection_for_item helper - filters variant_selection to only axes present in item's effective variants (own for CP/RM, inherited for FG/SG)",
+    "server.py_lines_5593-5602": "variant_selection assignment in create_wo_for_item now uses _filter_variant_selection_for_item to implement contextual propagation"
+  }
+}
