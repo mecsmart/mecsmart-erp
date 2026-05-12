@@ -7,6 +7,7 @@ import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, FileText,
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { SearchableItemSelect } from '../components/SearchableItemSelect';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
 import { fmtAmt } from '../utils/numberFormat';
@@ -889,10 +890,14 @@ export default function JobWorkPage() {
                       return (
                         <tr key={idx} className="border-t">
                           <td className="py-1 px-2">
-                            <Select value={p.item_id} onValueChange={v => updateJWPartItem(idx, v)}>
-                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select part" /></SelectTrigger>
-                              <SelectContent>{items.filter(i => ['finished_good','sub_assembly','component'].includes(i.category)).map(i => <SelectItem key={i.id} value={i.id}>{i.part_number} - {i.name}</SelectItem>)}</SelectContent>
-                            </Select>
+                            <SearchableItemSelect
+                              items={items}
+                              value={p.item_id}
+                              onChange={(id) => updateJWPartItem(idx, id)}
+                              filter={(i) => ['finished_good','sub_assembly','component'].includes(i.category)}
+                              placeholder="Search part by code / name…"
+                              testId={`jw-part-${idx}-item`}
+                            />
                             {p.process_names && p.process_names.length > 0 && (
                               <div className="text-[10px] text-[#1E429F] mt-1" data-testid={`jw-part-${idx}-processes`}>Processes: {p.process_names.join(', ')}</div>
                             )}
@@ -926,10 +931,13 @@ export default function JobWorkPage() {
                       return (
                       <tr key={idx} className="border-t">
                         <td className="py-1 px-2">
-                          <Select value={l.item_id} onValueChange={v => updateOrderLine(idx, 'item_id', v)}>
-                            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select item" /></SelectTrigger>
-                            <SelectContent>{items.map(i => <SelectItem key={i.id} value={i.id}>{i.part_number} - {i.name}</SelectItem>)}</SelectContent>
-                          </Select>
+                          <SearchableItemSelect
+                            items={items}
+                            value={l.item_id}
+                            onChange={(id) => updateOrderLine(idx, 'item_id', id)}
+                            placeholder="Search item by code / name…"
+                            testId={`jw-rm-${idx}-item`}
+                          />
                         </td>
                         <td className="py-1 px-2"><input type="number" min="1" value={l.quantity} onChange={e => updateOrderLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
                         <td className="py-1 px-2"><input type="number" min="0" value={l.rate} onChange={e => updateOrderLine(idx, 'rate', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
