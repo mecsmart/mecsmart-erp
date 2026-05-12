@@ -9,7 +9,7 @@ import logging
 import io
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Set
 import uuid
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
@@ -2510,46 +2510,50 @@ async def get_so_print_data(order_id: str, request: Request):
 
 @mrp_router.get("/demand")
 async def calculate_demand(request: Request, production_order_id: Optional[str] = None):
-    """Calculate RM demand: Only for SOs WITHOUT reserved MOs.
-    If an MO is reserved for an SO, that SO's demand is covered — skip it.
-    For remaining SOs: Net = Gross - (Available Stock after reservations).
-    Available = Current Stock - Reserved for MOs - Safety Stock.
-    Only Raw Materials are returned."""
+    """Calculate RM demand from open MANUFACTURING ORDERS (MTS + MTO).
+
+    Rationale: SOs only show demand intent — they reserve available stock but
+    don't commit to a production plan. Real RM/component demand happens when
+    an MO is created (MTS or MTO). MRP therefore explodes:
+      1. Reserved MOs → use their pre-computed `reserved_materials` shortfall.
+      2. Un-reserved open MOs (pending / in_progress, not yet `materials_reserved`)
+         → explode their BOM at MO quantity. Variant-bearing components are
+         redirected to the matching variant child SKU when the MO has a
+         `variant_selection`.
+      3. SOs without any MO yet are NOT counted — create the MO first.
+
+    Net Requirement = (reservation shortfall) + max(0, gross - available)
+    where available = on_hand - allocated_for_mo - safety_stock.
+    Only Raw Material items are returned."""
     await get_current_user(request)
     
     # Recalculate reservations based on current stock first
     await recalculate_all_reservations()
     
-    query = {"status": {"$in": ["confirmed", "planned", "released", "in_progress"]}}
+    # Optional filter by source SO (kept for backward compatibility — finds
+    # all MOs linked to that SO instead of filtering by SO id directly).
+    so_filter_ids: Set[str] = set()
     if production_order_id:
-        query["id"] = production_order_id
+        so_filter_ids.add(production_order_id)
     
-    orders = await db.production_orders.find(query, {"_id": 0}).to_list(1000)
-    
-    # Step 1: Compute reservation data from ALL reserved MOs
+    # ---- Step 1: aggregate reserved-MO shortfalls (same as before) ----
     reserved_mos = await db.work_orders.find(
         {"materials_reserved": True, "status": {"$in": ["pending", "in_progress"]}},
         {"_id": 0, "reserved_materials": 1, "production_order_id": 1, "quantity": 1}
     ).to_list(5000)
     
-    # SOs fully covered by reserved MOs → skip from gross demand
-    so_reserved_qty = {}
+    total_allocated = {}
+    total_shortfall = {}
     for mo in reserved_mos:
-        po_id = mo.get("production_order_id")
-        if po_id:
-            so_reserved_qty[po_id] = so_reserved_qty.get(po_id, 0) + mo.get("quantity", 0)
-    
-    # Per-RM: total allocated (locked stock) and total shortfall (purchase need)
-    total_allocated = {}   # item_id -> stock locked by reservations
-    total_shortfall = {}   # item_id -> shortfall needing purchase
-    for mo in reserved_mos:
+        if so_filter_ids and mo.get("production_order_id") not in so_filter_ids:
+            continue
         for rm in mo.get("reserved_materials", []):
             rid = rm.get("item_id")
             if rid:
                 total_allocated[rid] = total_allocated.get(rid, 0) + rm.get("allocated_qty", 0)
                 total_shortfall[rid] = total_shortfall.get(rid, 0) + rm.get("shortfall_qty", 0)
     
-    # Cache
+    # ---- Caches ----
     item_cache = {}
     async def get_item(item_id):
         if item_id not in item_cache:
@@ -2564,7 +2568,7 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
     
     rm_demand = {}
     
-    async def explode_all_rm(parent_item_id: str, parent_qty: float, order_info: dict, visited: set = None):
+    async def explode_all_rm(parent_item_id: str, parent_qty: float, order_info: dict, variant_selection: Optional[Dict[str, str]] = None, visited: set = None):
         if visited is None:
             visited = set()
         if parent_item_id in visited:
@@ -2584,6 +2588,15 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
             comp_item = await get_item(comp_item_id)
             if not comp_item:
                 continue
+
+            # Variant-aware: redirect demand to the variant child SKU when the
+            # MO has a matching variant_selection (same logic as WO /start).
+            variant_child = await _resolve_variant_child_item(comp_item, variant_selection)
+            if variant_child:
+                comp_item_id = variant_child["id"]
+                comp_item = variant_child
+                # Refresh cache with the variant child so later lookups are consistent.
+                item_cache[comp_item_id] = variant_child
             
             if comp_item.get("category") == "raw_material":
                 if comp_item_id not in rm_demand:
@@ -2607,28 +2620,34 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                 })
             else:
                 child_visited = set(visited)
-                await explode_all_rm(comp_item_id, qty_needed, order_info, child_visited)
+                await explode_all_rm(comp_item_id, qty_needed, order_info, variant_selection, child_visited)
     
-    # Step 2: Only explode SOs that are NOT fully covered by reserved MOs
-    for order in orders:
-        so_id = order.get("id")
-        so_qty = order.get("quantity", 0)
-        reserved_qty_for_so = so_reserved_qty.get(so_id, 0)
-        
-        # Calculate unreserved qty for this SO
-        unreserved_qty = max(0, so_qty - reserved_qty_for_so)
-        if unreserved_qty <= 0:
-            continue  # This SO is fully covered by reserved MOs — skip
-        
-        bom = await db.boms.find_one({"id": order.get("bom_id")}, {"_id": 0})
-        if not bom:
+    # ---- Step 2: explode UNRESERVED open MOs (MTS + MTO) ----
+    # Reserved MOs are already accounted for via total_allocated / total_shortfall.
+    open_mo_query = {
+        "status": {"$in": ["pending", "in_progress"]},
+        "materials_reserved": {"$ne": True},
+        # Skip child WOs (already exploded through parent) and subcontract.
+        "$or": [{"parent_wo_id": None}, {"parent_wo_id": {"$exists": False}}],
+    }
+    if so_filter_ids:
+        open_mo_query["production_order_id"] = {"$in": list(so_filter_ids)}
+    open_mos = await db.work_orders.find(open_mo_query, {"_id": 0}).to_list(5000)
+    for mo in open_mos:
+        item_id = mo.get("item_id")
+        if not item_id:
             continue
-        parent_item_id = bom.get("parent_item_id")
-        if parent_item_id:
-            await explode_all_rm(parent_item_id, unreserved_qty, order)
+        qty = mo.get("quantity", 0) or 0
+        if qty <= 0:
+            continue
+        order_info = {
+            "id": mo.get("id"),
+            "order_number": mo.get("wo_number") or mo.get("mo_number") or mo.get("id"),
+            "due_date": mo.get("scheduled_end") or mo.get("scheduled_start"),
+        }
+        await explode_all_rm(item_id, qty, order_info, mo.get("variant_selection"))
     
-    # Step 3: Net = reservation shortfall + unreserved SO shortfall
-    # Available for unreserved SOs = Stock - Allocated(locked) - Safety
+    # ---- Step 3: Compute net requirement ----
     for item_id, data in rm_demand.items():
         available_for_new = max(0, data["on_hand"] - data["allocated_for_mo"] - data["safety_stock"])
         unreserved_shortfall = max(0, data["gross_requirement"] - available_for_new)
@@ -2647,7 +2666,7 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                     running_available = 0
             data["orders"] = shortage_orders
     
-    # Step 3b: Also add RM items that have reservation shortfall but no unreserved SO demand
+    # ---- Step 3b: pure-reservation shortfalls (no current MO demand) ----
     for item_id, sf_qty in total_shortfall.items():
         if sf_qty > 0 and item_id not in rm_demand:
             item = await get_item(item_id)

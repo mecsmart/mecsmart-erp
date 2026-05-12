@@ -585,8 +585,13 @@ export default function ProductionPage() {
                               <div className="absolute z-30 mt-1 left-0 right-0 border border-[#E5E7EB] rounded-sm max-h-56 overflow-auto bg-white shadow-lg" data-testid="so-quotation-list">
                                 {(() => {
                                   const qs = (quotationSearch || '').trim().toLowerCase();
+                                  // Fix 2: only show results AFTER user types something.
+                                  // Avoids dumping the entire quotation list every time the
+                                  // dialog opens.
+                                  if (!qs) {
+                                    return <div className="px-3 py-3 text-center text-[11px] text-[#6B7280]">Type a quotation # or customer name to search…</div>;
+                                  }
                                   const filtered = quotations.filter(qx => {
-                                    if (!qs) return true;
                                     const no = (qx.quotation_no || '').toLowerCase();
                                     const cust = (qx.customer_name || qx.customer?.name || '').toLowerCase();
                                     return no.includes(qs) || cust.includes(qs);

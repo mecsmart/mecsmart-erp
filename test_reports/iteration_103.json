@@ -1,0 +1,83 @@
+{
+  "summary": "Iteration 103 - Verified MO-driven MRP demand feature (Fix 1). All 5 new tests passed + 19 regression tests from iteration 99/102 passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_103_mrp_mo_driven.py",
+    "/app/test_reports/pytest/pytest_iteration_103.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_103_mrp_mo_driven.py"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5 new tests + 19/19 regression tests)",
+    "frontend": "N/A - Backend only testing"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST_MRP_103_ prefixed items during tests, all cleaned up after each test class",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "MO-driven MRP demand feature verified working. The /api/mrp/demand endpoint now sources demand from work_orders (MOs) instead of production_orders (SOs). SOs without MOs generate NO demand. Variant-aware MRP demand also works correctly.",
+  "tests_executed": {
+    "backend": [
+      {
+        "test": "TestMRPMODrivenDemand::test_scenario_a_so_without_mo_no_mrp_demand",
+        "status": "PASSED",
+        "details": "Created SO for 5 FG but NO MO. Called /mrp/demand. Verified NO demand for RM (because no MO exists yet). This confirms SOs alone don't generate MRP demand."
+      },
+      {
+        "test": "TestMRPMODrivenDemand::test_scenario_b_mo_created_generates_mrp_demand",
+        "status": "PASSED",
+        "details": "Created MO for qty=5 FG. Called /mrp/demand. Verified 10 units demand for RM (5 FG × 2 RM per FG). This confirms MOs generate MRP demand."
+      },
+      {
+        "test": "TestMRPMODrivenDemand::test_scenario_c_reserved_mo_shortfall_captured",
+        "status": "PASSED",
+        "details": "Created MO and reserved materials (with shortfall since RM stock=0). Called /mrp/demand. Verified shortfall is captured in net_requirement > 0."
+      },
+      {
+        "test": "TestMRPMODrivenDemand::test_scenario_d_mts_mo_without_so_in_mrp_demand",
+        "status": "PASSED",
+        "details": "Created MTS MO without SO (production_order_id=null). Verified MO has no production_order_id. Called /mrp/demand. Verified demand increased by 6 units (3 FG × 2 RM per FG). This confirms MTS MOs without SOs still appear in MRP demand."
+      },
+      {
+        "test": "TestMRPVariantAwareDemand::test_variant_aware_mrp_demand",
+        "status": "PASSED",
+        "details": "Created RM with variants (Grit=16GT,30GT), generated variant children. Created MO with variant_selection={Grit:30GT}. Called /mrp/demand. Verified demand is against RM-30GT (variant child), not RM (parent). This confirms variant-aware MRP demand works."
+      }
+    ],
+    "regression": [
+      {
+        "test_file": "test_iteration_99_variant_inheritance.py",
+        "tests_passed": 15,
+        "tests_failed": 0,
+        "details": "All 15 variant inheritance tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_102_variant_consumption.py",
+        "tests_passed": 4,
+        "tests_failed": 0,
+        "details": "All 4 variant consumption tests passed - no regression"
+      }
+    ]
+  },
+  "features_verified": {
+    "mo_driven_mrp_demand": "MRP demand is now sourced from MOs (work_orders) instead of SOs (production_orders)",
+    "so_without_mo_no_demand": "SOs without MOs generate NO MRP demand (SOs only show intent, not commitment)",
+    "mts_mo_in_demand": "MTS MOs without SOs (production_order_id=null) still appear in MRP demand",
+    "reserved_mo_shortfall": "Reserved MO shortfalls are captured in MRP demand",
+    "variant_aware_mrp": "MO with variant_selection generates demand against variant child SKU, not parent"
+  },
+  "code_review_notes": {
+    "server.py_lines_2511-2700": "calculate_demand endpoint now queries work_orders (MOs) with status pending/in_progress, materials_reserved!=true, parent_wo_id=null. Uses _resolve_variant_child_item for variant-aware explosion."
+  }
+}

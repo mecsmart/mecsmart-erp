@@ -44,6 +44,10 @@ export default function ManufacturingPage() {
   const [workOrders, setWorkOrders] = useState([]);
   const [productionOrders, setProductionOrders] = useState([]);
   const [items, setItems] = useState([]);
+  // Set of item_ids that have an ACTIVE BOM. Used to restrict the MTS WO
+  // item picker to items that can actually be manufactured. Loaded once on
+  // mount alongside items.
+  const [itemsWithBom, setItemsWithBom] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('work-orders');
   
@@ -163,13 +167,14 @@ export default function ManufacturingPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [wcRes, routingsRes, woRes, poRes, itemsRes, supRes] = await Promise.all([
+      const [wcRes, routingsRes, woRes, poRes, itemsRes, supRes, bomsRes] = await Promise.all([
         api.get('/api/work-centers'),
         api.get('/api/routings'),
         api.get('/api/work-orders'),
         api.get('/api/production'),
         api.get('/api/items'),
         api.get('/api/suppliers'),
+        api.get('/api/bom?status=active'),
       ]);
       setWorkCenters(wcRes.data);
       setRoutings(routingsRes.data);
@@ -177,6 +182,7 @@ export default function ManufacturingPage() {
       setProductionOrders(poRes.data);
       setItems(itemsRes.data);
       setSuppliers(supRes.data);
+      setItemsWithBom(new Set((bomsRes.data || []).map(b => b.parent_item_id).filter(Boolean)));
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -1031,7 +1037,12 @@ export default function ManufacturingPage() {
                         <label className="block text-sm font-semibold text-[#111827] mb-1">Step 2 — Item to Manufacture *</label>
                         {(() => {
                           const q = (workOrderForm.item_search || '').trim().toLowerCase();
-                          const eligible = (items || []).filter(it => ['finished_good', 'sub_assembly', 'component'].includes(it.category));
+                          // Fix 3: MTS picker only shows items that have an ACTIVE BOM.
+                          // Items without a BOM can't be manufactured — no operations / no components.
+                          const eligible = (items || []).filter(it =>
+                            ['finished_good', 'sub_assembly', 'component'].includes(it.category) &&
+                            itemsWithBom.has(it.id)
+                          );
                           const filtered = q ? eligible.filter(it => {
                             const code = (it.part_number || '').toLowerCase();
                             const name = (it.name || '').toLowerCase();
@@ -1052,7 +1063,7 @@ export default function ManufacturingPage() {
                             <>
                               <input
                                 type="text"
-                                placeholder="Search by part number or name (FG / SG / Component only)…"
+                                placeholder="Search by part number or name (only items with an active BOM)…"
                                 value={workOrderForm.item_search || ''}
                                 onChange={(e) => setWorkOrderForm({ ...workOrderForm, item_search: e.target.value })}
                                 className="input-field"
