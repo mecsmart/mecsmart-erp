@@ -20,7 +20,15 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-11 (latest)** — **BOM/Items UX polish (4 fixes — TESTED 4/4 ✅):**
+- **2026-05-11 (latest)** — **Variant lifecycle completion — 4 fixes (DONE & TESTED 19/19 ✅):**
+  1. **Fix 1 (BOM dialog read-only variant axes)**: Already done in prior iteration — BOM dialog shows "Product Variants (inherited from BOM components — read-only)" with axes derived from `/api/items/{id}/effective-variants`. Confirmed matches user's screenshot intent.
+  2. **Fix 2 (Variant-aware component consumption)**: When MO has `variant_selection` and a BOM component carries its own `variant_attributes`, WO `/start` now consumes from the matching variant CHILD SKU (e.g. `CRW0E8000091-30GT`) instead of the parent. New backend helper `_resolve_variant_child_item` matches MO's selection against component axes; falls back to parent gracefully if the variant child doesn't exist yet. RM-only components unaffected.
+  3. **Fix 3 (MO/SO variant label)**: MO list and SO list views now show a `Variant: 30GT-1.0MM` line beneath the parent SKU/name when `variant_selection` is present. Concatenates picked variant values with `-` (matching the variant SKU suffix convention). Replaced legacy purple SKU chip on SO lines.
+  4. **Fix 4 (FG stock rollup on Items page)**: Variant children (`is_variant=true`) are no longer separate rows in the main Items table. Instead the parent FG row shows TOTAL stock (parent + sum of variants) with an inline breakdown listing each variant's suffix → stock (e.g. `16GT: 3 nos`, `30GT-08MM: 3 nos`). One-row-per-SKU experience, no separate scrolling.
+
+  **Tests:** `/app/backend/tests/test_iteration_102_variant_consumption.py` — 4 new tests (variant-aware consumption, fallback, FG credit regression, legacy no-selection). Iter-99 regression still 15/15. Total 19/19.
+
+
   1. **BOM dialog component rows**: Removed obsolete `applies_to` filter button ("All variants" / single-value chip). Replaced with read-only navy chips showing the COMPONENT item's own variant values (e.g. SA-001 row shows `1HP 2HP 220V 440V`). Data-testid `component-variant-chips-{index}`. (Fixes 1 & 2)
   2. **Items dialog Generate Variant Items**: Both Generate buttons (CP/RM own and FG/SG inherited) now call a new `persistParentForGenerate()` helper that PUTs the full form payload (description/name/category/etc) before running variant preview/generate. Children now inherit the latest edits, not the cached parent record. (Fix 3)
   3. **BOM → Items navigation speed**: Added `AbortController` scoped to BOMPage lifecycle. Background `/api/bom/{id}/explode` flood (up to 8 concurrent) is now aborted on unmount or `statusFilter` change. Items page's `/api/items?lite=1` no longer queues behind a hundred stale BOM explosion calls. Reduced MAX_PARALLEL from 20→8 for friendlier network usage. (Fix 4)
