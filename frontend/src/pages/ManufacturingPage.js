@@ -164,7 +164,13 @@ export default function ManufacturingPage() {
     return () => clearInterval(timer);
   }, [isJobCardOpen, jobCardWO]);
 
-  const fetchData = async () => {
+  const fetchData = async (opts = {}) => {
+    // Preserve scroll position by default. Operation-status updates trigger
+    // a full re-fetch which used to reset window scroll to 0 — disorienting
+    // when the operator was deep in a long WO list. Opts.preserveScroll=false
+    // (or initial mount) skips the snapshot.
+    const preserve = opts.preserveScroll !== false;
+    const scrollY = preserve ? (typeof window !== 'undefined' ? window.scrollY : 0) : 0;
     setLoading(true);
     try {
       const [wcRes, routingsRes, woRes, poRes, itemsRes, supRes, bomsRes] = await Promise.all([
@@ -187,6 +193,10 @@ export default function ManufacturingPage() {
       console.error('Failed to fetch data:', error);
     } finally {
       setLoading(false);
+      if (preserve && typeof window !== 'undefined') {
+        // Restore in next tick so it survives React's render flush.
+        requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: 'instant' }));
+      }
     }
   };
 
@@ -995,7 +1005,7 @@ export default function ManufacturingPage() {
                     <span>Create Manufacturing Order</span>
                   </button>
                 </DialogTrigger>
-                <DialogContent className="max-w-lg">
+                <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle className="font-[Chivo]">Create Manufacturing Order</DialogTitle>
                   </DialogHeader>
@@ -1047,7 +1057,7 @@ export default function ManufacturingPage() {
                             const code = (it.part_number || '').toLowerCase();
                             const name = (it.name || '').toLowerCase();
                             return code.includes(q) || name.includes(q);
-                          }) : eligible.slice(0, 50);
+                          }) : [];  // Fix 2: empty until user types — avoids dumping 600+ items by default
                           const selected = items.find(it => it.id === workOrderForm.item_id);
                           return selected ? (
                             <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-3 py-2" data-testid="mo-mts-item-selected">
@@ -1071,7 +1081,10 @@ export default function ManufacturingPage() {
                                 autoFocus
                               />
                               <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-56 overflow-auto bg-white" data-testid="mo-mts-item-list">
-                                {filtered.length === 0 && (
+                                {!q && (
+                                  <div className="px-3 py-3 text-center text-xs text-[#6B7280]" data-testid="mo-mts-item-prompt">Type a part number or name to search…</div>
+                                )}
+                                {q && filtered.length === 0 && (
                                   <div className="px-3 py-4 text-center text-xs text-[#6B7280]">No matching items.</div>
                                 )}
                                 {filtered.slice(0, 100).map(it => (

@@ -20,7 +20,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (newest)** — **2 MO fixes — cascade cancel + preview permission (DONE & TESTED 44/44 ✅):**
+- **2026-05-12 (newest)** — **3 MO/Manufacturing UX fixes (DONE & VERIFIED ✅):**
+  1. **Fix 1 (Scroll position preserved on op-update)**: `fetchData()` now snapshots `window.scrollY` before re-fetching and restores it in a `requestAnimationFrame` after state flush. Operators no longer get bounced to the top of the WO list after completing a job-card operation.
+  2. **Fix 2 (MTS item picker shows results only after search)**: Removed the default `eligible.slice(0, 50)` pre-fill. Empty-state prompt "Type a part number or name to search…" shown until user types. Avoids dumping 600+ items on every dialog open.
+  3. **Fix 3 (MO creation dialog scrollable)**: Added `max-h-[90vh] overflow-y-auto` to the MO Create dialog. Long forms (especially when variant configurator + multi-component lists appear) now scroll inside the dialog instead of pushing fields off-screen.
+  - All 44 regression tests still pass.
+
+
   1. **Fix 1 (Cascade cancel)**: PUT /api/work-orders/{id} with status='cancelled' now BFS-walks the entire `parent_wo_id` tree and cancels every uncompleted descendant WO. Completed WOs stay completed (real produced output preserved). Each cancelled descendant's `child_reservations` are released (reserved_stock decremented). The main WO's `cascade_cancelled_children` field lists every child id that was cancelled, for auditability.
   2. **Fix 2 (Preview permission)**: `/api/work-orders/{id}/start?preview=true` now requires only `manufacturing:view` instead of `manufacturing:create`. The actual start (which consumes stock) still requires `manufacturing:edit`. Production operators with view/edit-only access can now see the material consumption preview before requesting an admin to confirm.
   - **Tests**: `/app/backend/tests/test_iteration_106_mo_cancel_cascade_preview_permission.py` — 9 new tests + 35 regression = **44/44 passing**.
