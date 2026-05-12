@@ -20,7 +20,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (newest)** — **Auto-retire variant children + stock rollup cleanup (DONE & TESTED ✅):**
+- **2026-05-12 (newest)** — **FG/SG always uses inherited variants (DONE & TESTED ✅):**
+  Root cause of "BOM showing old variant name & only 1 axis" on production: FG/SG items had stale legacy `variant_attributes` in DB (e.g. `Grit Size: 16,24,30` without 4-char short codes). The previous "own → inherited" precedence kept returning the stale own and never walked the BOM.
+  - `_get_effective_variants(item)` for FG/SG **always prefers inherited** variants from BOM components. Falls back to legacy own only when the FG/SG has no BOM at all (so half-set-up items still show something).
+  - `/effective-variants` `source` field now correctly reports `inherited` even when stale own is present.
+  - Auto-retire on PUT items is now restricted to **CP/RM categories only** — clearing FG/SG own-variants (which is a cleanup that should be encouraged) no longer accidentally retires BOM-driven variant children.
+  - Verified manually: FG-001 with stale own=[Grit Size] returns inherited=[Motor Power, Voltage] from SA-001. All 29 regression tests still pass.
+
+
   Addresses production data scenario where parent items had `variant_attributes` cleared but variant children remained as `is_active=true` orphans, polluting the stock rollup column.
   - **Backend**: `PUT /api/items/{id}` now detects when `variant_attributes` is being set to empty `[]`. When the parent has existing variant children (`is_variant=true, parent_item_id=this`), all of them are auto-retired (`is_active=false`). Children stay in DB (stock history preserved) but disappear from rollups.
   - **Frontend**: ItemsPage stock rollup now filters out `is_active=false` variant children. A parent that had its variants cleared no longer shows stale variant lines under its STOCK column.

@@ -1176,11 +1176,18 @@ async def update_item(item_id: str, item_data: ItemUpdate, request: Request):
     if "variant_attributes" in update_data:
         new_attrs = _normalize_variant_attributes(update_data["variant_attributes"])
         update_data["variant_attributes"] = new_attrs
-        # If the user CLEARED all variant_attributes on a parent that has
-        # existing variant children, retire (is_active=false) those orphans so
-        # they stop showing up in stock rollups / dropdowns. Children stay in
-        # the DB (stock history preserved) but are visually gone.
-        if not new_attrs:
+        # If the user CLEARED all variant_attributes on a CP/RM parent that
+        # has existing variant children, retire (is_active=false) those
+        # orphans so they stop showing up in stock rollups / dropdowns.
+        # Children stay in the DB (stock history preserved) but are
+        # visually gone.
+        #
+        # NOTE: We deliberately DO NOT auto-retire for FG/SG — their variant
+        # children are driven by inherited BOM variants, not by the FG's own
+        # legacy variant_attributes. Clearing the FG's stale own-variants is
+        # actually a cleanup the system encourages (so inheritance takes over).
+        existing = await db.items.find_one({"id": item_id}, {"_id": 0, "category": 1})
+        if not new_attrs and existing and existing.get("category") in ("component", "raw_material"):
             await db.items.update_many(
                 {"parent_item_id": item_id, "is_variant": True, "is_active": {"$ne": False}},
                 {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc)}},
@@ -1427,16 +1434,21 @@ async def _get_effective_variants(item: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Return the effective variant_attributes used for variant generation,
     SO/MO selectors, and FG-stock-by-variant credit.
 
-    - Component / Raw Material: their own `variant_attributes` (manually defined).
-    - Finished Good / Sub-Assembly: legacy own `variant_attributes` if present
-      (kept for backward compatibility), otherwise INHERITED from their BOM components.
+    - Component / Raw Material: their own `variant_attributes` (the leaf items
+      ARE the source of truth — they have no BOM to inherit from).
+    - Finished Good / Sub-Assembly: ALWAYS prefer the union INHERITED from
+      variant-bearing BOM components. Falls back to legacy own
+      `variant_attributes` only when the FG/SG has no BOM yet (so a
+      half-set-up item still shows something). This avoids stale FG-level
+      variants (e.g. 1-axis legacy values) shadowing the real 2+ axes
+      contributed by the BOM components.
     """
-    own = _normalize_variant_attributes(item.get("variant_attributes") or [])
-    if own:
-        return own
     if item.get("category") in ("finished_good", "sub_assembly"):
-        return await _compute_inherited_variants(item["id"])
-    return []
+        inherited = await _compute_inherited_variants(item["id"])
+        if inherited:
+            return inherited
+        return _normalize_variant_attributes(item.get("variant_attributes") or [])
+    return _normalize_variant_attributes(item.get("variant_attributes") or [])
 
 
 async def _resolve_variant_child_item(comp_item: Dict[str, Any], variant_selection: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
@@ -1488,11 +1500,16 @@ async def get_effective_variants(item_id: str, request: Request):
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     effective = await _get_effective_variants(item)
-    has_own = bool(item.get("variant_attributes"))
-    source = "own" if has_own else ("inherited" if effective else "none")
     breakdown: List[Dict[str, Any]] = []
-    if not has_own and item.get("category") in ("finished_good", "sub_assembly"):
+    source = "none"
+    if item.get("category") in ("finished_good", "sub_assembly"):
         breakdown = await _compute_inherited_variants_breakdown(item_id)
+        if breakdown:
+            source = "inherited"
+        elif effective:
+            source = "own"  # FG/SG with no BOM yet — falling back to legacy own
+    elif effective:
+        source = "own"
     return {
         "item_id": item_id,
         "category": item.get("category"),
