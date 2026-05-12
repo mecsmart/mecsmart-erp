@@ -144,10 +144,21 @@ export default function JobWorkPage() {
   };
 
   const handleCreateOrder = async () => {
-    if (!orderForm.supplier_id || orderForm.lines.length === 0) { alert('Select supplier and add items'); return; }
+    // Distinct validations so the error message reflects the *actual* missing
+    // field. The previous combined check ("Select supplier and add items") was
+    // misleading for without_material SCs (no RM lines, only job_work_parts) —
+    // it would fire even when the supplier was clearly selected.
+    if (!orderForm.supplier_id) { alert('Please select a supplier (Party) to continue.'); return; }
+    const hasLines = (orderForm.lines || []).filter(l => l.item_id).length > 0;
+    const hasParts = (orderForm.job_work_parts || []).filter(p => p.item_id).length > 0;
+    if (!hasLines && !hasParts) { alert('Please add at least one Job Work Part or Raw Material line.'); return; }
     try {
       const payload = {
         ...orderForm,
+        // Strip empty lines/parts (rows where the user never picked an item) so
+        // they don't get persisted as ghost lines on the backend.
+        lines: (orderForm.lines || []).filter(l => l.item_id),
+        job_work_parts: (orderForm.job_work_parts || []).filter(p => p.item_id),
         expected_return_date: orderForm.expected_return_date ? new Date(orderForm.expected_return_date).toISOString() : null,
       };
       if (editingOrder) {
@@ -643,16 +654,18 @@ export default function JobWorkPage() {
                       const totalQty = o.lines.reduce((s, l) => s + l.quantity, 0);
                       const sentQty = o.lines.reduce((s, l) => s + (l.sent_quantity || 0), 0);
                       const recvQty = o.lines.reduce((s, l) => s + (l.received_quantity || 0), 0);
+                      // Collapsed default = 36px (~1 part / 1 RM line); hover expands smoothly.
+                      const collapseCls = "overflow-hidden max-h-[36px] group-hover:max-h-[600px] transition-[max-height] duration-300 ease-out";
                       return (
-                        <tr key={o.id} data-testid={`jw-order-row-${o.id}`}>
+                        <tr key={o.id} data-testid={`jw-order-row-${o.id}`} className="group align-top">
                           <td className="mono font-medium">{o.order_number}</td>
-                          <td className="text-sm">{(o.mo_numbers || []).map((m, mi) => <div key={mi} className="mono text-[#1D3557]">{m}</div>)}{!o.mo_numbers?.length && <span className="mono text-[#1D3557]">{o.mo_number || '-'}</span>}</td>
-                          <td className="text-sm">{o.job_work_parts && o.job_work_parts.length > 0 ? o.job_work_parts.map((p, pi) => {
+                          <td className="text-sm"><div className={collapseCls}>{(o.mo_numbers || []).map((m, mi) => <div key={mi} className="mono text-[#1D3557]">{m}</div>)}{!o.mo_numbers?.length && <span className="mono text-[#1D3557]">{o.mo_number || '-'}</span>}</div></td>
+                          <td className="text-sm"><div className={collapseCls}>{o.job_work_parts && o.job_work_parts.length > 0 ? o.job_work_parts.map((p, pi) => {
                             const pit = p.item || items.find(i => i.id === p.item_id);
                             return <div key={pi} className="mb-1"><div className="font-semibold text-[#1D3557] text-[11px] leading-tight">{pit?.part_number} - {pit?.name || ''}</div><div className="text-[#6B7280] text-[10px] leading-tight">Qty: {p.quantity}{p.charges ? <span className="text-[#723B13] ml-1">@{formatCurrency(p.charges)}</span> : ''}</div></div>;
-                          }) : <span className="text-[#6B7280] text-[11px]">{o.fg_item_name || '-'}</span>}</td>
+                          }) : <span className="text-[#6B7280] text-[11px]">{o.fg_item_name || '-'}</span>}</div></td>
                           <td className="text-sm">{o.supplier?.name || '-'}</td>
-                          <td className="text-sm">{(() => {
+                          <td className="text-sm"><div className={collapseCls}>{(() => {
                             const isJobOS = o.subcontract_type === 'without_material' && (o.reference_operation_seqs?.length || o.reference_operation_seq);
                             const rmList = isJobOS ? (o.rm_items || []) : (o.lines || []);
                             if (!rmList.length) return <span className="text-[#9CA3AF] text-xs italic">No RM</span>;
@@ -666,7 +679,7 @@ export default function JobWorkPage() {
                                 </div>
                               );
                             });
-                          })()}</td>
+                          })()}</div></td>
                           <td className="mono">{sentQty}/{totalQty}</td>
                           <td className="mono">{recvQty}</td>
                           <td className="text-right mono">{formatCurrency((o.job_work_parts || []).reduce((s, p) => s + (p.quantity || 0) * (p.charges || 0), 0) || o.processing_charges || 0)}</td>
@@ -754,16 +767,18 @@ export default function JobWorkPage() {
             ) : (
               <div className="overflow-x-auto sticky-header-scroll">
                 <table className="w-full data-table" data-testid="challans-table">
-                  <thead><tr><th>DC #</th><th>Order #</th><th>FG/SA/Part</th><th>Supplier</th><th>Items</th><th className="text-right">RM Price</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+                  <thead><tr><th>DC #</th><th>Order #</th><th style={{minWidth:'220px'}}>FG/SA/Part</th><th>Supplier</th><th style={{minWidth:'240px'}}>Items</th><th className="text-right">RM Price</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
                   <tbody>
-                    {challans.map(dc => (
-                      <tr key={dc.id} data-testid={`dc-row-${dc.id}`}>
+                    {challans.map(dc => {
+                      const dcCollapseCls = "overflow-hidden max-h-[36px] group-hover:max-h-[600px] transition-[max-height] duration-300 ease-out";
+                      return (
+                      <tr key={dc.id} data-testid={`dc-row-${dc.id}`} className="group align-top">
                         <td className="mono font-medium">
                           {dc.dc_number}
                           {dc.is_manual && <span className="ml-2 text-[10px] bg-[#FEF3C7] text-[#723B13] px-1.5 py-0.5 rounded">MANUAL</span>}
                         </td>
                         <td className="mono">{dc.order?.order_number || (dc.is_manual ? <span className="text-[10px] text-[#6B7280]">—</span> : '-')}</td>
-                        <td className="text-sm font-medium">
+                        <td className="text-sm font-medium"><div className={dcCollapseCls}>
                           {dc.is_manual ? (
                             <span className="text-[10px] text-[#6B7280] capitalize">{dc.dc_purpose || 'subcontract'}</span>
                           ) : (
@@ -775,14 +790,14 @@ export default function JobWorkPage() {
                               {!(dc.order?.job_work_parts?.length) && (dc.fg_item_name || '-')}
                             </>
                           )}
-                        </td>
+                        </div></td>
                         <td>{dc.supplier?.name || '-'}</td>
-                        <td className="text-sm">
+                        <td className="text-sm"><div className={dcCollapseCls}>
                           {dc.lines.map((l, li) => {
                             const it = l.item || items.find(i => i.id === l.item_id);
                             return <div key={li} className="text-[#4B5563]"><span className="mono text-[10px]">{it?.part_number || '-'}</span> {it?.name || ''} <span className="mono text-[#6B7280]">({l.quantity})</span></div>;
                           })}
-                        </td>
+                        </div></td>
                         <td className="text-right mono">{formatCurrency(dc.lines.reduce((s, l) => { const it = l.item || items.find(i => i.id === l.item_id); return s + (l.quantity * (it?.unit_cost || l.rate || 0)); }, 0))}</td>
                         <td><span className={`status-badge ${getStatusColor(dc.status)}`}>{dc.status}</span></td>
                         <td className="text-sm">{dc.created_at ? new Date(dc.created_at).toLocaleDateString() : '-'}</td>
@@ -812,7 +827,8 @@ export default function JobWorkPage() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
