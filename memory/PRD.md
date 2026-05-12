@@ -20,7 +20,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (latest)** — **Items page UX (3 fixes, DONE & TESTED ✅):**
+- **2026-05-12 (latest)** — **4 critical fixes — variant flow + tax invoice stock (DONE & TESTED 35/35 ✅):**
+  1. **Fix 1 (BOM dialog chips on SG/SA components)**: Hidden chips on SG/SA component rows — those carry stale legacy own variant_attributes. Chips now render only on CP/RM leaves; the "Product Variants" header block already surfaces leaf variants via inheritance.
+  2. **Fix 2 (Child WO variant inheritance)**: `create_wo_for_item` was setting `variant_selection=None` for non-main (child) WOs. Now child WOs inherit the parent MO's `variant_selection`, so variant-aware consumption (`_resolve_variant_child_item`) correctly fires at SG → leaf level too.
+  3. **Fix 3 (Tax Invoice variant picker)**: Added a variant dropdown beneath the item picker on Tax Invoice lines. When user picks a PARENT item, a dropdown lists every active variant child with `"<suffix> — stock: N <UoM>"`, and a green stock badge appears once selected. The line's item_id swaps to the chosen variant child.
+  4. **Fix 4 (Tax Invoice stock decrement)**: `POST /api/crm/tax-invoices` and proforma→tax-invoice conversion now decrement `items.current_stock` for every issued line item. Skipped for draft/cancelled invoices.
+  - **Tests**: `/app/backend/tests/test_iteration_105_wo_variant_tax_invoice_stock.py` — 6 new tests + 29 regression = **35/35 passing**.
+
+
   1. **BOM → Items navigation speed**: Parallelised 3 sequential on-mount API calls (`/api/item-groups`, `/api/settings/uoms`, `/api/settings/gst-slabs`) into `Promise.allSettled`. Memoised the `variantsByParent` rollup (was recomputed on every render). Result: navigation now ~2.2s (was ~5-10s previously).
   2. **Category column removed** from Items list; **Stock column widened** (`minWidth: 220px`) to fit variant breakdown lines comfortably.
   3. **Auto-generate variants on Update**: when saving a CP/RM item with variant attributes defined, the system now automatically calls `/generate-variants` after the PUT/POST and closes the dialog. Users no longer have to click Update → Generate separately.
