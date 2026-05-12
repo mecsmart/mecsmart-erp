@@ -1315,11 +1315,14 @@ async def _compute_inherited_variants(item_id: str) -> List[Dict[str, Any]]:
     from every variant-bearing component. Attributes with the same name are
     merged: union of values, dedup by value, first-seen short_code wins.
 
-    - If a component is itself a VARIANT CHILD (`is_variant=True`), the
-      helper walks up to its `parent_item_id` and uses THAT parent's
-      `variant_attributes` (variant children don't carry attrs themselves).
-    - Sub-assemblies recurse via their own BOM so deeper variant-bearing
-      components also surface at the top level.
+    Rules for which component contributes:
+    - CP / RM components: use their OWN `variant_attributes` (leaves).
+    - Variant CHILD references (is_variant=True) walk up to their parent first.
+    - SG / FG components: ALWAYS recurse into their own BOM first. If the
+      recursion yields any variants, ONLY those count (treats the SG as a
+      pass-through to its leaf components). Falls back to the SG's own
+      `variant_attributes` ONLY when the recursion returns nothing — so
+      legacy SGs with own variants but no variant-bearing children still work.
 
     Returns the canonical normalised list — same shape as Item.variant_attributes.
     """
@@ -1344,9 +1347,6 @@ async def _compute_inherited_variants(item_id: str) -> List[Dict[str, Any]]:
         )
         if not citem:
             continue
-
-        # 1) If the BOM points at a variant CHILD, walk up to its parent so we
-        #    can still surface the parent's variant_attributes.
         if citem.get("is_variant") and citem.get("parent_item_id"):
             parent_doc = await db.items.find_one(
                 {"id": citem["parent_item_id"]},
@@ -1355,11 +1355,15 @@ async def _compute_inherited_variants(item_id: str) -> List[Dict[str, Any]]:
             if parent_doc:
                 citem = parent_doc
 
-        attrs = _normalize_variant_attributes(citem.get("variant_attributes") or [])
-        # 2) For SG / SA components, recurse into the sub-BOM as well so
-        #    variant-bearing leaves deeper in the tree are also captured.
         if citem.get("category") in ("sub_assembly", "finished_good"):
-            attrs = attrs + (await _compute_inherited_variants(citem.get("id") or cid))
+            # Pass-through: prefer recursion into the SG's own BOM. Use own
+            # variants only when the recursion yields nothing.
+            attrs = await _compute_inherited_variants(citem.get("id") or cid)
+            if not attrs:
+                attrs = _normalize_variant_attributes(citem.get("variant_attributes") or [])
+        else:
+            attrs = _normalize_variant_attributes(citem.get("variant_attributes") or [])
+
         if not attrs:
             continue
         for a in attrs:
@@ -1378,8 +1382,11 @@ async def _compute_inherited_variants_breakdown(item_id: str) -> List[Dict[str, 
     """Per-component breakdown of inherited variants — used by BOM dialog
     to show which COMPONENT contributes which axis. Each entry:
       {component_id, component_part_number, component_name, variant_attributes: [...]}.
-    Walks variant-child → parent and SG sub-BOMs recursively (same as the
-    merging helper) but keeps the per-component grouping.
+
+    Only LEAF variant-bearing components (CP/RM with own variant_attributes,
+    or SG/FG that have own variants but no variant-bearing descendants)
+    appear. SG/FG that delegate to their BOM are skipped — their leaves are
+    shown directly.
     """
     bom = await db.boms.find_one(
         {"parent_item_id": item_id, "status": "active"},
@@ -1391,7 +1398,7 @@ async def _compute_inherited_variants_breakdown(item_id: str) -> List[Dict[str, 
     if not bom:
         return []
     out: List[Dict[str, Any]] = []
-    seen: Set[str] = set()  # dedupe by (component_part_number, attr_signature)
+    seen: Set[str] = set()
     for comp in (bom.get("components") or []):
         cid = comp.get("item_id")
         if not cid:
@@ -1409,24 +1416,43 @@ async def _compute_inherited_variants_breakdown(item_id: str) -> List[Dict[str, 
             )
             if parent_doc:
                 citem = parent_doc
-        own_attrs = _normalize_variant_attributes(citem.get("variant_attributes") or [])
-        if own_attrs:
-            sig = (citem.get("part_number") or "", tuple(sorted(a["name"] for a in own_attrs)))
-            if sig not in seen:
-                seen.add(sig)
-                out.append({
-                    "component_id": citem.get("id") or cid,
-                    "component_part_number": citem.get("part_number") or "",
-                    "component_name": citem.get("name") or "",
-                    "variant_attributes": own_attrs,
-                })
-        # Recurse for SG/FG components.
+
         if citem.get("category") in ("sub_assembly", "finished_good"):
-            for child in await _compute_inherited_variants_breakdown(citem.get("id") or cid):
-                sig = (child.get("component_part_number") or "", tuple(sorted(a["name"] for a in (child.get("variant_attributes") or []))))
+            # Pass-through: recurse for leaves. Only fall back to own variants
+            # when this SG/FG has NO variant-bearing descendants.
+            sub_leaves = await _compute_inherited_variants_breakdown(citem.get("id") or cid)
+            if sub_leaves:
+                for child in sub_leaves:
+                    sig = (child.get("component_part_number") or "", tuple(sorted(a["name"] for a in (child.get("variant_attributes") or []))))
+                    if sig not in seen:
+                        seen.add(sig)
+                        out.append(child)
+                continue
+            # No leaf variants below → use own (legacy SG case).
+            own_attrs = _normalize_variant_attributes(citem.get("variant_attributes") or [])
+            if own_attrs:
+                sig = (citem.get("part_number") or "", tuple(sorted(a["name"] for a in own_attrs)))
                 if sig not in seen:
                     seen.add(sig)
-                    out.append(child)
+                    out.append({
+                        "component_id": citem.get("id") or cid,
+                        "component_part_number": citem.get("part_number") or "",
+                        "component_name": citem.get("name") or "",
+                        "variant_attributes": own_attrs,
+                    })
+        else:
+            # CP / RM leaf.
+            own_attrs = _normalize_variant_attributes(citem.get("variant_attributes") or [])
+            if own_attrs:
+                sig = (citem.get("part_number") or "", tuple(sorted(a["name"] for a in own_attrs)))
+                if sig not in seen:
+                    seen.add(sig)
+                    out.append({
+                        "component_id": citem.get("id") or cid,
+                        "component_part_number": citem.get("part_number") or "",
+                        "component_name": citem.get("name") or "",
+                        "variant_attributes": own_attrs,
+                    })
     return out
 
 

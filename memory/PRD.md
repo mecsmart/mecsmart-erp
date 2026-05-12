@@ -20,7 +20,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (newest)** — **FG/SG always uses inherited variants (DONE & TESTED ✅):**
+- **2026-05-12 (newest)** — **Variant breakdown shows only LEAF components (DONE & TESTED ✅):**
+  Root cause of duplicated "Grit Size 16/24/30" entries on production BOM dialog: SG/SA components had stale OWN variant_attributes from legacy data AND their BOMs contained a deeper RM (`CRW0I0000091`) with the correct values. The recursion was showing both layers (4 stale + 1 correct).
+  - `_compute_inherited_variants` and `_compute_inherited_variants_breakdown` now treat SG/FG components as **pass-throughs**: ALWAYS prefer recursion into their BOM. Use their own variants only when there are no variant-bearing descendants (legacy fallback).
+  - End-to-end verified: an FG with 2 SGs (each with stale own `Grit Size: 16/24/30`) whose BOMs both contain a leaf RM (`Grit Size: 16GT/24GT/30GT`) now returns a single `variant_sources` entry — only the RM leaf. No more duplicates.
+  - All 29 regression tests still pass.
+
+
   Root cause of "BOM showing old variant name & only 1 axis" on production: FG/SG items had stale legacy `variant_attributes` in DB (e.g. `Grit Size: 16,24,30` without 4-char short codes). The previous "own → inherited" precedence kept returning the stale own and never walked the BOM.
   - `_get_effective_variants(item)` for FG/SG **always prefers inherited** variants from BOM components. Falls back to legacy own only when the FG/SG has no BOM at all (so half-set-up items still show something).
   - `/effective-variants` `source` field now correctly reports `inherited` even when stale own is present.
