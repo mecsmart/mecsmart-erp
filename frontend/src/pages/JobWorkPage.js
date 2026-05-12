@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
-import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, FileText, Edit2, Printer, AlertCircle, ChevronDown } from 'lucide-react';
+import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, FileText, Edit2, Printer, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -26,6 +26,14 @@ export default function JobWorkPage() {
   const [activeTab, setActiveTab] = useState('orders');
   // Collapsible section state — Subcontract Orders open by default; others closed.
   const [sectionsOpen, setSectionsOpen] = useState({ orders: true, challans: false, receipts: false });
+  // Per-row expansion state (shared across JW + DC tables). Default = collapsed
+  // (single-line preview); user clicks the arrow toggle to expand a row.
+  const [expandedRows, setExpandedRows] = useState(() => new Set());
+  const toggleRowExpanded = (id) => setExpandedRows(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   // Honour the `?tab=` URL param coming from the sidebar dropdown (orders/challans/receipts).
   // Re-runs whenever `location.search` changes so switching dropdown items while already
   // on /job-work correctly updates the visible section.
@@ -654,11 +662,26 @@ export default function JobWorkPage() {
                       const totalQty = o.lines.reduce((s, l) => s + l.quantity, 0);
                       const sentQty = o.lines.reduce((s, l) => s + (l.sent_quantity || 0), 0);
                       const recvQty = o.lines.reduce((s, l) => s + (l.received_quantity || 0), 0);
-                      // Collapsed default = 36px (~1 part / 1 RM line); hover expands smoothly.
-                      const collapseCls = "overflow-hidden max-h-[36px] group-hover:max-h-[600px] transition-[max-height] duration-300 ease-out";
+                      // Explicit per-row expand toggle. Default = collapsed
+                      // (max-h 36px shows just the first line). User clicks the
+                      // chevron in the Order # cell to expand/collapse.
+                      const isExpanded = expandedRows.has(o.id);
+                      const collapseCls = isExpanded
+                        ? "overflow-visible"
+                        : "overflow-hidden max-h-[36px]";
                       return (
-                        <tr key={o.id} data-testid={`jw-order-row-${o.id}`} className="group align-top">
-                          <td className="mono font-medium">{o.order_number}</td>
+                        <tr key={o.id} data-testid={`jw-order-row-${o.id}`} className="align-top">
+                          <td className="mono font-medium">
+                            <button
+                              onClick={() => toggleRowExpanded(o.id)}
+                              className="mr-1 text-[#9CA3AF] hover:text-[#1D3557] align-middle"
+                              title={isExpanded ? 'Collapse row' : 'Expand row'}
+                              data-testid={`jw-row-toggle-${o.id}`}
+                            >
+                              {isExpanded ? <ChevronDown className="w-3.5 h-3.5 inline" /> : <ChevronRight className="w-3.5 h-3.5 inline" />}
+                            </button>
+                            {o.order_number}
+                          </td>
                           <td className="text-sm"><div className={collapseCls}>{(o.mo_numbers || []).map((m, mi) => <div key={mi} className="mono text-[#1D3557]">{m}</div>)}{!o.mo_numbers?.length && <span className="mono text-[#1D3557]">{o.mo_number || '-'}</span>}</div></td>
                           <td className="text-sm"><div className={collapseCls}>{o.job_work_parts && o.job_work_parts.length > 0 ? o.job_work_parts.map((p, pi) => {
                             const pit = p.item || items.find(i => i.id === p.item_id);
@@ -770,24 +793,38 @@ export default function JobWorkPage() {
                   <thead><tr><th>DC #</th><th>Order #</th><th style={{minWidth:'220px'}}>FG/SA/Part</th><th>Supplier</th><th style={{minWidth:'240px'}}>Items</th><th className="text-right">RM Price</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
                   <tbody>
                     {challans.map(dc => {
-                      const dcCollapseCls = "overflow-hidden max-h-[36px] group-hover:max-h-[600px] transition-[max-height] duration-300 ease-out";
+                      const isExpanded = expandedRows.has(dc.id);
+                      const dcCollapseCls = isExpanded ? "overflow-visible" : "overflow-hidden max-h-[36px]";
                       return (
-                      <tr key={dc.id} data-testid={`dc-row-${dc.id}`} className="group align-top">
+                      <tr key={dc.id} data-testid={`dc-row-${dc.id}`} className="align-top">
                         <td className="mono font-medium">
+                          <button
+                            onClick={() => toggleRowExpanded(dc.id)}
+                            className="mr-1 text-[#9CA3AF] hover:text-[#1D3557] align-middle"
+                            title={isExpanded ? 'Collapse row' : 'Expand row'}
+                            data-testid={`dc-row-toggle-${dc.id}`}
+                          >
+                            {isExpanded ? <ChevronDown className="w-3.5 h-3.5 inline" /> : <ChevronRight className="w-3.5 h-3.5 inline" />}
+                          </button>
                           {dc.dc_number}
                           {dc.is_manual && <span className="ml-2 text-[10px] bg-[#FEF3C7] text-[#723B13] px-1.5 py-0.5 rounded">MANUAL</span>}
                         </td>
                         <td className="mono">{dc.order?.order_number || (dc.is_manual ? <span className="text-[10px] text-[#6B7280]">—</span> : '-')}</td>
-                        <td className="text-sm font-medium"><div className={dcCollapseCls}>
+                        <td className="text-sm"><div className={dcCollapseCls}>
                           {dc.is_manual ? (
                             <span className="text-[10px] text-[#6B7280] capitalize">{dc.dc_purpose || 'subcontract'}</span>
                           ) : (
                             <>
                               {(dc.order?.job_work_parts || []).map((p, pi) => {
                                 const pit = p.item || items.find(i => i.id === p.item_id);
-                                return <div key={pi}>{pit?.part_number || '-'} - {pit?.name || ''} <span className="text-[#6B7280] font-normal">({p.quantity})</span></div>;
+                                return (
+                                  <div key={pi} className="mb-1">
+                                    <div className="font-semibold text-[#1D3557] text-[11px] leading-tight">{pit?.part_number || '-'} - {pit?.name || ''}</div>
+                                    <div className="text-[#6B7280] text-[10px] leading-tight">Qty: {p.quantity}</div>
+                                  </div>
+                                );
                               })}
-                              {!(dc.order?.job_work_parts?.length) && (dc.fg_item_name || '-')}
+                              {!(dc.order?.job_work_parts?.length) && <span className="text-[11px]">{dc.fg_item_name || '-'}</span>}
                             </>
                           )}
                         </div></td>
@@ -795,7 +832,12 @@ export default function JobWorkPage() {
                         <td className="text-sm"><div className={dcCollapseCls}>
                           {dc.lines.map((l, li) => {
                             const it = l.item || items.find(i => i.id === l.item_id);
-                            return <div key={li} className="text-[#4B5563]"><span className="mono text-[10px]">{it?.part_number || '-'}</span> {it?.name || ''} <span className="mono text-[#6B7280]">({l.quantity})</span></div>;
+                            return (
+                              <div key={li} className="mb-0.5">
+                                <div className="mono text-[11px] font-medium">{it?.part_number || '-'}</div>
+                                <div className="text-[#4B5563] text-[11px]">{it?.name || ''} ({l.quantity})</div>
+                              </div>
+                            );
                           })}
                         </div></td>
                         <td className="text-right mono">{formatCurrency(dc.lines.reduce((s, l) => { const it = l.item || items.find(i => i.id === l.item_id); return s + (l.quantity * (it?.unit_cost || l.rate || 0)); }, 0))}</td>

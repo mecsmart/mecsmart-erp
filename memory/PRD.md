@@ -20,7 +20,12 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (newest)** — **3 more UX fixes — DC column widths + collapsible JW/DC rows + JW edit validation (DONE & VERIFIED ✅):**
+- **2026-05-12 (newest)** — **JW/DC row expand UX revision (DONE & VERIFIED ✅):**
+  1. **Removed hover-to-expand** — replaced with an explicit per-row chevron toggle button (`>` / `v`) placed inside the Order # (JW) and DC # (DC) cells. Per-row expand state stored in a shared `Set` (`expandedRows`); user clicks the chevron to expand/collapse that row only. No accidental expansion on mouseover.
+  2. **DC font size now matches JW** — DC's `FG/SA/Part` column renders part_no+name in `font-semibold text-[#1D3557] text-[11px] leading-tight` with a `text-[10px] leading-tight text-[#6B7280]` qty line (was inline `text-sm font-medium`). DC's `Items` column renders code on its own line (`mono text-[11px] font-medium`) and name+qty on the next (`text-[11px] text-[#4B5563]`), matching the JW RM column's compact 2-line layout exactly.
+  - Added test IDs: `jw-row-toggle-{id}`, `dc-row-toggle-{id}`.
+
+- **2026-05-12** — **3 UX fixes — DC column widths + collapsible JW/DC rows (initial hover-expand version, superseded) + JW edit validation (DONE & VERIFIED ✅):**
   1. **Fix 1 (DC column widths match JW)**: Subcontract `Delivery Challans` table — FG/SA/Part column minWidth bumped to 220px, Items (RM) column to 240px so DC table columns visually match the JW orders table.
   2. **Fix 2 (Collapsible JW & DC rows with hover-to-expand)**: Multi-line cells (MO #, FG/SA/Part, RM in JW; FG/SA/Part, Items in DC) are now wrapped in a `max-h-[36px]` overflow-hidden div that expands to `max-h-[600px]` on row hover via `group-hover` and a 300ms `transition-[max-height]` ease-out. Rows are now uniformly compact in the default view and expand smoothly on hover to reveal full content. Action buttons remain fully visible (not collapsed) so users can always click Edit/Send DC/Confirm.
   3. **Fix 3 ("Select supplier" error fires even when supplier is selected)**: The validation `!supplier_id || lines.length === 0` falsely triggered "Select supplier and add items" for valid SC-process orders that have `job_work_parts` but no RM `lines`. Split into two distinct checks: (a) `!supplier_id` → "Please select a supplier (Party)…", (b) no items in `lines` OR `job_work_parts` → "Please add at least one Job Work Part or Raw Material line." Also strip empty default lines/parts from the payload so ghost rows aren't persisted to the backend.
