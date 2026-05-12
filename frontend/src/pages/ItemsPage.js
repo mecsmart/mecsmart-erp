@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
@@ -42,6 +42,20 @@ export default function ItemsPage() {
     setPartNumberSort(s => (s === 'asc' ? 'desc' : 'asc'));
   };
   const [items, setItems] = useState([]);
+  // Variants rollup memoized — hides retired variant children, groups variants
+  // by parent_item_id. Heavy compute over 1000s of items, recomputed only when
+  // `items` changes.
+  const variantsRollup = useMemo(() => {
+    const variantsByParent = {};
+    for (const it of items) {
+      if (it.is_variant && it.parent_item_id && it.is_active !== false) {
+        if (!variantsByParent[it.parent_item_id]) variantsByParent[it.parent_item_id] = [];
+        variantsByParent[it.parent_item_id].push(it);
+      }
+    }
+    const baseItems = items.filter(it => !it.is_variant);
+    return { variantsByParent, baseItems };
+  }, [items]);
   const [uoms, setUoms] = useState([]);
   const [itemGroups, setItemGroups] = useState([]);
   const [units, setUnits] = useState(FALLBACK_UNITS);
@@ -127,23 +141,21 @@ export default function ItemsPage() {
   };
 
   useEffect(() => {
+    // Fire on-mount static-master fetches in parallel (was 3 sequential
+    // awaits — caused ~1s lag on every screen entry).
     (async () => {
-      await fetchItemGroups();
-      try {
-        const { data } = await api.get('/api/settings/uoms');
-        if (Array.isArray(data) && data.length) {
-          setUnits(data.map(u => u.code));
-        }
-      } catch (e) {
-        console.warn('Failed to fetch UOM master, using fallback:', e);
+      const [groupsR, uomsR, gstR] = await Promise.allSettled([
+        api.get('/api/item-groups'),
+        api.get('/api/settings/uoms'),
+        api.get('/api/settings/gst-slabs'),
+      ]);
+      if (groupsR.status === 'fulfilled') setItemGroups(groupsR.value.data || []);
+      if (uomsR.status === 'fulfilled' && Array.isArray(uomsR.value.data) && uomsR.value.data.length) {
+        setUnits(uomsR.value.data.map(u => u.code));
+        setUoms(uomsR.value.data);
       }
-      try {
-        const { data } = await api.get('/api/settings/gst-slabs');
-        if (Array.isArray(data) && data.length) {
-          setTaxSlabs(data.map(r => Number(r)).sort((a, b) => a - b));
-        }
-      } catch (e) {
-        console.warn('Failed to fetch GST slabs, using fallback:', e);
+      if (gstR.status === 'fulfilled' && Array.isArray(gstR.value.data) && gstR.value.data.length) {
+        setTaxSlabs(gstR.value.data.map(r => Number(r)).sort((a, b) => a - b));
       }
     })();
   }, []);
@@ -239,14 +251,33 @@ export default function ItemsPage() {
       .filter(a => a.name && a.values.length > 0);
     const payload = { ...formData, variant_attributes: cleanedVariantAttrs };
     try {
+      let savedItem;
       if (editingItem) {
         const { data: updated } = await api.put(`/api/items/${editingItem.id}`, payload);
+        savedItem = updated;
         setItems(prev => prev.map(it => it.id === editingItem.id ? { ...it, ...updated } : it));
         toast.success(`Item ${updated?.part_number || ''} updated`);
       } else {
         const { data: created } = await api.post('/api/items', payload);
+        savedItem = created;
         setItems(prev => [created, ...prev]);
         toast.success(`Item ${created?.part_number || ''} created`);
+      }
+      // Fix 3 — Auto-generate variant children when the item has variant
+      // attributes defined. Skips the manual "Generate Variant Items" click +
+      // confirmation dialog. Only runs for CP/RM items (the editor categories
+      // that own variants). FG/SG variants are inherited from BOM components,
+      // so a separate generate step is needed there.
+      const isLeaf = savedItem && (savedItem.category === 'component' || savedItem.category === 'raw_material');
+      if (isLeaf && cleanedVariantAttrs.length > 0 && savedItem.id) {
+        try {
+          const { data: result } = await api.post(`/api/items/${savedItem.id}/generate-variants`, {});
+          toast.success(result.message);
+          // Refresh items so newly-generated children show up in the rollup.
+          fetchItems().catch(() => {});
+        } catch (genErr) {
+          toast.error(genErr.response?.data?.detail || 'Variant generation failed — open the item again to retry.');
+        }
       }
       setIsDialogOpen(false);
       setEditingItem(null);
@@ -1074,11 +1105,10 @@ export default function ItemsPage() {
                     <span className="sort-chevron">{partNumberSort === 'desc' ? '▼' : '▲'}</span>
                   </th>
                   <th>Name</th>
-                  <th>Category</th>
                   <th>Group</th>
                   <th>HSN</th>
                   <th className="text-right">GST%</th>
-                  <th className="text-right">Stock</th>
+                  <th className="text-right" style={{ minWidth: '220px' }}>Stock</th>
                   <th className="text-right">Unit Cost</th>
                   {canViewPurchasePrice && <th className="text-right" data-testid="items-th-purchase-price">Purchase Price</th>}
                   {canViewSalePrice && <th className="text-right" data-testid="items-th-sale-price">Sale Price</th>}
@@ -1087,22 +1117,10 @@ export default function ItemsPage() {
               </thead>
               <tbody>
                 {(() => {
-                  // Fix 4 — Variant rollup: hide variant child rows (is_variant=true)
-                  // from the main listing and group them under their parent FG/SG.
-                  // The parent row shows summed stock + per-variant breakdown.
-                  // Retired variants (is_active=false) are excluded so a parent that
-                  // had its variant_attributes cleared doesn't keep displaying stale
-                  // orphan-variant lines in the stock column.
-                  const variantsByParent = {};
-                  for (const it of items) {
-                    if (it.is_variant && it.parent_item_id && it.is_active !== false) {
-                      if (!variantsByParent[it.parent_item_id]) variantsByParent[it.parent_item_id] = [];
-                      variantsByParent[it.parent_item_id].push(it);
-                    }
-                  }
-                  // Display list: all non-variant items, but the variants stay
-                  // attached to their parent and are rendered inline below the name/stock cells.
-                  const baseItems = items.filter(it => !it.is_variant);
+                  // Variants rollup pre-computed via useMemo (cached on `items`)
+                  // — was running on every render which made BOM → Items
+                  // navigation jank for ~600 items.
+                  const { variantsByParent, baseItems } = variantsRollup;
                   // Apply Part Number sort (case-insensitive, natural-ish via localeCompare with numeric=true)
                   const sortedItems = partNumberSort
                     ? [...baseItems].sort((a, b) => {
@@ -1126,16 +1144,6 @@ export default function ItemsPage() {
                         <span>{item.name}</span>
                       </div>
                     </td>
-                    <td>
-                      <span className={`status-badge ${
-                        item.category === 'raw_material' ? 'bg-[#E1EFFE] text-[#1E429F]' :
-                        item.category === 'component' ? 'bg-[#DEF7EC] text-[#03543F]' :
-                        item.category === 'sub_assembly' ? 'bg-[#FDF6B2] text-[#723B13]' :
-                        'bg-[#F3F4F6] text-[#4B5563]'
-                      }`}>
-                        {item.category.replace('_', ' ')}
-                      </span>
-                    </td>
                     <td className="text-sm">
                       {itemGroup ? (
                         <span className="px-2 py-0.5 bg-[#EEF2FF] text-[#3730A3] rounded-sm text-xs font-medium">{itemGroup.name}</span>
@@ -1143,7 +1151,7 @@ export default function ItemsPage() {
                     </td>
                     <td className="mono text-sm">{item.hsn_code || '-'}</td>
                     <td className="text-right mono">{item.gst_rate != null ? `${item.gst_rate}%` : '-'}</td>
-                    <td className="text-right mono">
+                    <td className="text-right mono" style={{ minWidth: '220px' }}>
                       {formatQty(totalStock, item.unit_of_measure, uoms)} {item.unit_of_measure}
                       {variants.length > 0 && (
                         <div className="mt-1 space-y-0.5 text-[10px] text-[#6B7280] font-normal" data-testid={`item-variant-stock-${item.part_number}`}>

@@ -20,7 +20,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (newest)** — **Variant breakdown shows only LEAF components (DONE & TESTED ✅):**
+- **2026-05-12 (latest)** — **Items page UX (3 fixes, DONE & TESTED ✅):**
+  1. **BOM → Items navigation speed**: Parallelised 3 sequential on-mount API calls (`/api/item-groups`, `/api/settings/uoms`, `/api/settings/gst-slabs`) into `Promise.allSettled`. Memoised the `variantsByParent` rollup (was recomputed on every render). Result: navigation now ~2.2s (was ~5-10s previously).
+  2. **Category column removed** from Items list; **Stock column widened** (`minWidth: 220px`) to fit variant breakdown lines comfortably.
+  3. **Auto-generate variants on Update**: when saving a CP/RM item with variant attributes defined, the system now automatically calls `/generate-variants` after the PUT/POST and closes the dialog. Users no longer have to click Update → Generate separately.
+  - 29/29 regression tests still pass.
+
+
   Root cause of duplicated "Grit Size 16/24/30" entries on production BOM dialog: SG/SA components had stale OWN variant_attributes from legacy data AND their BOMs contained a deeper RM (`CRW0I0000091`) with the correct values. The recursion was showing both layers (4 stale + 1 correct).
   - `_compute_inherited_variants` and `_compute_inherited_variants_breakdown` now treat SG/FG components as **pass-throughs**: ALWAYS prefer recursion into their BOM. Use their own variants only when there are no variant-bearing descendants (legacy fallback).
   - End-to-end verified: an FG with 2 SGs (each with stale own `Grit Size: 16/24/30`) whose BOMs both contain a leaf RM (`Grit Size: 16GT/24GT/30GT`) now returns a single `variant_sources` entry — only the RM leaf. No more duplicates.
