@@ -85,9 +85,13 @@ export default function JobWorkPage() {
 
   // Permission gating — view = list only; edit = process existing orders
   // (receive, convert, DC-create); create = brand-new subcontract order.
+  // Admin (role === 'admin' or is_admin_group) ALWAYS bypasses module-level perms
+  // because the `job_work` module is not always present in the user's permission
+  // map (legacy admin records) — without this bypass all Edit/Send DC/Confirm
+  // buttons would disappear for the admin user.
   const isAdmin = user?.role === 'admin' || user?.is_admin_group;
-  const canCreate = hasPermission ? hasPermission('job_work', 'create') : isAdmin;
-  const canEdit = (hasPermission ? hasPermission('job_work', 'edit') : false) || canCreate;
+  const canCreate = isAdmin || (hasPermission ? hasPermission('job_work', 'create') : false);
+  const canEdit = isAdmin || (hasPermission ? hasPermission('job_work', 'edit') : false) || canCreate;
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -625,7 +629,7 @@ export default function JobWorkPage() {
                     <th style={{width:'80px'}}>MO #</th>
                     <th style={{minWidth:'220px'}}>FG/SA/Part</th>
                     <th style={{width:'100px'}}>Supplier</th>
-                    <th style={{minWidth:'140px'}}>RM</th>
+                    <th style={{minWidth:'240px'}}>RM</th>
                     <th style={{width:'70px'}}>Sent/Total</th>
                     <th style={{width:'60px'}}>Received</th>
                     <th style={{width:'80px'}} className="text-right">Charges</th>

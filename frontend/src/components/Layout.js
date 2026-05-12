@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { 
+import {
   Factory, LayoutDashboard, Package, FileStack, Calculator, ClipboardCheck,
   Warehouse, LogOut, Menu, X, User, ChevronDown, ChevronRight,
   Truck, ShoppingCart, Settings2, Users, Building2, Shield, FileText, Wrench, Cog,
-  Headphones, Megaphone, AlertTriangle
+  Headphones, Megaphone, AlertTriangle, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -75,6 +75,20 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Collapsible sidebar (desktop only). Persisted via localStorage. Default = collapsed.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      const v = localStorage.getItem('mecsmart_sidebar_collapsed');
+      return v === null ? true : v === '1';
+    } catch (e) { return true; }
+  });
+  const [sidebarHovered, setSidebarHovered] = useState(false);
+  const isExpanded = !sidebarCollapsed || sidebarHovered;
+
+  useEffect(() => {
+    try { localStorage.setItem('mecsmart_sidebar_collapsed', sidebarCollapsed ? '1' : '0'); } catch (e) {}
+  }, [sidebarCollapsed]);
+
   const [inventoryOpen, setInventoryOpen] = useState(() => {
     return inventoryGroupItems.some(item => location.pathname === item.href);
   });
@@ -137,18 +151,50 @@ export default function Layout() {
   const isProductionActive = productionGroupItems.some(item => location.pathname === item.href);
   const isStoresActive = location.pathname === '/warehouses';
 
+  // Render a top-level nav item. When sidebar is collapsed (icon-only) we
+  // center the icon and hide the label; the native `title` attribute provides
+  // a tooltip on hover.
   const renderNavItem = (item) => (
     <li key={item.name}>
       <NavLink
         to={item.href}
         onClick={() => setSidebarOpen(false)}
-        className={({ isActive }) => isActive ? 'sidebar-link-active' : 'sidebar-link'}
+        title={!isExpanded ? item.name : undefined}
+        className={({ isActive }) =>
+          `${isActive ? 'sidebar-link-active' : 'sidebar-link'} ${!isExpanded ? 'justify-center' : ''}`
+        }
         data-testid={`nav-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
       >
-        <item.icon className="w-5 h-5" />
-        <span>{item.name}</span>
+        <item.icon className="w-5 h-5 flex-shrink-0" />
+        {isExpanded && <span className="truncate">{item.name}</span>}
       </NavLink>
     </li>
+  );
+
+  // Render a collapsible group header (Inventory / Production / Stores / Job Work / CRM).
+  const renderGroupHeader = ({ icon: Icon, label, isOpen, setOpen, isActive, testId, onIconClickWhenCollapsed }) => (
+    <button
+      onClick={() => {
+        if (!isExpanded) {
+          // When collapsed, clicking the icon expands the sidebar permanently
+          // and opens the group so the user can pick a child item.
+          setSidebarCollapsed(false);
+          setOpen(true);
+          if (onIconClickWhenCollapsed) onIconClickWhenCollapsed();
+          return;
+        }
+        setOpen(!isOpen);
+      }}
+      title={!isExpanded ? label : undefined}
+      className={`sidebar-link w-full ${isExpanded ? 'justify-between' : 'justify-center'} ${isActive ? 'text-white bg-[#1F2937]' : ''}`}
+      data-testid={testId}
+    >
+      <div className={`flex items-center ${isExpanded ? 'space-x-3' : ''}`}>
+        <Icon className="w-5 h-5 flex-shrink-0" />
+        {isExpanded && <span>{label}</span>}
+      </div>
+      {isExpanded && (isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />)}
+    </button>
   );
 
   return (
@@ -157,37 +203,64 @@ export default function Layout() {
         <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#111827] transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside
+        onMouseEnter={() => sidebarCollapsed && setSidebarHovered(true)}
+        onMouseLeave={() => sidebarCollapsed && setSidebarHovered(false)}
+        className={`fixed inset-y-0 left-0 z-50 bg-[#111827] transform transition-all duration-200 ease-in-out lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} ${isExpanded ? 'w-64' : 'w-16'} ${sidebarCollapsed && sidebarHovered ? 'shadow-2xl' : ''}`}
+        data-testid="sidebar-root"
+        data-collapsed={sidebarCollapsed ? '1' : '0'}
+        data-expanded={isExpanded ? '1' : '0'}
+      >
         <div className="flex flex-col h-full">
-          <div className="flex items-center justify-between h-14 px-4 border-b border-[#1F2937]">
-            <div className="flex items-center space-x-2">
-              <Factory className="w-6 h-6 text-white" />
-              <span className="text-lg font-bold font-[Chivo] text-white">MecSmart ERP</span>
-            </div>
-            <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 text-[#9CA3AF] hover:text-white">
-              <X className="w-5 h-5" />
-            </button>
+          <div className={`flex items-center h-14 border-b border-[#1F2937] ${isExpanded ? 'justify-between px-4' : 'justify-center px-2'}`}>
+            {isExpanded ? (
+              <>
+                <div className="flex items-center space-x-2 min-w-0">
+                  <Factory className="w-6 h-6 text-white flex-shrink-0" />
+                  <span className="text-lg font-bold font-[Chivo] text-white truncate">MecSmart ERP</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                    className="hidden lg:inline-flex p-1 text-[#9CA3AF] hover:text-white"
+                    title={sidebarCollapsed ? 'Pin sidebar open' : 'Collapse sidebar'}
+                    data-testid="sidebar-collapse-toggle"
+                  >
+                    {sidebarCollapsed ? <PanelLeftOpen className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
+                  </button>
+                  <button onClick={() => setSidebarOpen(false)} className="lg:hidden p-1 text-[#9CA3AF] hover:text-white">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button
+                onClick={() => setSidebarCollapsed(false)}
+                className="p-1 text-white hover:text-[#9CA3AF]"
+                title="Expand sidebar"
+                data-testid="sidebar-collapse-toggle"
+              >
+                <Factory className="w-6 h-6" />
+              </button>
+            )}
           </div>
 
-          <nav className="flex-1 py-4 overflow-y-auto">
+          <nav className="flex-1 py-4 overflow-y-auto overflow-x-hidden">
             <ul className="space-y-1">
               {canView(dashboardNavItem.module) && renderNavItem(dashboardNavItem)}
 
               {/* CRM Group */}
               {showCRMGroup && (
                 <li>
-                  <button
-                    onClick={() => setCrmOpen(!crmOpen)}
-                    className={`sidebar-link w-full justify-between ${location.pathname === '/crm' ? 'text-white bg-[#1F2937]' : ''}`}
-                    data-testid="nav-crm-group"
-                  >
-                    <div className="flex items-center space-x-3">
-                      <Users className="w-5 h-5" />
-                      <span>CRM</span>
-                    </div>
-                    {crmOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  </button>
-                  {crmOpen && (
+                  {renderGroupHeader({
+                    icon: Users,
+                    label: 'CRM',
+                    isOpen: crmOpen,
+                    setOpen: setCrmOpen,
+                    isActive: location.pathname === '/crm',
+                    testId: 'nav-crm-group',
+                  })}
+                  {isExpanded && crmOpen && (
                     <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
                       {/* Marketing — parent navigates to pipeline, chevron toggles children */}
                       {canView('crm_marketing') && (
@@ -225,7 +298,7 @@ export default function Layout() {
                           )}
                         </li>
                       )}
-                      {/* Support — parent navigates to pipeline, chevron toggles children */}
+                      {/* Support */}
                       {canView('crm_support') && (
                         <li>
                           <div className={`flex items-center w-full rounded-sm ${location.search.includes('tab=support') && location.pathname === '/crm' ? 'bg-[#1D3557]' : ''}`}>
@@ -266,24 +339,21 @@ export default function Layout() {
                 </li>
               )}
 
-              {/* Core nav items (Customers, Sales Orders) */}
+              {/* Core nav items (Sales Orders) */}
               {filteredTop.map(renderNavItem)}
 
               {/* Inventory Group */}
               {showInventoryGroup && (
                 <li>
-                  <button
-                    onClick={() => setInventoryOpen(!inventoryOpen)}
-                    className={`sidebar-link w-full justify-between ${isInventoryActive ? 'text-white bg-[#1F2937]' : ''}`}
-                    data-testid="nav-inventory-group"
-                  >
-                    <div className="flex items-center space-x-3">
-                      <Package className="w-5 h-5" />
-                      <span>Inventory</span>
-                    </div>
-                    {inventoryOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  </button>
-                  {inventoryOpen && (
+                  {renderGroupHeader({
+                    icon: Package,
+                    label: 'Inventory',
+                    isOpen: inventoryOpen,
+                    setOpen: setInventoryOpen,
+                    isActive: isInventoryActive,
+                    testId: 'nav-inventory-group',
+                  })}
+                  {isExpanded && inventoryOpen && (
                     <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
                       {filteredInventory.map(item => (
                         <li key={item.name}>
@@ -308,18 +378,15 @@ export default function Layout() {
               {/* Production Group */}
               {showProductionGroup && (
                 <li>
-                  <button
-                    onClick={() => setProductionOpen(!productionOpen)}
-                    className={`sidebar-link w-full justify-between ${isProductionActive ? 'text-white bg-[#1F2937]' : ''}`}
-                    data-testid="nav-production-group"
-                  >
-                    <div className="flex items-center space-x-3">
-                      <Cog className="w-5 h-5" />
-                      <span>Production</span>
-                    </div>
-                    {productionOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  </button>
-                  {productionOpen && (
+                  {renderGroupHeader({
+                    icon: Cog,
+                    label: 'Production',
+                    isOpen: productionOpen,
+                    setOpen: setProductionOpen,
+                    isActive: isProductionActive,
+                    testId: 'nav-production-group',
+                  })}
+                  {isExpanded && productionOpen && (
                     <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
                       {filteredProduction.map(item => (
                         <li key={item.name}>
@@ -344,18 +411,15 @@ export default function Layout() {
               {/* Stores Group */}
               {showStoresGroup && (
                 <li>
-                  <button
-                    onClick={() => setStoresOpen(!storesOpen)}
-                    className={`sidebar-link w-full justify-between ${isStoresActive ? 'text-white bg-[#1F2937]' : ''}`}
-                    data-testid="nav-stores-group"
-                  >
-                    <div className="flex items-center space-x-3">
-                      <Warehouse className="w-5 h-5" />
-                      <span>Stores</span>
-                    </div>
-                    {storesOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  </button>
-                  {storesOpen && (
+                  {renderGroupHeader({
+                    icon: Warehouse,
+                    label: 'Stores',
+                    isOpen: storesOpen,
+                    setOpen: setStoresOpen,
+                    isActive: isStoresActive,
+                    testId: 'nav-stores-group',
+                  })}
+                  {isExpanded && storesOpen && (
                     <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
                       {filteredStores.map(item => (
                         <li key={item.name}>
@@ -382,18 +446,15 @@ export default function Layout() {
               {/* Job Work Group */}
               {showJobWorkGroup && (
                 <li>
-                  <button
-                    onClick={() => setJobWorkOpen(!jobWorkOpen)}
-                    className={`sidebar-link w-full justify-between ${location.pathname === '/job-work' ? 'text-white bg-[#1F2937]' : ''}`}
-                    data-testid="nav-jobwork-group"
-                  >
-                    <div className="flex items-center space-x-3">
-                      <Wrench className="w-5 h-5" />
-                      <span>Job Work</span>
-                    </div>
-                    {jobWorkOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  </button>
-                  {jobWorkOpen && (
+                  {renderGroupHeader({
+                    icon: Wrench,
+                    label: 'Job Work',
+                    isOpen: jobWorkOpen,
+                    setOpen: setJobWorkOpen,
+                    isActive: location.pathname === '/job-work',
+                    testId: 'nav-jobwork-group',
+                  })}
+                  {isExpanded && jobWorkOpen && (
                     <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
                       {filteredJobWork.map(item => (
                         <li key={item.name}>
@@ -415,32 +476,32 @@ export default function Layout() {
                 </li>
               )}
 
-              {/* CRM Group (moved to top — above Inventory) */}
-
               {allNavItems.map(renderNavItem)}
             </ul>
           </nav>
 
-          <div className="border-t border-[#1F2937] p-4">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-full bg-[#1F2937] flex items-center justify-center">
+          <div className={`border-t border-[#1F2937] ${isExpanded ? 'p-4' : 'p-2'}`}>
+            <div className={`flex items-center ${isExpanded ? 'space-x-3' : 'justify-center'}`}>
+              <div className="w-10 h-10 rounded-full bg-[#1F2937] flex items-center justify-center flex-shrink-0" title={!isExpanded ? user?.name : undefined}>
                 <User className="w-5 h-5 text-[#9CA3AF]" />
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate" data-testid="sidebar-user-name">{user?.name || 'User'}</p>
-                <p className="text-xs text-[#9CA3AF] truncate" data-testid="sidebar-user-email">{user?.email}</p>
-                {user?.role_group?.name && (
-                  <p className="text-[10px] uppercase tracking-wide text-[#60A5FA] font-semibold mt-0.5 truncate" data-testid="sidebar-user-group">
-                    {user.role_group.name}
-                  </p>
-                )}
-              </div>
+              {isExpanded && (
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-white truncate" data-testid="sidebar-user-name">{user?.name || 'User'}</p>
+                  <p className="text-xs text-[#9CA3AF] truncate" data-testid="sidebar-user-email">{user?.email}</p>
+                  {user?.role_group?.name && (
+                    <p className="text-[10px] uppercase tracking-wide text-[#60A5FA] font-semibold mt-0.5 truncate" data-testid="sidebar-user-group">
+                      {user.role_group.name}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
       </aside>
 
-      <div className="lg:ml-64">
+      <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'} transition-all duration-200`}>
         <header className="h-14 bg-white border-b border-[#E5E7EB] flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30">
           <div className="flex items-center space-x-4">
             <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-1 text-[#4B5563] hover:text-[#111827]" data-testid="mobile-menu-btn">
