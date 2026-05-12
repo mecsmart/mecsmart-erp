@@ -1350,6 +1350,39 @@ async def _get_effective_variants(item: Dict[str, Any]) -> List[Dict[str, Any]]:
     return []
 
 
+async def _resolve_variant_child_item(comp_item: Dict[str, Any], variant_selection: Optional[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    """For a BOM component whose item carries its OWN variant_attributes,
+    pick the matching variant child item based on the MO's variant_selection.
+
+    Example:
+      comp_item = {part_number: 'CRW0E8000091', variant_attributes: [{name: 'Grit Size', values: [...] }]}
+      variant_selection = {'Grit Size': '30GT', 'Sieve Slot': '1.0mm'}  # MO-level UNION
+      → looks up variant child 'CRW0E8000091-30GT' and returns it.
+
+    Returns None when the component has no variants, or when the MO's
+    variant_selection doesn't pick any of this component's axes.
+    """
+    if not variant_selection:
+        return None
+    attrs = _normalize_variant_attributes(comp_item.get("variant_attributes") or [])
+    if not attrs:
+        return None
+    combo: Dict[str, Dict[str, str]] = {}
+    for a in attrs:
+        v = variant_selection.get(a["name"])
+        if v is None:
+            continue
+        match = next((x for x in a["values"] if x["value"] == v), None)
+        if match:
+            combo[a["name"]] = {"value": match["value"], "short_code": match["short_code"]}
+    if not combo:
+        return None
+    sku = _build_variant_sku_from_short_codes(comp_item.get("part_number") or "", combo)
+    child = await db.items.find_one({"part_number": sku}, {"_id": 0})
+    return child
+
+
+
 @items_router.get("/{item_id}/effective-variants")
 async def get_effective_variants(item_id: str, request: Request):
     """Return the variant axes that drive variant SKUs for this item.
@@ -6328,6 +6361,7 @@ async def start_work_order(wo_id: str, request: Request, preview: bool = False):
     
     if bom and not skip_material_consumption:
         wo_qty = wo.get("quantity", 1)
+        mo_variant_selection = wo.get("variant_selection") or None
         
         for component in bom.get("components", []):
             if component.get("is_alternate"):
@@ -6337,6 +6371,16 @@ async def start_work_order(wo_id: str, request: Request, preview: bool = False):
             comp_item = await db.items.find_one({"id": comp_item_id})
             if not comp_item:
                 continue
+
+            # Variant-aware consumption: if this component carries its own
+            # variant_attributes AND the MO's variant_selection picks one of
+            # those axes, redirect consumption to the matching variant child
+            # SKU (e.g. CRW0E8000091-30GT) instead of the parent. The variant
+            # child must already exist (user generates them via the Item dialog).
+            variant_child = await _resolve_variant_child_item(comp_item, mo_variant_selection)
+            if variant_child:
+                comp_item_id = variant_child["id"]
+                comp_item = variant_child
             
             # Consume ALL BOM components (RM, components, sub-assemblies) from stock
             if comp_item.get("category") in ["raw_material", "component", "sub_assembly"]:

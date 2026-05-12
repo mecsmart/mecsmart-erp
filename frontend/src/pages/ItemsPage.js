@@ -1087,17 +1087,33 @@ export default function ItemsPage() {
               </thead>
               <tbody>
                 {(() => {
+                  // Fix 4 — Variant rollup: hide variant child rows (is_variant=true)
+                  // from the main listing and group them under their parent FG/SG.
+                  // The parent row shows summed stock + per-variant breakdown.
+                  const variantsByParent = {};
+                  for (const it of items) {
+                    if (it.is_variant && it.parent_item_id) {
+                      if (!variantsByParent[it.parent_item_id]) variantsByParent[it.parent_item_id] = [];
+                      variantsByParent[it.parent_item_id].push(it);
+                    }
+                  }
+                  // Display list: all non-variant items, but the variants stay
+                  // attached to their parent and are rendered inline below the name/stock cells.
+                  const baseItems = items.filter(it => !it.is_variant);
                   // Apply Part Number sort (case-insensitive, natural-ish via localeCompare with numeric=true)
                   const sortedItems = partNumberSort
-                    ? [...items].sort((a, b) => {
+                    ? [...baseItems].sort((a, b) => {
                         const ax = (a.part_number || '').toLowerCase();
                         const bx = (b.part_number || '').toLowerCase();
                         const cmp = ax.localeCompare(bx, undefined, { numeric: true, sensitivity: 'base' });
                         return partNumberSort === 'asc' ? cmp : -cmp;
                       })
-                    : items;
+                    : baseItems;
                   return sortedItems.slice(0, visibleCount).map((item) => {
                   const itemGroup = itemGroups.find(g => g.id === item.group_id);
+                  const variants = variantsByParent[item.id] || [];
+                  const variantTotal = variants.reduce((s, v) => s + (parseFloat(v.current_stock) || 0), 0);
+                  const totalStock = (parseFloat(item.current_stock) || 0) + variantTotal;
                   return (
                   <tr key={item.id} className={isLowStock(item) ? 'bg-[#FDE8E8]/30' : ''} data-testid={`item-row-${item.part_number}`}>
                     <td className="mono font-medium">{item.part_number}</td>
@@ -1124,7 +1140,24 @@ export default function ItemsPage() {
                     </td>
                     <td className="mono text-sm">{item.hsn_code || '-'}</td>
                     <td className="text-right mono">{item.gst_rate != null ? `${item.gst_rate}%` : '-'}</td>
-                    <td className="text-right mono">{formatQty(item.current_stock, item.unit_of_measure, uoms)} {item.unit_of_measure}</td>
+                    <td className="text-right mono">
+                      {formatQty(totalStock, item.unit_of_measure, uoms)} {item.unit_of_measure}
+                      {variants.length > 0 && (
+                        <div className="mt-1 space-y-0.5 text-[10px] text-[#6B7280] font-normal" data-testid={`item-variant-stock-${item.part_number}`}>
+                          {variants.map(v => {
+                            const suffix = (v.part_number || '').startsWith(item.part_number + '-')
+                              ? v.part_number.slice(item.part_number.length + 1)
+                              : v.part_number;
+                            return (
+                              <div key={v.id} className="flex items-center justify-end gap-1">
+                                <span className="mono text-[10px] text-[#374151]">{suffix}:</span>
+                                <span className="mono text-[10px]">{formatQty(v.current_stock || 0, v.unit_of_measure, uoms)} {v.unit_of_measure}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </td>
                     <td className="text-right mono">{formatCurrency(item.unit_cost)}</td>
                     {canViewPurchasePrice && (
                       <td className="text-right mono" data-testid={`item-purchase-price-${item.part_number}`}>

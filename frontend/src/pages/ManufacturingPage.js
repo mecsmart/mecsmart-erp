@@ -1419,7 +1419,15 @@ export default function ManufacturingPage() {
                             <span className="mono font-medium">{wo.wo_number}</span>
                             <span className="ml-1 text-[10px] px-1 py-0.5 rounded font-semibold text-white" style={{backgroundColor: getCatColor(wo)}}>{getCatLabel(wo)}</span>
                           </td>
-                          <td><span className="mono text-sm">{wo.item?.part_number || '-'}</span><p className="text-xs text-[#4B5563]">{wo.item?.name || '-'}</p></td>
+                          <td>
+                            <span className="mono text-sm">{wo.item?.part_number || '-'}</span>
+                            <p className="text-xs text-[#4B5563]">{wo.item?.name || '-'}</p>
+                            {wo.variant_selection && Object.values(wo.variant_selection).some(v => v) && (
+                              <p className="text-[10px] mono text-[#723B13] mt-0.5" data-testid={`wo-variant-label-${wo.id}`}>
+                                Variant: {Object.values(wo.variant_selection).filter(v => v).join('-')}
+                              </p>
+                            )}
+                          </td>
                           <td className="text-sm">{wo.routing?.name || '-'}</td>
                           <td className="text-right mono">{wo.quantity_completed || 0}/{wo.quantity}</td>
                           <td style={{minWidth:'110px'}}>
