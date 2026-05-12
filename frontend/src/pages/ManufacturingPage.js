@@ -152,7 +152,7 @@ export default function ManufacturingPage() {
   };
 
   useEffect(() => {
-    fetchData();
+    fetchData({ preserveScroll: false });
   }, []);
 
   // Refresh duration display every 5s when Job Card is open and an op is running
@@ -167,11 +167,17 @@ export default function ManufacturingPage() {
   const fetchData = async (opts = {}) => {
     // Preserve scroll position by default. Operation-status updates trigger
     // a full re-fetch which used to reset window scroll to 0 — disorienting
-    // when the operator was deep in a long WO list. Opts.preserveScroll=false
-    // (or initial mount) skips the snapshot.
+    // when the operator was deep in a long WO list. Pass {preserveScroll: false}
+    // explicitly for cases where reset-to-top is intentional (initial mount).
     const preserve = opts.preserveScroll !== false;
     const scrollY = preserve ? (typeof window !== 'undefined' ? window.scrollY : 0) : 0;
-    setLoading(true);
+    // CRITICAL: when preserving scroll, DO NOT toggle setLoading(true). The
+    // loading spinner replaces the entire table with a small element, which
+    // shrinks the page height to zero and the browser clamps window.scrollY
+    // to 0. By the time the table re-renders, our rAF/timeout restore
+    // attempts can fight a moving target. Skipping the loading state keeps
+    // the existing data on screen during the silent refetch.
+    if (!preserve) setLoading(true);
     try {
       const [wcRes, routingsRes, woRes, poRes, itemsRes, supRes, bomsRes] = await Promise.all([
         api.get('/api/work-centers'),
@@ -192,7 +198,7 @@ export default function ManufacturingPage() {
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
-      setLoading(false);
+      if (!preserve) setLoading(false);
       if (preserve && typeof window !== 'undefined') {
         // Restore twice: once on next paint (catches most cases) and once
         // again after the heavy list re-render settles (~150ms covers

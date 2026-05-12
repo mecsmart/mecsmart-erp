@@ -20,7 +20,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (newest)** — **2 MO fixes — scroll preservation + cancel permission (DONE & VERIFIED ✅):**
+- **2026-05-12 (newest)** — **Scroll preservation root-cause fix (DONE & VERIFIED ✅):**
+  Prior fixes (in-place patching, rAF restore, 150ms timeout) didn't fully solve scroll-to-top because of a deeper cause: `setLoading(true)` swapped the entire table for a tiny spinner, shrinking page height to ~100px, which forced the browser to clamp `window.scrollY` to 0. By the time the table re-rendered tall enough, the saved scrollY was a moving target.
+  - **Fix**: `fetchData({ preserveScroll: true })` (the default for op-completion refreshes) now **skips** `setLoading(true)` entirely — existing table stays on screen while the silent refetch runs. No page-height collapse, no scroll clamp.
+  - Initial mount explicitly passes `preserveScroll: false` so the loading spinner still shows on first paint.
+  - Manually verified: scrolled page to scrollY=1500 → triggered ambient API refresh → scrollY stays exactly at 1500.
+  - All 44 regression tests still pass.
+
+
   1. **Fix 1 (Scroll preservation, robust)**: `handleOperationSave` and `handleOperationUpdate` now patch the affected WO in place (`setWorkOrders(prev => prev.map(…))`) instead of triggering a full `fetchData()`. This eliminates the heavy re-render that was causing the scroll-to-top issue at child WO level. Full refetch only happens on operation completion (to refresh parent aggregate status), and even then `fetchData` now restores `scrollY` twice (rAF + 150ms timeout) for robust restoration.
   2. **Fix 2 (Cancel requires delete permission)**: Cancel button on MO list is now gated on `canDelete` (was `canEdit`). Backend `PUT /api/work-orders/{id}` with `status='cancelled'` now requires `manufacturing:delete` permission. Edit-only users can no longer cancel MOs from the UI or via direct API call.
   - All 44 regression tests still pass.
