@@ -20,7 +20,12 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (latest)** — **4 critical fixes — variant flow + tax invoice stock (DONE & TESTED 35/35 ✅):**
+- **2026-05-12 (newest)** — **2 MO fixes — cascade cancel + preview permission (DONE & TESTED 44/44 ✅):**
+  1. **Fix 1 (Cascade cancel)**: PUT /api/work-orders/{id} with status='cancelled' now BFS-walks the entire `parent_wo_id` tree and cancels every uncompleted descendant WO. Completed WOs stay completed (real produced output preserved). Each cancelled descendant's `child_reservations` are released (reserved_stock decremented). The main WO's `cascade_cancelled_children` field lists every child id that was cancelled, for auditability.
+  2. **Fix 2 (Preview permission)**: `/api/work-orders/{id}/start?preview=true` now requires only `manufacturing:view` instead of `manufacturing:create`. The actual start (which consumes stock) still requires `manufacturing:edit`. Production operators with view/edit-only access can now see the material consumption preview before requesting an admin to confirm.
+  - **Tests**: `/app/backend/tests/test_iteration_106_mo_cancel_cascade_preview_permission.py` — 9 new tests + 35 regression = **44/44 passing**.
+
+
   1. **Fix 1 (BOM dialog chips on SG/SA components)**: Hidden chips on SG/SA component rows — those carry stale legacy own variant_attributes. Chips now render only on CP/RM leaves; the "Product Variants" header block already surfaces leaf variants via inheritance.
   2. **Fix 2 (Child WO variant inheritance)**: `create_wo_for_item` was setting `variant_selection=None` for non-main (child) WOs. Now child WOs inherit the parent MO's `variant_selection`, so variant-aware consumption (`_resolve_variant_child_item`) correctly fires at SG → leaf level too.
   3. **Fix 3 (Tax Invoice variant picker)**: Added a variant dropdown beneath the item picker on Tax Invoice lines. When user picks a PARENT item, a dropdown lists every active variant child with `"<suffix> — stock: N <UoM>"`, and a green stock badge appears once selected. The line's item_id swaps to the chosen variant child.
