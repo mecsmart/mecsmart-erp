@@ -20,7 +20,12 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (newest)** — **3 MO/Manufacturing UX fixes (DONE & VERIFIED ✅):**
+- **2026-05-12 (newest)** — **2 MO fixes — scroll preservation + cancel permission (DONE & VERIFIED ✅):**
+  1. **Fix 1 (Scroll preservation, robust)**: `handleOperationSave` and `handleOperationUpdate` now patch the affected WO in place (`setWorkOrders(prev => prev.map(…))`) instead of triggering a full `fetchData()`. This eliminates the heavy re-render that was causing the scroll-to-top issue at child WO level. Full refetch only happens on operation completion (to refresh parent aggregate status), and even then `fetchData` now restores `scrollY` twice (rAF + 150ms timeout) for robust restoration.
+  2. **Fix 2 (Cancel requires delete permission)**: Cancel button on MO list is now gated on `canDelete` (was `canEdit`). Backend `PUT /api/work-orders/{id}` with `status='cancelled'` now requires `manufacturing:delete` permission. Edit-only users can no longer cancel MOs from the UI or via direct API call.
+  - All 44 regression tests still pass.
+
+
   1. **Fix 1 (Scroll position preserved on op-update)**: `fetchData()` now snapshots `window.scrollY` before re-fetching and restores it in a `requestAnimationFrame` after state flush. Operators no longer get bounced to the top of the WO list after completing a job-card operation.
   2. **Fix 2 (MTS item picker shows results only after search)**: Removed the default `eligible.slice(0, 50)` pre-fill. Empty-state prompt "Type a part number or name to search…" shown until user types. Avoids dumping 600+ items on every dialog open.
   3. **Fix 3 (MO creation dialog scrollable)**: Added `max-h-[90vh] overflow-y-auto` to the MO Create dialog. Long forms (especially when variant configurator + multi-component lists appear) now scroll inside the dialog instead of pushing fields off-screen.

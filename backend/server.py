@@ -6705,6 +6705,10 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
     update_data = {k: v for k, v in wo_data.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No data to update")
+
+    # Cancellation is destructive — require delete permission.
+    if update_data.get("status") == "cancelled" and wo.get("status") != "cancelled":
+        _require_access(user, ["admin", "production_manager"], module="manufacturing", action="delete")
     
     # If trying to change status to in_progress, redirect to start endpoint
     if update_data.get("status") == "in_progress" and wo.get("status") == "pending":

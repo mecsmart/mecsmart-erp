@@ -194,8 +194,11 @@ export default function ManufacturingPage() {
     } finally {
       setLoading(false);
       if (preserve && typeof window !== 'undefined') {
-        // Restore in next tick so it survives React's render flush.
+        // Restore twice: once on next paint (catches most cases) and once
+        // again after the heavy list re-render settles (~150ms covers
+        // typical reflows for 600+ row tables).
         requestAnimationFrame(() => window.scrollTo({ top: scrollY, behavior: 'instant' }));
+        setTimeout(() => window.scrollTo({ top: scrollY, behavior: 'instant' }), 150);
       }
     }
   };
@@ -478,7 +481,15 @@ export default function ManufacturingPage() {
       const { data } = await api.put(`/api/work-orders/${woId}/operations/${sequence}`, payload);
       setJobCardWO(data);
       setOpDialog({ open: false, mode: '', sequence: 0 });
-      fetchData();
+      // Patch the WO in place — full fetchData() re-renders 600+ rows and
+      // bounces window scroll to top, which disorients operators in long
+      // WO lists. Only re-fetch on completion (status changed to completed)
+      // because the parent WO's aggregate status may need refreshing too —
+      // and even there, fetchData now preserves scroll.
+      setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, ...data } : w));
+      if (data.status === 'completed') {
+        fetchData({ preserveScroll: true });
+      }
     } catch (error) {
       alert(error.response?.data?.detail || 'Failed to update operation');
     }
@@ -491,7 +502,11 @@ export default function ManufacturingPage() {
         quantity_completed: newStatus === 'completed' ? jobCardWO?.quantity : 0
       });
       setJobCardWO(data);
-      fetchData();
+      // In-place patch — same reasoning as handleOperationSave: avoid full refetch.
+      setWorkOrders(prev => prev.map(w => w.id === woId ? { ...w, ...data } : w));
+      if (data.status === 'completed') {
+        fetchData({ preserveScroll: true });
+      }
     } catch (error) {
       alert(error.response?.data?.detail || 'Failed to update operation');
     }
@@ -1477,7 +1492,7 @@ export default function ManufacturingPage() {
                             ) : (
                             <div className="flex items-center flex-wrap gap-1">
                               {/* RESERVED badge removed — auto-reserve on MO create is implicit; no need to clutter the UI. */}
-                              {canEdit && ['pending', 'released'].includes(wo.status) && !wo.parent_wo_id && (
+                              {canDelete && ['pending', 'released'].includes(wo.status) && !wo.parent_wo_id && (
                                 <button onClick={() => {
                                   if (window.confirm(`Cancel Manufacturing Order ${wo.wo_number}?\n\nThis releases any reserved child stock back. Cannot be undone.`)) {
                                     handleUpdateWorkOrderStatus(wo.id, 'cancelled');
