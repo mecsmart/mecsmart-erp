@@ -1090,9 +1090,12 @@ export default function ItemsPage() {
                   // Fix 4 — Variant rollup: hide variant child rows (is_variant=true)
                   // from the main listing and group them under their parent FG/SG.
                   // The parent row shows summed stock + per-variant breakdown.
+                  // Retired variants (is_active=false) are excluded so a parent that
+                  // had its variant_attributes cleared doesn't keep displaying stale
+                  // orphan-variant lines in the stock column.
                   const variantsByParent = {};
                   for (const it of items) {
-                    if (it.is_variant && it.parent_item_id) {
+                    if (it.is_variant && it.parent_item_id && it.is_active !== false) {
                       if (!variantsByParent[it.parent_item_id]) variantsByParent[it.parent_item_id] = [];
                       variantsByParent[it.parent_item_id].push(it);
                     }

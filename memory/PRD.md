@@ -20,7 +20,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (latest)** — **Per-component variant breakdown + variant-child walkup (DONE & TESTED 29/29 ✅):**
+- **2026-05-12 (newest)** — **Auto-retire variant children + stock rollup cleanup (DONE & TESTED ✅):**
+  Addresses production data scenario where parent items had `variant_attributes` cleared but variant children remained as `is_active=true` orphans, polluting the stock rollup column.
+  - **Backend**: `PUT /api/items/{id}` now detects when `variant_attributes` is being set to empty `[]`. When the parent has existing variant children (`is_variant=true, parent_item_id=this`), all of them are auto-retired (`is_active=false`). Children stay in DB (stock history preserved) but disappear from rollups.
+  - **Frontend**: ItemsPage stock rollup now filters out `is_active=false` variant children. A parent that had its variants cleared no longer shows stale variant lines under its STOCK column.
+  - **Production note**: User must redeploy preview → production for both fixes plus all earlier session work (per-component breakdown, variant-child walkup, etc.) to take effect.
+  - All 29 regression tests still passing.
+
+
   Investigation of user's production BOM (`CRW0I8000001` Rice Whitener) revealed two issues with how inherited variants were displayed in the BOM dialog:
   1. **Per-component breakdown**: When two variant-bearing components share an axis name OR contribute different axes, the merged union didn't make it clear WHICH component contributed WHICH variants. Added `variant_sources: [{component_id, component_part_number, component_name, variant_attributes}]` to the `/effective-variants` response. BOM dialog now renders **per-component** (e.g. `SA-001 — Pump Assembly: Motor Power [1HP][2HP], Voltage [220V][440V]`) when variants are inherited.
   2. **Variant-CHILD reference walkup**: If a BOM line points at a variant child (e.g. `CRW0E8000091-30GT`) instead of the parent component, the helper now walks `is_variant=true → parent_item_id` and uses the parent's `variant_attributes`. Previously the variant axes silently disappeared because variant children carry `variant_attributes=None`.

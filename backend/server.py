@@ -1174,7 +1174,17 @@ async def update_item(item_id: str, item_data: ItemUpdate, request: Request):
     update_data["updated_at"] = datetime.now(timezone.utc)
     # Normalize variant_attributes to canonical shape (List[{name, values:[{value,short_code}]}]).
     if "variant_attributes" in update_data:
-        update_data["variant_attributes"] = _normalize_variant_attributes(update_data["variant_attributes"])
+        new_attrs = _normalize_variant_attributes(update_data["variant_attributes"])
+        update_data["variant_attributes"] = new_attrs
+        # If the user CLEARED all variant_attributes on a parent that has
+        # existing variant children, retire (is_active=false) those orphans so
+        # they stop showing up in stock rollups / dropdowns. Children stay in
+        # the DB (stock history preserved) but are visually gone.
+        if not new_attrs:
+            await db.items.update_many(
+                {"parent_item_id": item_id, "is_variant": True, "is_active": {"$ne": False}},
+                {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc)}},
+            )
     result = await db.items.update_one({"id": item_id}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
