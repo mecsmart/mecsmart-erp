@@ -20,7 +20,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-11 (latest)** — **Variant lifecycle completion — 4 fixes (DONE & TESTED 19/19 ✅):**
+- **2026-05-11 (latest)** — **3 quick fixes — MO-driven MRP + UX (DONE & TESTED 24/24 ✅):**
+  1. **Fix 1 (MRP from MOs not SOs)**: `GET /api/mrp/demand` now sources demand from open Manufacturing Orders (status pending/in_progress, materials_reserved≠true, parent_wo_id=null) instead of from Sales Orders. SOs without a created MO generate no MRP demand. MTS MOs without an SO are also captured. Variant-aware: uses `_resolve_variant_child_item` so demand goes against the variant child SKU when the MO has a `variant_selection`.
+  2. **Fix 2 (SO Quotation dropdown)**: Quotation picker on SO creation no longer dumps the full list when the dropdown opens. Empty state prompts "Type a quotation # or customer name to search…" — results render only once user types.
+  3. **Fix 3 (MTS WO item picker)**: Restricted to items that have an ACTIVE BOM. Avoids creating WOs against items that have no operations/components defined. Driven by a new `itemsWithBom` Set loaded alongside items on mount (single `/api/bom?status=active` fetch).
+  - **Tests**: `/app/backend/tests/test_iteration_103_mrp_mo_driven.py` — 5 new tests (SO-without-MO=zero, MO-creates-demand, reserved-shortfall, MTS-without-SO, variant-aware MRP). Plus iter-99 (15) + iter-102 (4) regression = **24/24 passing**.
+
+
   1. **Fix 1 (BOM dialog read-only variant axes)**: Already done in prior iteration — BOM dialog shows "Product Variants (inherited from BOM components — read-only)" with axes derived from `/api/items/{id}/effective-variants`. Confirmed matches user's screenshot intent.
   2. **Fix 2 (Variant-aware component consumption)**: When MO has `variant_selection` and a BOM component carries its own `variant_attributes`, WO `/start` now consumes from the matching variant CHILD SKU (e.g. `CRW0E8000091-30GT`) instead of the parent. New backend helper `_resolve_variant_child_item` matches MO's selection against component axes; falls back to parent gracefully if the variant child doesn't exist yet. RM-only components unaffected.
   3. **Fix 3 (MO/SO variant label)**: MO list and SO list views now show a `Variant: 30GT-1.0MM` line beneath the parent SKU/name when `variant_selection` is present. Concatenates picked variant values with `-` (matching the variant SKU suffix convention). Replaced legacy purple SKU chip on SO lines.
