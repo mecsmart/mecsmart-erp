@@ -623,7 +623,7 @@ export default function JobWorkPage() {
                   <thead><tr>
                     <th style={{width:'90px'}}>Order #</th>
                     <th style={{width:'80px'}}>MO #</th>
-                    <th style={{minWidth:'160px'}}>FG/SA/Part</th>
+                    <th style={{minWidth:'220px'}}>FG/SA/Part</th>
                     <th style={{width:'100px'}}>Supplier</th>
                     <th style={{minWidth:'140px'}}>RM</th>
                     <th style={{width:'70px'}}>Sent/Total</th>
@@ -631,7 +631,7 @@ export default function JobWorkPage() {
                     <th style={{width:'80px'}} className="text-right">Charges</th>
                     <th style={{width:'80px'}}>Status</th>
                     <th style={{width:'80px'}}>Return Date</th>
-                    <th style={{width:'100px'}}>Actions</th>
+                    <th style={{width:'180px'}}>Actions</th>
                   </tr></thead>
                   <tbody>
                     {orders.map(o => {
@@ -644,8 +644,8 @@ export default function JobWorkPage() {
                           <td className="text-sm">{(o.mo_numbers || []).map((m, mi) => <div key={mi} className="mono text-[#1D3557]">{m}</div>)}{!o.mo_numbers?.length && <span className="mono text-[#1D3557]">{o.mo_number || '-'}</span>}</td>
                           <td className="text-sm">{o.job_work_parts && o.job_work_parts.length > 0 ? o.job_work_parts.map((p, pi) => {
                             const pit = p.item || items.find(i => i.id === p.item_id);
-                            return <div key={pi} className="mb-1"><div className="font-semibold text-[#1D3557]">{pit?.part_number} - {pit?.name || ''}</div><div className="text-[#6B7280] text-[11px]">Qty: {p.quantity}{p.charges ? <span className="text-[#723B13] ml-1">@{formatCurrency(p.charges)}</span> : ''}</div></div>;
-                          }) : <span className="text-[#6B7280]">{o.fg_item_name || '-'}</span>}</td>
+                            return <div key={pi} className="mb-1"><div className="font-semibold text-[#1D3557] text-[11px] leading-tight">{pit?.part_number} - {pit?.name || ''}</div><div className="text-[#6B7280] text-[10px] leading-tight">Qty: {p.quantity}{p.charges ? <span className="text-[#723B13] ml-1">@{formatCurrency(p.charges)}</span> : ''}</div></div>;
+                          }) : <span className="text-[#6B7280] text-[11px]">{o.fg_item_name || '-'}</span>}</td>
                           <td className="text-sm">{o.supplier?.name || '-'}</td>
                           <td className="text-sm">{(() => {
                             const isJobOS = o.subcontract_type === 'without_material' && (o.reference_operation_seqs?.length || o.reference_operation_seq);
@@ -687,8 +687,8 @@ export default function JobWorkPage() {
                               {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && (o.reference_operation_seqs?.length || o.reference_operation_seq) && o.subcontract_type === 'without_material' && o.job_work_parts?.length > 0 && !o.dc_created && (
                                 <button onClick={() => openJobOSDCDialog(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-jobos-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
                               )}
-                              {/* Plain MO→SC without material (no reference_operation_seqs): retains existing Create-PO flow. */}
-                              {canEdit && ['confirmed', 'in_progress'].includes(o.status) && (!o.lines || o.lines.length === 0) && o.job_work_parts?.length > 0 && !o.dc_created && !(o.reference_operation_seqs?.length || o.reference_operation_seq) && (
+                              {/* Plain MO→SC without material (no reference_operation_seqs): Send DC with the FG part going for outsourced operation. */}
+                              {canEdit && ['confirmed', 'in_progress'].includes(o.status) && o.subcontract_type === 'without_material' && !(o.reference_operation_seqs?.length || o.reference_operation_seq) && o.job_work_parts?.length > 0 && !o.dc_created && (
                                 <button onClick={() => handleCreateDCForParts(o)} className="btn-primary text-xs px-2 py-1" data-testid={`send-dc-parts-${o.id}`}><ArrowRight className="w-3 h-3 inline mr-1" />Send DC</button>
                               )}
                               {/* SC with RM: After DC sent, show info to receive from GRN page */}

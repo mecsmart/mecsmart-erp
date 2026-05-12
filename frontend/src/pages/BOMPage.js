@@ -327,6 +327,7 @@ export default function BOMPage() {
         setBomEditStack(s => s.slice(0, -1));
         setEditingBom(parent.bom);
         setFormData(parent.formData);
+        loadVariantsForItem(parent.bom?.parent_item_id);
       } else {
         setIsDialogOpen(false);
         setEditingBom(null);
@@ -453,6 +454,23 @@ export default function BOMPage() {
       alert(error.response?.data?.detail || 'Failed to create revision');
     }
   };
+
+  // Shared helper — reload variant attrs + sources for a given parent_item_id.
+  // Called whenever the dialog SWITCHES to a different BOM (drilling into a
+  // nested sub-BOM, popping back to parent, or save-and-close). Without this
+  // refresh the dialog kept showing the OUTER BOM's breakdown.
+  const loadVariantsForItem = (parentItemId) => {
+    setParentVariantAttrs([]);
+    setParentVariantSources([]);
+    if (!parentItemId) return;
+    api.get(`/api/items/${parentItemId}/effective-variants`)
+      .then(({ data }) => {
+        setParentVariantAttrs(data?.variant_attributes || []);
+        setParentVariantSources(data?.variant_sources || []);
+      })
+      .catch(() => {});
+  };
+
 
   const handleDelete = async (bom) => {
     if (!window.confirm(`Delete BOM "${bom.name}"?`)) return;
@@ -832,6 +850,7 @@ export default function BOMPage() {
               setBomEditStack(s => s.slice(0, -1));
               setEditingBom(parent.bom);
               setFormData(parent.formData);
+              loadVariantsForItem(parent.bom?.parent_item_id);
               return;
             }
             setIsDialogOpen(open);
@@ -892,6 +911,7 @@ export default function BOMPage() {
                         setBomEditStack(s => s.slice(0, -1));
                         setEditingBom(parent.bom);
                         setFormData(parent.formData);
+                        loadVariantsForItem(parent.bom?.parent_item_id);
                         return;
                       }
                       setIsDialogOpen(false);
@@ -1216,6 +1236,7 @@ export default function BOMPage() {
                                           components: sortBomComponentsForEdit(childBom.components || [], items),
                                           parent_routings: childBom.parent_routings || [],
                                         });
+                                        loadVariantsForItem(childBom.parent_item_id);
                                       }}
                                       className="text-[10px] text-[#1D3557] underline hover:no-underline flex items-center gap-0.5"
                                       data-testid={`comp-${index}-goto-child-bom`}
@@ -1327,6 +1348,7 @@ export default function BOMPage() {
                         setBomEditStack(s => s.slice(0, -1));
                         setEditingBom(parent.bom);
                         setFormData(parent.formData);
+                        loadVariantsForItem(parent.bom?.parent_item_id);
                         return;
                       }
                       setIsDialogOpen(false);

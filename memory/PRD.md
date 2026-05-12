@@ -20,7 +20,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (newest)** — **Contextual variant propagation (DONE & TESTED 48/48 ✅):**
+- **2026-05-12 (newest)** — **3 fixes — BOM nested variants + JW actions + JW row UX (DONE & VERIFIED ✅):**
+  1. **Fix 1 (Nested BOM dialog variant refresh)**: When the user drilled INTO a nested sub-BOM (FG → SG), the variant breakdown stayed pinned to the OUTER BOM's data, so unrelated variant leaves from sibling sub-trees kept appearing. Added shared `loadVariantsForItem(parentItemId)` helper and invoked it on every nested drill-down AND parent-pop transition. Now each level shows ONLY the variants in its own BOM subtree.
+  2. **Fix 2 (MO→SC without_material: Send DC button missing)**: Send DC button was gated on `lines.length === 0`, but the MO→SC creation always writes a single dummy line. Updated the condition to `subcontract_type === 'without_material' && !reference_operation_seqs && job_work_parts.length > 0 && !dc_created`. Both Edit and Send DC now appear correctly for MO-derived JW orders.
+  3. **Fix 3 (JW table row density)**: Widened the FG/SA/Part column (160px → 220px) and the Actions column (100px → 180px). Reduced part-number/name font to 11px and qty/charges line to 10px with `leading-tight` so multi-part rows fit in one frame without wrap-overflow.
+  - 48/48 regression tests still pass.
+
+
   Variants now propagate to child WOs based on each child's OWN BOM tree, not blanket inheritance from the parent MO.
   - **Backend**: New helper `_filter_variant_selection_for_item(item_id, variant_selection)` returns only the subset of axes that appear in the item's `_get_effective_variants` (own for CP/RM, inherited via BOM walk for FG/SG). `create_wo_for_item` uses this filter when setting `variant_selection` on each auto-created child WO.
   - **Behavior matches user's 3 examples**:
