@@ -671,7 +671,7 @@ export default function JobWorkPage() {
                           </td>
                           <td className="text-sm">{o.last_receipt_date ? new Date(o.last_receipt_date).toLocaleDateString() : o.expected_return_date ? new Date(o.expected_return_date).toLocaleDateString() : '-'}</td>
                           <td>
-                            <div className="flex items-center space-x-1">
+                            <div className="flex flex-wrap items-center gap-1" data-testid={`jw-actions-${o.id}`}>
                               {canEdit && ['draft', 'confirmed', 'in_progress'].includes(o.status) && !o.po_created && !o.dc_created && (
                                 <button onClick={() => handleEditOrder(o)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Edit" data-testid={`edit-jw-${o.id}`}>
                                   <Edit2 className="w-4 h-4" />
