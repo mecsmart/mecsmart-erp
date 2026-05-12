@@ -105,6 +105,10 @@ export default function BOMPage() {
   // Phase 2 — variant attributes for the parent FG/SG item.
   // Edited inline in the BOM dialog. Persisted to the parent item via PUT /api/items/{id}.
   const [parentVariantAttrs, setParentVariantAttrs] = useState([]);  // [{name, values: []}]
+  // Per-component breakdown (only used by the read-only BOM dialog block so
+  // the user can see WHICH component contributes which axis when multiple
+  // components are variant-bearing on different axes).
+  const [parentVariantSources, setParentVariantSources] = useState([]);
   const [appliesToDialog, setAppliesToDialog] = useState({ open: false, componentIdx: -1 });
 
   // Permission gating — always trust the granular permissions object (falls
@@ -421,9 +425,11 @@ export default function BOMPage() {
       try {
         const { data } = await api.get(`/api/items/${bom.parent_item_id}/effective-variants`);
         setParentVariantAttrs(data?.variant_attributes || []);
+        setParentVariantSources(data?.variant_sources || []);
       } catch {
         const parentItem = items.find(it => it.id === bom.parent_item_id);
         setParentVariantAttrs(parentItem?.variant_attributes || []);
+        setParentVariantSources([]);
       }
     })();
     setIsDialogOpen(true);
@@ -591,6 +597,7 @@ export default function BOMPage() {
       parent_routings: [],
     });
     setParentVariantAttrs([]);
+    setParentVariantSources([]);
   };
 
   const toggleExpanded = (key) => {
@@ -996,20 +1003,50 @@ export default function BOMPage() {
                       <span className="text-[10px] text-[#92400E]">Generate child SKUs from the Item edit dialog</span>
                     </div>
                     <div className="space-y-1.5">
-                      {(parentVariantAttrs || []).map((attr, ai) => {
-                        const vals = (attr.values || []).map(v => typeof v === 'string' ? v : (v?.value || v?.short_code || ''));
-                        return (
-                          <div key={ai} className="flex items-center gap-2 bg-white border border-[#FDE68A] rounded-sm px-2 py-1.5" data-testid={`bom-variant-attr-row-${ai}`}>
-                            <span className="text-xs font-semibold text-[#374151] w-40 truncate" title={attr.name}>{attr.name || '—'}</span>
-                            <div className="flex flex-wrap gap-1 flex-1">
-                              {vals.map((v, vi) => (
-                                <span key={vi} className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">{v}</span>
-                              ))}
-                              {vals.length === 0 && <span className="text-[10px] text-[#9CA3AF] italic">no values</span>}
+                      {/* When the parent item INHERITS variants from BOM components, prefer the
+                          per-component breakdown so the user sees WHICH component contributes WHICH
+                          axis. Falls back to the merged union (for legacy items with own variants
+                          or when the breakdown is empty for some reason). */}
+                      {(parentVariantSources && parentVariantSources.length > 0) ? (
+                        parentVariantSources.map((src, si) => (
+                          <div key={si} className="bg-white border border-[#FDE68A] rounded-sm px-2 py-1.5" data-testid={`bom-variant-source-${si}`}>
+                            <div className="text-[10px] mono font-semibold text-[#723B13] mb-1" title={src.component_name || ''}>
+                              {src.component_part_number}<span className="ml-1 text-[#92400E] font-normal">— {src.component_name || ''}</span>
+                            </div>
+                            <div className="space-y-1">
+                              {(src.variant_attributes || []).map((attr, ai) => {
+                                const vals = (attr.values || []).map(v => typeof v === 'string' ? v : (v?.value || v?.short_code || ''));
+                                return (
+                                  <div key={ai} className="flex items-center gap-2" data-testid={`bom-variant-source-${si}-attr-${ai}`}>
+                                    <span className="text-xs font-semibold text-[#374151] w-32 truncate" title={attr.name}>{attr.name || '—'}</span>
+                                    <div className="flex flex-wrap gap-1 flex-1">
+                                      {vals.map((v, vi) => (
+                                        <span key={vi} className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">{v}</span>
+                                      ))}
+                                      {vals.length === 0 && <span className="text-[10px] text-[#9CA3AF] italic">no values</span>}
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
-                        );
-                      })}
+                        ))
+                      ) : (
+                        (parentVariantAttrs || []).map((attr, ai) => {
+                          const vals = (attr.values || []).map(v => typeof v === 'string' ? v : (v?.value || v?.short_code || ''));
+                          return (
+                            <div key={ai} className="flex items-center gap-2 bg-white border border-[#FDE68A] rounded-sm px-2 py-1.5" data-testid={`bom-variant-attr-row-${ai}`}>
+                              <span className="text-xs font-semibold text-[#374151] w-40 truncate" title={attr.name}>{attr.name || '—'}</span>
+                              <div className="flex flex-wrap gap-1 flex-1">
+                                {vals.map((v, vi) => (
+                                  <span key={vi} className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-[#1D3557] text-white">{v}</span>
+                                ))}
+                                {vals.length === 0 && <span className="text-[10px] text-[#9CA3AF] italic">no values</span>}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
                 )}

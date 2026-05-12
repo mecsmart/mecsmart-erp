@@ -1,0 +1,90 @@
+{
+  "summary": "Iteration 104 - Verified variant_sources breakdown feature in GET /api/items/{id}/effective-variants. All 5 new tests passed + 24 regression tests from iterations 99/102/103 passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_104_variant_sources_breakdown.py",
+    "/app/test_reports/pytest/pytest_iteration_104.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_104_variant_sources_breakdown.py"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5 new tests + 24/24 regression tests)",
+    "frontend": "N/A - Backend only testing"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST_BREAKDOWN_ prefixed items during tests, all cleaned up after each test class",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "variant_sources breakdown feature verified working. The /api/items/{id}/effective-variants endpoint now returns a variant_sources array with per-component breakdown when source='inherited'. Variant-child → parent walkup logic also works correctly.",
+  "tests_executed": {
+    "backend": [
+      {
+        "test": "TestVariantSourcesBreakdown::test_variant_sources_has_both_components",
+        "status": "PASSED",
+        "details": "Created FG with 2 variant-bearing BOM components on DIFFERENT axes (Grit Size, Sieve Slot). Verified variant_sources has BOTH entries with correct component_part_number and variant_attributes."
+      },
+      {
+        "test": "TestVariantSourcesBreakdown::test_merged_variant_attributes_has_union",
+        "status": "PASSED",
+        "details": "Verified merged variant_attributes contains the union of all axes (Grit Size: 16GT,24GT,30GT + Sieve Slot: 1.0mm,1.5mm)."
+      },
+      {
+        "test": "TestVariantChildWalkup::test_variant_child_walks_up_to_parent",
+        "status": "PASSED",
+        "details": "Created parent component with variants, generated variant children, added CHILD (not parent) as BOM component. Verified FG's effective-variants walks up to parent and surfaces parent's variant_attributes. variant_sources correctly references the PARENT, not the child."
+      },
+      {
+        "test": "TestSourceOwnEmptyVariantSources::test_source_own_has_empty_variant_sources",
+        "status": "PASSED",
+        "details": "Component with own variant_attributes returns source='own' and empty variant_sources (only used for inherited FG/SG)."
+      },
+      {
+        "test": "TestRawMaterialOwnVariants::test_rm_source_own_has_empty_variant_sources",
+        "status": "PASSED",
+        "details": "Raw Material with own variant_attributes returns source='own' and empty variant_sources."
+      }
+    ],
+    "regression": [
+      {
+        "test_file": "test_iteration_99_variant_inheritance.py",
+        "tests_passed": 15,
+        "tests_failed": 0,
+        "details": "All 15 variant inheritance tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_102_variant_consumption.py",
+        "tests_passed": 4,
+        "tests_failed": 0,
+        "details": "All 4 variant consumption tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_103_mrp_mo_driven.py",
+        "tests_passed": 5,
+        "tests_failed": 0,
+        "details": "All 5 MO-driven MRP demand tests passed - no regression"
+      }
+    ]
+  },
+  "features_verified": {
+    "variant_sources_breakdown": "GET /api/items/{id}/effective-variants now returns variant_sources array with per-component breakdown (component_id, component_part_number, component_name, variant_attributes)",
+    "multiple_variant_components": "FG with 2 variant-bearing BOM components on DIFFERENT axes correctly shows BOTH in variant_sources",
+    "variant_child_walkup": "BOM pointing at variant CHILD (is_variant=true, parent_item_id set) correctly walks up to parent and surfaces parent's variant_attributes",
+    "source_own_empty_breakdown": "When source='own' (CP/RM with own variants), variant_sources is empty (only used for inherited FG/SG)",
+    "merged_union": "variant_attributes field still contains the merged union of all axes from all variant-bearing components"
+  },
+  "code_review_notes": {
+    "server.py_lines_1360-1413": "_compute_inherited_variants_breakdown helper correctly walks variant-child → parent and SG sub-BOMs recursively, keeping per-component grouping",
+    "server.py_lines_1465-1492": "get_effective_variants endpoint now includes variant_sources in response when source='inherited'"
+  }
+}

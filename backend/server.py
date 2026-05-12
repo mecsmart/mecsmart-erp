@@ -1298,6 +1298,12 @@ async def _compute_inherited_variants(item_id: str) -> List[Dict[str, Any]]:
     from every variant-bearing component. Attributes with the same name are
     merged: union of values, dedup by value, first-seen short_code wins.
 
+    - If a component is itself a VARIANT CHILD (`is_variant=True`), the
+      helper walks up to its `parent_item_id` and uses THAT parent's
+      `variant_attributes` (variant children don't carry attrs themselves).
+    - Sub-assemblies recurse via their own BOM so deeper variant-bearing
+      components also surface at the top level.
+
     Returns the canonical normalised list — same shape as Item.variant_attributes.
     """
     bom = await db.boms.find_one(
@@ -1315,13 +1321,30 @@ async def _compute_inherited_variants(item_id: str) -> List[Dict[str, Any]]:
         cid = comp.get("item_id")
         if not cid:
             continue
-        citem = await db.items.find_one({"id": cid}, {"_id": 0, "variant_attributes": 1, "category": 1})
+        citem = await db.items.find_one(
+            {"id": cid},
+            {"_id": 0, "id": 1, "variant_attributes": 1, "category": 1, "is_variant": 1, "parent_item_id": 1, "part_number": 1, "name": 1},
+        )
         if not citem:
             continue
+
+        # 1) If the BOM points at a variant CHILD, walk up to its parent so we
+        #    can still surface the parent's variant_attributes.
+        if citem.get("is_variant") and citem.get("parent_item_id"):
+            parent_doc = await db.items.find_one(
+                {"id": citem["parent_item_id"]},
+                {"_id": 0, "id": 1, "variant_attributes": 1, "category": 1, "part_number": 1, "name": 1},
+            )
+            if parent_doc:
+                citem = parent_doc
+
         attrs = _normalize_variant_attributes(citem.get("variant_attributes") or [])
-        # Walk into SG sub-BOMs so deeper variant components also surface.
-        if citem.get("category") == "sub_assembly":
-            attrs = attrs + (await _compute_inherited_variants(cid))
+        # 2) For SG / SA components, recurse into the sub-BOM as well so
+        #    variant-bearing leaves deeper in the tree are also captured.
+        if citem.get("category") in ("sub_assembly", "finished_good"):
+            attrs = attrs + (await _compute_inherited_variants(citem.get("id") or cid))
+        if not attrs:
+            continue
         for a in attrs:
             name = a["name"]
             if name not in merged:
@@ -1332,6 +1355,62 @@ async def _compute_inherited_variants(item_id: str) -> List[Dict[str, Any]]:
                 if key not in merged[name]:
                     merged[name][key] = {"value": v["value"], "short_code": v["short_code"]}
     return [{"name": n, "values": list(merged[n].values())} for n in order]
+
+
+async def _compute_inherited_variants_breakdown(item_id: str) -> List[Dict[str, Any]]:
+    """Per-component breakdown of inherited variants — used by BOM dialog
+    to show which COMPONENT contributes which axis. Each entry:
+      {component_id, component_part_number, component_name, variant_attributes: [...]}.
+    Walks variant-child → parent and SG sub-BOMs recursively (same as the
+    merging helper) but keeps the per-component grouping.
+    """
+    bom = await db.boms.find_one(
+        {"parent_item_id": item_id, "status": "active"},
+        {"_id": 0, "components": 1},
+    ) or await db.boms.find_one(
+        {"parent_item_id": item_id},
+        {"_id": 0, "components": 1},
+    )
+    if not bom:
+        return []
+    out: List[Dict[str, Any]] = []
+    seen: Set[str] = set()  # dedupe by (component_part_number, attr_signature)
+    for comp in (bom.get("components") or []):
+        cid = comp.get("item_id")
+        if not cid:
+            continue
+        citem = await db.items.find_one(
+            {"id": cid},
+            {"_id": 0, "id": 1, "variant_attributes": 1, "category": 1, "is_variant": 1, "parent_item_id": 1, "part_number": 1, "name": 1},
+        )
+        if not citem:
+            continue
+        if citem.get("is_variant") and citem.get("parent_item_id"):
+            parent_doc = await db.items.find_one(
+                {"id": citem["parent_item_id"]},
+                {"_id": 0, "id": 1, "variant_attributes": 1, "category": 1, "part_number": 1, "name": 1},
+            )
+            if parent_doc:
+                citem = parent_doc
+        own_attrs = _normalize_variant_attributes(citem.get("variant_attributes") or [])
+        if own_attrs:
+            sig = (citem.get("part_number") or "", tuple(sorted(a["name"] for a in own_attrs)))
+            if sig not in seen:
+                seen.add(sig)
+                out.append({
+                    "component_id": citem.get("id") or cid,
+                    "component_part_number": citem.get("part_number") or "",
+                    "component_name": citem.get("name") or "",
+                    "variant_attributes": own_attrs,
+                })
+        # Recurse for SG/FG components.
+        if citem.get("category") in ("sub_assembly", "finished_good"):
+            for child in await _compute_inherited_variants_breakdown(citem.get("id") or cid):
+                sig = (child.get("component_part_number") or "", tuple(sorted(a["name"] for a in (child.get("variant_attributes") or []))))
+                if sig not in seen:
+                    seen.add(sig)
+                    out.append(child)
+    return out
 
 
 async def _get_effective_variants(item: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1389,17 +1468,27 @@ async def get_effective_variants(item_id: str, request: Request):
     For CP/RM this is the item's own `variant_attributes`. For FG/SG it
     is the UNION of variant_attributes from variant-bearing BOM components
     (recursively walking SG sub-BOMs), or the legacy own value if set.
+
+    Response includes `variant_sources` — a per-component breakdown so the
+    BOM dialog can show "CRW0E…: Grit Size: 16,24,30" rather than only the
+    merged union (helps when multiple components contribute different axes).
     """
     await get_current_user(request)
     item = await db.items.find_one({"id": item_id}, {"_id": 0})
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     effective = await _get_effective_variants(item)
+    has_own = bool(item.get("variant_attributes"))
+    source = "own" if has_own else ("inherited" if effective else "none")
+    breakdown: List[Dict[str, Any]] = []
+    if not has_own and item.get("category") in ("finished_good", "sub_assembly"):
+        breakdown = await _compute_inherited_variants_breakdown(item_id)
     return {
         "item_id": item_id,
         "category": item.get("category"),
-        "source": "own" if item.get("variant_attributes") else ("inherited" if effective else "none"),
+        "source": source,
         "variant_attributes": effective,
+        "variant_sources": breakdown,
     }
 
 
