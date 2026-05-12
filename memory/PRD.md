@@ -20,7 +20,16 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (newest)** — **Scroll preservation root-cause fix (DONE & VERIFIED ✅):**
+- **2026-05-12 (newest)** — **Contextual variant propagation (DONE & TESTED 48/48 ✅):**
+  Variants now propagate to child WOs based on each child's OWN BOM tree, not blanket inheritance from the parent MO.
+  - **Backend**: New helper `_filter_variant_selection_for_item(item_id, variant_selection)` returns only the subset of axes that appear in the item's `_get_effective_variants` (own for CP/RM, inherited via BOM walk for FG/SG). `create_wo_for_item` uses this filter when setting `variant_selection` on each auto-created child WO.
+  - **Behavior matches user's 3 examples**:
+    - Ex1: FG with variant-bearing components → main WO + matching child WOs carry the variant_selection.
+    - Ex2: SG whose BOM tree has zero variant-bearing components → variant_selection=None (runs plain).
+    - Ex3: SG whose BOM has one variant-bearing leaf → variant_selection contains only that axis (other parent axes dropped).
+  - **Tests**: `/app/backend/tests/test_iteration_107_contextual_variant_propagation.py` — 4 new tests + 44 regression = **48/48 passing**.
+
+
   Prior fixes (in-place patching, rAF restore, 150ms timeout) didn't fully solve scroll-to-top because of a deeper cause: `setLoading(true)` swapped the entire table for a tiny spinner, shrinking page height to ~100px, which forced the browser to clamp `window.scrollY` to 0. By the time the table re-rendered tall enough, the saved scrollY was a moving target.
   - **Fix**: `fetchData({ preserveScroll: true })` (the default for op-completion refreshes) now **skips** `setLoading(true)` entirely — existing table stays on screen while the silent refetch runs. No page-height collapse, no scroll clamp.
   - Initial mount explicitly passes `preserveScroll: false` so the loading spinner still shows on first paint.
