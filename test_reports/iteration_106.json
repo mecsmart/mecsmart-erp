@@ -1,0 +1,124 @@
+{
+  "summary": "Iteration 106 - Verified 2 backend bug fixes: (1) MO cancellation cascade to all uncompleted child WOs, (2) Preview permission relaxation for manufacturing:view users. All 9 new tests passed + 35 regression tests from iter-99/102/103/104/105 passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_106_mo_cancel_cascade_preview_permission.py",
+    "/app/test_reports/pytest/pytest_iteration_106.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_106_mo_cancel_cascade_preview_permission.py"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 new tests + 35/35 regression tests)",
+    "frontend": "N/A - Backend only testing"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST_VAR_106_ prefixed items during tests, all cleaned up after each test class",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Both backend fixes verified working. Fix 1: MO cancellation now cascades to all uncompleted child WOs recursively (BFS over parent_wo_id tree), sets cancelled_by_parent on children, releases child_reservations. Fix 2: Preview permission split - manufacturing:view allows ?preview=true, manufacturing:edit required for actual start.",
+  "tests_executed": {
+    "backend": [
+      {
+        "test": "TestMOCancelCascade::test_cancel_main_mo_cascades_to_child_wo",
+        "status": "PASSED",
+        "details": "Created FG→SG→RM BOM chain. Created MO for FG (auto-creates child WO for SG). Cancelled main MO. Verified child WO status=cancelled with cancelled_by_parent=main_mo_id, and main WO has cascade_cancelled_children containing child id."
+      },
+      {
+        "test": "TestMOCancelCascade::test_cancel_releases_child_reservations",
+        "status": "PASSED",
+        "details": "Created MO for FG. Verified child_reservations created. Cancelled main MO. Verified reserved_stock on SG item was released (decremented)."
+      },
+      {
+        "test": "TestMOCancelCascade::test_completed_child_wo_stays_completed",
+        "status": "PASSED",
+        "details": "Created MO, started and completed child WO, then cancelled main MO. Verified completed child WO stays completed (not cancelled)."
+      },
+      {
+        "test": "TestMultiLevelCancelCascade::test_multi_level_cancel_cascade",
+        "status": "PASSED",
+        "details": "Created 3-level BOM (FG→SG1→SG2→RM). Created MO for FG. Cancelled main MO. Verified ALL descendants (SG1 WO, SG2 WO) are cancelled with cancelled_by_parent=main_mo_id."
+      },
+      {
+        "test": "TestPreviewPermission::test_view_only_user_can_preview",
+        "status": "PASSED",
+        "details": "Created user with only manufacturing:view permission. Called POST /api/work-orders/{id}/start?preview=true. Got 200 with consumed_materials payload."
+      },
+      {
+        "test": "TestPreviewPermission::test_view_only_user_cannot_actual_start",
+        "status": "PASSED",
+        "details": "View-only user called POST /api/work-orders/{id}/start (no preview). Got 403 Forbidden as expected."
+      },
+      {
+        "test": "TestPreviewPermission::test_admin_can_do_both",
+        "status": "PASSED",
+        "details": "Admin can call both ?preview=true (200) and actual start (not 403)."
+      },
+      {
+        "test": "TestRegressionExistingTests::test_basic_api_health",
+        "status": "PASSED",
+        "details": "Items, BOMs, Work Orders APIs all return 200."
+      },
+      {
+        "test": "TestRegressionExistingTests::test_auth_me_endpoint",
+        "status": "PASSED",
+        "details": "/auth/me returns user info with email and permissions."
+      }
+    ],
+    "regression": [
+      {
+        "test_file": "test_iteration_99_variant_inheritance.py",
+        "tests_passed": 15,
+        "tests_failed": 0,
+        "details": "All 15 variant inheritance tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_102_variant_consumption.py",
+        "tests_passed": 4,
+        "tests_failed": 0,
+        "details": "All 4 variant consumption tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_103_mrp_mo_driven.py",
+        "tests_passed": 5,
+        "tests_failed": 0,
+        "details": "All 5 MO-driven MRP demand tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_104_variant_sources_breakdown.py",
+        "tests_passed": 5,
+        "tests_failed": 0,
+        "details": "All 5 variant sources breakdown tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_105_wo_variant_tax_invoice_stock.py",
+        "tests_passed": 6,
+        "tests_failed": 0,
+        "details": "All 6 child WO variant + tax invoice stock tests passed - no regression"
+      }
+    ]
+  },
+  "features_verified": {
+    "fix_1_cascade_cancel": "PUT /api/work-orders/{id} with status=cancelled now cascades to all uncompleted child WOs (BFS over parent_wo_id tree)",
+    "fix_1_cancelled_by_parent": "Child WOs get cancelled_by_parent=main_wo_id field set",
+    "fix_1_cascade_cancelled_children": "Main WO gets cascade_cancelled_children list with all cancelled child IDs",
+    "fix_1_reservation_release": "Child WO reservations (child_reservations) are released - reserved_stock decremented",
+    "fix_1_completed_preserved": "Already completed child WOs are NOT cancelled (status stays completed)",
+    "fix_2_preview_view_permission": "POST /api/work-orders/{id}/start?preview=true requires only manufacturing:view",
+    "fix_2_actual_start_edit_permission": "POST /api/work-orders/{id}/start (actual start) requires manufacturing:edit"
+  },
+  "code_review_notes": {
+    "server.py_lines_6731-6768": "BFS cascade cancel implementation - walks parent_wo_id tree, skips completed/cancelled WOs, releases child_reservations, sets cancelled_by_parent",
+    "server.py_line_6423": "Permission split: action='view' if preview else 'edit'"
+  }
+}

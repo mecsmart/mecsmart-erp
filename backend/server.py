@@ -6416,7 +6416,11 @@ async def start_work_order(wo_id: str, request: Request, preview: bool = False):
     show a confirmation dialog before committing.
     """
     user = await get_current_user(request)
-    _require_access(user, ["admin", "production_manager"], module="manufacturing", action="create")
+    # Preview-only needs VIEW/EDIT access; only the actual start (which
+    # consumes stock) requires create/edit rights. Splitting these means
+    # operators with edit-only permission can still SEE the material
+    # consumption details before requesting an admin to confirm the start.
+    _require_access(user, ["admin", "production_manager", "production_operator"], module="manufacturing", action="view" if preview else "edit")
     wo = await db.work_orders.find_one({"id": wo_id})
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -6709,7 +6713,8 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
             detail="Use POST /api/work-orders/{wo_id}/start to start a work order (this will consume materials)"
         )
 
-    # If cancelling, release any child stock reservations recorded against this MO.
+    # If cancelling, release any child stock reservations recorded against this MO,
+    # and cascade-cancel all uncompleted child WOs (and their reservations).
     if update_data.get("status") == "cancelled" and wo.get("status") != "cancelled":
         for resv in (wo.get("child_reservations") or []):
             resv_item = resv.get("item_id")
@@ -6722,6 +6727,45 @@ async def update_work_order(wo_id: str, wo_data: WorkOrderUpdate, request: Reque
         if wo.get("child_reservations"):
             update_data["child_reservations"] = []
             update_data["reservation_released_at"] = datetime.now(timezone.utc)
+
+        # Fix: cascade-cancel every uncompleted descendant WO. BFS over the
+        # parent_wo_id graph. Skips already-completed / already-cancelled WOs
+        # (those represent real produced output and must NOT be undone).
+        now_ts = datetime.now(timezone.utc)
+        cancelled_children: List[str] = []
+        frontier = [wo_id]
+        while frontier:
+            cursor = await db.work_orders.find(
+                {"parent_wo_id": {"$in": frontier}, "status": {"$nin": ["completed", "cancelled"]}},
+                {"_id": 0, "id": 1, "child_reservations": 1}
+            ).to_list(5000)
+            if not cursor:
+                break
+            child_ids = [c["id"] for c in cursor]
+            # Release each child WO's own reservations before cancelling it.
+            for child in cursor:
+                for resv in (child.get("child_reservations") or []):
+                    resv_item = resv.get("item_id")
+                    resv_qty = int(resv.get("qty", 0) or 0)
+                    if resv_item and resv_qty > 0:
+                        await db.items.update_one(
+                            {"id": resv_item},
+                            {"$inc": {"reserved_stock": -resv_qty}},
+                        )
+            await db.work_orders.update_many(
+                {"id": {"$in": child_ids}},
+                {"$set": {
+                    "status": "cancelled",
+                    "child_reservations": [],
+                    "reservation_released_at": now_ts,
+                    "cancelled_by_parent": wo_id,
+                    "updated_at": now_ts,
+                }},
+            )
+            cancelled_children.extend(child_ids)
+            frontier = child_ids
+        if cancelled_children:
+            update_data["cascade_cancelled_children"] = cancelled_children
     
     # If completing the work order, update finished goods stock
     if update_data.get("status") == "completed" and wo.get("status") == "in_progress":
