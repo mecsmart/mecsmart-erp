@@ -1,0 +1,103 @@
+{
+  "summary": "Iteration 105 - Verified 2 backend bug fixes: (1) Child WO variant_selection inheritance, (2) Tax Invoice stock decrement. All 6 new tests passed + 29 regression tests from iter-99/102/103/104 passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_105_wo_variant_tax_invoice_stock.py",
+    "/app/test_reports/pytest/pytest_iteration_105.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_105_wo_variant_tax_invoice_stock.py"
+  ],
+  "success_rate": {
+    "backend": "100% (6/6 new tests + 29/29 regression tests)",
+    "frontend": "N/A - Backend only testing"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST_VAR_105_ prefixed items during tests, all cleaned up after each test class",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Both backend fixes verified working. Child WOs now inherit parent MO's variant_selection (Fix 2). Tax Invoice creation with status='issued' decrements stock (Fix 4). Proforma→Tax Invoice conversion also decrements stock (Fix 4b).",
+  "tests_executed": {
+    "backend": [
+      {
+        "test": "TestChildWOVariantInheritance::test_child_wo_inherits_variant_selection",
+        "status": "PASSED",
+        "details": "Created multi-level BOM (FG → SG with routing → CP with variants). Created MO for FG with variant_selection={Grit:30GT}. Verified auto-created child WO for SG has variant_selection={Grit:30GT} (was None before fix)."
+      },
+      {
+        "test": "TestChildWOVariantInheritance::test_child_wo_start_consumes_variant_child",
+        "status": "PASSED",
+        "details": "Started child WO for SG. Verified it consumed from CP-30GT (variant child) instead of CP (parent). CP-30GT stock dropped by 2, CP parent stock unchanged."
+      },
+      {
+        "test": "TestTaxInvoiceStockDecrement::test_tax_invoice_issued_decrements_stock",
+        "status": "PASSED",
+        "details": "POST /api/crm/tax-invoices with status='issued' and qty=5. Verified item current_stock dropped from 100 to 95."
+      },
+      {
+        "test": "TestTaxInvoiceStockDecrement::test_tax_invoice_draft_no_stock_decrement",
+        "status": "PASSED",
+        "details": "POST /api/crm/tax-invoices with status='draft' and qty=5. Verified item current_stock remained unchanged (draft invoices don't decrement stock)."
+      },
+      {
+        "test": "TestTaxInvoiceStockDecrement::test_tax_invoice_free_text_line_no_decrement",
+        "status": "PASSED",
+        "details": "Tax invoice with free-text line (no item_id). Verified no stock decrement (free-text lines are services/misc)."
+      },
+      {
+        "test": "TestProformaToTaxInvoiceStockDecrement::test_proforma_to_tax_invoice_decrements_stock",
+        "status": "PASSED",
+        "details": "Created proforma with line item (stock unchanged). Converted to tax invoice. Verified stock dropped by 10 on conversion."
+      }
+    ],
+    "regression": [
+      {
+        "test_file": "test_iteration_99_variant_inheritance.py",
+        "tests_passed": 15,
+        "tests_failed": 0,
+        "details": "All 15 variant inheritance tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_102_variant_consumption.py",
+        "tests_passed": 4,
+        "tests_failed": 0,
+        "details": "All 4 variant consumption tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_103_mrp_mo_driven.py",
+        "tests_passed": 5,
+        "tests_failed": 0,
+        "details": "All 5 MO-driven MRP demand tests passed - no regression"
+      },
+      {
+        "test_file": "test_iteration_104_variant_sources_breakdown.py",
+        "tests_passed": 5,
+        "tests_failed": 0,
+        "details": "All 5 variant sources breakdown tests passed - no regression"
+      }
+    ]
+  },
+  "features_verified": {
+    "fix_2_child_wo_variant_inheritance": "Child WOs for SG/sub-assemblies now inherit parent MO's variant_selection (line ~5575 in server.py)",
+    "fix_2_child_wo_consumption": "Child WO /start consumes from variant child (e.g., CRW-30GT) instead of parent (CRW)",
+    "fix_4_tax_invoice_stock_decrement": "POST /api/crm/tax-invoices with status='issued' decrements current_stock for line items (line ~12657-12669 in server.py)",
+    "fix_4_draft_no_decrement": "Draft/cancelled invoices do NOT decrement stock",
+    "fix_4_free_text_no_decrement": "Free-text lines (no item_id) do NOT decrement stock",
+    "fix_4b_proforma_conversion_decrement": "POST /api/crm/proformas/{pid}/convert-to-tax-invoice also decrements stock (line ~13028-13036 in server.py)"
+  },
+  "code_review_notes": {
+    "server.py_line_5575": "variant_selection: variant_sel_for_mo or None - propagates MO's variant_selection to all child WOs",
+    "server.py_lines_12657-12669": "Stock decrement loop after tax invoice insert - skips draft/cancelled status and lines without item_id",
+    "server.py_lines_13028-13036": "Stock decrement loop in proforma→tax invoice conversion path"
+  }
+}

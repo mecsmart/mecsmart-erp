@@ -3096,6 +3096,59 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                                 showCategory={false}
                                 testId={`ti-line-item-${i}`}
                               />
+                              {/* Variant picker — appears if the selected item is a PARENT
+                                  (has active variant children). User picks the variant and
+                                  the line's item_id swaps to that variant's id. Also shows
+                                  the picked variant's current_stock as a small badge. */}
+                              {(() => {
+                                if (!l.item_id) return null;
+                                const sel = items.find(x => x.id === l.item_id);
+                                if (!sel) return null;
+                                // Find children whose parent_item_id === l.item_id OR (if line currently
+                                // points at a variant child) parent_item_id === sel.parent_item_id.
+                                const parentId = sel.is_variant ? sel.parent_item_id : sel.id;
+                                const variantChildren = items.filter(x =>
+                                  x.is_variant && x.parent_item_id === parentId && x.is_active !== false
+                                );
+                                if (variantChildren.length === 0) return null;
+                                const currentVariantId = sel.is_variant ? sel.id : '';
+                                const picked = items.find(x => x.id === currentVariantId);
+                                return (
+                                  <div className="flex items-center gap-1 mt-1" data-testid={`ti-line-variant-block-${i}`}>
+                                    <select
+                                      className="grid-input flex-1 text-xs"
+                                      value={currentVariantId}
+                                      onChange={(e) => {
+                                        const vid = e.target.value;
+                                        if (!vid) {
+                                          // Reset to parent
+                                          applyItemToLine(i, parentId);
+                                        } else {
+                                          applyItemToLine(i, vid);
+                                        }
+                                      }}
+                                      data-testid={`ti-line-variant-select-${i}`}
+                                    >
+                                      <option value="">Pick a variant…</option>
+                                      {variantChildren.map(v => {
+                                        const suffix = (v.part_number || '').startsWith((items.find(p => p.id === parentId)?.part_number || '') + '-')
+                                          ? v.part_number.slice((items.find(p => p.id === parentId)?.part_number || '').length + 1)
+                                          : v.part_number;
+                                        return (
+                                          <option key={v.id} value={v.id}>
+                                            {suffix} — stock: {v.current_stock ?? 0} {v.unit_of_measure || ''}
+                                          </option>
+                                        );
+                                      })}
+                                    </select>
+                                    {picked && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#DEF7EC] text-[#03543F] mono whitespace-nowrap" data-testid={`ti-line-variant-stock-${i}`}>
+                                        Stock: {picked.current_stock ?? 0} {picked.unit_of_measure || ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                               <textarea rows={2} className="grid-textarea" placeholder="Description (auto-filled — editable)" value={l.description} onChange={e => updateLine(i, { description: e.target.value })} data-testid={`ti-line-desc-${i}`} />
                             </div>
                           </td>

@@ -5566,7 +5566,13 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
             "is_subcontract": wo_data.is_subcontract if is_main else False,
             "subcontract_supplier_id": wo_data.subcontract_supplier_id if is_main else "",
             "subcontract_type": wo_data.subcontract_type if is_main else "with_material",
-            "variant_selection": variant_sel_for_mo if is_main else None,
+            # Propagate the MO's variant_selection to child WOs too so the
+            # variant-aware consumption logic (`_resolve_variant_child_item`)
+            # can match against variant-bearing components deep in the BOM
+            # tree (e.g. SG → RM leaf carrying Grit Size). Without this,
+            # only the main MO consumes variant children; SG-level consumption
+            # silently falls back to parent items.
+            "variant_selection": variant_sel_for_mo or None,
             "variant_sku": (_build_variant_sku(item_doc.get("part_number") or "", variant_sel_for_mo) if (is_main and variant_sel_for_mo) else None),
             "notes": wo_data.notes if is_main else f"Auto-created for {item_doc.get('category', 'child item')}",
             "materials_consumed": False,
@@ -12648,6 +12654,19 @@ async def create_tax_invoice(data: TaxInvoiceCreate, request: Request):
     else:
         doc["qr_code"] = ""
     await db.tax_invoices.insert_one(doc)
+    # Fix 4 — Tax invoices DELIVER goods; decrement on-hand stock for every
+    # line that references an actual item (skips free-text/service lines).
+    # Skips draft / cancelled invoices.
+    inv_status = (doc.get("status") or "issued").lower()
+    if inv_status not in ("draft", "cancelled"):
+        for ln in lines:
+            item_id = ln.get("item_id")
+            qty = float(ln.get("quantity") or 0)
+            if item_id and qty > 0:
+                await db.items.update_one(
+                    {"id": item_id},
+                    {"$inc": {"current_stock": -qty}},
+                )
     return await _enrich_tax_invoice(doc)
 
 @crm_router.put("/tax-invoices/{tid}")
@@ -13006,6 +13025,15 @@ async def convert_proforma_to_tax_invoice(pid: str, payload: dict = Body(default
     }
     doc["qr_code"] = await _build_upi_qr_payload(doc["grand_total"], invoice_no) if p_currency == "INR" else ""
     await db.tax_invoices.insert_one(doc)
+    # Decrement stock for every line item (proforma→tax invoice path also delivers goods).
+    for ln in lines:
+        item_id = ln.get("item_id")
+        qty = float(ln.get("quantity") or 0)
+        if item_id and qty > 0:
+            await db.items.update_one(
+                {"id": item_id},
+                {"$inc": {"current_stock": -qty}},
+            )
     await db.proforma_invoices.update_one(
         {"id": pid},
         {"$set": {

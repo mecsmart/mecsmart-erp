@@ -1151,12 +1151,14 @@ export default function BOMPage() {
                                 <input type="checkbox" checked={comp.is_alternate} onChange={(e) => updateComponent(index, 'is_alternate', e.target.checked)} className="rounded" />
                                 <span>Alt</span>
                               </label>
-                              {/* Show the COMPONENT ITEM's own variant values (read-only, from
-                                  Item.variant_attributes). In the new architecture, components
-                                  define their own variants and the production picker (MO/SO)
-                                  chooses which variant to consume — no per-row BOM filter needed. */}
+                              {/* Show the COMPONENT ITEM's own variant values (read-only).
+                                  ONLY for leaf items (CP / RM) — SG / FG components carry stale
+                                  legacy own-variant data; their real variants come from their
+                                  sub-BOM and are shown in the parent's "Product Variants" block at the top. */}
                               {(() => {
-                                const cAttrs = compItem?.variant_attributes;
+                                if (!compItem) return null;
+                                if (!['component', 'raw_material'].includes(compItem.category)) return null;
+                                const cAttrs = compItem.variant_attributes;
                                 if (!cAttrs || cAttrs.length === 0) return null;
                                 // Flatten all values into chips: "16GT 24GT 30GT" (across attrs).
                                 const chips = [];
