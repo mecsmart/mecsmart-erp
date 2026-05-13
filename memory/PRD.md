@@ -20,7 +20,12 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-13 (newest)** — **PO line description UX + edit-preservation fix (DONE & VERIFIED ✅):**
+- **2026-05-13 (newest)** — **BOM panel expand fix + DC dialog Quotation-style table (DONE & VERIFIED ✅):**
+  1. **BOM panel not expanding (regression)**: My recent `/rollup-costs` batched-preload change seeded `allExplosions[bomId]` with a SKELETON `{ explosion: [], ...costs }` so panel headers could paint cost tags immediately. Unfortunately `ensureExplosion()` then short-circuited on `if (allExplosions[bomId])` and returned the skeleton — so expanded panels showed no components. Fixed by treating cache entries as complete only when `explosion` is a non-empty array, and merging fresh `/explode` data into the existing rollup-cost fields on first expand.
+  2. **DC line-items table congested**: The Manual DC dialog used a `grid-cols-12` Tailwind layout where Qty was crammed into 1 col-span. Replaced with the exact same `<table className="line-items-grid">` pattern used by Quotation editor: `# | Item Name & Description | UOM | Qty | Unit Price (₹) | Charges/Unit (₹) | Notes | ×`. Column widths match quotation (Qty=80px, UOM=70px, Unit Price=110px, Charges=110px, Description=300px min). Inputs use `.grid-input.mono.num` for right-aligned monospace numerics. Dialog widened to `max-w-5xl` to accommodate the new layout.
+  - Verified via Playwright: BOM expand on the first two FG panels rendered full component tables; DC dialog opens with the quotation-style table, lazy item search still works (50 options on "RM" search), item-pick auto-populates UOM + Unit Price.
+
+- **2026-05-13** — **PO line description UX + edit-preservation fix (DONE & VERIFIED ✅):**
   - **Symptom**: Users reported they couldn't add additional description on PO line items even with edit/create rights.
   - **Root causes (two)**:
     1. The description textarea had `rows={1}` and ~28px min-height — visually appeared as a thin strip under the item chip, making users think it was read-only or part of the item-select badge. Hard to see/edit the existing text or know it was a separate field.

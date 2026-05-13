@@ -1068,7 +1068,7 @@ export default function JobWorkPage() {
 
       {/* Manual DC Dialog — standalone DC (no parent SC) */}
       <Dialog open={manualDcDialog} onOpenChange={setManualDcDialog}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="manual-dc-dialog">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" data-testid="manual-dc-dialog">
           <DialogHeader><DialogTitle className="font-[Chivo]">{manualDcForm.id ? 'Edit Manual Delivery Challan' : 'Create Manual Delivery Challan'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3">
             <div className="grid grid-cols-3 gap-3">
@@ -1099,95 +1099,105 @@ export default function JobWorkPage() {
                 <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="border rounded-sm overflow-hidden">
+            <div className="border border-[#E5E7EB] rounded-sm overflow-hidden">
               <div className="bg-[#F3F4F6] px-3 py-2">
                 <span className="text-xs font-semibold uppercase text-[#4B5563]">Items to Ship ({manualDcForm.lines.length})</span>
               </div>
-              <div className="p-3 space-y-3">
-                {manualDcForm.lines.map((line, idx) => {
-                  const q = (line.item_search || '').trim().toLowerCase();
-                  // Show suggestions ONLY after the user starts typing — the
-                  // global items list (1k+ rows) is overwhelming if dumped on
-                  // open. Empty query = no suggestions shown.
-                  const filtered = q
-                    ? items.filter(i => (i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q))
-                    : [];
-                  const selected = items.find(i => i.id === line.item_id);
-                  const uom = selected?.unit_of_measure || 'pcs';
-                  const lineTotal = (parseFloat(line.quantity) || 0) * (parseFloat(line.unit_price) || 0);
-                  return (
-                    <div key={idx} className="border border-[#E5E7EB] rounded-sm p-2 bg-[#F9FAFB]" data-testid={`manual-dc-line-${idx}`}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-semibold text-[#374151]">Line {idx + 1}</span>
-                        {manualDcForm.lines.length > 1 && (
-                          <button type="button" onClick={() => removeManualDcLine(idx)} className="text-xs text-[#9B1C1C] hover:underline flex items-center gap-1" data-testid={`manual-dc-remove-line-${idx}`}><X className="w-3 h-3" />Remove</button>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-12 gap-2">
-                        <div className="col-span-5">
-                          <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Item *</label>
-                          {selected ? (
-                            <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-2 py-1" data-testid={`manual-dc-selected-${idx}`}>
-                              <div className="text-xs truncate">
-                                <span className="mono font-semibold">{selected.part_number}</span>
-                                <span className="mx-1">—</span>
-                                <span>{selected.name}</span>
-                                <span className="ml-2 text-[#6B7280]">Stock: {selected.current_stock || 0}</span>
-                              </div>
-                              <button type="button" className="text-[10px] text-[#9B1C1C] hover:underline ml-2" onClick={() => updateManualDcLine(idx, { item_id: '', item_search: '' })} data-testid={`manual-dc-clear-${idx}`}>Clear</button>
-                            </div>
-                          ) : (
-                            <>
-                              <input type="text" placeholder="Start typing part number or name…" value={line.item_search || ''} onChange={(e) => updateManualDcLine(idx, { item_search: e.target.value })} className="input-field text-xs" data-testid={`manual-dc-search-${idx}`} />
-                              {q && (
-                                <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-32 overflow-auto bg-white">
-                                  {filtered.length === 0 && <div className="px-2 py-2 text-[10px] text-center text-[#6B7280]">No matching items</div>}
-                                  {filtered.slice(0, 50).map(it => (
-                                    <button key={it.id} type="button" onClick={() => updateManualDcLine(idx, { item_id: it.id, item_search: '', unit_price: it.unit_cost || 0 })} data-testid={`manual-dc-option-${idx}-${it.id}`} className="w-full text-left px-2 py-1 text-[11px] border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]">
-                                      <span className="mono font-semibold">{it.part_number}</span>
-                                      <span className="mx-1">—</span>
-                                      <span>{it.name}</span>
-                                      <span className="ml-2 text-[#6B7280]">({it.unit_of_measure || 'pcs'})</span>
-                                      <span className="ml-2 text-[#6B7280]">Stock: {it.current_stock || 0}</span>
-                                    </button>
-                                  ))}
+              <div className="overflow-x-auto">
+                <table className="line-items-grid" data-testid="manual-dc-lines-table">
+                  <thead>
+                    <tr>
+                      <th className="row-num">#</th>
+                      <th style={{ minWidth: '300px' }}>Item Name &amp; Description</th>
+                      <th style={{ width: '70px' }}>UOM</th>
+                      <th style={{ width: '80px' }}>Qty</th>
+                      <th style={{ width: '110px' }}>Unit Price ({currencySymbol})</th>
+                      <th style={{ width: '110px' }}>Charges/Unit ({currencySymbol})</th>
+                      <th style={{ minWidth: '160px' }}>Notes</th>
+                      <th className="remove-cell"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {manualDcForm.lines.map((line, idx) => {
+                      const q = (line.item_search || '').trim().toLowerCase();
+                      // Show suggestions ONLY after the user starts typing — the
+                      // global items list (1k+ rows) is overwhelming if dumped on
+                      // open. Empty query = no suggestions shown.
+                      const filtered = q
+                        ? items.filter(i => (i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q))
+                        : [];
+                      const selected = items.find(i => i.id === line.item_id);
+                      const uom = selected?.unit_of_measure || 'pcs';
+                      const lineTotal = (parseFloat(line.quantity) || 0) * (parseFloat(line.unit_price) || 0);
+                      return (
+                        <tr key={idx} data-testid={`manual-dc-line-${idx}`}>
+                          <td className="row-num">{idx + 1}</td>
+                          <td>
+                            <div className="px-1 py-1">
+                              {selected ? (
+                                <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-2 py-1" data-testid={`manual-dc-selected-${idx}`}>
+                                  <div className="text-xs truncate">
+                                    <span className="mono font-semibold">{selected.part_number}</span>
+                                    <span className="mx-1">—</span>
+                                    <span>{selected.name}</span>
+                                    <span className="ml-2 text-[#6B7280]">Stock: {selected.current_stock || 0}</span>
+                                  </div>
+                                  <button type="button" className="text-[10px] text-[#9B1C1C] hover:underline ml-2" onClick={() => updateManualDcLine(idx, { item_id: '', item_search: '' })} data-testid={`manual-dc-clear-${idx}`}>Clear</button>
                                 </div>
+                              ) : (
+                                <>
+                                  <input type="text" placeholder="Start typing part number or name…" value={line.item_search || ''} onChange={(e) => updateManualDcLine(idx, { item_search: e.target.value })} className="grid-input" data-testid={`manual-dc-search-${idx}`} />
+                                  {q && (
+                                    <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-32 overflow-auto bg-white">
+                                      {filtered.length === 0 && <div className="px-2 py-2 text-[10px] text-center text-[#6B7280]">No matching items</div>}
+                                      {filtered.slice(0, 50).map(it => (
+                                        <button key={it.id} type="button" onClick={() => updateManualDcLine(idx, { item_id: it.id, item_search: '', unit_price: it.unit_cost || 0 })} data-testid={`manual-dc-option-${idx}-${it.id}`} className="w-full text-left px-2 py-1 text-[11px] border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]">
+                                          <span className="mono font-semibold">{it.part_number}</span>
+                                          <span className="mx-1">—</span>
+                                          <span>{it.name}</span>
+                                          <span className="ml-2 text-[#6B7280]">({it.unit_of_measure || 'pcs'})</span>
+                                          <span className="ml-2 text-[#6B7280]">Stock: {it.current_stock || 0}</span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </>
                               )}
-                            </>
-                          )}
-                        </div>
-                        <div className="col-span-1">
-                          <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">UOM</label>
-                          <div className="input-field text-xs text-center bg-[#F3F4F6] cursor-not-allowed" data-testid={`manual-dc-uom-${idx}`}>{selected ? uom : '—'}</div>
-                        </div>
-                        <div className="col-span-1">
-                          <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Qty *</label>
-                          <input type="number" min="0" step="0.01" value={line.quantity} onChange={(e) => updateManualDcLine(idx, { quantity: parseFloat(e.target.value) || 0 })} className="input-field text-xs mono" data-testid={`manual-dc-qty-${idx}`} />
-                        </div>
-                        <div className="col-span-2">
-                          <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Unit Price</label>
-                          <input type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => updateManualDcLine(idx, { unit_price: parseFloat(e.target.value) || 0 })} className="input-field text-xs mono" data-testid={`manual-dc-price-${idx}`} />
-                          {lineTotal > 0 && (
-                            <div className="text-[10px] text-[#6B7280] text-right mt-0.5">= {currencySymbol}{lineTotal.toFixed(2)}</div>
-                          )}
-                        </div>
-                        <div className="col-span-1">
-                          <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Charges/Unit</label>
-                          <input type="number" min="0" step="0.01" value={line.processing_charges} onChange={(e) => updateManualDcLine(idx, { processing_charges: parseFloat(e.target.value) || 0 })} className="input-field text-xs mono" data-testid={`manual-dc-charges-${idx}`} />
-                        </div>
-                        <div className="col-span-2">
-                          <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Notes</label>
-                          <input type="text" value={line.notes} onChange={(e) => updateManualDcLine(idx, { notes: e.target.value })} className="input-field text-xs" data-testid={`manual-dc-notes-${idx}`} />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                {/* Add-line button anchored at the bottom of the lines list so
-                    new lines always insert below the last one. */}
-                <div className="flex justify-end pt-1">
-                  <button type="button" onClick={addManualDcLine} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1 px-2 py-1 border border-dashed border-[#1D3557] rounded-sm" data-testid="manual-dc-add-line"><Plus className="w-3 h-3" />Add Line</button>
-                </div>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="static-cell text-center" data-testid={`manual-dc-uom-${idx}`}>{selected ? uom : '—'}</div>
+                          </td>
+                          <td>
+                            <input type="number" min="0" step="0.01" value={line.quantity} onChange={(e) => updateManualDcLine(idx, { quantity: parseFloat(e.target.value) || 0 })} className="grid-input mono num" data-testid={`manual-dc-qty-${idx}`} />
+                          </td>
+                          <td>
+                            <input type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => updateManualDcLine(idx, { unit_price: parseFloat(e.target.value) || 0 })} className="grid-input mono num" data-testid={`manual-dc-price-${idx}`} />
+                            {lineTotal > 0 && (
+                              <div className="text-[10px] text-[#6B7280] text-right px-1">= {currencySymbol}{lineTotal.toFixed(2)}</div>
+                            )}
+                          </td>
+                          <td>
+                            <input type="number" min="0" step="0.01" value={line.processing_charges} onChange={(e) => updateManualDcLine(idx, { processing_charges: parseFloat(e.target.value) || 0 })} className="grid-input mono num" data-testid={`manual-dc-charges-${idx}`} />
+                          </td>
+                          <td>
+                            <input type="text" value={line.notes} onChange={(e) => updateManualDcLine(idx, { notes: e.target.value })} className="grid-input" data-testid={`manual-dc-notes-${idx}`} />
+                          </td>
+                          <td className="remove-cell">
+                            {manualDcForm.lines.length > 1 && (
+                              <button type="button" onClick={() => removeManualDcLine(idx)} className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded p-1" title="Remove line" data-testid={`manual-dc-remove-line-${idx}`}><X className="w-3.5 h-3.5" /></button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {/* Add-line button anchored at the bottom of the lines list so
+                  new lines always insert below the last one. */}
+              <div className="flex justify-end p-2 bg-[#F9FAFB] border-t border-[#E5E7EB]">
+                <button type="button" onClick={addManualDcLine} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1 px-2 py-1 border border-dashed border-[#1D3557] rounded-sm" data-testid="manual-dc-add-line"><Plus className="w-3 h-3" />Add Line</button>
               </div>
             </div>
             <div>
