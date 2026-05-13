@@ -171,15 +171,27 @@ export default function PurchaseOrdersPage() {
 
   const updateLine = (index, field, value) => {
     const newLines = [...formData.lines];
+    const previousItemId = newLines[index].item_id;
     newLines[index] = { ...newLines[index], [field]: value };
-    if (field === 'item_id') {
+    if (field === 'item_id' && value !== previousItemId) {
+      // Item ACTUALLY changed (not a re-pick of the same item). Auto-fill
+      // master fields. We previously reset on every item_id assign, which
+      // wiped any custom description the user had typed when they happened
+      // to re-click the item picker. Only seed the description when there
+      // is no existing user-entered text, so re-selecting the same item
+      // (or a different one when the user has already typed a custom
+      // description) preserves their edits.
       const item = items.find(it => it.id === value);
       if (item) {
         newLines[index].unit_price = item.unit_cost || 0;
         newLines[index].hsn_code = item.hsn_code || '';
         newLines[index].gst_rate = item.gst_rate != null ? item.gst_rate : 18;
         newLines[index].uom = item.unit_of_measure || 'pcs';
-        newLines[index].description = item.description || '';
+        // Only auto-fill description if the line doesn't already have one.
+        const existing = (newLines[index].description || '').trim();
+        if (!existing) {
+          newLines[index].description = item.description || '';
+        }
       }
     }
     setFormData({ ...formData, lines: newLines });
@@ -572,11 +584,13 @@ export default function PurchaseOrdersPage() {
                                 testId={`po-line-item-${index}`}
                               />
                               <textarea
-                                rows={1}
+                                rows={2}
                                 value={line.description || ''}
                                 onChange={(e) => updateLine(index, 'description', e.target.value)}
                                 className="grid-textarea"
-                                placeholder="Description (printed on PO)"
+                                placeholder="Additional description (printed on PO) — click to edit or append…"
+                                title="Click and type to add/edit description for this line item"
+                                style={{ minHeight: 44, lineHeight: '1.35', resize: 'vertical' }}
                                 data-testid={`po-line-description-${index}`}
                               />
                             </div>

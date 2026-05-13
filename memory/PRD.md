@@ -20,7 +20,17 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-13 (newest)** — **JW & DC user rights fix (DONE & VERIFIED ✅):**
+- **2026-05-13 (newest)** — **PO line description UX + edit-preservation fix (DONE & VERIFIED ✅):**
+  - **Symptom**: Users reported they couldn't add additional description on PO line items even with edit/create rights.
+  - **Root causes (two)**:
+    1. The description textarea had `rows={1}` and ~28px min-height — visually appeared as a thin strip under the item chip, making users think it was read-only or part of the item-select badge. Hard to see/edit the existing text or know it was a separate field.
+    2. `updateLine` unconditionally reset `description = item.description` whenever the item_id field was assigned, even if the user re-clicked the SAME item (effectively wiping their typed description).
+  - **Fixes**:
+    1. Textarea bumped to `rows={2}` (~44px) with `resize: vertical`. Placeholder reworded to "Additional description (printed on PO) — click to edit or append…" and added `title` tooltip so users clearly see it's editable.
+    2. `updateLine` now only auto-fills the description when (a) the item ACTUALLY changed (`value !== previousItemId`), AND (b) the line's existing description is empty. Re-selecting the same item or switching items when the user has already typed a custom description now preserves their edits.
+  - Verified: Playwright test typed " + APPENDED EXTRA INFO" into PO000071 line 0, saved, dialog closed; reopening showed the appended text still there. Curl test also confirmed backend persistence (`PUT /api/purchase-orders/{id}` returns the user-entered description).
+
+- **2026-05-13** — **JW & DC user rights fix (DONE & VERIFIED ✅):**
   - **Root cause**: The sidebar in `Layout.js` was checking the `manufacturing` permission for all JW menu items (Subcontract Orders / Delivery Challans / Receipts), but the Role Groups admin page (`UserManagementPage.js`) saves permissions under the `job_work` key. So any user whose role-group had `job_work` ticked with `view/create/edit/delete` would never see the JW menu — the sidebar was reading the wrong key.
   - **Fix**: Changed `module: 'manufacturing'` → `module: 'job_work'` for all 3 JW sidebar items so the sidebar's `canView('job_work')` check matches what the role-group permission grid actually stores.
   - Verified via curl + Playwright: created a test inventory_manager user assigned to a role-group with only `job_work` ticked. Before fix → JW menu hidden. After fix → JW menu group + all 3 sub-items render correctly in the sidebar.
