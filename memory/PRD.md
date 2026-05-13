@@ -20,7 +20,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-13 (newest)** — **MO Category filter — phased workflow (DONE & VERIFIED ✅):**
+- **2026-05-13 (newest)** — **Per-FG panel filter (DONE & VERIFIED ✅):**
+  - Removed the global Category pill toolbar from the top of the MO page.
+  - Each main FG panel now carries its OWN inline filter pills `[All] [SG only] [Parts only]` directly inside the panel summary. Pills only render when the FG actually has SG/Part descendants worth filtering (e.g., FGs with no children show no pills).
+  - When `SG only` is active on a panel, the panel's tree collapses to FG + only SG descendants. When `Parts only` is active, the panel shows FG + only Part descendants (any intervening SG layers are skipped — Parts surface directly under the FG row at the same depth). Other FG panels are untouched.
+  - State (`panelFilters` keyed by FG MO id) persists across `fetchData()` refreshes — completing a child WO doesn't reset the filter on its panel.
+  - Verified via Playwright: 73 SG-only pills + 15 Parts-only pills + 154 All pills rendered (242 total per-panel filter elements). Global pills count = 0. Clicking Parts-only collapsed an FG tree from 3 rows to just FG + Part rows.
+
+- **2026-05-13** — **MO Category filter (REPLACED by per-FG panel filter above):**
   - Replaced the family-filter UX (which still exists as a secondary tool) with a primary **Category pill filter**: `[All | Parts | SG | FG]` next to the Status filter.
   - Phased processing workflow now possible: click **Parts** to see ONLY Part MOs (23 of 663) — process Phase 1. Click **SG** to see ONLY Sub-Assemblies (122 of 663) — Phase 2. Click **FG** for Phase 3 (401 of 663). Click **All** to return to the full tree.
   - When a category filter is active, rendering switches from "walk every WO up to its FG root and render the whole tree" to a **flat-mode** where each filtered WO becomes its own top-level row and child rendering is suppressed. This avoids the bug where filtering to Parts still showed full FG trees (with SGs and FG rows mixed in).

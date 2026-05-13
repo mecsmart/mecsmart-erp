@@ -61,14 +61,15 @@ export default function ManufacturingPage() {
   const [editingWorkCenter, setEditingWorkCenter] = useState(null);
   const [woStatusFilter, setWoStatusFilter] = useState('');
   const [moSearch, setMoSearch] = useState('');
-  // Category filter — drives the phased workflow:
-  //   Phase 1 = Parts (components) → process all leaf parts first.
-  //   Phase 2 = Sub-Assemblies → process SGs once their parts are done.
-  //   Phase 3 = Finished Goods → final assembly.
-  // Empty string = show all categories (default).
-  // Like all other filters, this is plain client state and SURVIVES every
-  // fetchData() refresh — completing a WO does NOT reset the user's filter.
-  const [woCategoryFilter, setWoCategoryFilter] = useState('');
+  // Per-panel category filter — keyed by the root FG MO id. Values:
+  //   '' / undefined  → show full tree (default)
+  //   'component'     → show ONLY Part descendants under that FG
+  //   'sub_assembly'  → show ONLY SG descendants under that FG
+  // Scoped per-panel so two FG trees can be filtered independently while
+  // the user processes them. State persists across fetchData() refreshes.
+  const [panelFilters, setPanelFilters] = useState({});
+  const setPanelFilter = (rootId, cat) =>
+    setPanelFilters(prev => ({ ...prev, [rootId]: cat }));
   // Family filter — when set to a parent WO id, the WO list is filtered to
   // that WO plus every descendant (recursively via parent_wo_id). Lets the
   // user focus on a single MO tree to process child SG/Parts first without
@@ -776,7 +777,6 @@ export default function ManufacturingPage() {
   const filteredWorkOrders = (woStatusFilter
     ? workOrders.filter(wo => wo.status === woStatusFilter)
     : workOrders).filter(wo => {
-      if (woCategoryFilter && getWoCategory(wo) !== woCategoryFilter) return false;
       if (familyWoIds && !familyWoIds.has(wo.id)) return false;
       if (!moSearch.trim()) return true;
       const q = moSearch.toLowerCase();
@@ -1064,25 +1064,6 @@ export default function ManufacturingPage() {
                   <span>Clear</span>
                 </button>
               )}
-              {/* Category pill filter — phased workflow: process Parts first,
-                  then SGs, then FG. Click again on the active pill to clear. */}
-              <div className="flex items-center gap-1 border border-[#E5E7EB] rounded-sm p-0.5 bg-white" data-testid="wo-category-filter">
-                {[
-                  { key: '', label: 'All' },
-                  { key: 'component', label: 'Parts' },
-                  { key: 'sub_assembly', label: 'SG' },
-                  { key: 'finished_good', label: 'FG' },
-                ].map(opt => (
-                  <button
-                    key={opt.key || 'all'}
-                    onClick={() => setWoCategoryFilter(opt.key)}
-                    className={`text-xs px-2.5 py-1 rounded-sm transition-colors ${woCategoryFilter === opt.key ? 'bg-[#1D3557] text-white font-medium' : 'text-[#4B5563] hover:bg-[#F3F4F6]'}`}
-                    data-testid={`wo-cat-${opt.key || 'all'}`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
               {/* Active family filter chip — visible only when a parent MO is being focused on. */}
               {familyFilterWoId && (
                 <div className="flex items-center gap-1 px-2 py-1 bg-[#E1EFFE] border border-[#1D3557] rounded-sm text-xs" data-testid="family-filter-chip">
@@ -1468,39 +1449,22 @@ export default function ManufacturingPage() {
                   // hit a true root (parent_wo_id == null OR parent missing).
                   // Render each unique root exactly once; renderMORow recursively
                   // walks down — guaranteed no duplicate top-level for a child MO.
-                  //
-                  // EXCEPTION: when a category filter is active (Parts / SG / FG),
-                  // we DO NOT walk up to roots — each filtered WO becomes its own
-                  // top-level row, and child rendering is suppressed below. This
-                  // gives the user a flat list of just-that-category items so they
-                  // can power through Phase 1 (Parts), Phase 2 (SGs), Phase 3 (FGs)
-                  // without other category rows distracting them.
                   const woById = new Map(workOrders.map(w => [w.id, w]));
                   const rootIdsOrder = [];
                   const rootIdSet = new Set();
-                  if (woCategoryFilter) {
-                    // Flat mode — every filtered WO is its own root.
-                    for (const wo of filteredWorkOrders) {
-                      if (!rootIdSet.has(wo.id)) {
-                        rootIdSet.add(wo.id);
-                        rootIdsOrder.push(wo.id);
-                      }
+                  for (const wo of filteredWorkOrders) {
+                    let cursor = wo;
+                    const visited = new Set();
+                    while (cursor && cursor.parent_wo_id && !visited.has(cursor.id)) {
+                      visited.add(cursor.id);
+                      const parent = woById.get(cursor.parent_wo_id);
+                      if (!parent) break;
+                      cursor = parent;
                     }
-                  } else {
-                    for (const wo of filteredWorkOrders) {
-                      let cursor = wo;
-                      const visited = new Set();
-                      while (cursor && cursor.parent_wo_id && !visited.has(cursor.id)) {
-                        visited.add(cursor.id);
-                        const parent = woById.get(cursor.parent_wo_id);
-                        if (!parent) break;
-                        cursor = parent;
-                      }
-                      const rootId = cursor?.id;
-                      if (rootId && !rootIdSet.has(rootId)) {
-                        rootIdSet.add(rootId);
-                        rootIdsOrder.push(rootId);
-                      }
+                    const rootId = cursor?.id;
+                    if (rootId && !rootIdSet.has(rootId)) {
+                      rootIdSet.add(rootId);
+                      rootIdsOrder.push(rootId);
                     }
                   }
                   const rootMOs = rootIdsOrder.map(id => woById.get(id)).filter(Boolean);
@@ -1512,8 +1476,18 @@ export default function ManufacturingPage() {
                   // a given <details> tree (defends against any malformed parent chain).
                   let renderedIds = new Set();
 
-                  const renderMORow = (wo, depth = 0) => {
+                  const renderMORow = (wo, depth = 0, panelFilter = '') => {
                     if (!wo || renderedIds.has(wo.id)) return null;
+                    // Per-panel category filter — root FG (depth 0) always renders;
+                    // a descendant that doesn't match the filter is hidden, BUT we
+                    // still walk into its own children at the SAME depth so any
+                    // matching grandchildren (e.g. Parts under a hidden SG layer)
+                    // surface directly under the FG panel.
+                    if (panelFilter && depth > 0 && getWoCategory(wo) !== panelFilter) {
+                      renderedIds.add(wo.id);
+                      const kids = workOrders.filter(w => w.parent_wo_id === wo.id);
+                      return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter))}</React.Fragment>;
+                    }
                     renderedIds.add(wo.id);
                     const progress = getWOProgress(wo);
                     const progressColor = getProgressColor(progress);
@@ -1633,7 +1607,7 @@ export default function ManufacturingPage() {
                             )}
                           </td>
                         </tr>
-                        {!woCategoryFilter && children.map(c => renderMORow(c, depth + 1))}
+                        {children.map(c => renderMORow(c, depth + 1, panelFilter))}
                       </React.Fragment>
                     );
                   };
@@ -1646,9 +1620,27 @@ export default function ManufacturingPage() {
                     const parentItem = parentMO.item || items.find(i => i.id === parentMO.item_id);
                     const children = getChildMOs(parentMO.id);
                     const catColor = getCatColor(parentMO);
+                    const activePanelFilter = panelFilters[parentMO.id] || '';
+                    // Walk descendants once to decide which filter pills to show
+                    // — no point offering a "Parts" pill if this FG has no Part
+                    // descendants. Cheap O(N) within the tree.
+                    const descendantCats = (() => {
+                      const cats = new Set();
+                      const walk = (pid) => {
+                        for (const w of workOrders) {
+                          if (w.parent_wo_id === pid) {
+                            const c = getWoCategory(w);
+                            if (c) cats.add(c);
+                            walk(w.id);
+                          }
+                        }
+                      };
+                      walk(parentMO.id);
+                      return cats;
+                    })();
                     return (
                       <details key={parentMO.id} open className="border rounded-sm overflow-hidden">
-                        <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none" style={{borderLeft: `4px solid ${catColor}`}}>
+                        <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none flex-wrap" style={{borderLeft: `4px solid ${catColor}`}}>
                           <ChevronRight className="w-4 h-4 text-[#4B5563]" />
                           <span className="mono font-bold text-sm" style={{color: catColor}}>{parentMO.wo_number}</span>
                           {parentMO.production_order?.order_number && <span className="text-[10px] bg-[#E1EFFE] text-[#1E429F] px-1.5 py-0.5 rounded font-medium mono" data-testid={`so-ref-${parentMO.id}`}>SO: {parentMO.production_order.order_number}</span>}
@@ -1656,11 +1648,37 @@ export default function ManufacturingPage() {
                           <span className="text-[10px] px-1.5 py-0.5 rounded text-white font-semibold" style={{backgroundColor: catColor}}>{getCatLabel(parentMO)}</span>
                           <span className={`text-[10px] px-1 rounded ${parentMO.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : parentMO.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : 'bg-[#FDF6B2] text-[#723B13]'}`}>{parentMO.status?.replace('_',' ')}</span>
                           {parentMO.is_subcontract && <span className="text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">Sub-Contract</span>}
+                          {/* Per-FG child filter — only render if this FG has
+                              SG or Part descendants worth filtering. Click on
+                              the active pill to clear back to All. */}
+                          {(descendantCats.has('component') || descendantCats.has('sub_assembly')) && (
+                            <div className="flex items-center gap-0.5 border border-[#D1D5DB] rounded-sm p-0.5 bg-white" data-testid={`panel-filter-${parentMO.id}`} onClick={(e) => e.preventDefault()}>
+                              <button
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPanelFilter(parentMO.id, ''); }}
+                                className={`text-[10px] px-1.5 py-0.5 rounded-sm ${activePanelFilter === '' ? 'bg-[#1D3557] text-white font-semibold' : 'text-[#4B5563] hover:bg-[#F3F4F6]'}`}
+                                data-testid={`panel-filter-${parentMO.id}-all`}
+                              >All</button>
+                              {descendantCats.has('sub_assembly') && (
+                                <button
+                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPanelFilter(parentMO.id, activePanelFilter === 'sub_assembly' ? '' : 'sub_assembly'); }}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded-sm ${activePanelFilter === 'sub_assembly' ? 'bg-[#1E429F] text-white font-semibold' : 'text-[#4B5563] hover:bg-[#F3F4F6]'}`}
+                                  data-testid={`panel-filter-${parentMO.id}-sg`}
+                                >SG only</button>
+                              )}
+                              {descendantCats.has('component') && (
+                                <button
+                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPanelFilter(parentMO.id, activePanelFilter === 'component' ? '' : 'component'); }}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded-sm ${activePanelFilter === 'component' ? 'bg-[#723B13] text-white font-semibold' : 'text-[#4B5563] hover:bg-[#F3F4F6]'}`}
+                                  data-testid={`panel-filter-${parentMO.id}-parts`}
+                                >Parts only</button>
+                              )}
+                            </div>
+                          )}
                           <span className="text-xs text-[#6B7280] ml-auto">{1 + children.length} MO(s)</span>
                         </summary>
                         <div className="overflow-x-auto sticky-header-scroll">
                           <table className="w-full data-table"><thead><tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
-                          <tbody>{renderMORow(parentMO, 0)}</tbody></table>
+                          <tbody>{renderMORow(parentMO, 0, activePanelFilter)}</tbody></table>
                         </div>
                       </details>
                     );
