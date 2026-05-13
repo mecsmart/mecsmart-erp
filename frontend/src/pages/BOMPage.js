@@ -170,45 +170,48 @@ export default function BOMPage() {
       const signal = fetchAbortRef.current?.signal;
       const { data } = await api.get(`/api/bom${params}`, { signal });
       setBoms(data);
-      setLoading(false); // Show the table immediately — don't block on explosions
+      setLoading(false); // Show the table immediately — don't block on rollups
 
       if (skipExplosions) return;
 
-      // Background-load explosions for every active BOM so inline rollup +
-      // process-cost tags appear on each panel header without the user
-      // having to expand it. We cap concurrency with a sliding window
-      // (`MAX_PARALLEL` simultaneous in-flight requests) and update state
-      // as soon as EACH response arrives — UI fills in row-by-row instead of
-      // chunk-by-chunk, so the user sees progress immediately.
-      // Workers abort early if the AbortController has been triggered (user
-      // navigated away), so the next page's API calls aren't blocked behind
-      // a flood of stale explosion calls.
-      const activeBoms = data.filter(b => b.status === 'active');
-      const MAX_PARALLEL = 8;
-      let cursor = 0;
-      const explosions = {};
-      const runOne = async () => {
-        while (cursor < activeBoms.length) {
-          if (signal?.aborted) return;
-          const idx = cursor++;
-          const bom = activeBoms[idx];
-          try {
-            const { data: expData } = await api.get(`/api/bom/${bom.id}/explode`, { signal });
-            explosions[bom.id] = expData;
-          } catch (e) {
-            if (signal?.aborted || e?.code === 'ERR_CANCELED') return; // Bail entire worker.
-            explosions[bom.id] = { explosion: [], total_rollup_cost: 0 };
-          }
-          if (signal?.aborted) return;
-          // Flush per-BOM so inline costs paint as soon as the response
-          // lands instead of waiting for the whole chunk to settle.
-          setAllExplosions(prev => ({ ...prev, [bom.id]: explosions[bom.id] }));
-        }
-      };
-      const workers = Array.from({ length: Math.min(MAX_PARALLEL, activeBoms.length) }, runOne);
-      // Don't await — let workers run in the background while the user
-      // interacts with the page. Errors are already swallowed inside runOne.
-      Promise.all(workers).catch(() => {});
+      // Single batched rollup call replaces the previous N parallel
+      // `/api/bom/{id}/explode` calls. The backend pre-loads all BOMs +
+      // items into memory and runs the recursive cost rollup in-process,
+      // so what used to take 30+ seconds on a list of 100 active BOMs now
+      // completes in well under a second.
+      //
+      // We only need the rollup *totals* on the list view (Total /
+      // FG Process inline tags). The full explosion (with per-component
+      // tree) is still fetched lazily via `/explode` when the user
+      // expands a panel.
+      try {
+        const rollupStatus = statusFilter || 'active';
+        const { data: rollups } = await api.get(`/api/bom/rollup-costs?status=${rollupStatus}`, { signal });
+        if (signal?.aborted) return;
+        // Store rollup-only entries under the existing allExplosions map so
+        // downstream UI (panel headers) reads `total_rollup_cost` /
+        // `fg_process_cost_per_unit` from the same shape it always has.
+        // The `explosion` array stays empty here — it's lazily populated
+        // on panel expansion (see `fetchBomExplosion`).
+        setAllExplosions(prev => {
+          const next = { ...prev };
+          Object.entries(rollups || {}).forEach(([bomId, r]) => {
+            // Don't clobber a full explosion that may already be loaded for a
+            // BOM the user previously expanded — only seed entries that
+            // don't yet have an explosion array.
+            const existing = next[bomId];
+            if (existing && Array.isArray(existing.explosion) && existing.explosion.length > 0) {
+              next[bomId] = { ...existing, ...r };
+            } else {
+              next[bomId] = { explosion: [], ...r };
+            }
+          });
+          return next;
+        });
+      } catch (e) {
+        if (e?.code === 'ERR_CANCELED') return;
+        console.error('Failed to fetch BOM rollup costs:', e);
+      }
     } catch (error) {
       if (error?.code === 'ERR_CANCELED') return;
       console.error('Failed to fetch BOMs:', error);

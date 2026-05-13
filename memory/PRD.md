@@ -20,7 +20,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-12 (newest)** — **JW/DC row expand UX revision (DONE & VERIFIED ✅):**
+- **2026-05-13 (newest)** — **BOM perf fix (N+1 → 1 batched call) + JW single-section rendering (DONE & VERIFIED ✅):**
+  1. **Fix 1 (BOM page took 30+ seconds to load)**: Root cause was an N+1 pattern — after fetching `/api/bom`, the frontend fired `/api/bom/{id}/explode` for EVERY active BOM (sliding window of 8 in parallel) just to render the inline `Total` / `FG Process` cost tags on each panel header. With 317 active BOMs this was ~317 HTTP round-trips, each running a recursive explosion with many per-component awaits.
+     - **Backend**: New endpoint `GET /api/bom/rollup-costs?status=active` pre-loads all BOMs + items into memory and runs the recursive rollup in-process with O(N) DB calls total. Returns `{bom_id: {fg_process_cost_per_unit, components_cost, total_rollup_cost}}` for ALL BOMs in a single response. Also optimized `GET /api/bom` to batch-load parent items in 1 `$in` query (was N individual `find_one`s).
+     - **Frontend**: Replaced the per-BOM `/explode` worker pool in `fetchBoms` with a single `/rollup-costs` call. Full `/explode` (with the per-component tree) is still fetched lazily when the user expands a panel.
+     - **Result**: `/api/bom` returns in **260 ms**, `/rollup-costs` in **123 ms**, total page network-idle **2.7 s** (was 30+ s). First Total tag visible **47 ms** after network-idle.
+  2. **Fix 2 (JW page — show only the relevant section per sidebar tab)**: Previously the page rendered 3 stacked `<details>` accordions (Subcontract Orders / Delivery Challans / Receipts) with chevron toggles; the URL `?tab=` param only controlled which was open by default. Now each section is conditionally rendered based on `activeTab` — clicking "Subcontract Orders" in the sidebar shows ONLY that section's card (no accordion summaries, no other sections). Same for DC and Receipts. The internal "Create DC" `<span role="button">` was also tightened to a proper `<button>`.
+
+- **2026-05-12** — **JW/DC row expand UX revision (DONE & VERIFIED ✅):**
   1. **Removed hover-to-expand** — replaced with an explicit per-row chevron toggle button (`>` / `v`) placed inside the Order # (JW) and DC # (DC) cells. Per-row expand state stored in a shared `Set` (`expandedRows`); user clicks the chevron to expand/collapse that row only. No accidental expansion on mouseover.
   2. **DC font size now matches JW** — DC's `FG/SA/Part` column renders part_no+name in `font-semibold text-[#1D3557] text-[11px] leading-tight` with a `text-[10px] leading-tight text-[#6B7280]` qty line (was inline `text-sm font-medium`). DC's `Items` column renders code on its own line (`mono text-[11px] font-medium`) and name+qty on the next (`text-[11px] text-[#4B5563]`), matching the JW RM column's compact 2-line layout exactly.
   - Added test IDs: `jw-row-toggle-{id}`, `dc-row-toggle-{id}`.

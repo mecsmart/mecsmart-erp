@@ -1794,12 +1794,102 @@ async def get_boms(request: Request, status: Optional[str] = None):
     if status:
         query["status"] = status
     boms = await db.boms.find(query, {"_id": 0}).to_list(1000)
-    
-    # Enrich with parent item info
+
+    # Batch-load parent items in ONE query instead of N find_one() calls.
+    # Previously the per-BOM loop did `db.items.find_one({"id": parent_item_id})`
+    # for every BOM, which on a 100-BOM list cost ~100 round-trips before the
+    # response even started streaming.
+    parent_ids = [b.get("parent_item_id") for b in boms if b.get("parent_item_id")]
+    items_map = {}
+    if parent_ids:
+        async for it in db.items.find({"id": {"$in": parent_ids}}, {"_id": 0}):
+            items_map[it["id"]] = it
     for bom in boms:
-        item = await db.items.find_one({"id": bom.get("parent_item_id")}, {"_id": 0})
-        bom["parent_item"] = item
+        bom["parent_item"] = items_map.get(bom.get("parent_item_id"))
     return boms
+
+
+@bom_router.get("/rollup-costs")
+async def get_all_bom_rollup_costs(request: Request, status: Optional[str] = "active"):
+    """Return rollup costs for ALL BOMs (default: active) in a single response.
+
+    Replaces the N+1 pattern where the BOM list page used to call
+    `/api/bom/{id}/explode` for every active BOM (one HTTP round-trip each)
+    just to render the inline `Total` / `FG Process` cost tags on the panel
+    headers. This endpoint pre-loads all items + all BOMs into memory, then
+    runs the same recursive cost rollup logic in-process with O(N) DB calls
+    total instead of O(N × depth × children).
+
+    Response shape:
+        { bom_id: { fg_process_cost_per_unit, components_cost, total_rollup_cost } }
+    """
+    await get_current_user(request)
+
+    # 1. Load every BOM (we need ALL of them, not just active, because child
+    #    BOMs of an active parent might be in another state — but for rollup
+    #    we only follow children that are status='active').
+    all_boms = await db.boms.find({}, {"_id": 0}).to_list(5000)
+    # Map: parent_item_id -> active BOM doc (single source of truth for child lookups)
+    active_bom_by_parent = {b["parent_item_id"]: b for b in all_boms if b.get("status") == "active"}
+    # Map: bom_id -> bom doc
+    bom_by_id = {b["id"]: b for b in all_boms}
+
+    # 2. Pre-load all items in one query so component cost lookups don't hit Mongo.
+    all_items = {}
+    async for it in db.items.find({}, {"_id": 0, "id": 1, "unit_cost": 1}):
+        all_items[it["id"]] = it
+
+    # 3. In-memory recursive rollup. Each BOM's cost is memoized in `cache` so
+    #    a shared sub-assembly used 10 times is computed once.
+    cache = {}
+
+    def rollup(bom_id: str, depth: int = 0):
+        if bom_id in cache:
+            return cache[bom_id]
+        if depth > 12:
+            return {"components_cost": 0.0, "fg_process_cost": 0.0, "total": 0.0}
+        bom = bom_by_id.get(bom_id)
+        if not bom:
+            return {"components_cost": 0.0, "fg_process_cost": 0.0, "total": 0.0}
+
+        components_cost = 0.0
+        for comp in bom.get("components", []):
+            cid = comp.get("item_id")
+            qty = comp.get("quantity", 0) or 0
+            child_bom = active_bom_by_parent.get(cid)
+            if child_bom:
+                child = rollup(child_bom["id"], depth + 1)
+                # Material cost = child's total rollup × qty.
+                # Process cost on the parent line uses the child's FG-process
+                # (single source of truth — same rule the /explode endpoint applies).
+                unit_cost = child["total"]
+                process_cost_per_unit = child["fg_process_cost"]
+            else:
+                item = all_items.get(cid)
+                unit_cost = (item or {}).get("unit_cost", 0) or 0
+                process_cost_per_unit = routings_total_cost(comp.get("routings", []))
+            components_cost += (unit_cost + process_cost_per_unit) * qty
+
+        fg_process_cost = routings_total_cost(bom.get("parent_routings", []))
+        total = components_cost + fg_process_cost
+        cache[bom_id] = {
+            "components_cost": components_cost,
+            "fg_process_cost": fg_process_cost,
+            "total": total,
+        }
+        return cache[bom_id]
+
+    # 4. Build the response. Filter by `status` query param (default: 'active').
+    target_boms = [b for b in all_boms if (not status or b.get("status") == status)]
+    out = {}
+    for b in target_boms:
+        r = rollup(b["id"])
+        out[b["id"]] = {
+            "fg_process_cost_per_unit": round(r["fg_process_cost"], 2),
+            "components_cost": round(r["components_cost"], 2),
+            "total_rollup_cost": round(r["total"], 2),
+        }
+    return out
 
 @bom_router.get("/{bom_id}")
 async def get_bom(bom_id: str, request: Request):

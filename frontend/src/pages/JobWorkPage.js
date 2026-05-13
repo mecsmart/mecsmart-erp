@@ -625,16 +625,19 @@ export default function JobWorkPage() {
         <div className="card-flat p-4"><p className="kpi-label">Processing Charges</p><p className="kpi-value">{formatCurrency(orders.reduce((s, o) => s + (o.processing_charges || 0), 0))}</p></div>
       </div>
 
-      {/* Collapsible sections (user-requested accordion layout). Each section can be
-          expanded/collapsed independently; default = orders open, others closed. */}
+      {/* Sections are now rendered one at a time based on the sidebar's
+          `?tab=` choice — instead of stacking accordions on the page, the
+          user sees ONLY the section they clicked into (orders / challans /
+          receipts). The collapsible accordion summaries / chevrons have
+          been removed; the section title is just the card header. */}
       <div className="space-y-3">
         {/* Subcontract Orders */}
-        <details className="card-flat" open={sectionsOpen.orders} onToggle={(e) => setSectionsOpen(s => ({ ...s, orders: e.target.open }))}>
-          <summary className="cursor-pointer px-4 py-3 flex items-center justify-between hover:bg-[#F9FAFB] select-none font-semibold text-[#111827] rounded-sm">
+        {activeTab === 'orders' && (
+        <div className="card-flat">
+          <div className="px-4 py-3 flex items-center justify-between font-semibold text-[#111827] border-b border-[#E5E7EB]" data-testid="jw-section-header-orders">
             <span className="flex items-center gap-2"><Truck className="w-4 h-4 text-[#1D3557]" /> Subcontract Orders <span className="text-xs text-[#6B7280] font-normal">({orders.length})</span></span>
-            <ChevronDown className="w-4 h-4 text-[#6B7280] details-chevron" />
-          </summary>
-          <div className="px-4 pb-4">
+          </div>
+          <div className="px-4 pb-4 pt-4">
           <div className="flex justify-end mb-4">
             {canCreate && <button onClick={() => setOrderDialog(true)} className="btn-primary flex items-center space-x-2" data-testid="create-jw-order-btn"><Plus className="w-4 h-4" /><span>New Subcontract Order</span></button>}
           </div>
@@ -768,22 +771,23 @@ export default function JobWorkPage() {
             )}
           </div>
           </div>
-        </details>
+        </div>
+        )}
 
         {/* Delivery Challans */}
-        <details className="card-flat" open={sectionsOpen.challans} onToggle={(e) => setSectionsOpen(s => ({ ...s, challans: e.target.open }))}>
-          <summary className="cursor-pointer px-4 py-3 flex items-center justify-between hover:bg-[#F9FAFB] select-none font-semibold text-[#111827] rounded-sm">
+        {activeTab === 'challans' && (
+        <div className="card-flat">
+          <div className="px-4 py-3 flex items-center justify-between font-semibold text-[#111827] border-b border-[#E5E7EB]" data-testid="jw-section-header-challans">
             <span className="flex items-center gap-2"><FileText className="w-4 h-4 text-[#1D3557]" /> Delivery Challans <span className="text-xs text-[#6B7280] font-normal">({challans.length})</span></span>
             <span className="flex items-center gap-2">
               {canCreate && (
-                <span role="button" tabIndex={0} onClick={(e) => { e.preventDefault(); e.stopPropagation(); openManualDC(); }} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1" data-testid="create-manual-dc-btn">
+                <button type="button" onClick={openManualDC} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1" data-testid="create-manual-dc-btn">
                   <Plus className="w-3 h-3" /> Create DC
-                </span>
+                </button>
               )}
-              <ChevronDown className="w-4 h-4 text-[#6B7280] details-chevron" />
             </span>
-          </summary>
-          <div className="px-4 pb-4">
+          </div>
+          <div className="px-4 pb-4 pt-4">
           <div className="card-flat overflow-hidden">
             {challans.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><FileText className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No delivery challans</p></div>
@@ -877,15 +881,16 @@ export default function JobWorkPage() {
             )}
           </div>
           </div>
-        </details>
+        </div>
+        )}
 
         {/* Receipts */}
-        <details className="card-flat" open={sectionsOpen.receipts} onToggle={(e) => setSectionsOpen(s => ({ ...s, receipts: e.target.open }))}>
-          <summary className="cursor-pointer px-4 py-3 flex items-center justify-between hover:bg-[#F9FAFB] select-none font-semibold text-[#111827] rounded-sm">
+        {activeTab === 'receipts' && (
+        <div className="card-flat">
+          <div className="px-4 py-3 flex items-center justify-between font-semibold text-[#111827] border-b border-[#E5E7EB]" data-testid="jw-section-header-receipts">
             <span className="flex items-center gap-2"><Package className="w-4 h-4 text-[#1D3557]" /> Receipts <span className="text-xs text-[#6B7280] font-normal">({receipts.length})</span></span>
-            <ChevronDown className="w-4 h-4 text-[#6B7280] details-chevron" />
-          </summary>
-          <div className="px-4 pb-4">
+          </div>
+          <div className="px-4 pb-4 pt-4">
           <div className="card-flat overflow-hidden">
             {receipts.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><Package className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No receipts</p></div>
@@ -911,7 +916,8 @@ export default function JobWorkPage() {
             )}
           </div>
           </div>
-        </details>
+        </div>
+        )}
       </div>
 
       {/* Create Order Dialog */}
