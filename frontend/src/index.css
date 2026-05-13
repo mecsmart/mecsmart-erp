@@ -306,25 +306,13 @@ details[open] > summary .details-chevron { transform: rotate(180deg); }
 }
 
 
-/* Items table fixed-layout safeguard — keeps the table within its scroll
-   wrapper instead of letting a single oversized cell push the layout past
-   the viewport. Long text wraps naturally; monospaced/numeric cells stay on
-   a single line. */
+/* Items table — keep the overall TABLE bounded to its scroll wrapper so a
+   single oversized cell can't push the page wider than the viewport. The
+   inner `overflow-x-auto` div will scroll horizontally if needed; the cells
+   keep their original auto-layout (no forced ellipsis/wrapping change). */
 [data-testid="items-table"] {
-  table-layout: fixed;
-}
-[data-testid="items-table"] td,
-[data-testid="items-table"] th {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-[data-testid="items-table"] td {
-  white-space: normal;
-  word-break: break-word;
-}
-[data-testid="items-table"] td.mono,
-[data-testid="items-table"] td .mono {
-  white-space: nowrap;
+  width: 100%;
+  max-width: 100%;
 }
 
 /* BOM tree styles */

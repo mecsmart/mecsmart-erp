@@ -1092,25 +1092,8 @@ export default function ItemsPage() {
             <p>No items found</p>
           </div>
         ) : (
-          <div className="overflow-x-auto sticky-header-scroll" style={{ maxWidth: '100%' }}>
-            <table
-              ref={tableRef}
-              className="w-full data-table"
-              data-testid="items-table"
-              style={{
-                // `table-layout: fixed` plus explicit min-width keeps the
-                // overall table from runaway-growing past the viewport when a
-                // single cell has a wide value. The browser will distribute
-                // column widths based on the <th> hints (we already set
-                // minWidth on Stock/Group) and clip long cell text via
-                // overflow inside each <td>. Without this, dragging or
-                // a content-heavy cell would push the table off-screen and
-                // there's no way to "take back" the width.
-                tableLayout: 'fixed',
-                minWidth: '1100px',
-                maxWidth: 'none',
-              }}
-            >
+          <div className="overflow-x-auto sticky-header-scroll">
+            <table ref={tableRef} className="w-full data-table" data-testid="items-table">
               <thead>
                 <tr>
                   <th

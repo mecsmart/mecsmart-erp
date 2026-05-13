@@ -7836,7 +7836,10 @@ async def export_bom_parts_only_excel(request: Request, bom_id: str):
         raise HTTPException(status_code=404, detail="BOM not found")
     root_item = await db.items.find_one({"id": root_bom["parent_item_id"]}, {"_id": 0}) or {}
 
-    # Aggregated leaf parts: { item_id: {"item": <doc>, "qty": float} }.
+    # Aggregated leaf parts: { item_id: {"item": <doc>, "qty": float, "is_sg_no_bom": bool} }.
+    # `is_sg_no_bom` flags sub-assemblies / finished-goods that surfaced as
+    # leaves because no active BOM was found — useful so the procurement
+    # team can spot items needing a BOM to be authored.
     parts: Dict[str, Dict[str, Any]] = {}
 
     async def walk(bom: Dict[str, Any], multiplier: float, depth: int = 0):
@@ -7851,18 +7854,24 @@ async def export_bom_parts_only_excel(request: Request, bom_id: str):
             citem = await db.items.find_one({"id": cid}, {"_id": 0})
             if not citem:
                 continue
-            # Recurse into active child BOMs for sub-assemblies / FGs (which
-            # are intermediates, not parts). Anything else (RM / component) is
-            # a leaf and gets aggregated.
-            child_bom = None
-            if citem.get("category") in ("sub_assembly", "finished_good"):
-                child_bom = await db.boms.find_one(
-                    {"parent_item_id": cid, "status": "active"}, {"_id": 0}
-                )
+            # Recurse into ANY active child BOM — not just SG/FG. A component
+            # can also have its own BOM (e.g., a fabricated bracket that has
+            # sub-parts listed). The earlier check was restricted to
+            # `sub_assembly` and `finished_good`, which meant components with
+            # their own BOMs were exported as leaves instead of being exploded
+            # into the parts they carry. Now we always look up an active BOM;
+            # if one exists for this item, we drill in.
+            child_bom = await db.boms.find_one(
+                {"parent_item_id": cid, "status": "active"}, {"_id": 0}
+            )
             if child_bom:
                 await walk(child_bom, qty, depth + 1)
             else:
-                entry = parts.setdefault(cid, {"item": citem, "qty": 0.0})
+                entry = parts.setdefault(cid, {
+                    "item": citem,
+                    "qty": 0.0,
+                    "is_sg_no_bom": citem.get("category") in ("sub_assembly", "finished_good"),
+                })
                 entry["qty"] += qty
 
     await walk(root_bom, 1.0)
@@ -7903,17 +7912,22 @@ async def export_bom_parts_only_excel(request: Request, bom_id: str):
 
     row_num = 3
     total_value = 0.0
+    sg_no_bom_count = 0
     for idx, p in enumerate(sorted_parts, 1):
         it = p["item"]
         qty = round(p["qty"], 4)
         unit_cost = float(it.get("unit_cost") or 0)
         line_cost = round(qty * unit_cost, 2)
         total_value += line_cost
+        category_label = (it.get("category") or "").replace("_", " ").title()
+        if p.get("is_sg_no_bom"):
+            sg_no_bom_count += 1
+            category_label = f"{category_label}  ⚠ no BOM"
         values = [
             idx,
             it.get("part_number", ""),
             it.get("name", ""),
-            (it.get("category") or "").replace("_", " ").title(),
+            category_label,
             it.get("hsn_code", ""),
             it.get("unit_of_measure", "pcs"),
             qty,
@@ -7927,6 +7941,9 @@ async def export_bom_parts_only_excel(request: Request, bom_id: str):
             cell.border = thin_border
             if col in (1, 7, 8, 9, 10):
                 cell.alignment = Alignment(horizontal='right')
+            # Highlight SG rows that surfaced as leaves due to missing BOM.
+            if p.get("is_sg_no_bom"):
+                cell.fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
         row_num += 1
 
     # Totals row.
@@ -7939,6 +7956,21 @@ async def export_bom_parts_only_excel(request: Request, bom_id: str):
     total_cell.font = Font(bold=True)
     total_cell.alignment = Alignment(horizontal='right')
     total_cell.fill = PatternFill(start_color="DEF7EC", end_color="DEF7EC", fill_type="solid")
+
+    # If any sub-assembly surfaced as a leaf because it has no active BOM,
+    # add a one-line callout so the user knows why it shows up flat (and can
+    # author the missing BOM).
+    if sg_no_bom_count:
+        note_row = total_row + 1
+        ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row, end_column=len(headers))
+        note = ws.cell(
+            row=note_row, column=1,
+            value=f"⚠ {sg_no_bom_count} sub-assembly row(s) shown above have NO active BOM — they were "
+                  "exported as leaves. Author a BOM for those items to drill them into their parts.",
+        )
+        note.font = Font(italic=True, color="723B13", size=10)
+        note.fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+        note.alignment = Alignment(horizontal='left', wrap_text=True)
 
     # Column widths.
     widths = [6, 18, 30, 14, 10, 8, 12, 12, 14, 12, 18]
