@@ -1706,7 +1706,35 @@ export default function BOMPage() {
                           <span className="text-[11px] bg-[#FDF6B2] text-[#723B13] px-2 py-0.5 rounded mono font-medium" title="FG Parent Process Cost per unit">FG Process: {formatCurrency(explosion.fg_process_cost_per_unit)}</span>
                         )}
                         {canSeeRollupCost && <span className="mono text-sm font-bold">Total: {formatCurrency(totalCost)}</span>}
-                        {activeBom && <button onClick={(e) => { e.stopPropagation(); fetchBomExplosion(activeBom.id); }} className="p-1 hover:bg-white/20 rounded" title="Refresh Costs (re-pull from BOM)" data-testid={`refresh-bom-${pid}`}><RefreshCw className="w-4 h-4" /></button>}
+                        {activeBom && <button onClick={async (e) => {
+                          e.stopPropagation();
+                          // The refresh button must update the INLINE PANEL state
+                          // (`allExplosions[bomId]`) — not the modal-only state
+                          // `bomExplosion`. Previously this called
+                          // `fetchBomExplosion()` which only set the View-dialog
+                          // state, so clicking refresh while the panel was open
+                          // had no visible effect on the costs shown in the panel.
+                          try {
+                            const { data } = await api.get(`/api/bom/${activeBom.id}/explode`);
+                            setAllExplosions(prev => ({ ...prev, [activeBom.id]: data }));
+                            // Also refresh the batched rollup so other unexpanded
+                            // panels reflect any upstream item-cost changes.
+                            try {
+                              const { data: rollups } = await api.get(`/api/bom/rollup-costs?status=${statusFilter || 'active'}`);
+                              setAllExplosions(prev => {
+                                const next = { ...prev };
+                                Object.entries(rollups || {}).forEach(([bid, r]) => {
+                                  const existing = next[bid] || {};
+                                  // Don't clobber explosion arrays already loaded.
+                                  next[bid] = { ...existing, ...r };
+                                });
+                                return next;
+                              });
+                            } catch {}
+                          } catch (err) {
+                            console.error('Refresh BOM costs failed:', err);
+                          }
+                        }} className="p-1 hover:bg-white/20 rounded" title="Refresh Costs (re-pull from BOM)" data-testid={`refresh-bom-${pid}`}><RefreshCw className="w-4 h-4" /></button>}
                         {activeBom && (
                           <button
                             onClick={async (e) => {

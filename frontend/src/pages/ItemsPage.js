@@ -1105,7 +1105,7 @@ export default function ItemsPage() {
                     <span className="sort-chevron">{partNumberSort === 'desc' ? '▼' : '▲'}</span>
                   </th>
                   <th>Name</th>
-                  <th>Group</th>
+                  <th style={{ minWidth: '180px' }}>Group</th>
                   <th>HSN</th>
                   <th className="text-right">GST%</th>
                   <th className="text-right" style={{ minWidth: '220px' }}>Stock</th>

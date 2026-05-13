@@ -1840,6 +1840,36 @@ async def get_all_bom_rollup_costs(request: Request, status: Optional[str] = "ac
     async for it in db.items.find({}, {"_id": 0, "id": 1, "unit_cost": 1}):
         all_items[it["id"]] = it
 
+    # 2b. Pre-load SC-order job-work-part charges (latest per item_id) and
+    #     completed-WO operation cost (latest per item_id). The /explode
+    #     endpoint falls back to these when a component has no routings, so
+    #     rollup-costs must mirror that fallback or the panel total visibly
+    #     changes when the user expands the panel.
+    sc_charge_by_item: Dict[str, float] = {}
+    async for so in db.subcontract_orders.find(
+        {"status": {"$in": ["in_progress", "completed"]}, "job_work_parts": {"$exists": True, "$ne": []}},
+        {"_id": 0, "job_work_parts": 1, "created_at": 1},
+    ).sort("created_at", -1):
+        for jwp in so.get("job_work_parts", []):
+            iid = jwp.get("item_id")
+            charge = float(jwp.get("charges") or 0)
+            # Keep the FIRST hit per item (sort is created_at DESC → latest first).
+            if iid and charge and iid not in sc_charge_by_item:
+                sc_charge_by_item[iid] = charge
+    wo_proc_by_item: Dict[str, float] = {}
+    async for wo in db.work_orders.find(
+        {"status": "completed", "operations_status": {"$exists": True}},
+        {"_id": 0, "item_id": 1, "operations_status": 1, "actual_end": 1},
+    ).sort("actual_end", -1):
+        iid = wo.get("item_id")
+        if not iid or iid in wo_proc_by_item:
+            continue
+        total = 0.0
+        for op in wo.get("operations_status", []):
+            total += float(op.get("process_cost_per_unit") or 0)
+        if total:
+            wo_proc_by_item[iid] = total
+
     # 3. In-memory recursive rollup. Each BOM's cost is memoized in `cache` so
     #    a shared sub-assembly used 10 times is computed once.
     cache = {}
@@ -1860,15 +1890,24 @@ async def get_all_bom_rollup_costs(request: Request, status: Optional[str] = "ac
             child_bom = active_bom_by_parent.get(cid)
             if child_bom:
                 child = rollup(child_bom["id"], depth + 1)
-                # Material cost = child's total rollup × qty.
-                # Process cost on the parent line uses the child's FG-process
-                # (single source of truth — same rule the /explode endpoint applies).
-                unit_cost = child["total"]
+                # Match the /explode endpoint EXACTLY (single source of truth):
+                #   Material Cost  = sum of child's children-only rollup (no FG process)
+                #                  → that's child["components_cost"], NOT child["total"].
+                #   Process Cost   = child's own FG-process (parent_routings).
+                # The previous version used child["total"] for unit_cost AND added
+                # child["fg_process_cost"] again, double-counting it. /rollup-costs
+                # was therefore inflated vs. /explode, causing the panel total to
+                # change after the user clicked to expand a BOM.
+                unit_cost = child["components_cost"]
                 process_cost_per_unit = child["fg_process_cost"]
             else:
                 item = all_items.get(cid)
                 unit_cost = (item or {}).get("unit_cost", 0) or 0
                 process_cost_per_unit = routings_total_cost(comp.get("routings", []))
+            # Same SC/WO fallback as /explode — only kicks in when no routing
+            # has been configured for this leaf/component.
+            if not process_cost_per_unit:
+                process_cost_per_unit = sc_charge_by_item.get(cid, 0) or wo_proc_by_item.get(cid, 0)
             components_cost += (unit_cost + process_cost_per_unit) * qty
 
         fg_process_cost = routings_total_cost(bom.get("parent_routings", []))
