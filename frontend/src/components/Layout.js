@@ -41,9 +41,14 @@ const storesGroupItems = [
 ];
 
 const jobWorkGroupItems = [
-  { name: 'Subcontract Orders', href: '/job-work?tab=orders', icon: Truck, module: 'manufacturing' },
-  { name: 'Delivery Challans', href: '/job-work?tab=challans', icon: FileText, module: 'manufacturing' },
-  { name: 'Receipts', href: '/job-work?tab=receipts', icon: Package, module: 'manufacturing' },
+  // Module key MUST match what `UserManagementPage.js` exposes in the Role
+  // Groups permission grid (`job_work`). Previously these were keyed under
+  // `manufacturing`, which meant a user whose role-group had `job_work` ticked
+  // would NEVER see the JW menu — the sidebar was reading the wrong key from
+  // their permissions map.
+  { name: 'Subcontract Orders', href: '/job-work?tab=orders', icon: Truck, module: 'job_work' },
+  { name: 'Delivery Challans', href: '/job-work?tab=challans', icon: FileText, module: 'job_work' },
+  { name: 'Receipts', href: '/job-work?tab=receipts', icon: Package, module: 'job_work' },
 ];
 
 const crmMarketingItems = [

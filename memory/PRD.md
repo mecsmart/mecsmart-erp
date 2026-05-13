@@ -20,7 +20,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-13 (newest)** — **Manual DC: UOM, Unit Price, Edit, lazy item search (DONE & VERIFIED ✅):**
+- **2026-05-13 (newest)** — **JW & DC user rights fix (DONE & VERIFIED ✅):**
+  - **Root cause**: The sidebar in `Layout.js` was checking the `manufacturing` permission for all JW menu items (Subcontract Orders / Delivery Challans / Receipts), but the Role Groups admin page (`UserManagementPage.js`) saves permissions under the `job_work` key. So any user whose role-group had `job_work` ticked with `view/create/edit/delete` would never see the JW menu — the sidebar was reading the wrong key.
+  - **Fix**: Changed `module: 'manufacturing'` → `module: 'job_work'` for all 3 JW sidebar items so the sidebar's `canView('job_work')` check matches what the role-group permission grid actually stores.
+  - Verified via curl + Playwright: created a test inventory_manager user assigned to a role-group with only `job_work` ticked. Before fix → JW menu hidden. After fix → JW menu group + all 3 sub-items render correctly in the sidebar.
+  - **Note**: This is a frontend-only fix. The `Edit JW`, `Send DC`, `Create DC` button-level guards already correctly checked `hasPermission('job_work', ...)` in `JobWorkPage.js`, so backend permissions and inline UI guards were never broken — only the navigation entry was hidden by the module key mismatch.
+
+- **2026-05-13** — **Manual DC: UOM, Unit Price, Edit, lazy item search (DONE & VERIFIED ✅):**
   1. **Items list hidden by default** — dropdown only appears after the user types ≥1 character (empty search shows nothing). Placeholder updated to "Start typing part number or name…".
   2. **UOM column** rendered next to the item field (read-only, populated from `item.unit_of_measure`).
   3. **Unit Price column** added (auto-fills from `item.unit_cost` when an item is selected; user can override). Line total `= ₹{qty × price}` shown inline below the price input.
