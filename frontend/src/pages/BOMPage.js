@@ -143,16 +143,28 @@ export default function BOMPage() {
   // Lazy-load explosion data for a single BOM (used by inline rollup cost,
   // panel expansion, and the Print button). Caches in `allExplosions` so
   // repeated views don't refetch.
+  // Note: the `/rollup-costs` batched preload seeds `allExplosions[bomId]`
+  // with a SKELETON `{ explosion: [], total_rollup_cost, ... }` so panel
+  // headers can render cost tags without fetching the full tree. We must
+  // therefore only treat a cache entry as complete when `explosion` is a
+  // non-empty array — otherwise the BOM panel would never load its
+  // component tree on first expand.
   const ensureExplosion = async (bomId) => {
     if (!bomId) return null;
-    if (allExplosions[bomId]) return allExplosions[bomId];
+    const cached = allExplosions[bomId];
+    if (cached && Array.isArray(cached.explosion) && cached.explosion.length > 0) {
+      return cached;
+    }
     try {
       const { data } = await api.get(`/api/bom/${bomId}/explode`);
-      setAllExplosions(prev => ({ ...prev, [bomId]: data }));
+      // Merge with any previously-seeded rollup fields so cost tags stay
+      // consistent if the dedicated /rollup-costs endpoint and /explode
+      // disagree on rounding.
+      setAllExplosions(prev => ({ ...prev, [bomId]: { ...(prev[bomId] || {}), ...data } }));
       return data;
     } catch {
       const empty = { explosion: [], total_rollup_cost: 0 };
-      setAllExplosions(prev => ({ ...prev, [bomId]: empty }));
+      setAllExplosions(prev => ({ ...prev, [bomId]: { ...(prev[bomId] || {}), ...empty } }));
       return empty;
     }
   };
