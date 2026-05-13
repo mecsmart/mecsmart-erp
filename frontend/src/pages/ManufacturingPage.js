@@ -61,6 +61,14 @@ export default function ManufacturingPage() {
   const [editingWorkCenter, setEditingWorkCenter] = useState(null);
   const [woStatusFilter, setWoStatusFilter] = useState('');
   const [moSearch, setMoSearch] = useState('');
+  // Category filter — drives the phased workflow:
+  //   Phase 1 = Parts (components) → process all leaf parts first.
+  //   Phase 2 = Sub-Assemblies → process SGs once their parts are done.
+  //   Phase 3 = Finished Goods → final assembly.
+  // Empty string = show all categories (default).
+  // Like all other filters, this is plain client state and SURVIVES every
+  // fetchData() refresh — completing a WO does NOT reset the user's filter.
+  const [woCategoryFilter, setWoCategoryFilter] = useState('');
   // Family filter — when set to a parent WO id, the WO list is filtered to
   // that WO plus every descendant (recursively via parent_wo_id). Lets the
   // user focus on a single MO tree to process child SG/Parts first without
@@ -759,9 +767,16 @@ export default function ManufacturingPage() {
     return w?.wo_number || familyFilterWoId.slice(0, 8);
   }, [familyFilterWoId, workOrders]);
 
+  // Helper: resolve a WO's effective item category — prefer the embedded
+  // `wo.item.category` (populated by the backend join) and fall back to the
+  // local items map. Returns one of: 'finished_good' | 'sub_assembly' |
+  // 'component' | undefined.
+  const getWoCategory = (wo) => wo.item?.category || items.find(i => i.id === wo.item_id)?.category;
+
   const filteredWorkOrders = (woStatusFilter
     ? workOrders.filter(wo => wo.status === woStatusFilter)
     : workOrders).filter(wo => {
+      if (woCategoryFilter && getWoCategory(wo) !== woCategoryFilter) return false;
       if (familyWoIds && !familyWoIds.has(wo.id)) return false;
       if (!moSearch.trim()) return true;
       const q = moSearch.toLowerCase();
@@ -1049,6 +1064,25 @@ export default function ManufacturingPage() {
                   <span>Clear</span>
                 </button>
               )}
+              {/* Category pill filter — phased workflow: process Parts first,
+                  then SGs, then FG. Click again on the active pill to clear. */}
+              <div className="flex items-center gap-1 border border-[#E5E7EB] rounded-sm p-0.5 bg-white" data-testid="wo-category-filter">
+                {[
+                  { key: '', label: 'All' },
+                  { key: 'component', label: 'Parts' },
+                  { key: 'sub_assembly', label: 'SG' },
+                  { key: 'finished_good', label: 'FG' },
+                ].map(opt => (
+                  <button
+                    key={opt.key || 'all'}
+                    onClick={() => setWoCategoryFilter(opt.key)}
+                    className={`text-xs px-2.5 py-1 rounded-sm transition-colors ${woCategoryFilter === opt.key ? 'bg-[#1D3557] text-white font-medium' : 'text-[#4B5563] hover:bg-[#F3F4F6]'}`}
+                    data-testid={`wo-cat-${opt.key || 'all'}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
               {/* Active family filter chip — visible only when a parent MO is being focused on. */}
               {familyFilterWoId && (
                 <div className="flex items-center gap-1 px-2 py-1 bg-[#E1EFFE] border border-[#1D3557] rounded-sm text-xs" data-testid="family-filter-chip">
@@ -1434,22 +1468,39 @@ export default function ManufacturingPage() {
                   // hit a true root (parent_wo_id == null OR parent missing).
                   // Render each unique root exactly once; renderMORow recursively
                   // walks down — guaranteed no duplicate top-level for a child MO.
+                  //
+                  // EXCEPTION: when a category filter is active (Parts / SG / FG),
+                  // we DO NOT walk up to roots — each filtered WO becomes its own
+                  // top-level row, and child rendering is suppressed below. This
+                  // gives the user a flat list of just-that-category items so they
+                  // can power through Phase 1 (Parts), Phase 2 (SGs), Phase 3 (FGs)
+                  // without other category rows distracting them.
                   const woById = new Map(workOrders.map(w => [w.id, w]));
                   const rootIdsOrder = [];
                   const rootIdSet = new Set();
-                  for (const wo of filteredWorkOrders) {
-                    let cursor = wo;
-                    const visited = new Set();
-                    while (cursor && cursor.parent_wo_id && !visited.has(cursor.id)) {
-                      visited.add(cursor.id);
-                      const parent = woById.get(cursor.parent_wo_id);
-                      if (!parent) break;
-                      cursor = parent;
+                  if (woCategoryFilter) {
+                    // Flat mode — every filtered WO is its own root.
+                    for (const wo of filteredWorkOrders) {
+                      if (!rootIdSet.has(wo.id)) {
+                        rootIdSet.add(wo.id);
+                        rootIdsOrder.push(wo.id);
+                      }
                     }
-                    const rootId = cursor?.id;
-                    if (rootId && !rootIdSet.has(rootId)) {
-                      rootIdSet.add(rootId);
-                      rootIdsOrder.push(rootId);
+                  } else {
+                    for (const wo of filteredWorkOrders) {
+                      let cursor = wo;
+                      const visited = new Set();
+                      while (cursor && cursor.parent_wo_id && !visited.has(cursor.id)) {
+                        visited.add(cursor.id);
+                        const parent = woById.get(cursor.parent_wo_id);
+                        if (!parent) break;
+                        cursor = parent;
+                      }
+                      const rootId = cursor?.id;
+                      if (rootId && !rootIdSet.has(rootId)) {
+                        rootIdSet.add(rootId);
+                        rootIdsOrder.push(rootId);
+                      }
                     }
                   }
                   const rootMOs = rootIdsOrder.map(id => woById.get(id)).filter(Boolean);
@@ -1582,7 +1633,7 @@ export default function ManufacturingPage() {
                             )}
                           </td>
                         </tr>
-                        {children.map(c => renderMORow(c, depth + 1))}
+                        {!woCategoryFilter && children.map(c => renderMORow(c, depth + 1))}
                       </React.Fragment>
                     );
                   };

@@ -20,7 +20,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-13 (newest)** — **MO page family filter (DONE & VERIFIED ✅):**
+- **2026-05-13 (newest)** — **MO Category filter — phased workflow (DONE & VERIFIED ✅):**
+  - Replaced the family-filter UX (which still exists as a secondary tool) with a primary **Category pill filter**: `[All | Parts | SG | FG]` next to the Status filter.
+  - Phased processing workflow now possible: click **Parts** to see ONLY Part MOs (23 of 663) — process Phase 1. Click **SG** to see ONLY Sub-Assemblies (122 of 663) — Phase 2. Click **FG** for Phase 3 (401 of 663). Click **All** to return to the full tree.
+  - When a category filter is active, rendering switches from "walk every WO up to its FG root and render the whole tree" to a **flat-mode** where each filtered WO becomes its own top-level row and child rendering is suppressed. This avoids the bug where filtering to Parts still showed full FG trees (with SGs and FG rows mixed in).
+  - Filter persists across `fetchData()` refreshes — completing a Part WO does NOT reset the filter; the user keeps working through the Parts phase.
+
+- **2026-05-13** — **MO page family filter (DONE & VERIFIED ✅):**
   - Added a per-row **"Focus family"** button on every MO that has children. Clicking it filters the MO list to just that parent + every descendant WO (recursive BFS via `parent_wo_id`).
   - Filter is rendered as a chip next to the existing status filter: `[🔽 Family: MO-000661 [×]]`.
   - State (`familyFilterWoId`) is pure client React state — it survives `fetchData()` refreshes triggered by op-completes / SC creation / cancel / etc. The user can complete sub-WOs one by one without losing their focus context. Only the explicit Clear button resets it.
