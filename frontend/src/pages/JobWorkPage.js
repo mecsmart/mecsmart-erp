@@ -60,8 +60,9 @@ export default function JobWorkPage() {
   // Manual DC dialog (standalone DC not tied to a Subcontract Order)
   const [manualDcDialog, setManualDcDialog] = useState(false);
   const [manualDcForm, setManualDcForm] = useState({
+    id: null,  // present => edit mode
     supplier_id: '', dc_purpose: 'subcontract', warehouse_id: '', notes: '',
-    lines: [{ item_id: '', item_search: '', quantity: 1, processing_charges: 0, notes: '' }]
+    lines: [{ item_id: '', item_search: '', quantity: 1, unit_price: 0, processing_charges: 0, notes: '' }]
   });
 
   // DC Print T&C dialog
@@ -284,14 +285,37 @@ export default function JobWorkPage() {
   // ================== MANUAL DC (standalone — DC → GRN Receipt flow) ==================
   const openManualDC = () => {
     setManualDcForm({
+      id: null,
       supplier_id: '', dc_purpose: 'subcontract', warehouse_id: '', notes: '',
-      lines: [{ item_id: '', item_search: '', quantity: 1, processing_charges: 0, notes: '' }]
+      lines: [{ item_id: '', item_search: '', quantity: 1, unit_price: 0, processing_charges: 0, notes: '' }]
+    });
+    setManualDcDialog(true);
+  };
+
+  // Open the same manual-DC dialog in EDIT mode, prefilled from the existing
+  // draft DC. Only manual + draft DCs are editable; the row-level guard is in
+  // the Edit button's render condition.
+  const openEditManualDC = (dc) => {
+    setManualDcForm({
+      id: dc.id,
+      supplier_id: dc.supplier_id || '',
+      dc_purpose: dc.dc_purpose || 'subcontract',
+      warehouse_id: dc.warehouse_id || '',
+      notes: dc.notes || '',
+      lines: (dc.lines || []).map(l => ({
+        item_id: l.item_id,
+        item_search: '',
+        quantity: l.quantity || 0,
+        unit_price: l.unit_price || (items.find(i => i.id === l.item_id)?.unit_cost) || 0,
+        processing_charges: l.processing_charges || 0,
+        notes: l.notes || '',
+      })),
     });
     setManualDcDialog(true);
   };
 
   const addManualDcLine = () => {
-    setManualDcForm(prev => ({ ...prev, lines: [...prev.lines, { item_id: '', item_search: '', quantity: 1, processing_charges: 0, notes: '' }] }));
+    setManualDcForm(prev => ({ ...prev, lines: [...prev.lines, { item_id: '', item_search: '', quantity: 1, unit_price: 0, processing_charges: 0, notes: '' }] }));
   };
 
   const removeManualDcLine = (idx) => {
@@ -315,12 +339,16 @@ export default function JobWorkPage() {
         lines: validLines.map(l => ({
           item_id: l.item_id,
           quantity: parseFloat(l.quantity),
+          unit_price: parseFloat(l.unit_price || 0),
           processing_charges: parseFloat(l.processing_charges || 0),
           notes: l.notes || ''
         }))
       };
-      const { data } = await api.post('/api/job-work/challans/manual', payload);
-      alert(`Manual DC ${data.dc_number} created successfully`);
+      const isEdit = !!manualDcForm.id;
+      const { data } = isEdit
+        ? await api.put(`/api/job-work/challans/manual/${manualDcForm.id}`, payload)
+        : await api.post('/api/job-work/challans/manual', payload);
+      alert(`Manual DC ${data.dc_number} ${isEdit ? 'updated' : 'created'} successfully`);
       setManualDcDialog(false);
       fetchData();
     } catch (e) {
@@ -328,7 +356,7 @@ export default function JobWorkPage() {
       if (err && typeof err === 'object' && err.items) {
         alert(`Insufficient stock:\n${err.items.map(i => `• ${i.part_number} — needed ${i.required}, available ${i.available}`).join('\n')}`);
       } else {
-        alert(err || 'Failed to create manual DC');
+        alert(err || 'Failed to save manual DC');
       }
     }
   };
@@ -444,7 +472,8 @@ export default function JobWorkPage() {
     // RM lines
     const totalRMCost = dc.lines.reduce((s, l) => {
       const it = l.item || items.find(i => i.id === l.item_id);
-      return s + (l.quantity * (it?.unit_cost || l.rate || 0));
+      const rate = l.unit_price || it?.unit_cost || l.rate || 0;
+      return s + (l.quantity * rate);
     }, 0);
     
     // Rename title based on SC type:
@@ -565,15 +594,19 @@ export default function JobWorkPage() {
     
     <div class="section-title">Raw Material Issued</div>
     <table>
-      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th class="text-right">Rate/Unit</th><th class="text-right">Total RM Cost</th></tr></thead>
+      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th>UOM</th><th class="text-right">Rate/Unit</th><th class="text-right">Total RM Cost</th></tr></thead>
       <tbody>
       ${dc.lines.map((l, i) => {
-        const it = l.item || {};
-        const rate = it.unit_cost || l.rate || 0;
+        const it = l.item || items.find(x => x.id === l.item_id) || {};
+        // Prefer the line-level unit_price persisted on manual DCs; fall back
+        // to the item master unit cost for SC-linked DCs that never had a
+        // per-line price captured.
+        const rate = l.unit_price || it.unit_cost || l.rate || 0;
+        const uom = l.unit || it.unit_of_measure || 'pcs';
         const cost = l.quantity * rate;
-        return `<tr><td>${i+1}</td><td>${it.part_number || '-'}, ${it.name || '-'}</td><td>${it.hsn_code || '-'}</td><td class="text-right mono">${l.quantity}</td><td class="text-right mono">${currencySymbol}${fmtAmt(rate)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(cost)}</td></tr>`;
+        return `<tr><td>${i+1}</td><td>${it.part_number || '-'}, ${it.name || '-'}</td><td>${it.hsn_code || '-'}</td><td class="text-right mono">${l.quantity}</td><td>${uom}</td><td class="text-right mono">${currencySymbol}${fmtAmt(rate)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(cost)}</td></tr>`;
       }).join('')}
-      <tr class="total-row"><td colspan="5" class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalRMCost)}</td></tr>
+      <tr class="total-row"><td colspan="6" class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalRMCost)}</td></tr>
       </tbody>
     </table>`}
     
@@ -849,6 +882,11 @@ export default function JobWorkPage() {
                         <td className="text-sm">{dc.created_at ? new Date(dc.created_at).toLocaleDateString() : '-'}</td>
                         <td>
                           <div className="flex items-center space-x-1">
+                            {dc.status === 'draft' && dc.is_manual && canEdit && (
+                              <button onClick={() => openEditManualDC(dc)} className="btn-secondary text-xs px-2 py-1" data-testid={`edit-manual-dc-${dc.id}`}>
+                                <Edit2 className="w-3 h-3 inline mr-1" />Edit
+                              </button>
+                            )}
                             {dc.status === 'draft' && canEdit && (
                               <button onClick={async () => {
                                 try {
@@ -1031,7 +1069,7 @@ export default function JobWorkPage() {
       {/* Manual DC Dialog — standalone DC (no parent SC) */}
       <Dialog open={manualDcDialog} onOpenChange={setManualDcDialog}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="manual-dc-dialog">
-          <DialogHeader><DialogTitle className="font-[Chivo]">Create Manual Delivery Challan</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-[Chivo]">{manualDcForm.id ? 'Edit Manual Delivery Challan' : 'Create Manual Delivery Challan'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3">
             <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2">
@@ -1062,18 +1100,21 @@ export default function JobWorkPage() {
               </Select>
             </div>
             <div className="border rounded-sm overflow-hidden">
-              <div className="bg-[#F3F4F6] px-3 py-2 flex items-center justify-between">
+              <div className="bg-[#F3F4F6] px-3 py-2">
                 <span className="text-xs font-semibold uppercase text-[#4B5563]">Items to Ship ({manualDcForm.lines.length})</span>
-                <button type="button" onClick={addManualDcLine} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1" data-testid="manual-dc-add-line"><Plus className="w-3 h-3" />Add Line</button>
               </div>
               <div className="p-3 space-y-3">
                 {manualDcForm.lines.map((line, idx) => {
                   const q = (line.item_search || '').trim().toLowerCase();
-                  const filtered = items.filter(i => {
-                    if (!q) return true;
-                    return (i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q);
-                  });
+                  // Show suggestions ONLY after the user starts typing — the
+                  // global items list (1k+ rows) is overwhelming if dumped on
+                  // open. Empty query = no suggestions shown.
+                  const filtered = q
+                    ? items.filter(i => (i.part_number || '').toLowerCase().includes(q) || (i.name || '').toLowerCase().includes(q))
+                    : [];
                   const selected = items.find(i => i.id === line.item_id);
+                  const uom = selected?.unit_of_measure || 'pcs';
+                  const lineTotal = (parseFloat(line.quantity) || 0) * (parseFloat(line.unit_price) || 0);
                   return (
                     <div key={idx} className="border border-[#E5E7EB] rounded-sm p-2 bg-[#F9FAFB]" data-testid={`manual-dc-line-${idx}`}>
                       <div className="flex items-center justify-between mb-1">
@@ -1083,7 +1124,7 @@ export default function JobWorkPage() {
                         )}
                       </div>
                       <div className="grid grid-cols-12 gap-2">
-                        <div className="col-span-6">
+                        <div className="col-span-5">
                           <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Item *</label>
                           {selected ? (
                             <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-2 py-1" data-testid={`manual-dc-selected-${idx}`}>
@@ -1097,26 +1138,40 @@ export default function JobWorkPage() {
                             </div>
                           ) : (
                             <>
-                              <input type="text" placeholder="Search item by part number / name..." value={line.item_search || ''} onChange={(e) => updateManualDcLine(idx, { item_search: e.target.value })} className="input-field text-xs" data-testid={`manual-dc-search-${idx}`} />
-                              <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-32 overflow-auto bg-white">
-                                {filtered.length === 0 && <div className="px-2 py-2 text-[10px] text-center text-[#6B7280]">No matching items</div>}
-                                {filtered.slice(0, 50).map(it => (
-                                  <button key={it.id} type="button" onClick={() => updateManualDcLine(idx, { item_id: it.id, item_search: '' })} data-testid={`manual-dc-option-${idx}-${it.id}`} className="w-full text-left px-2 py-1 text-[11px] border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]">
-                                    <span className="mono font-semibold">{it.part_number}</span>
-                                    <span className="mx-1">—</span>
-                                    <span>{it.name}</span>
-                                    <span className="ml-2 text-[#6B7280]">Stock: {it.current_stock || 0}</span>
-                                  </button>
-                                ))}
-                              </div>
+                              <input type="text" placeholder="Start typing part number or name…" value={line.item_search || ''} onChange={(e) => updateManualDcLine(idx, { item_search: e.target.value })} className="input-field text-xs" data-testid={`manual-dc-search-${idx}`} />
+                              {q && (
+                                <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-32 overflow-auto bg-white">
+                                  {filtered.length === 0 && <div className="px-2 py-2 text-[10px] text-center text-[#6B7280]">No matching items</div>}
+                                  {filtered.slice(0, 50).map(it => (
+                                    <button key={it.id} type="button" onClick={() => updateManualDcLine(idx, { item_id: it.id, item_search: '', unit_price: it.unit_cost || 0 })} data-testid={`manual-dc-option-${idx}-${it.id}`} className="w-full text-left px-2 py-1 text-[11px] border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]">
+                                      <span className="mono font-semibold">{it.part_number}</span>
+                                      <span className="mx-1">—</span>
+                                      <span>{it.name}</span>
+                                      <span className="ml-2 text-[#6B7280]">({it.unit_of_measure || 'pcs'})</span>
+                                      <span className="ml-2 text-[#6B7280]">Stock: {it.current_stock || 0}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                             </>
                           )}
                         </div>
-                        <div className="col-span-2">
+                        <div className="col-span-1">
+                          <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">UOM</label>
+                          <div className="input-field text-xs text-center bg-[#F3F4F6] cursor-not-allowed" data-testid={`manual-dc-uom-${idx}`}>{selected ? uom : '—'}</div>
+                        </div>
+                        <div className="col-span-1">
                           <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Qty *</label>
-                          <input type="number" min="1" step="0.01" value={line.quantity} onChange={(e) => updateManualDcLine(idx, { quantity: parseFloat(e.target.value) || 0 })} className="input-field text-xs mono" data-testid={`manual-dc-qty-${idx}`} />
+                          <input type="number" min="0" step="0.01" value={line.quantity} onChange={(e) => updateManualDcLine(idx, { quantity: parseFloat(e.target.value) || 0 })} className="input-field text-xs mono" data-testid={`manual-dc-qty-${idx}`} />
                         </div>
                         <div className="col-span-2">
+                          <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Unit Price</label>
+                          <input type="number" min="0" step="0.01" value={line.unit_price} onChange={(e) => updateManualDcLine(idx, { unit_price: parseFloat(e.target.value) || 0 })} className="input-field text-xs mono" data-testid={`manual-dc-price-${idx}`} />
+                          {lineTotal > 0 && (
+                            <div className="text-[10px] text-[#6B7280] text-right mt-0.5">= {currencySymbol}{lineTotal.toFixed(2)}</div>
+                          )}
+                        </div>
+                        <div className="col-span-1">
                           <label className="block text-[10px] font-semibold text-[#6B7280] uppercase mb-1">Charges/Unit</label>
                           <input type="number" min="0" step="0.01" value={line.processing_charges} onChange={(e) => updateManualDcLine(idx, { processing_charges: parseFloat(e.target.value) || 0 })} className="input-field text-xs mono" data-testid={`manual-dc-charges-${idx}`} />
                         </div>
@@ -1128,6 +1183,11 @@ export default function JobWorkPage() {
                     </div>
                   );
                 })}
+                {/* Add-line button anchored at the bottom of the lines list so
+                    new lines always insert below the last one. */}
+                <div className="flex justify-end pt-1">
+                  <button type="button" onClick={addManualDcLine} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1 px-2 py-1 border border-dashed border-[#1D3557] rounded-sm" data-testid="manual-dc-add-line"><Plus className="w-3 h-3" />Add Line</button>
+                </div>
               </div>
             </div>
             <div>
@@ -1136,7 +1196,7 @@ export default function JobWorkPage() {
             </div>
             <div className="flex justify-end space-x-3 pt-3 border-t">
               <button type="button" onClick={() => setManualDcDialog(false)} className="btn-secondary">Cancel</button>
-              <button type="button" onClick={handleCreateManualDC} className="btn-primary" data-testid="manual-dc-submit">Create DC &amp; Deduct Stock</button>
+              <button type="button" onClick={handleCreateManualDC} className="btn-primary" data-testid="manual-dc-submit">{manualDcForm.id ? 'Update DC & Adjust Stock' : 'Create DC & Deduct Stock'}</button>
             </div>
           </div>
         </DialogContent>

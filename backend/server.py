@@ -698,6 +698,7 @@ class ManualDCLineItem(BaseModel):
     item_id: str
     quantity: float
     unit: Optional[str] = "pcs"
+    unit_price: Optional[float] = 0  # Per-unit value of the goods being shipped (for value declaration on the DC)
     processing_charges: Optional[float] = 0
     notes: Optional[str] = ""
 
@@ -10539,6 +10540,7 @@ async def create_manual_delivery_challan(data: ManualDCCreate, request: Request)
             "item_id": line.item_id,
             "quantity": float(line.quantity),
             "unit": line.unit or (item.get("unit_of_measure") if item else "pcs"),
+            "unit_price": float(line.unit_price or (item.get("unit_cost") if item else 0) or 0),
             "processing_charges": float(line.processing_charges or 0),
             "notes": line.notes or ""
         }
@@ -10582,6 +10584,125 @@ async def create_manual_delivery_challan(data: ManualDCCreate, request: Request)
     await db.delivery_challans.insert_one(dc_doc)
     dc_doc.pop("_id", None)
     return dc_doc
+
+
+@jobwork_router.put("/challans/manual/{dc_id}")
+async def update_manual_delivery_challan(dc_id: str, data: ManualDCCreate, request: Request):
+    """Update a manual (standalone) DC while it's still in draft. Stock movements
+    are recalculated diff-style: items removed from the DC have their stock
+    refunded, items added have stock deducted, and quantity changes are netted.
+
+    Only manual DCs in `draft` status can be edited — once a DC is `sent` it's
+    treated as an outward shipment and is immutable from this endpoint.
+    """
+    user = await get_current_user(request)
+    _require_access(user, ["admin", "production_manager", "inventory_manager"], module="job_work", action="edit")
+
+    dc = await db.delivery_challans.find_one({"id": dc_id})
+    if not dc:
+        raise HTTPException(status_code=404, detail="DC not found")
+    if not dc.get("is_manual"):
+        raise HTTPException(status_code=400, detail="Only manual DCs are editable via this endpoint")
+    if dc.get("status") not in ("draft",):
+        raise HTTPException(status_code=400, detail=f"DC in status '{dc.get('status')}' cannot be edited")
+
+    if not data.lines:
+        raise HTTPException(status_code=400, detail="At least one line item is required")
+
+    # Build per-item delta map: new_qty - old_qty (per item_id, summed across
+    # lines because the user could split or merge lines).
+    old_qty_by_item: Dict[str, float] = {}
+    for line in dc.get("lines", []):
+        iid = line.get("item_id")
+        if iid:
+            old_qty_by_item[iid] = old_qty_by_item.get(iid, 0.0) + float(line.get("quantity", 0) or 0)
+    new_qty_by_item: Dict[str, float] = {}
+    for line in data.lines:
+        new_qty_by_item[line.item_id] = new_qty_by_item.get(line.item_id, 0.0) + float(line.quantity)
+
+    all_item_ids = set(old_qty_by_item.keys()) | set(new_qty_by_item.keys())
+    deltas = {}  # positive delta => additional stock needed
+    for iid in all_item_ids:
+        deltas[iid] = new_qty_by_item.get(iid, 0.0) - old_qty_by_item.get(iid, 0.0)
+
+    # Stock availability check — only need to validate items whose net qty INCREASED.
+    if not data.skip_stock_deduct:
+        insufficient = []
+        for iid, delta in deltas.items():
+            if delta <= 0:
+                continue
+            item = await db.items.find_one({"id": iid})
+            if not item:
+                raise HTTPException(status_code=404, detail=f"Item {iid} not found")
+            if float(item.get("current_stock", 0) or 0) < delta:
+                insufficient.append({
+                    "part_number": item.get("part_number"),
+                    "name": item.get("name"),
+                    "required": delta,
+                    "available": item.get("current_stock", 0),
+                })
+        if insufficient:
+            raise HTTPException(
+                status_code=400,
+                detail={"message": "Insufficient stock for one or more items", "items": insufficient},
+            )
+
+    # Apply stock deltas (skip if original DC was created with skip_stock_deduct,
+    # detectable by absence of inventory_transactions referencing this dc_number).
+    if not data.skip_stock_deduct:
+        for iid, delta in deltas.items():
+            if abs(delta) < 1e-9:
+                continue
+            item = await db.items.find_one({"id": iid})
+            if not item:
+                continue
+            current_stock = float(item.get("current_stock", 0) or 0)
+            new_stock = current_stock - delta  # positive delta => deduct; negative => refund
+            await db.items.update_one(
+                {"id": iid},
+                {"$set": {"current_stock": new_stock, "updated_at": datetime.now(timezone.utc)}},
+            )
+            await db.inventory_transactions.insert_one({
+                "id": str(uuid.uuid4()),
+                "item_id": iid,
+                "transaction_type": "issue" if delta > 0 else "return",
+                "quantity": abs(delta),
+                "reference_type": "manual_dc_edit",
+                "reference_id": dc.get("dc_number"),
+                "previous_stock": current_stock,
+                "new_stock": new_stock,
+                "notes": f"Manual DC {dc.get('dc_number')} edit — net {'issue' if delta > 0 else 'refund'}",
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"],
+            })
+
+    # Rebuild DC lines preserving the same shape as create.
+    dc_lines = []
+    for line in data.lines:
+        item = await db.items.find_one({"id": line.item_id})
+        dc_lines.append({
+            "item_id": line.item_id,
+            "quantity": float(line.quantity),
+            "unit": line.unit or (item.get("unit_of_measure") if item else "pcs"),
+            "unit_price": float(line.unit_price or (item.get("unit_cost") if item else 0) or 0),
+            "processing_charges": float(line.processing_charges or 0),
+            "notes": line.notes or "",
+        })
+
+    await db.delivery_challans.update_one(
+        {"id": dc_id},
+        {"$set": {
+            "supplier_id": data.supplier_id,
+            "dc_purpose": data.dc_purpose or "subcontract",
+            "warehouse_id": data.warehouse_id or "",
+            "lines": dc_lines,
+            "notes": data.notes or "",
+            "updated_at": datetime.now(timezone.utc),
+            "updated_by": user["id"],
+        }},
+    )
+    updated = await db.delivery_challans.find_one({"id": dc_id}, {"_id": 0})
+    return updated
 
 @jobwork_router.post("/challans", status_code=201)
 async def create_delivery_challan(data: DCCreate, request: Request):

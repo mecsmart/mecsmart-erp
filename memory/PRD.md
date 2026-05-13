@@ -20,7 +20,16 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-13 (newest)** — **Family filter + per-panel filter composition (DONE & VERIFIED ✅):**
+- **2026-05-13 (newest)** — **Manual DC: UOM, Unit Price, Edit, lazy item search (DONE & VERIFIED ✅):**
+  1. **Items list hidden by default** — dropdown only appears after the user types ≥1 character (empty search shows nothing). Placeholder updated to "Start typing part number or name…".
+  2. **UOM column** rendered next to the item field (read-only, populated from `item.unit_of_measure`).
+  3. **Unit Price column** added (auto-fills from `item.unit_cost` when an item is selected; user can override). Line total `= ₹{qty × price}` shown inline below the price input.
+  4. **Add Line button moved to the bottom** of the lines list (dashed border, anchored below the last line). New lines always insert at the end.
+  5. **DC Edit option** — `Edit` button on every `is_manual` + `draft` DC row opens the same dialog in edit mode. Backend `PUT /api/job-work/challans/manual/{dc_id}` rebuilds the DC and diff-adjusts stock: items with increased qty get net deduction, decreased/removed items get refunded. New inventory_transactions row tagged `reference_type=manual_dc_edit` for audit.
+  6. **DC PDF prints UOM column** in the Raw Material Issued table and reads `unit_price` first (falls back to `item.unit_cost`).
+  - Verified via curl: created DC000005 with `unit_price=99.5` then edited to `qty=2, unit_price=150`; stock diff'd by -1 → response confirmed. UI Playwright: empty search shows 0 options, typing "CP" shows 50, picking CP-001 auto-populates UOM=`pcs` + price=`280`, Add Line inserts Line 2 at the bottom, draft manual DCs render the Edit button.
+
+- **2026-05-13** — **Family filter + per-panel filter composition (DONE & VERIFIED ✅):**
   - When a family filter is active, the focused WO now becomes its OWN top-level panel root (it no longer walks up to the FG ancestor for rendering). This makes the per-panel `[All] [SG only] [Parts only]` pills on the focused panel filter ONLY within that family's subtree.
   - Example workflow: user clicks **Focus family** on an SG → that SG and its descendants become the panel; clicking **Parts only** on the panel shows just the Parts under that SG, hiding any other intermediate WOs. Combine the two filters to drill into exactly the level + category you want to process.
   - Verified via Playwright: focusing on MO-000658 + SG-only filter rendered the correct 3-row panel scoped to that family; clearing the family chip restored the full list.
