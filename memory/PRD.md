@@ -20,7 +20,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-13 (newest)** — **BOM perf fix (N+1 → 1 batched call) + JW single-section rendering (DONE & VERIFIED ✅):**
+- **2026-05-13 (newest)** — **MO page family filter (DONE & VERIFIED ✅):**
+  - Added a per-row **"Focus family"** button on every MO that has children. Clicking it filters the MO list to just that parent + every descendant WO (recursive BFS via `parent_wo_id`).
+  - Filter is rendered as a chip next to the existing status filter: `[🔽 Family: MO-000661 [×]]`.
+  - State (`familyFilterWoId`) is pure client React state — it survives `fetchData()` refreshes triggered by op-completes / SC creation / cancel / etc. The user can complete sub-WOs one by one without losing their focus context. Only the explicit Clear button resets it.
+  - Verified: clicking Focus on MO-000661 (3 children) filtered 663 → 3 rows correctly; clear button restored full list.
+
+- **2026-05-13** — **BOM perf fix (N+1 → 1 batched call) + JW single-section rendering (DONE & VERIFIED ✅):**
   1. **Fix 1 (BOM page took 30+ seconds to load)**: Root cause was an N+1 pattern — after fetching `/api/bom`, the frontend fired `/api/bom/{id}/explode` for EVERY active BOM (sliding window of 8 in parallel) just to render the inline `Total` / `FG Process` cost tags on each panel header. With 317 active BOMs this was ~317 HTTP round-trips, each running a recursive explosion with many per-component awaits.
      - **Backend**: New endpoint `GET /api/bom/rollup-costs?status=active` pre-loads all BOMs + items into memory and runs the recursive rollup in-process with O(N) DB calls total. Returns `{bom_id: {fg_process_cost_per_unit, components_cost, total_rollup_cost}}` for ALL BOMs in a single response. Also optimized `GET /api/bom` to batch-load parent items in 1 `$in` query (was N individual `find_one`s).
      - **Frontend**: Replaced the per-BOM `/explode` worker pool in `fetchBoms` with a single `/rollup-costs` call. Full `/explode` (with the per-component tree) is still fetched lazily when the user expands a panel.

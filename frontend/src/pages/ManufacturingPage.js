@@ -20,7 +20,9 @@ import {
   ChevronRight,
   Search,
   PackageCheck,
-  PackageX
+  PackageX,
+  Filter,
+  X as XIcon
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -59,6 +61,14 @@ export default function ManufacturingPage() {
   const [editingWorkCenter, setEditingWorkCenter] = useState(null);
   const [woStatusFilter, setWoStatusFilter] = useState('');
   const [moSearch, setMoSearch] = useState('');
+  // Family filter — when set to a parent WO id, the WO list is filtered to
+  // that WO plus every descendant (recursively via parent_wo_id). Lets the
+  // user focus on a single MO tree to process child SG/Parts first without
+  // the rest of the workshop's MOs distracting them. State is pure client
+  // state so it survives fetchData() refreshes — i.e., completing a sub-MO
+  // does NOT clear the filter; the user keeps working in the same tree
+  // until they explicitly click the Clear button.
+  const [familyFilterWoId, setFamilyFilterWoId] = useState(null);
   
   // Operation start/stop dialog
   const [opDialog, setOpDialog] = useState({ open: false, mode: '', sequence: 0 });
@@ -722,9 +732,37 @@ export default function ManufacturingPage() {
     return '#D1D5DB';
   };
 
+  // Compute the family-filter set ONCE per render so renderMORow doesn't
+  // recompute descendants for every row. Members include the target WO and
+  // ALL descendants (BFS via parent_wo_id).
+  const familyWoIds = React.useMemo(() => {
+    if (!familyFilterWoId) return null;
+    const ids = new Set([familyFilterWoId]);
+    let added = true;
+    while (added) {
+      added = false;
+      for (const w of workOrders) {
+        if (w.parent_wo_id && ids.has(w.parent_wo_id) && !ids.has(w.id)) {
+          ids.add(w.id);
+          added = true;
+        }
+      }
+    }
+    return ids;
+  }, [familyFilterWoId, workOrders]);
+  // Display label for the active filter chip — falls back to the id if the
+  // target WO has been pruned from the local list (shouldn't happen, but
+  // keeps the chip non-empty).
+  const familyFilterLabel = React.useMemo(() => {
+    if (!familyFilterWoId) return '';
+    const w = workOrders.find(x => x.id === familyFilterWoId);
+    return w?.wo_number || familyFilterWoId.slice(0, 8);
+  }, [familyFilterWoId, workOrders]);
+
   const filteredWorkOrders = (woStatusFilter
     ? workOrders.filter(wo => wo.status === woStatusFilter)
     : workOrders).filter(wo => {
+      if (familyWoIds && !familyWoIds.has(wo.id)) return false;
       if (!moSearch.trim()) return true;
       const q = moSearch.toLowerCase();
       return wo.wo_number?.toLowerCase().includes(q) || wo.item?.part_number?.toLowerCase().includes(q) || wo.item?.name?.toLowerCase().includes(q);
@@ -1010,6 +1048,16 @@ export default function ManufacturingPage() {
                 <button onClick={() => setWoStatusFilter('')} className="text-xs text-[#4B5563] hover:text-[#1D3557] flex items-center gap-1" data-testid="wo-clear-filter">
                   <span>Clear</span>
                 </button>
+              )}
+              {/* Active family filter chip — visible only when a parent MO is being focused on. */}
+              {familyFilterWoId && (
+                <div className="flex items-center gap-1 px-2 py-1 bg-[#E1EFFE] border border-[#1D3557] rounded-sm text-xs" data-testid="family-filter-chip">
+                  <Filter className="w-3 h-3 text-[#1D3557]" />
+                  <span className="text-[#1D3557] font-medium">Family: {familyFilterLabel}</span>
+                  <button onClick={() => setFamilyFilterWoId(null)} className="text-[#1D3557] hover:text-[#9B1C1C] ml-1" data-testid="family-filter-clear" title="Clear family filter">
+                    <XIcon className="w-3 h-3" />
+                  </button>
+                </div>
               )}
               <span className="text-xs text-[#6B7280]">{filteredWorkOrders.length} of {workOrders.length} orders</span>
             </div>
@@ -1463,6 +1511,21 @@ export default function ManufacturingPage() {
                             {depth > 0 && <span className="text-[#1D3557] mr-1">└→</span>}
                             <span className="mono font-medium">{wo.wo_number}</span>
                             <span className="ml-1 text-[10px] px-1 py-0.5 rounded font-semibold text-white" style={{backgroundColor: getCatColor(wo)}}>{getCatLabel(wo)}</span>
+                            {/* Family-focus button — only shown for WOs that actually
+                                have children, and only when the user is NOT already
+                                focused on this WO (avoids redundant button on the
+                                currently filtered head row). */}
+                            {children.length > 0 && familyFilterWoId !== wo.id && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setFamilyFilterWoId(wo.id); }}
+                                className="ml-2 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-[#F3F4F6] hover:bg-[#E1EFFE] text-[#4B5563] hover:text-[#1D3557] border border-[#E5E7EB]"
+                                title="Filter to this MO and its sub-WOs"
+                                data-testid={`focus-family-${wo.id}`}
+                              >
+                                <Filter className="w-3 h-3" />
+                                <span>Focus family</span>
+                              </button>
+                            )}
                           </td>
                           <td>
                             <span className="mono text-sm">{wo.item?.part_number || '-'}</span>
