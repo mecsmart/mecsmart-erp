@@ -7816,19 +7816,22 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
 
 @bom_router.get("/export/parts-only/excel")
 async def export_bom_parts_only_excel(request: Request, bom_id: str):
-    """Export the exploded BOM as one row per (Parent → Component) pair.
+    """Export ONLY the Component → Raw-Material BOMs of the root BOM tree.
 
-    Output format mirrors the user-supplied reference template:
-        Level | Parent Part Number | Parent Name | Revision | Status |
-        Component Part Number | Component Name | Quantity | Is Alternate |
-        Effectivity Date | <one column per distinct routing operation>
-
-    Walking strategy: starting from the root BOM, for each component in
-    bom.components emit ONE row (parent = BOM's parent_item, component =
-    comp.item). If the component has its own active BOM, recurse (the
-    component becomes the parent of its own children at the next level).
-    Routing operation columns are populated dynamically from each component's
-    `routings` list (or the BOM's `parent_routings` for the FG row).
+    Behaviour:
+        - Skip FG and SG parent rows entirely.
+        - Walk the full BOM tree starting at the root BOM. For every item
+          encountered whose category == 'component' (and that has its own
+          active BOM), emit one row per Raw-Material child in that
+          component's BOM.
+        - Each component's routing operations are output as dynamic columns
+          (one per distinct operation name across the whole tree) with the
+          per-unit cost as the value, plus a Total Routing Cost column.
+        - Routing is shown only on the FIRST RM row of each component to
+          avoid visual duplication; subsequent rows for the same component
+          leave routing cells blank.
+        - Each unique component is exported only once even if used in
+          multiple parent assemblies.
     """
     await get_current_user(request)
     from openpyxl import Workbook
@@ -7846,89 +7849,86 @@ async def export_bom_parts_only_excel(request: Request, bom_id: str):
     async for b in db.boms.find({"status": "active"}, {"_id": 0}):
         active_bom_by_parent[b["parent_item_id"]] = b
 
-    # Discover the union of all routing-operation names used anywhere in the
-    # tree, so we can build a column for each (instead of hard-coding a list).
+    # Step 1: walk the tree from the root BOM and collect every component-category
+    # item that has its own active BOM. Dedupe by item_id.
+    component_boms: List[Dict[str, Any]] = []
+    seen_component_ids: set = set()
+
+    def walk_tree(bom):
+        parent_item = items_by_id.get(bom["parent_item_id"]) or {}
+        parent_cat = (parent_item.get("category") or "").lower()
+        if parent_cat == "component" and bom["parent_item_id"] not in seen_component_ids:
+            seen_component_ids.add(bom["parent_item_id"])
+            component_boms.append(bom)
+        for comp in bom.get("components", []) or []:
+            cid = comp.get("item_id")
+            child = active_bom_by_parent.get(cid)
+            if child:
+                walk_tree(child)
+
+    walk_tree(root_bom)
+
+    # Step 2: keep only component BOMs that have at least one Raw-Material
+    # child — those are the rows we will actually emit. We collect the union
+    # of routing operation names from THESE components only, so columns
+    # represent real data (no empty operation columns).
+    emit_list: List[Dict[str, Any]] = []
     routing_names: List[str] = []
     seen_names: set = set()
-
-    def collect_routing_names(routings):
-        for r in routings or []:
-            nm = None
-            if isinstance(r, dict):
-                nm = (r.get("name") or r.get("operation_name") or r.get("process") or "").strip()
-            elif isinstance(r, str):
-                nm = r.strip()
+    for cb in component_boms:
+        rm_children = [
+            c for c in (cb.get("components") or [])
+            if (items_by_id.get(c.get("item_id"), {}).get("category") or "").lower() == "raw_material"
+        ]
+        if not rm_children:
+            continue
+        emit_list.append({"bom": cb, "rm_children": rm_children})
+        for r in normalize_routings(cb.get("parent_routings") or []):
+            nm = (r.get("name") or "").strip()
             if nm and nm not in seen_names:
                 seen_names.add(nm)
                 routing_names.append(nm)
 
-    def walk_for_names(bom):
-        collect_routing_names(bom.get("parent_routings"))
-        for c in bom.get("components", []) or []:
-            collect_routing_names(c.get("routings"))
-            child = active_bom_by_parent.get(c.get("item_id"))
-            if child:
-                walk_for_names(child)
-    walk_for_names(root_bom)
-
-    # Helper: given a routings list and a routing-name column, return the
-    # process_cost or a marker the reference template uses ("Yes" / "—").
-    # The reference seems to use the part_number of the routing config or a
-    # blank. We'll emit "Yes" when the routing is present for that line.
-    def routing_value(routings, name):
-        for r in routings or []:
-            rn = None
-            if isinstance(r, dict):
-                rn = (r.get("name") or r.get("operation_name") or r.get("process") or "").strip()
-            elif isinstance(r, str):
-                rn = r.strip()
-            if rn == name:
-                if isinstance(r, dict):
-                    # Prefer human-friendly display: cost/unit if set, else "Yes".
-                    cost = r.get("cost_per_unit") or r.get("process_cost_per_unit") or r.get("cost")
-                    if cost:
-                        return cost
-                return "Yes"
+    def routing_cost(routings, name):
+        for r in normalize_routings(routings or []):
+            if (r.get("name") or "").strip() == name:
+                return r.get("cost", 0) or 0
         return ""
 
+    # Step 3: build the row list. Only RM children are emitted.
     rows: List[Dict[str, Any]] = []
-
-    def walk(bom, depth):
-        parent_item = items_by_id.get(bom["parent_item_id"]) or {}
-        for comp in bom.get("components", []) or []:
-            cid = comp.get("item_id")
-            citem = items_by_id.get(cid) or {}
+    for entry in emit_list:
+        cb = entry["bom"]
+        rm_children = entry["rm_children"]
+        comp_item = items_by_id.get(cb["parent_item_id"]) or {}
+        comp_routings = cb.get("parent_routings") or []
+        total_route_cost = round(routings_total_cost(comp_routings), 2)
+        for idx, comp in enumerate(rm_children):
+            citem = items_by_id.get(comp.get("item_id")) or {}
             rows.append({
-                "level": depth + 1,
-                "parent_part_number": parent_item.get("part_number", ""),
-                "parent_name": parent_item.get("name", ""),
-                "revision": bom.get("revision", ""),
-                "status": bom.get("status", ""),
-                "component_part_number": citem.get("part_number", ""),
-                "component_name": citem.get("name", ""),
+                "component_part_number": comp_item.get("part_number", ""),
+                "component_name": comp_item.get("name", ""),
+                "revision": cb.get("revision", ""),
+                "rm_part_number": citem.get("part_number", ""),
+                "rm_name": citem.get("name", ""),
                 "quantity": comp.get("quantity", 0),
+                "uom": comp.get("unit_of_measure") or citem.get("unit_of_measure") or "",
                 "is_alternate": "Yes" if comp.get("is_alternate") else "No",
-                "effectivity_date": (comp.get("effectivity_date") or bom.get("effectivity_date") or ""),
-                "routings": comp.get("routings") or [],
-                "is_sg_no_bom": (citem.get("category") in ("sub_assembly", "finished_good"))
-                                 and not active_bom_by_parent.get(cid),
+                "effectivity_date": (comp.get("effectivity_date") or cb.get("effectivity_date") or ""),
+                "routings": comp_routings if idx == 0 else [],
+                "total_route_cost": total_route_cost if idx == 0 else "",
             })
-            child = active_bom_by_parent.get(cid)
-            if child:
-                walk(child, depth + 1)
-
-    walk(root_bom, 0)
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Component BOM"
 
     base_headers = [
-        "Level", "Parent Part Number", "Parent Name", "Revision", "Status",
-        "Component Part Number", "Component Name", "Quantity",
+        "Component Part Number", "Component Name", "Revision",
+        "RM Part Number", "RM Name", "Quantity", "UOM",
         "Is Alternate", "Effectivity Date",
     ]
-    headers = base_headers + routing_names
+    headers = base_headers + routing_names + ["Total Routing Cost"]
 
     header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=11)
@@ -7943,13 +7943,8 @@ async def export_bom_parts_only_excel(request: Request, bom_id: str):
         cell.alignment = Alignment(horizontal='center', wrap_text=True)
         cell.border = thin_border
 
-    no_bom_fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
-
     row_num = 2
-    sg_no_bom_count = 0
     for r in rows:
-        if r["is_sg_no_bom"]:
-            sg_no_bom_count += 1
         # Effectivity date — format ISO datetime → YYYY-MM-DD for readability.
         eff = r["effectivity_date"]
         if hasattr(eff, "strftime"):
@@ -7957,41 +7952,39 @@ async def export_bom_parts_only_excel(request: Request, bom_id: str):
         elif isinstance(eff, str) and "T" in eff:
             eff = eff.split("T", 1)[0]
         base_values = [
-            r["level"],
-            r["parent_part_number"],
-            r["parent_name"],
-            r["revision"],
-            r["status"],
             r["component_part_number"],
             r["component_name"],
+            r["revision"],
+            r["rm_part_number"],
+            r["rm_name"],
             r["quantity"],
+            r["uom"],
             r["is_alternate"],
             eff,
         ]
-        routing_values = [routing_value(r["routings"], nm) for nm in routing_names]
-        for col, v in enumerate(base_values + routing_values, 1):
+        routing_values = [routing_cost(r["routings"], nm) for nm in routing_names]
+        all_values = base_values + routing_values + [r["total_route_cost"]]
+        for col, v in enumerate(all_values, 1):
             cell = ws.cell(row=row_num, column=col, value=v)
             cell.border = thin_border
-            if col in (1, 8):
+            if col == 6:  # Quantity
                 cell.alignment = Alignment(horizontal='right')
-            if r["is_sg_no_bom"]:
-                cell.fill = no_bom_fill
+            if col > len(base_headers):  # routing + total cost columns
+                cell.alignment = Alignment(horizontal='right')
         row_num += 1
 
-    if sg_no_bom_count:
-        note_row = row_num
-        ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row, end_column=len(headers))
-        note = ws.cell(
-            row=note_row, column=1,
-            value=f"⚠ {sg_no_bom_count} sub-assembly row(s) have NO active BOM — their component "
-                  "is shown as a leaf. Author a BOM for those items to drill them into their parts.",
+    if not rows:
+        note_cell = ws.cell(
+            row=2, column=1,
+            value="No component-level BOMs found in this assembly. Ensure your components "
+                  "(category = 'component') have their own active BOMs authored.",
         )
-        note.font = Font(italic=True, color="723B13", size=10)
-        note.fill = no_bom_fill
-        note.alignment = Alignment(horizontal='left', wrap_text=True)
+        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(headers))
+        note_cell.font = Font(italic=True, color="723B13", size=10)
+        note_cell.alignment = Alignment(horizontal='left', wrap_text=True)
 
-    # Sensible column widths — base columns + dynamic routing columns.
-    base_widths = [6, 22, 32, 8, 8, 22, 32, 9, 10, 13]
+    # Sensible column widths.
+    base_widths = [22, 32, 9, 22, 32, 9, 8, 10, 13]
     for i, w in enumerate(base_widths, 1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
     for i in range(len(base_widths) + 1, len(headers) + 1):

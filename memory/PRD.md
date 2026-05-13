@@ -20,7 +20,15 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-13 (newest)** — **Constant table width on resize + Full exploded BOM export (DONE & VERIFIED ✅):**
+- **2026-05-13 (newest)** — **Component BOM export refined to Component→RM only (DONE & VERIFIED ✅):** User requested the `/api/bom/export/parts-only/excel` endpoint output ONLY component → RM rows (skip FG, skip SG, skip any non-component intermediate level). Rewrote the export so that:
+  1. Walks the BOM tree from the root and collects every item whose `category == "component"` AND that has its own active BOM (deduped by item_id).
+  2. For each such component, emits ONE row per Raw-Material child (skips component / SG / FG children — those are surfaced via their own BOMs elsewhere in the walk).
+  3. Routing operations of each component's `parent_routings` become dynamic columns (one per distinct operation name across all emitted components). Cell value = per-unit cost; empty if that op doesn't apply to that component.
+  4. New `Total Routing Cost` column at the far right; routing values + total are emitted only on the FIRST RM-row of each component to avoid visual duplication.
+  5. Headers: `Component Part Number | Component Name | Revision | RM Part Number | RM Name | Quantity | UOM | Is Alternate | Effectivity Date | <one column per routing op> | Total Routing Cost`.
+  - Verified on FG-1 (Elevator Assembly) which has FG → SG (component) → 2 sub-components → 1 RM each. Export correctly produced 2 rows: `Part_1 → RM-1` and `Part_2 → RM-2`, each with `LC Cutting` cost (500 / 1200) and `Total Routing Cost` matching. FG/SG rows fully skipped; "Welding" op on the skipped SG correctly NOT emitted as a column.
+
+- **2026-05-13** — **Constant table width on resize + Full exploded BOM export (DONE & VERIFIED ✅):**
   1. **Items & Stock page column resize now keeps total width constant**: Previously when the user dragged a column edge wider, the `useResizableColumns` hook grew the `<table>`'s width by the same delta — pushing the page past the viewport. Now the drag handler steals width from the IMMEDIATE NEXT column (clamped to a 40px minimum). If the next column can't shrink further, the drag simply stops instead of expanding the table. Also added `max-width` lock to the table element on mount so siblings can't push it wider even via DOM manipulation.
      - Verified via Playwright: dragging the Name column +100px on the Items page → table width stayed at **1814px** (delta = 0px); next column visibly shrunk to compensate.
      - Same hook is used by `InventoryPage.js` (line 53) so the Stock page automatically inherits this behavior.
