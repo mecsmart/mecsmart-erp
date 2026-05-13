@@ -545,6 +545,52 @@ export default function BOMPage() {
   const bomFileRef = useRef(null);
   const [bomImporting, setBomImporting] = useState(false);
 
+  // Parts-only export: a single FG's flat aggregated parts list, useful for
+  // procurement / stores. Reuses the same popup-fallback strategy as the full
+  // BOM export to handle pop-up blockers across environments.
+  const handleBomPartsExport = async (bomId) => {
+    if (!bomId) return;
+    const apiUrl = api.defaults.baseURL || process.env.REACT_APP_BACKEND_URL || '';
+    const url = `/api/bom/export/parts-only/excel?bom_id=${bomId}`;
+    const directUrl = `${apiUrl}${url}`;
+    const toastId = toast.loading('Opening parts-only export…');
+    try {
+      const topWin = window.top || window;
+      const popup = topWin.open(directUrl, '_blank', 'noopener,noreferrer');
+      if (!popup) {
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = directUrl;
+        document.body.appendChild(iframe);
+        setTimeout(() => { try { document.body.removeChild(iframe); } catch { /* noop */ } }, 10000);
+        toast.success('Parts list download triggered — check your browser downloads', { id: toastId, duration: 4000 });
+        return;
+      }
+      toast.success('Parts export started — check your browser downloads', { id: toastId, duration: 4000 });
+    } catch (err) {
+      try {
+        const response = await api.get(url, { responseType: 'blob' });
+        if (!response.data || response.data.size === 0) {
+          toast.error('Export returned an empty file', { id: toastId });
+          return;
+        }
+        const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const blobUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = `bom_parts_${bomId.slice(0, 8)}.xlsx`;
+        document.body.appendChild(link);
+        link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        setTimeout(() => { try { document.body.removeChild(link); } catch { /* noop */ } }, 100);
+        setTimeout(() => { try { window.URL.revokeObjectURL(blobUrl); } catch { /* noop */ } }, 5000);
+        toast.success(`Parts list exported (${(blob.size / 1024).toFixed(1)} KB)`, { id: toastId });
+      } catch (blobErr) {
+        const msg = blobErr?.response?.data?.detail || blobErr?.message || 'Network/server error';
+        toast.error(`Parts export failed: ${msg}`, { id: toastId });
+      }
+    }
+  };
+
   const handleBomExport = async (bomId = null) => {
     const apiUrl = api.defaults.baseURL || process.env.REACT_APP_BACKEND_URL || '';
     const url = bomId ? `/api/bom/export/excel?bom_id=${bomId}` : '/api/bom/export/excel';
@@ -1758,7 +1804,8 @@ export default function BOMPage() {
                             data-testid={`print-bom-${pid}`}
                           ><Printer className="w-4 h-4" /></button>
                         )}
-                        {activeBom && <button onClick={(e) => { e.stopPropagation(); handleBomExport(activeBom.id); }} className="p-1 hover:bg-white/20 rounded" title="Export this BOM" data-testid={`export-bom-${pid}`}><Download className="w-4 h-4" /></button>}
+                        {activeBom && <button onClick={(e) => { e.stopPropagation(); handleBomExport(activeBom.id); }} className="p-1 hover:bg-white/20 rounded" title="Export this BOM (full tree)" data-testid={`export-bom-${pid}`}><Download className="w-4 h-4" /></button>}
+                        {activeBom && <button onClick={(e) => { e.stopPropagation(); handleBomPartsExport(activeBom.id); }} className="p-1 hover:bg-white/20 rounded text-[10px] font-semibold tracking-wide" title="Export aggregated parts list for this FG (1 row per leaf part)" data-testid={`export-bom-parts-${pid}`}>PARTS</button>}
                         <button onClick={(e) => { e.stopPropagation(); handleView(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="View"><Eye className="w-4 h-4" /></button>
                         {canEdit && <button onClick={(e) => { e.stopPropagation(); handleEdit(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>}
                         {canEdit && <button onClick={(e) => { e.stopPropagation(); handleRevise(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="Revise"><GitBranch className="w-4 h-4" /></button>}

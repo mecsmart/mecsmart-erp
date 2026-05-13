@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
@@ -45,9 +45,14 @@ export default function InventoryPage() {
   const [uoms, setUoms] = useState([]);
   // Sort + resize state for the inventory table.
   const [partNumberSort, setPartNumberSort] = useState(null);
+  // Pagination — render at most PAGE_SIZE rows initially, then a "Load more"
+  // button appends another batch. Mirrors the Items page strategy because
+  // rendering 1k+ rows synchronously was the main reason the Stock tab felt
+  // sluggish on first paint (the API itself returns in ~250ms).
+  const PAGE_SIZE = 100;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const tableRef = useRef(null);
   useResizableColumns(tableRef, [inventory.length, loading]);
-  const togglePartNumberSort = () => setPartNumberSort(s => (s === 'asc' ? 'desc' : 'asc'));
 
   // Deep-link: sidebar "Configuration" now has its own route, keep only stock/transactions here
   useEffect(() => {
@@ -64,6 +69,32 @@ export default function InventoryPage() {
   const [showLowStock, setShowLowStock] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [stockSearch, setStockSearch] = useState('');
+  const togglePartNumberSort = () => setPartNumberSort(s => (s === 'asc' ? 'desc' : 'asc'));
+
+  // Compute the filtered + sorted inventory once per render so we can both
+  // slice for pagination AND show the total/visible count beneath the table.
+  // Note: this useMemo depends on `stockSearch`, `groupFilter`, etc., so it
+  // MUST be declared AFTER those `useState`s (TDZ — can't reference let-binds
+  // before initialization in the function body).
+  const filteredSortedInventory = useMemo(() => {
+    const filtered = inventory.filter(item => {
+      if (groupFilter && item.group_id !== groupFilter) return false;
+      if (!stockSearch.trim()) return true;
+      const q = stockSearch.toLowerCase();
+      const grp = itemGroups.find(g => g.id === item.group_id);
+      return [
+        item.part_number, item.name, item.description, item.hsn_code,
+        item.category, grp?.name, grp?.code,
+      ].some(v => v && String(v).toLowerCase().includes(q));
+    });
+    if (!partNumberSort) return filtered;
+    return [...filtered].sort((a, b) => {
+      const ax = (a.part_number || '').toLowerCase();
+      const bx = (b.part_number || '').toLowerCase();
+      const cmp = ax.localeCompare(bx, undefined, { numeric: true, sensitivity: 'base' });
+      return partNumberSort === 'asc' ? cmp : -cmp;
+    });
+  }, [inventory, groupFilter, stockSearch, itemGroups, partNumberSort]);
   
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false);
   const [transactionForm, setTransactionForm] = useState({
@@ -174,6 +205,13 @@ export default function InventoryPage() {
   useEffect(() => {
     fetchData();
   }, [showLowStock, categoryFilter]);
+
+  // Reset pagination back to first page whenever a filter / search / sort
+  // changes — otherwise the user could end up viewing rows that don't match
+  // the new criteria.
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [showLowStock, categoryFilter, groupFilter, stockSearch, partNumberSort]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -532,6 +570,7 @@ export default function InventoryPage() {
                 <p>No inventory items found</p>
               </div>
             ) : (
+              <>
               <div className="overflow-x-auto sticky-header-scroll">
                 <table ref={tableRef} className="w-full data-table" data-testid="inventory-table">
                   <thead>
@@ -558,26 +597,7 @@ export default function InventoryPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(() => {
-                      const filtered = inventory.filter(item => {
-                        if (groupFilter && item.group_id !== groupFilter) return false;
-                        if (!stockSearch.trim()) return true;
-                        const q = stockSearch.toLowerCase();
-                        const grp = itemGroups.find(g => g.id === item.group_id);
-                        return [
-                          item.part_number, item.name, item.description, item.hsn_code,
-                          item.category, grp?.name, grp?.code,
-                        ].some(v => v && String(v).toLowerCase().includes(q));
-                      });
-                      const sorted = partNumberSort
-                        ? [...filtered].sort((a, b) => {
-                            const ax = (a.part_number || '').toLowerCase();
-                            const bx = (b.part_number || '').toLowerCase();
-                            const cmp = ax.localeCompare(bx, undefined, { numeric: true, sensitivity: 'base' });
-                            return partNumberSort === 'asc' ? cmp : -cmp;
-                          })
-                        : filtered;
-                      return sorted.map((item) => (
+                    {filteredSortedInventory.slice(0, visibleCount).map((item) => (
                       <tr key={item.id} className={isLowStock(item) ? 'bg-[#FDE8E8]/30' : ''} data-testid={`inventory-row-${item.part_number}`}>
                         <td className="mono font-medium">{item.part_number}</td>
                         <td>
@@ -657,11 +677,26 @@ export default function InventoryPage() {
                           </td>
                         )}
                       </tr>
-                    ));
-                    })()}
+                    ))}
                   </tbody>
                 </table>
               </div>
+              {/* Pagination footer — shows visible / total count and a Load
+                  more button so the user can pull additional rows on demand
+                  without forcing a 1000-row initial render. */}
+              <div className="flex items-center justify-between px-4 py-2 text-xs text-[#6B7280] border-t border-[#E5E7EB] bg-[#F9FAFB]" data-testid="inventory-pagination-footer">
+                <span>
+                  Showing <strong>{Math.min(visibleCount, filteredSortedInventory.length)}</strong> of <strong>{filteredSortedInventory.length}</strong> items
+                </span>
+                {filteredSortedInventory.length > visibleCount && (
+                  <button
+                    onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+                    className="btn-secondary text-xs px-3 py-1"
+                    data-testid="inventory-load-more"
+                  >Load more ({Math.min(PAGE_SIZE, filteredSortedInventory.length - visibleCount)} rows)</button>
+                )}
+              </div>
+              </>
             )}
           </div>
         </TabsContent>

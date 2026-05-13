@@ -7814,6 +7814,148 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
     
     return results
 
+@bom_router.get("/export/parts-only/excel")
+async def export_bom_parts_only_excel(request: Request, bom_id: str):
+    """Export ONLY the leaf parts (components / raw materials) needed for a single FG/SG BOM.
+
+    Unlike `/export/excel` (which dumps the full tree), this endpoint walks
+    every active child BOM and aggregates the LEAVES (items whose category is
+    NOT finished_good / sub_assembly OR that have no active BOM) into a flat
+    list. Quantities are multiplied by the parent qty at each level, so the
+    output is "to build 1 of this FG you need X of Part A, Y of Part B".
+
+    Use case: procurement / store-keepers want a flat shopping list per FG
+    without the multi-level structure that the regular BOM export gives.
+    """
+    await get_current_user(request)
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    root_bom = await db.boms.find_one({"id": bom_id}, {"_id": 0})
+    if not root_bom:
+        raise HTTPException(status_code=404, detail="BOM not found")
+    root_item = await db.items.find_one({"id": root_bom["parent_item_id"]}, {"_id": 0}) or {}
+
+    # Aggregated leaf parts: { item_id: {"item": <doc>, "qty": float} }.
+    parts: Dict[str, Dict[str, Any]] = {}
+
+    async def walk(bom: Dict[str, Any], multiplier: float, depth: int = 0):
+        # Hard cap to prevent runaway recursion on bad data.
+        if depth > 12:
+            return
+        for comp in bom.get("components", []) or []:
+            cid = comp.get("item_id")
+            if not cid:
+                continue
+            qty = float(comp.get("quantity") or 0) * multiplier
+            citem = await db.items.find_one({"id": cid}, {"_id": 0})
+            if not citem:
+                continue
+            # Recurse into active child BOMs for sub-assemblies / FGs (which
+            # are intermediates, not parts). Anything else (RM / component) is
+            # a leaf and gets aggregated.
+            child_bom = None
+            if citem.get("category") in ("sub_assembly", "finished_good"):
+                child_bom = await db.boms.find_one(
+                    {"parent_item_id": cid, "status": "active"}, {"_id": 0}
+                )
+            if child_bom:
+                await walk(child_bom, qty, depth + 1)
+            else:
+                entry = parts.setdefault(cid, {"item": citem, "qty": 0.0})
+                entry["qty"] += qty
+
+    await walk(root_bom, 1.0)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Parts Required"
+
+    headers = ["#", "Part Number", "Name", "Category", "HSN", "UOM", "Qty Required", "Unit Cost", "Total Cost", "Current Stock", "Group"]
+    header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'),
+    )
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center', wrap_text=True)
+        cell.border = thin_border
+
+    # Subtitle row showing what this list is FOR.
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(headers))
+    sub = ws.cell(row=2, column=1, value=f"Parts list for: {root_item.get('part_number','?')} — {root_item.get('name','?')} (BOM {root_bom.get('revision','')} — for 1 qty of FG)")
+    sub.font = Font(italic=True, bold=True, color="1D3557")
+    sub.alignment = Alignment(horizontal='left')
+
+    # Group lookup for the Group column.
+    group_ids = {p["item"].get("group_id") for p in parts.values() if p["item"].get("group_id")}
+    groups_map = {}
+    if group_ids:
+        async for g in db.item_groups.find({"id": {"$in": list(group_ids)}}, {"_id": 0, "id": 1, "name": 1}):
+            groups_map[g["id"]] = g.get("name", "")
+
+    # Sort by part number for deterministic output.
+    sorted_parts = sorted(parts.values(), key=lambda p: (p["item"].get("part_number") or "").lower())
+
+    row_num = 3
+    total_value = 0.0
+    for idx, p in enumerate(sorted_parts, 1):
+        it = p["item"]
+        qty = round(p["qty"], 4)
+        unit_cost = float(it.get("unit_cost") or 0)
+        line_cost = round(qty * unit_cost, 2)
+        total_value += line_cost
+        values = [
+            idx,
+            it.get("part_number", ""),
+            it.get("name", ""),
+            (it.get("category") or "").replace("_", " ").title(),
+            it.get("hsn_code", ""),
+            it.get("unit_of_measure", "pcs"),
+            qty,
+            unit_cost,
+            line_cost,
+            it.get("current_stock", 0),
+            groups_map.get(it.get("group_id"), ""),
+        ]
+        for col, v in enumerate(values, 1):
+            cell = ws.cell(row=row_num, column=col, value=v)
+            cell.border = thin_border
+            if col in (1, 7, 8, 9, 10):
+                cell.alignment = Alignment(horizontal='right')
+        row_num += 1
+
+    # Totals row.
+    total_row = row_num
+    ws.cell(row=total_row, column=1, value="").border = thin_border
+    total_label = ws.cell(row=total_row, column=8, value="Total")
+    total_label.font = Font(bold=True)
+    total_label.alignment = Alignment(horizontal='right')
+    total_cell = ws.cell(row=total_row, column=9, value=round(total_value, 2))
+    total_cell.font = Font(bold=True)
+    total_cell.alignment = Alignment(horizontal='right')
+    total_cell.fill = PatternFill(start_color="DEF7EC", end_color="DEF7EC", fill_type="solid")
+
+    # Column widths.
+    widths = [6, 18, 30, 14, 10, 8, 12, 12, 14, 12, 18]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    fname = f"BOM-Parts-{root_item.get('part_number','?')}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @bom_router.get("/export/excel")
 async def export_boms_excel(request: Request, bom_id: Optional[str] = None, top_level_only: bool = True):
     """
