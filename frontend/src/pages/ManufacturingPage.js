@@ -1449,22 +1449,36 @@ export default function ManufacturingPage() {
                   // hit a true root (parent_wo_id == null OR parent missing).
                   // Render each unique root exactly once; renderMORow recursively
                   // walks down — guaranteed no duplicate top-level for a child MO.
+                  //
+                  // EXCEPTION: when a family filter is active, the focused WO IS
+                  // the root — we don't walk up past it. This way per-panel
+                  // filter pills on the focused subtree filter ONLY within the
+                  // family (instead of within the whole FG tree). E.g. focusing
+                  // on an SG then choosing "Parts only" shows just the Parts
+                  // under that SG.
                   const woById = new Map(workOrders.map(w => [w.id, w]));
                   const rootIdsOrder = [];
                   const rootIdSet = new Set();
-                  for (const wo of filteredWorkOrders) {
-                    let cursor = wo;
-                    const visited = new Set();
-                    while (cursor && cursor.parent_wo_id && !visited.has(cursor.id)) {
-                      visited.add(cursor.id);
-                      const parent = woById.get(cursor.parent_wo_id);
-                      if (!parent) break;
-                      cursor = parent;
+                  if (familyFilterWoId) {
+                    if (woById.has(familyFilterWoId)) {
+                      rootIdSet.add(familyFilterWoId);
+                      rootIdsOrder.push(familyFilterWoId);
                     }
-                    const rootId = cursor?.id;
-                    if (rootId && !rootIdSet.has(rootId)) {
-                      rootIdSet.add(rootId);
-                      rootIdsOrder.push(rootId);
+                  } else {
+                    for (const wo of filteredWorkOrders) {
+                      let cursor = wo;
+                      const visited = new Set();
+                      while (cursor && cursor.parent_wo_id && !visited.has(cursor.id)) {
+                        visited.add(cursor.id);
+                        const parent = woById.get(cursor.parent_wo_id);
+                        if (!parent) break;
+                        cursor = parent;
+                      }
+                      const rootId = cursor?.id;
+                      if (rootId && !rootIdSet.has(rootId)) {
+                        rootIdSet.add(rootId);
+                        rootIdsOrder.push(rootId);
+                      }
                     }
                   }
                   const rootMOs = rootIdsOrder.map(id => woById.get(id)).filter(Boolean);

@@ -20,7 +20,12 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-13 (newest)** — **Per-FG panel filter (DONE & VERIFIED ✅):**
+- **2026-05-13 (newest)** — **Family filter + per-panel filter composition (DONE & VERIFIED ✅):**
+  - When a family filter is active, the focused WO now becomes its OWN top-level panel root (it no longer walks up to the FG ancestor for rendering). This makes the per-panel `[All] [SG only] [Parts only]` pills on the focused panel filter ONLY within that family's subtree.
+  - Example workflow: user clicks **Focus family** on an SG → that SG and its descendants become the panel; clicking **Parts only** on the panel shows just the Parts under that SG, hiding any other intermediate WOs. Combine the two filters to drill into exactly the level + category you want to process.
+  - Verified via Playwright: focusing on MO-000658 + SG-only filter rendered the correct 3-row panel scoped to that family; clearing the family chip restored the full list.
+
+- **2026-05-13** — **Per-FG panel filter (DONE & VERIFIED ✅):**
   - Removed the global Category pill toolbar from the top of the MO page.
   - Each main FG panel now carries its OWN inline filter pills `[All] [SG only] [Parts only]` directly inside the panel summary. Pills only render when the FG actually has SG/Part descendants worth filtering (e.g., FGs with no children show no pills).
   - When `SG only` is active on a panel, the panel's tree collapses to FG + only SG descendants. When `Parts only` is active, the panel shows FG + only Part descendants (any intervening SG layers are skipped — Parts surface directly under the FG row at the same depth). Other FG panels are untouched.
