@@ -13,11 +13,12 @@ import { useEffect } from 'react';
  *  - Locks each <th> to its natural-distribution width on mount and switches
  *    the <table> to `table-layout: fixed`. Sorting / filtering / re-rendering
  *    no longer reflow column widths.
- *  - Sets the <table>'s explicit width to the SUM of column widths (instead
- *    of leaving Tailwind's `w-full` to constrain it). When the user drags a
- *    column wider, the parent <table>'s width grows by the same delta — so
- *    the OTHER columns are not squeezed to compensate. The parent scroll
- *    container's `overflow-x: auto` then kicks in for horizontal scrolling.
+ *  - When the user drags a column wider, the NEXT sibling <th> is shrunk by
+ *    the same delta (clamped to MIN_WIDTH) — so the total table width
+ *    REMAINS CONSTANT. This prevents the page from expanding beyond the
+ *    viewport when a column is enlarged. If the next sibling is already at
+ *    its minimum, the drag stops (no further widening) instead of pushing
+ *    the table past its container.
  *  - Resize handles are 6px-wide divs hugging the right edge. Mouse-down
  *    begins a resize session.
  *
@@ -56,10 +57,26 @@ export default function useResizableColumns(tableRef, deps = []) {
       table.style.tableLayout = 'fixed';
       table.style.width = total + 'px';
       table.style.minWidth = total + 'px';
+      // Hard upper bound — once locked, the table cannot grow wider than its
+      // initial natural width (sum of column natural widths). Subsequent
+      // drags redistribute width AMONG columns rather than pushing the table
+      // off-screen.
+      table.style.maxWidth = total + 'px';
     });
 
     const cleanups = [];
-    ths.forEach((th) => {
+    // Minimum allowed column width — anything thinner becomes unreadable.
+    const MIN_WIDTH = 40;
+    // Lock <th> widths via inline style so the table stays in sync. Resizing
+    // a single column will steal width from the immediate-next column rather
+    // than expanding the table.
+    const setThWidth = (th, w) => {
+      const clamped = Math.max(MIN_WIDTH, w);
+      th.style.width = clamped + 'px';
+      th.style.minWidth = clamped + 'px';
+      th.style.maxWidth = clamped + 'px';
+    };
+    ths.forEach((th, idx) => {
       // Avoid double-attaching when React re-renders rows (same <th> reused).
       if (th.querySelector(':scope > .col-resizer')) return;
 
@@ -69,6 +86,10 @@ export default function useResizableColumns(tableRef, deps = []) {
 
       let startX = 0;
       let startWidth = 0;
+      let startNextWidth = 0;
+      // The next-sibling <th> we'll steal width from when this column is
+      // widened. May be null if this is the LAST column.
+      let nextTh = null;
       // True briefly after a drag — used to suppress the synthetic click
       // event the browser fires on mouseup, which would otherwise reach the
       // <th>'s onClick={togglePartNumberSort} and reorder the items.
@@ -77,13 +98,21 @@ export default function useResizableColumns(tableRef, deps = []) {
       const onMove = (e) => {
         didResize = true;
         const dx = e.clientX - startX;
-        const next = Math.max(40, startWidth + dx);
-        th.style.width = next + 'px';
-        th.style.minWidth = next + 'px';
-        th.style.maxWidth = next + 'px';
-        // Grow the <table>'s width by the same delta so siblings keep their
-        // widths and the parent gains horizontal scroll if needed.
-        syncTableWidth();
+        if (nextTh) {
+          // Steal width from the next column. Clamp so neither column shrinks
+          // below MIN_WIDTH — i.e. the user can't drag past the point where
+          // the next column would disappear.
+          const maxIncrease = startNextWidth - MIN_WIDTH;  // how much we can take
+          const maxDecrease = startWidth - MIN_WIDTH;       // how much this can lose
+          const delta = Math.min(maxIncrease, Math.max(-maxDecrease, dx));
+          setThWidth(th, startWidth + delta);
+          setThWidth(nextTh, startNextWidth - delta);
+        } else {
+          // No sibling to steal from — just resize this column and let the
+          // table grow (preserving the prior behavior for the last column).
+          setThWidth(th, startWidth + dx);
+          syncTableWidth();
+        }
       };
       const onUp = () => {
         handle.classList.remove('resizing');
@@ -98,6 +127,11 @@ export default function useResizableColumns(tableRef, deps = []) {
         e.stopPropagation();
         startX = e.clientX;
         startWidth = th.getBoundingClientRect().width;
+        // Capture the current width of the next sibling THE INSTANT the drag
+        // starts. We re-fetch every drag because columns may have been
+        // resized by previous drags.
+        nextTh = ths[idx + 1] || null;
+        startNextWidth = nextTh ? nextTh.getBoundingClientRect().width : 0;
         didResize = false;
         handle.classList.add('resizing');
         document.addEventListener('mousemove', onMove);

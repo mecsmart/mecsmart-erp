@@ -7816,16 +7816,23 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
 
 @bom_router.get("/export/parts-only/excel")
 async def export_bom_parts_only_excel(request: Request, bom_id: str):
-    """Export ONLY the leaf parts (components / raw materials) needed for a single FG/SG BOM.
+    """Export the FULLY-EXPLODED BOM tree for a single FG/SG.
 
-    Unlike `/export/excel` (which dumps the full tree), this endpoint walks
-    every active child BOM and aggregates the LEAVES (items whose category is
-    NOT finished_good / sub_assembly OR that have no active BOM) into a flat
-    list. Quantities are multiplied by the parent qty at each level, so the
-    output is "to build 1 of this FG you need X of Part A, Y of Part B".
+    Emits one row per component appearance at every level of the tree (not
+    aggregated by leaf). Sub-assemblies with their own active BOMs are
+    listed first and then recursively expanded into their children — so the
+    output mirrors the indented BOM structure a procurement / stores user
+    would walk through manually.
 
-    Use case: procurement / store-keepers want a flat shopping list per FG
-    without the multi-level structure that the regular BOM export gives.
+    Columns:
+        Level | Path | Part Number | Name | Category | HSN | UOM |
+        Qty / Parent | Cumulative Qty (× FG qty 1) | Unit Cost | Total Cost |
+        Current Stock | Group | Has BOM
+
+    A footer row aggregates total extended cost (sum of all leaf component
+    costs × cumulative qty), and rows for sub-assemblies that lack an active
+    BOM are highlighted so the procurement team can flag them for BOM
+    authoring.
     """
     await get_current_user(request)
     from openpyxl import Workbook
@@ -7836,51 +7843,76 @@ async def export_bom_parts_only_excel(request: Request, bom_id: str):
         raise HTTPException(status_code=404, detail="BOM not found")
     root_item = await db.items.find_one({"id": root_bom["parent_item_id"]}, {"_id": 0}) or {}
 
-    # Aggregated leaf parts: { item_id: {"item": <doc>, "qty": float, "is_sg_no_bom": bool} }.
-    # `is_sg_no_bom` flags sub-assemblies / finished-goods that surfaced as
-    # leaves because no active BOM was found — useful so the procurement
-    # team can spot items needing a BOM to be authored.
-    parts: Dict[str, Dict[str, Any]] = {}
+    # Pre-load all items + active BOMs by parent_item_id so the recursion is
+    # entirely in-memory (no per-row DB hits).
+    items_by_id: Dict[str, Dict[str, Any]] = {}
+    async for it in db.items.find({}, {"_id": 0}):
+        items_by_id[it["id"]] = it
+    active_bom_by_parent: Dict[str, Dict[str, Any]] = {}
+    async for b in db.boms.find({"status": "active"}, {"_id": 0}):
+        active_bom_by_parent[b["parent_item_id"]] = b
 
-    async def walk(bom: Dict[str, Any], multiplier: float, depth: int = 0):
-        # Hard cap to prevent runaway recursion on bad data.
+    group_ids = {it.get("group_id") for it in items_by_id.values() if it.get("group_id")}
+    groups_map: Dict[str, str] = {}
+    if group_ids:
+        async for g in db.item_groups.find({"id": {"$in": list(group_ids)}}, {"_id": 0, "id": 1, "name": 1}):
+            groups_map[g["id"]] = g.get("name", "")
+
+    # Output rows accumulated in traversal order.
+    rows: List[Dict[str, Any]] = []
+    leaf_total_cost = 0.0
+    sg_no_bom_count = 0
+
+    def walk(bom: Dict[str, Any], multiplier: float, path_parts: List[str], depth: int):
+        nonlocal leaf_total_cost, sg_no_bom_count
         if depth > 12:
             return
         for comp in bom.get("components", []) or []:
             cid = comp.get("item_id")
             if not cid:
                 continue
-            qty = float(comp.get("quantity") or 0) * multiplier
-            citem = await db.items.find_one({"id": cid}, {"_id": 0})
+            citem = items_by_id.get(cid)
             if not citem:
                 continue
-            # Recurse into ANY active child BOM — not just SG/FG. A component
-            # can also have its own BOM (e.g., a fabricated bracket that has
-            # sub-parts listed). The earlier check was restricted to
-            # `sub_assembly` and `finished_good`, which meant components with
-            # their own BOMs were exported as leaves instead of being exploded
-            # into the parts they carry. Now we always look up an active BOM;
-            # if one exists for this item, we drill in.
-            child_bom = await db.boms.find_one(
-                {"parent_item_id": cid, "status": "active"}, {"_id": 0}
-            )
+            qty_per_parent = float(comp.get("quantity") or 0)
+            cumulative = qty_per_parent * multiplier
+            child_bom = active_bom_by_parent.get(cid)
+            is_sg_no_bom = (citem.get("category") in ("sub_assembly", "finished_good")) and not child_bom
+            if is_sg_no_bom:
+                sg_no_bom_count += 1
+            unit_cost = float(citem.get("unit_cost") or 0)
+            line_cost = round(cumulative * unit_cost, 2)
+            # Only leaf rows contribute to the rollup total — intermediate
+            # SG/FG rows would double-count if their children are also
+            # listed below.
+            if not child_bom:
+                leaf_total_cost += line_cost
+            this_path = path_parts + [citem.get("part_number") or "?"]
+            rows.append({
+                "level": depth + 1,
+                "path": " → ".join(this_path),
+                "item": citem,
+                "qty_per_parent": qty_per_parent,
+                "cumulative": cumulative,
+                "unit_cost": unit_cost,
+                "line_cost": line_cost,
+                "has_bom": bool(child_bom),
+                "is_sg_no_bom": is_sg_no_bom,
+            })
             if child_bom:
-                await walk(child_bom, qty, depth + 1)
-            else:
-                entry = parts.setdefault(cid, {
-                    "item": citem,
-                    "qty": 0.0,
-                    "is_sg_no_bom": citem.get("category") in ("sub_assembly", "finished_good"),
-                })
-                entry["qty"] += qty
+                walk(child_bom, cumulative, this_path, depth + 1)
 
-    await walk(root_bom, 1.0)
+    walk(root_bom, 1.0, [root_item.get("part_number") or "?"], 0)
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Parts Required"
+    ws.title = "Exploded BOM"
 
-    headers = ["#", "Part Number", "Name", "Category", "HSN", "UOM", "Qty Required", "Unit Cost", "Total Cost", "Current Stock", "Group"]
+    headers = [
+        "Level", "Path (Parent → Child)", "Part Number", "Name", "Category",
+        "HSN", "UOM", "Qty / Parent", "Cumulative Qty",
+        "Unit Cost", "Total Cost", "Current Stock", "Group", "Has BOM",
+    ]
     header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=11)
     thin_border = Border(
@@ -7894,93 +7926,97 @@ async def export_bom_parts_only_excel(request: Request, bom_id: str):
         cell.alignment = Alignment(horizontal='center', wrap_text=True)
         cell.border = thin_border
 
-    # Subtitle row showing what this list is FOR.
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(headers))
-    sub = ws.cell(row=2, column=1, value=f"Parts list for: {root_item.get('part_number','?')} — {root_item.get('name','?')} (BOM {root_bom.get('revision','')} — for 1 qty of FG)")
+    sub = ws.cell(
+        row=2, column=1,
+        value=f"Exploded BOM for: {root_item.get('part_number','?')} — {root_item.get('name','?')} "
+              f"(BOM {root_bom.get('revision','')} — for 1 qty of root)",
+    )
     sub.font = Font(italic=True, bold=True, color="1D3557")
     sub.alignment = Alignment(horizontal='left')
 
-    # Group lookup for the Group column.
-    group_ids = {p["item"].get("group_id") for p in parts.values() if p["item"].get("group_id")}
-    groups_map = {}
-    if group_ids:
-        async for g in db.item_groups.find({"id": {"$in": list(group_ids)}}, {"_id": 0, "id": 1, "name": 1}):
-            groups_map[g["id"]] = g.get("name", "")
-
-    # Sort by part number for deterministic output.
-    sorted_parts = sorted(parts.values(), key=lambda p: (p["item"].get("part_number") or "").lower())
+    # Highlight palettes for each category so the structure is readable at a glance.
+    cat_fills = {
+        "finished_good": PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid"),
+        "sub_assembly": PatternFill(start_color="E0F2FE", end_color="E0F2FE", fill_type="solid"),
+        "component":    PatternFill(start_color="F0FDF4", end_color="F0FDF4", fill_type="solid"),
+        "raw_material": PatternFill(start_color="FEFCE8", end_color="FEFCE8", fill_type="solid"),
+    }
+    no_bom_fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
 
     row_num = 3
-    total_value = 0.0
-    sg_no_bom_count = 0
-    for idx, p in enumerate(sorted_parts, 1):
-        it = p["item"]
-        qty = round(p["qty"], 4)
-        unit_cost = float(it.get("unit_cost") or 0)
-        line_cost = round(qty * unit_cost, 2)
-        total_value += line_cost
-        category_label = (it.get("category") or "").replace("_", " ").title()
-        if p.get("is_sg_no_bom"):
-            sg_no_bom_count += 1
+    for r in rows:
+        it = r["item"]
+        category = (it.get("category") or "")
+        category_label = category.replace("_", " ").title()
+        if r["is_sg_no_bom"]:
             category_label = f"{category_label}  ⚠ no BOM"
+        # Indent the Path column by 2 spaces per depth level so the hierarchy
+        # is visible at a glance even when the sheet is sorted by index.
+        indent = "    " * (r["level"] - 1)
         values = [
-            idx,
+            r["level"],
+            indent + r["path"],
             it.get("part_number", ""),
             it.get("name", ""),
             category_label,
             it.get("hsn_code", ""),
             it.get("unit_of_measure", "pcs"),
-            qty,
-            unit_cost,
-            line_cost,
+            round(r["qty_per_parent"], 4),
+            round(r["cumulative"], 4),
+            r["unit_cost"],
+            r["line_cost"],
             it.get("current_stock", 0),
             groups_map.get(it.get("group_id"), ""),
+            "Yes" if r["has_bom"] else "—",
         ]
         for col, v in enumerate(values, 1):
             cell = ws.cell(row=row_num, column=col, value=v)
             cell.border = thin_border
-            if col in (1, 7, 8, 9, 10):
+            if col in (1, 8, 9, 10, 11, 12):
                 cell.alignment = Alignment(horizontal='right')
-            # Highlight SG rows that surfaced as leaves due to missing BOM.
-            if p.get("is_sg_no_bom"):
-                cell.fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+            # Pick row fill: SG-no-BOM warning trumps category color.
+            if r["is_sg_no_bom"]:
+                cell.fill = no_bom_fill
+            elif category in cat_fills:
+                cell.fill = cat_fills[category]
+            # Bold intermediate (has_bom) rows so they read as section headers.
+            if r["has_bom"]:
+                cell.font = Font(bold=True)
         row_num += 1
 
-    # Totals row.
+    # Rollup of leaf cost only — intermediate rows don't add to this total to
+    # avoid double-counting.
     total_row = row_num
-    ws.cell(row=total_row, column=1, value="").border = thin_border
-    total_label = ws.cell(row=total_row, column=8, value="Total")
+    total_label = ws.cell(row=total_row, column=10, value="Leaf Total")
     total_label.font = Font(bold=True)
     total_label.alignment = Alignment(horizontal='right')
-    total_cell = ws.cell(row=total_row, column=9, value=round(total_value, 2))
+    total_cell = ws.cell(row=total_row, column=11, value=round(leaf_total_cost, 2))
     total_cell.font = Font(bold=True)
     total_cell.alignment = Alignment(horizontal='right')
     total_cell.fill = PatternFill(start_color="DEF7EC", end_color="DEF7EC", fill_type="solid")
 
-    # If any sub-assembly surfaced as a leaf because it has no active BOM,
-    # add a one-line callout so the user knows why it shows up flat (and can
-    # author the missing BOM).
     if sg_no_bom_count:
         note_row = total_row + 1
         ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row, end_column=len(headers))
         note = ws.cell(
             row=note_row, column=1,
-            value=f"⚠ {sg_no_bom_count} sub-assembly row(s) shown above have NO active BOM — they were "
-                  "exported as leaves. Author a BOM for those items to drill them into their parts.",
+            value=f"⚠ {sg_no_bom_count} sub-assembly row(s) above have NO active BOM — they appear as "
+                  "leaves. Author a BOM for those items to expand them further.",
         )
         note.font = Font(italic=True, color="723B13", size=10)
-        note.fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+        note.fill = no_bom_fill
         note.alignment = Alignment(horizontal='left', wrap_text=True)
 
-    # Column widths.
-    widths = [6, 18, 30, 14, 10, 8, 12, 12, 14, 12, 18]
+    # Column widths tuned to the new layout.
+    widths = [7, 38, 16, 28, 14, 10, 8, 12, 13, 12, 14, 12, 16, 9]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
 
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    fname = f"BOM-Parts-{root_item.get('part_number','?')}.xlsx"
+    fname = f"BOM-Exploded-{root_item.get('part_number','?')}.xlsx"
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
