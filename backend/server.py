@@ -7816,23 +7816,19 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
 
 @bom_router.get("/export/parts-only/excel")
 async def export_bom_parts_only_excel(request: Request, bom_id: str):
-    """Export the FULLY-EXPLODED BOM tree for a single FG/SG.
+    """Export the exploded BOM as one row per (Parent → Component) pair.
 
-    Emits one row per component appearance at every level of the tree (not
-    aggregated by leaf). Sub-assemblies with their own active BOMs are
-    listed first and then recursively expanded into their children — so the
-    output mirrors the indented BOM structure a procurement / stores user
-    would walk through manually.
+    Output format mirrors the user-supplied reference template:
+        Level | Parent Part Number | Parent Name | Revision | Status |
+        Component Part Number | Component Name | Quantity | Is Alternate |
+        Effectivity Date | <one column per distinct routing operation>
 
-    Columns:
-        Level | Path | Part Number | Name | Category | HSN | UOM |
-        Qty / Parent | Cumulative Qty (× FG qty 1) | Unit Cost | Total Cost |
-        Current Stock | Group | Has BOM
-
-    A footer row aggregates total extended cost (sum of all leaf component
-    costs × cumulative qty), and rows for sub-assemblies that lack an active
-    BOM are highlighted so the procurement team can flag them for BOM
-    authoring.
+    Walking strategy: starting from the root BOM, for each component in
+    bom.components emit ONE row (parent = BOM's parent_item, component =
+    comp.item). If the component has its own active BOM, recurse (the
+    component becomes the parent of its own children at the next level).
+    Routing operation columns are populated dynamically from each component's
+    `routings` list (or the BOM's `parent_routings` for the FG row).
     """
     await get_current_user(request)
     from openpyxl import Workbook
@@ -7841,10 +7837,8 @@ async def export_bom_parts_only_excel(request: Request, bom_id: str):
     root_bom = await db.boms.find_one({"id": bom_id}, {"_id": 0})
     if not root_bom:
         raise HTTPException(status_code=404, detail="BOM not found")
-    root_item = await db.items.find_one({"id": root_bom["parent_item_id"]}, {"_id": 0}) or {}
 
-    # Pre-load all items + active BOMs by parent_item_id so the recursion is
-    # entirely in-memory (no per-row DB hits).
+    # Pre-load items + active BOMs for in-memory recursion.
     items_by_id: Dict[str, Dict[str, Any]] = {}
     async for it in db.items.find({}, {"_id": 0}):
         items_by_id[it["id"]] = it
@@ -7852,171 +7846,162 @@ async def export_bom_parts_only_excel(request: Request, bom_id: str):
     async for b in db.boms.find({"status": "active"}, {"_id": 0}):
         active_bom_by_parent[b["parent_item_id"]] = b
 
-    group_ids = {it.get("group_id") for it in items_by_id.values() if it.get("group_id")}
-    groups_map: Dict[str, str] = {}
-    if group_ids:
-        async for g in db.item_groups.find({"id": {"$in": list(group_ids)}}, {"_id": 0, "id": 1, "name": 1}):
-            groups_map[g["id"]] = g.get("name", "")
+    # Discover the union of all routing-operation names used anywhere in the
+    # tree, so we can build a column for each (instead of hard-coding a list).
+    routing_names: List[str] = []
+    seen_names: set = set()
 
-    # Output rows accumulated in traversal order.
+    def collect_routing_names(routings):
+        for r in routings or []:
+            nm = None
+            if isinstance(r, dict):
+                nm = (r.get("name") or r.get("operation_name") or r.get("process") or "").strip()
+            elif isinstance(r, str):
+                nm = r.strip()
+            if nm and nm not in seen_names:
+                seen_names.add(nm)
+                routing_names.append(nm)
+
+    def walk_for_names(bom):
+        collect_routing_names(bom.get("parent_routings"))
+        for c in bom.get("components", []) or []:
+            collect_routing_names(c.get("routings"))
+            child = active_bom_by_parent.get(c.get("item_id"))
+            if child:
+                walk_for_names(child)
+    walk_for_names(root_bom)
+
+    # Helper: given a routings list and a routing-name column, return the
+    # process_cost or a marker the reference template uses ("Yes" / "—").
+    # The reference seems to use the part_number of the routing config or a
+    # blank. We'll emit "Yes" when the routing is present for that line.
+    def routing_value(routings, name):
+        for r in routings or []:
+            rn = None
+            if isinstance(r, dict):
+                rn = (r.get("name") or r.get("operation_name") or r.get("process") or "").strip()
+            elif isinstance(r, str):
+                rn = r.strip()
+            if rn == name:
+                if isinstance(r, dict):
+                    # Prefer human-friendly display: cost/unit if set, else "Yes".
+                    cost = r.get("cost_per_unit") or r.get("process_cost_per_unit") or r.get("cost")
+                    if cost:
+                        return cost
+                return "Yes"
+        return ""
+
     rows: List[Dict[str, Any]] = []
-    leaf_total_cost = 0.0
-    sg_no_bom_count = 0
 
-    def walk(bom: Dict[str, Any], multiplier: float, path_parts: List[str], depth: int):
-        nonlocal leaf_total_cost, sg_no_bom_count
-        if depth > 12:
-            return
+    def walk(bom, depth):
+        parent_item = items_by_id.get(bom["parent_item_id"]) or {}
         for comp in bom.get("components", []) or []:
             cid = comp.get("item_id")
-            if not cid:
-                continue
-            citem = items_by_id.get(cid)
-            if not citem:
-                continue
-            qty_per_parent = float(comp.get("quantity") or 0)
-            cumulative = qty_per_parent * multiplier
-            child_bom = active_bom_by_parent.get(cid)
-            is_sg_no_bom = (citem.get("category") in ("sub_assembly", "finished_good")) and not child_bom
-            if is_sg_no_bom:
-                sg_no_bom_count += 1
-            unit_cost = float(citem.get("unit_cost") or 0)
-            line_cost = round(cumulative * unit_cost, 2)
-            # Only leaf rows contribute to the rollup total — intermediate
-            # SG/FG rows would double-count if their children are also
-            # listed below.
-            if not child_bom:
-                leaf_total_cost += line_cost
-            this_path = path_parts + [citem.get("part_number") or "?"]
+            citem = items_by_id.get(cid) or {}
             rows.append({
                 "level": depth + 1,
-                "path": " → ".join(this_path),
-                "item": citem,
-                "qty_per_parent": qty_per_parent,
-                "cumulative": cumulative,
-                "unit_cost": unit_cost,
-                "line_cost": line_cost,
-                "has_bom": bool(child_bom),
-                "is_sg_no_bom": is_sg_no_bom,
+                "parent_part_number": parent_item.get("part_number", ""),
+                "parent_name": parent_item.get("name", ""),
+                "revision": bom.get("revision", ""),
+                "status": bom.get("status", ""),
+                "component_part_number": citem.get("part_number", ""),
+                "component_name": citem.get("name", ""),
+                "quantity": comp.get("quantity", 0),
+                "is_alternate": "Yes" if comp.get("is_alternate") else "No",
+                "effectivity_date": (comp.get("effectivity_date") or bom.get("effectivity_date") or ""),
+                "routings": comp.get("routings") or [],
+                "is_sg_no_bom": (citem.get("category") in ("sub_assembly", "finished_good"))
+                                 and not active_bom_by_parent.get(cid),
             })
-            if child_bom:
-                walk(child_bom, cumulative, this_path, depth + 1)
+            child = active_bom_by_parent.get(cid)
+            if child:
+                walk(child, depth + 1)
 
-    walk(root_bom, 1.0, [root_item.get("part_number") or "?"], 0)
+    walk(root_bom, 0)
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "Exploded BOM"
+    ws.title = "Component BOM"
 
-    headers = [
-        "Level", "Path (Parent → Child)", "Part Number", "Name", "Category",
-        "HSN", "UOM", "Qty / Parent", "Cumulative Qty",
-        "Unit Cost", "Total Cost", "Current Stock", "Group", "Has BOM",
+    base_headers = [
+        "Level", "Parent Part Number", "Parent Name", "Revision", "Status",
+        "Component Part Number", "Component Name", "Quantity",
+        "Is Alternate", "Effectivity Date",
     ]
+    headers = base_headers + routing_names
+
     header_fill = PatternFill(start_color="1D3557", end_color="1D3557", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF", size=11)
     thin_border = Border(
         left=Side(style='thin'), right=Side(style='thin'),
         top=Side(style='thin'), bottom=Side(style='thin'),
     )
-    for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=header)
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal='center', wrap_text=True)
         cell.border = thin_border
 
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(headers))
-    sub = ws.cell(
-        row=2, column=1,
-        value=f"Exploded BOM for: {root_item.get('part_number','?')} — {root_item.get('name','?')} "
-              f"(BOM {root_bom.get('revision','')} — for 1 qty of root)",
-    )
-    sub.font = Font(italic=True, bold=True, color="1D3557")
-    sub.alignment = Alignment(horizontal='left')
-
-    # Highlight palettes for each category so the structure is readable at a glance.
-    cat_fills = {
-        "finished_good": PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid"),
-        "sub_assembly": PatternFill(start_color="E0F2FE", end_color="E0F2FE", fill_type="solid"),
-        "component":    PatternFill(start_color="F0FDF4", end_color="F0FDF4", fill_type="solid"),
-        "raw_material": PatternFill(start_color="FEFCE8", end_color="FEFCE8", fill_type="solid"),
-    }
     no_bom_fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
 
-    row_num = 3
+    row_num = 2
+    sg_no_bom_count = 0
     for r in rows:
-        it = r["item"]
-        category = (it.get("category") or "")
-        category_label = category.replace("_", " ").title()
         if r["is_sg_no_bom"]:
-            category_label = f"{category_label}  ⚠ no BOM"
-        # Indent the Path column by 2 spaces per depth level so the hierarchy
-        # is visible at a glance even when the sheet is sorted by index.
-        indent = "    " * (r["level"] - 1)
-        values = [
+            sg_no_bom_count += 1
+        # Effectivity date — format ISO datetime → YYYY-MM-DD for readability.
+        eff = r["effectivity_date"]
+        if hasattr(eff, "strftime"):
+            eff = eff.strftime("%Y-%m-%d")
+        elif isinstance(eff, str) and "T" in eff:
+            eff = eff.split("T", 1)[0]
+        base_values = [
             r["level"],
-            indent + r["path"],
-            it.get("part_number", ""),
-            it.get("name", ""),
-            category_label,
-            it.get("hsn_code", ""),
-            it.get("unit_of_measure", "pcs"),
-            round(r["qty_per_parent"], 4),
-            round(r["cumulative"], 4),
-            r["unit_cost"],
-            r["line_cost"],
-            it.get("current_stock", 0),
-            groups_map.get(it.get("group_id"), ""),
-            "Yes" if r["has_bom"] else "—",
+            r["parent_part_number"],
+            r["parent_name"],
+            r["revision"],
+            r["status"],
+            r["component_part_number"],
+            r["component_name"],
+            r["quantity"],
+            r["is_alternate"],
+            eff,
         ]
-        for col, v in enumerate(values, 1):
+        routing_values = [routing_value(r["routings"], nm) for nm in routing_names]
+        for col, v in enumerate(base_values + routing_values, 1):
             cell = ws.cell(row=row_num, column=col, value=v)
             cell.border = thin_border
-            if col in (1, 8, 9, 10, 11, 12):
+            if col in (1, 8):
                 cell.alignment = Alignment(horizontal='right')
-            # Pick row fill: SG-no-BOM warning trumps category color.
             if r["is_sg_no_bom"]:
                 cell.fill = no_bom_fill
-            elif category in cat_fills:
-                cell.fill = cat_fills[category]
-            # Bold intermediate (has_bom) rows so they read as section headers.
-            if r["has_bom"]:
-                cell.font = Font(bold=True)
         row_num += 1
 
-    # Rollup of leaf cost only — intermediate rows don't add to this total to
-    # avoid double-counting.
-    total_row = row_num
-    total_label = ws.cell(row=total_row, column=10, value="Leaf Total")
-    total_label.font = Font(bold=True)
-    total_label.alignment = Alignment(horizontal='right')
-    total_cell = ws.cell(row=total_row, column=11, value=round(leaf_total_cost, 2))
-    total_cell.font = Font(bold=True)
-    total_cell.alignment = Alignment(horizontal='right')
-    total_cell.fill = PatternFill(start_color="DEF7EC", end_color="DEF7EC", fill_type="solid")
-
     if sg_no_bom_count:
-        note_row = total_row + 1
+        note_row = row_num
         ws.merge_cells(start_row=note_row, start_column=1, end_row=note_row, end_column=len(headers))
         note = ws.cell(
             row=note_row, column=1,
-            value=f"⚠ {sg_no_bom_count} sub-assembly row(s) above have NO active BOM — they appear as "
-                  "leaves. Author a BOM for those items to expand them further.",
+            value=f"⚠ {sg_no_bom_count} sub-assembly row(s) have NO active BOM — their component "
+                  "is shown as a leaf. Author a BOM for those items to drill them into their parts.",
         )
         note.font = Font(italic=True, color="723B13", size=10)
         note.fill = no_bom_fill
         note.alignment = Alignment(horizontal='left', wrap_text=True)
 
-    # Column widths tuned to the new layout.
-    widths = [7, 38, 16, 28, 14, 10, 8, 12, 13, 12, 14, 12, 16, 9]
-    for i, w in enumerate(widths, 1):
+    # Sensible column widths — base columns + dynamic routing columns.
+    base_widths = [6, 22, 32, 8, 8, 22, 32, 9, 10, 13]
+    for i, w in enumerate(base_widths, 1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+    for i in range(len(base_widths) + 1, len(headers) + 1):
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = 14
 
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    fname = f"BOM-Exploded-{root_item.get('part_number','?')}.xlsx"
+    root_item = items_by_id.get(root_bom["parent_item_id"]) or {}
+    fname = f"{root_item.get('part_number','BOM')} Component BOM.xlsx"
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
