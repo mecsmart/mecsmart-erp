@@ -20,7 +20,19 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-14 (newest)** — **JW Process OS — specific routing cost + Item Description + Bottom Add-Part (DONE & VERIFIED ✅):** Three user-reported issues on the Job Work / Subcontract Order edit flow.
+- **2026-05-14 (newest)** — **JW DC: style match + per-op cost override on unsent DCs (DONE & VERIFIED ✅):**
+  1. **Fix 1 — Send Materials (DC) dialog styled like Manual DC**: The Job Card OS DC dialog's Part column now stacks three lines vertically per row (mirroring Manual DC's item-cell layout):
+     - Line 1: `<part_number>` (bold mono) — `<item_name>`
+     - Line 2: `Op: <process_name>` (small bronze)
+     - Line 3: `<item_description>` (small italic gray)
+     All existing columns (HSN, Qty, UOM, Charges/Unit, Total Charges, RM Cost/Unit, Total Amount) preserved. data-testid `dc-desc-{idx}`.
+  2. **Fix 2 — Unsent-DC per-op cost override**: User reported that even after iteration 109's fix, opening a Send DC dialog or listing draft DCs sometimes still showed the COMBINED process cost (legacy data pollution). Added two override paths:
+     - `GET /api/job-work/orders/{sc_id}/dc-lines` — when the SC's job_work_part has a `process_name`, `charges_per_unit` is recomputed via `find_routing_cost(item_id, process_name)`, overriding any stale stored value. Falls back to stored value if op not found in any BOM. Also now returns `item_description` and `process_name` to the frontend.
+     - `GET /api/job-work/challans` — for DCs with `status='draft'` whose parent SC is a Job Card OS, each line's stored `processing_charges` is overridden with the specific routing cost (self-heal of legacy DCs). Sent/completed DCs are NOT touched (audit preservation).
+     - `JobWorkLineItem` model and `POST /api/job-work/challans` persist new optional fields `item_description` and `process_name` on each DC line.
+  - **Verification** (iteration 110): 7/7 backend tests + 3/3 frontend UI tests pass. Tested with planted polluted data (stored charges=2500, expected 500 via 'LC Cutting'): both /dc-lines and /challans self-healed to 500. Regression tests confirm Full MO-SC (no reference_operation_seqs) still uses stored/combined charges as before.
+
+- **2026-05-14** — **JW Process OS — specific routing cost + Item Description + Bottom Add-Part (DONE & VERIFIED ✅):** Three user-reported issues on the Job Work / Subcontract Order edit flow.
   1. **Specific outsource routing cost in DC**: For Job Card OS SCs (those with `reference_operation_seqs` — auto-created when starting a specific outsourced operation), the SC stores a per-op `charges` (the cost of that ONE routing op only). Two existing backend bugs were wiping this and replacing it with the **combined** BOM process cost:
      - `PUT /api/job-work/orders/{id}` (line ~10524): when the frontend re-saved an SC without explicit charges, the enricher overwrote `charges` with `compute_bom_costs.process_cost` (sum of all routings). Rewrote the enricher with a `_find_existing` helper that matches incoming entries to the original `job_work_parts` by (item_id, process_name) → preserves `process_name`, `wo_id`, `item_description`, and falls back to specific-routing cost via `find_routing_cost` when process_name is set.
      - `GET /api/job-work/orders` (line ~10414): auto-refresh logic was unconditionally re-setting `part["charges"] = fg_process_cost` on every list call. Added `has_specific_op = bool(part.get("process_name"))` guard so the overwrite is skipped when the line is tied to a specific routing.
