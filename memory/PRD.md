@@ -20,7 +20,11 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-14 (newest)** — **MO page refinement v2 (DONE & VERIFIED ✅):**
+- **2026-05-14 (newest)** — **MO + Items pages: sticky-on-scroll header + MO collapsed by default (DONE & VERIFIED ✅):**
+  1. Applied the BOM page's sticky-header pattern (`sticky top-0 z-30 bg-white py-2 border-b -mx-6 px-6`) to the **Manufacturing Orders** page header and the **Items & Parts** page header. Title + toolbar stays pinned at the top while scrolling through 100s of rows.
+  2. **All FG groups on the MO page are now collapsed by default** (removed `open={parentMO.status !== 'completed'}` from the `<details>` element). User clicks the chevron to expand a specific FG's tree.
+
+- **2026-05-14** — **MO page refinement v2 (DONE & VERIFIED ✅):**
   1. **Family focus no longer hides other FG-MOs**: Removed the global `familyWoIds` filter from `filteredWorkOrders`. Family focus is now a **per-FG visual narrowing** — applied only inside the FG that contains the focused SG via a `familyMask` Set. Other FGs render fully unchanged.
   2. **Removed the global "Family: MO-XXX" chip** from the toolbar. The clear-focus indicator now lives ONLY as the inline `Focused: MO-XXX [×]` chip on the FG header that owns the focused SG.
   3. **Moved global toolbar (All Statuses + count + Search + Create MO button) inline with the Manufacturing Orders page header** (top-right corner). Saves vertical space; the old toolbar row is removed.
