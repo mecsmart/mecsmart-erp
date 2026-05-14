@@ -19,6 +19,17 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-05-14 (BOM single-line header + Accounts perm split + MO Routing visual — DONE & VERIFIED ✅):**
+  1. **BOM page single-line header** (`/app/frontend/src/pages/BOMPage.js`): Merged Status filter + Search into the sticky page header alongside Export / Import / Create BOM buttons. The standalone status+search card directly below the header has been removed.
+  2. **Accounts permission module split** (`/app/backend/core/permissions.py`): The unified `accounts` module from iteration 118 has been split back into two granular modules — `purchase_invoices` and `tax_invoices`. Admin can now grant access to one without the other. Defaults granted to admin/production_manager/inventory_manager.
+  3. **Backend gates re-targeted** (`/app/backend/server.py`): All 4 PI endpoints check `module="purchase_invoices"`; the 3 TI endpoints (POST/PUT/DELETE) check `module="tax_invoices"`.
+  4. **Migration updated** (`migrate_purchase_invoices_perm_to_accounts`): Now performs both legacy-fold AND split: any role group with legacy `accounts` perms has them unioned into BOTH `purchase_invoices` and `tax_invoices`. Idempotent. Verified — 1 role group successfully split.
+  5. **Frontend Layout / UserManagementPage**: `accountsGroupItems` modules now point to the two new keys (PI → `purchase_invoices`, TI → `tax_invoices`); MODULE_GROUPS Accounts main shows two sub-rows (`Purchase Invoices`, `Tax Invoices`) each with its own R/C/W/D/All checkboxes.
+  6. **CRMPage**: `canAccountsEdit` renamed to `canTaxInvoiceEdit` and now checks `tax_invoices.create|edit`.
+  7. **MO Routing column visual** (`/app/frontend/src/pages/ManufacturingPage.js`): Replaced arrow-joined string with a vertical stack — each routing name rendered as a separate span with `text-[11px] text-[#1E429F] font-medium leading-tight`, matching the BOM page's blue routing pill style. Falls back to `operations_status[*].operation_name` when `wo.routing` is null.
+  8. **Testing**: `testing_agent_v3_fork` iteration 119 — 100% pass (backend + frontend). No console errors.
+
+
 - **2026-05-14 (Accounts menu + permission module — DONE & VERIFIED ✅):**
   1. **New Accounts sidebar group** (`/app/frontend/src/components/Layout.js`): Added a collapsible Accounts group with `Wallet` icon between Job Work and Settings. Children: Purchase Invoices (`/purchase-invoices`) and Tax Invoices (`/crm?tab=marketing&sub=tax-invoices`).
   2. **Removed from old locations**: Purchase Invoices no longer appears under Inventory; Tax Invoices and Packing Lists no longer appear under CRM → Marketing dropdown (Stores → Packing Lists remains intact).
