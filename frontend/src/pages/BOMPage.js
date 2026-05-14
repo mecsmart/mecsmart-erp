@@ -1957,7 +1957,7 @@ export default function BOMPage() {
           {bomExplosion && (
             <div className="mt-4">
               <div className="bg-[#F3F4F6] p-3 rounded-sm mb-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
                   <div>
                     <span className="mono font-medium">{bomExplosion.parent_item?.part_number}</span>
                     <span className="text-[#4B5563] mx-2">-</span>

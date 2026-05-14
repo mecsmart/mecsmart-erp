@@ -227,11 +227,10 @@ export default function SuppliersPage() {
   };
 
   return (
-    <div className="space-y-6" data-testid="suppliers-page">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4" data-testid="suppliers-page">
+      <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
         <div>
-          <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Suppliers</h1>
-          <p className="text-sm text-[#4B5563]">Manage your supplier database</p>
+          <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Suppliers</h1>
         </div>
         {canEdit && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => {

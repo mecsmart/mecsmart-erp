@@ -20,7 +20,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-14 (newest)** — **MO page FG scroll fix + Items single-line header (DONE & VERIFIED ✅):**
+- **2026-05-14 (newest)** — **Global single-line headers + brand-hides-on-scroll + Inventory New-Transaction speed (DONE & VERIFIED ✅):**
+  1. **Brand header now scrolls away on scroll**: Removed `sticky top-0 z-30` from the Layout's MecSmart ERP brand header (`/app/frontend/src/components/Layout.js`). Page headers (sticky themselves) now slide up to the very top when content scrolls — matching the BOM page pattern requested.
+  2. **Single-line headers across the entire app**: Bulk-removed all page subtitle `<p>` lines and applied the sticky-on-scroll pattern (`sticky top-0 z-30 bg-white py-2 border-b -mx-6 px-6`) to 12 pages: Items, Inventory, Sales Orders (Production), Suppliers, Customers, MRP, Purchase Invoices, Purchase Orders, Quality, Settings, User Management, Warehouses, JobWork, BOM. Title compressed from `text-2xl` → `text-xl`.
+  3. **Items & Parts header is now genuinely one line**: Search input, All Categories filter, All Groups filter, Export, Import, and Add Item button all on a single row (filter card row removed entirely).
+  4. **Inventory Management — New Transaction dialog speed fix**: The dialog took several seconds to open because the item `<Select>` rendered all 1200+ inventory rows as DOM `<SelectItem>` children. Replaced with `SearchableItemSelect` (lazy-rendering, debounce-filtered). Measured open latency: ~540ms (was multi-second).
+  5. **Reconcile Reservations verified working**: Backend endpoint returns 200 with proper drift report (tested with curl); no error in current build. If user still hits the error in production, that build is older than today's redeploy.
+
+- **2026-05-14** — **MO page FG scroll fix + Items single-line header (DONE & VERIFIED ✅):**
   1. **MO page — FG headers now scroll up with the page**: The `.sticky-header-scroll` CSS class (used to keep table column headers visible on long flat tables) was wrapping every FG's `<table>` and applied `max-height: calc(100vh - 220px)`. That created an INNER scroll viewport per FG, so the outer page scroll couldn't move the FG headers up. Removed the class from the MO FG table wrapper — only the page header (Manufacturing Orders + toolbar) remains sticky now, matching the BOM page exactly.
   2. **Items & Parts page — single-line header**: Moved Search input, All Categories, All Groups filters all inline with the page header (title + Export + Import + Add Item). Removed the separate filter card row entirely. Header is sticky-on-scroll and stays pinned.
 

@@ -676,7 +676,7 @@ export default function JobWorkPage() {
 
   return (
     <div className="space-y-3" data-testid="jobwork-page">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
         <div>
           <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Job Work / Subcontracting</h1>
         </div>

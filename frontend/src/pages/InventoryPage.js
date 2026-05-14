@@ -20,6 +20,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { SearchableItemSelect } from '../components/SearchableItemSelect';
 import { toast } from 'sonner';
 
 const transactionTypes = [
@@ -284,11 +285,10 @@ export default function InventoryPage() {
   const lowStockCount = inventory.filter(isLowStock).length;
 
   return (
-    <div className="space-y-6" data-testid="inventory-page">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4" data-testid="inventory-page">
+      <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
         <div>
-          <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Inventory Management</h1>
-          <p className="text-sm text-[#4B5563]">Track stock levels and inventory transactions</p>
+          <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Inventory Management</h1>
         </div>
         <div className="flex items-center gap-2">
         {user?.role === 'admin' && (
@@ -343,21 +343,13 @@ export default function InventoryPage() {
               <form onSubmit={handleTransactionSubmit} className="space-y-4 mt-4">
                 <div>
                   <label className="block text-sm font-semibold text-[#111827] mb-1">Item *</label>
-                  <Select 
-                    value={transactionForm.item_id} 
-                    onValueChange={(v) => setTransactionForm({ ...transactionForm, item_id: v })}
-                  >
-                    <SelectTrigger data-testid="transaction-item-select">
-                      <SelectValue placeholder="Select item" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {inventory.map((item) => (
-                        <SelectItem key={item.id} value={item.id}>
-                          {item.part_number} - {item.name} (Stock: {item.current_stock})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableItemSelect
+                    items={inventory}
+                    value={transactionForm.item_id}
+                    onChange={(v) => setTransactionForm({ ...transactionForm, item_id: v })}
+                    placeholder="Search part by code / name…"
+                    testId="transaction-item-select"
+                  />
                 </div>
 
                 <div>

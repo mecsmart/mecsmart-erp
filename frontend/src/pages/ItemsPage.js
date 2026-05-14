@@ -479,7 +479,6 @@ export default function ItemsPage() {
         <div className="flex items-center gap-3 flex-wrap">
           <div>
             <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Items & Parts</h1>
-            <p className="text-[10px] text-[#4B5563]">Inventory items and parts catalog</p>
           </div>
           {/* Search + Category + Group inline with the header (single line). */}
           <div className="relative w-56">

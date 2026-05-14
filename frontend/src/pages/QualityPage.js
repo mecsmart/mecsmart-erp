@@ -178,11 +178,10 @@ export default function QualityPage() {
   };
 
   return (
-    <div className="space-y-6" data-testid="quality-page">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4" data-testid="quality-page">
+      <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
         <div>
-          <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Quality Control</h1>
-          <p className="text-sm text-[#4B5563]">Manage inspections and quality templates</p>
+          <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Quality Control</h1>
         </div>
         <div className="flex items-center space-x-2">
           {canCreate && (

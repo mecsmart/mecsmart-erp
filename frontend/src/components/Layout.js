@@ -507,7 +507,7 @@ export default function Layout() {
       </aside>
 
       <div className={`${sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'} transition-all duration-200`}>
-        <header className="h-14 bg-white border-b border-[#E5E7EB] flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30">
+        <header className="h-14 bg-white border-b border-[#E5E7EB] flex items-center justify-between px-4 lg:px-6">
           <div className="flex items-center space-x-4">
             <button onClick={() => setSidebarOpen(true)} className="lg:hidden p-1 text-[#4B5563] hover:text-[#111827]" data-testid="mobile-menu-btn">
               <Menu className="w-6 h-6" />

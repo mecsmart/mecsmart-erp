@@ -219,11 +219,10 @@ export default function SettingsPage() {
   if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div></div>;
 
   return (
-    <div className="space-y-6" data-testid="settings-page">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4" data-testid="settings-page">
+      <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
         <div>
-          <h1 className="text-2xl font-bold font-[Chivo] text-[#1D3557]">Settings</h1>
-          <p className="text-sm text-[#4B5563]">Manage company profile, branding, currency and PO configuration</p>
+          <h1 className="text-xl font-bold font-[Chivo] text-[#1D3557]">Settings</h1>
         </div>
       </div>
 
