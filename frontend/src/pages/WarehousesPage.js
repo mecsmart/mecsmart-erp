@@ -271,12 +271,23 @@ export default function WarehousesPage() {
   };
 
   // GRN Functions
-  const openGRNDialog = (po) => {
-    setSelectedPO(po);
+  const openGRNDialog = async (po) => {
+    // ALWAYS re-fetch the freshest PO data from the backend before opening
+    // the dialog — this prevents stale `received_quantity` values (cached in
+    // the React state from a prior fetch) from showing the full PO qty after
+    // a partial receipt. If the live fetch fails (network), fall back to
+    // whatever the parent passed.
+    let freshPO = po;
+    try {
+      const { data } = await api.get('/api/grn/pending-pos');
+      const fresh = (data || []).find(p => p.id === po.id);
+      if (fresh) freshPO = fresh;
+    } catch {}
+    setSelectedPO(freshPO);
     // For partial PO support: each line shows remaining (pending) qty.
     // Lines fully received are filtered out. User can enter what supplier delivered
     // this round; backend cumulatively tracks line.received_quantity on the PO.
-    const pendingLines = (po.lines || []).map(line => {
+    const pendingLines = (freshPO.lines || []).map(line => {
       const ordered = Number(line.quantity || 0);
       const alreadyReceived = Number(line.received_quantity || 0);
       const pending = Math.max(0, ordered - alreadyReceived);

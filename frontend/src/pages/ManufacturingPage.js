@@ -78,12 +78,6 @@ export default function ManufacturingPage() {
   // does NOT clear the filter; the user keeps working in the same tree
   // until they explicitly click the Clear button.
   const [familyFilterWoId, setFamilyFilterWoId] = useState(null);
-  // Per-FG search and status filters — scoped to the FG's own MO tree.
-  // Keyed by parent FG WO id. Empty/null = no filter applied.
-  const [panelSearch, setPanelSearch] = useState({});
-  const [panelStatus, setPanelStatus] = useState({});
-  const setPanelSearchFor = (fgId, q) => setPanelSearch(prev => ({ ...prev, [fgId]: q }));
-  const setPanelStatusFor = (fgId, s) => setPanelStatus(prev => ({ ...prev, [fgId]: s }));
   
   // Operation start/stop dialog
   const [opDialog, setOpDialog] = useState({ open: false, mode: '', sequence: 0 });
@@ -1018,8 +1012,8 @@ export default function ManufacturingPage() {
     <div className="space-y-6" data-testid="manufacturing-page">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Manufacturing Orders</h1>
-          <p className="text-sm text-[#4B5563]">Work centers, routings, and manufacturing order tracking</p>
+          <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Manufacturing Orders</h1>
+          <p className="text-xs text-[#4B5563]">Work centers, routings, and manufacturing order tracking</p>
         </div>
       </div>
 
@@ -1496,7 +1490,7 @@ export default function ManufacturingPage() {
                   // a given <details> tree (defends against any malformed parent chain).
                   let renderedIds = new Set();
 
-                  const renderMORow = (wo, depth = 0, panelFilter = '', search = '', statusFilter = '') => {
+                  const renderMORow = (wo, depth = 0, panelFilter = '') => {
                     if (!wo || renderedIds.has(wo.id)) return null;
                     // Per-panel category filter — root FG (depth 0) always renders;
                     // a descendant that doesn't match the filter is hidden, BUT we
@@ -1506,25 +1500,7 @@ export default function ManufacturingPage() {
                     if (panelFilter && depth > 0 && getWoCategory(wo) !== panelFilter) {
                       renderedIds.add(wo.id);
                       const kids = workOrders.filter(w => w.parent_wo_id === wo.id);
-                      return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter))}</React.Fragment>;
-                    }
-                    // Per-FG search filter — depth>0 only (root FG always shown).
-                    // Match either the item part_number or item name (case-insensitive).
-                    if (search && depth > 0) {
-                      const q = search.toLowerCase();
-                      const it = wo.item || items.find(i => i.id === wo.item_id) || {};
-                      const hay = `${it.part_number || ''} ${it.name || ''} ${wo.wo_number || ''}`.toLowerCase();
-                      if (!hay.includes(q)) {
-                        renderedIds.add(wo.id);
-                        const kids = workOrders.filter(w => w.parent_wo_id === wo.id);
-                        return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter))}</React.Fragment>;
-                      }
-                    }
-                    // Per-FG status filter — depth>0 only.
-                    if (statusFilter && depth > 0 && wo.status !== statusFilter) {
-                      renderedIds.add(wo.id);
-                      const kids = workOrders.filter(w => w.parent_wo_id === wo.id);
-                      return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter))}</React.Fragment>;
+                      return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter))}</React.Fragment>;
                     }
                     renderedIds.add(wo.id);
                     const progress = getWOProgress(wo);
@@ -1630,7 +1606,7 @@ export default function ManufacturingPage() {
                             )}
                           </td>
                         </tr>
-                        {children.map(c => renderMORow(c, depth + 1, panelFilter, search, statusFilter))}
+                        {children.map(c => renderMORow(c, depth + 1, panelFilter))}
                       </React.Fragment>
                     );
                   };
@@ -1662,7 +1638,7 @@ export default function ManufacturingPage() {
                       return cats;
                     })();
                     return (
-                      <details key={parentMO.id} open className="border rounded-sm overflow-hidden">
+                      <details key={parentMO.id} open={parentMO.status !== 'completed'} className="border rounded-sm overflow-hidden">
                         <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none flex-wrap" style={{borderLeft: `4px solid ${catColor}`}}>
                           <ChevronRight className="w-4 h-4 text-[#4B5563]" />
                           <span className="mono font-bold text-sm" style={{color: catColor}}>{parentMO.wo_number}</span>
@@ -1671,6 +1647,20 @@ export default function ManufacturingPage() {
                           <span className="text-[10px] px-1.5 py-0.5 rounded text-white font-semibold" style={{backgroundColor: catColor}}>{getCatLabel(parentMO)}</span>
                           <span className={`text-[10px] px-1 rounded ${parentMO.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : parentMO.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : 'bg-[#FDF6B2] text-[#723B13]'}`}>{parentMO.status?.replace('_',' ')}</span>
                           {parentMO.is_subcontract && <span className="text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">Sub-Contract</span>}
+                          {/* Family focus — focuses the GLOBAL list to ONLY this FG's
+                              family (the FG + all its descendant SGs/Parts). Click
+                              again on the active pill to unfocus. */}
+                          {children.length > 0 && (
+                            <button
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFamilyFilterWoId(familyFilterWoId === parentMO.id ? null : parentMO.id); }}
+                              className={`text-[10px] px-1.5 py-0.5 rounded-sm flex items-center gap-1 border ${familyFilterWoId === parentMO.id ? 'bg-[#1D3557] text-white border-[#1D3557]' : 'bg-white text-[#1D3557] border-[#1D3557] hover:bg-[#E1EFFE]'}`}
+                              data-testid={`family-focus-${parentMO.id}`}
+                              title="Focus the global list to only this FG family"
+                            >
+                              <Filter className="w-3 h-3" />
+                              {familyFilterWoId === parentMO.id ? 'Focused' : 'Family focus'}
+                            </button>
+                          )}
                           {/* Per-FG child filter — only render if this FG has
                               SG or Part descendants worth filtering. Click on
                               the active pill to clear back to All. */}
@@ -1699,47 +1689,9 @@ export default function ManufacturingPage() {
                           )}
                           <span className="text-xs text-[#6B7280] ml-auto">{1 + children.length} MO(s)</span>
                         </summary>
-                        {/* Per-FG search & status filter row — appears just under the
-                            FG group header so users can drill into THIS FG's MO tree
-                            without affecting other FGs. */}
-                        <div className="flex items-center gap-2 px-4 py-2 bg-[#F9FAFB] border-b border-[#E5E7EB] flex-wrap" data-testid={`panel-filters-${parentMO.id}`}>
-                          <div className="relative flex-1 min-w-[200px] max-w-[360px]">
-                            <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-[#6B7280]" />
-                            <input
-                              type="text"
-                              placeholder="Search MO / item in this FG…"
-                              value={panelSearch[parentMO.id] || ''}
-                              onChange={(e) => setPanelSearchFor(parentMO.id, e.target.value)}
-                              onClick={(e) => e.stopPropagation()}
-                              className="w-full pl-7 pr-2 py-1 border border-[#D1D5DB] rounded-sm text-xs focus:outline-none focus:border-[#1D3557]"
-                              data-testid={`panel-search-${parentMO.id}`}
-                            />
-                          </div>
-                          <select
-                            value={panelStatus[parentMO.id] || ''}
-                            onChange={(e) => setPanelStatusFor(parentMO.id, e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="px-2 py-1 border border-[#D1D5DB] rounded-sm text-xs bg-white focus:outline-none focus:border-[#1D3557]"
-                            data-testid={`panel-status-${parentMO.id}`}
-                          >
-                            <option value="">All Statuses</option>
-                            <option value="pending">Pending</option>
-                            <option value="in_progress">In Progress</option>
-                            <option value="outsourced">Outsourced</option>
-                            <option value="completed">Completed</option>
-                            <option value="cancelled">Cancelled</option>
-                          </select>
-                          {(panelSearch[parentMO.id] || panelStatus[parentMO.id]) && (
-                            <button
-                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPanelSearchFor(parentMO.id, ''); setPanelStatusFor(parentMO.id, ''); }}
-                              className="text-[10px] text-[#9B1C1C] hover:underline"
-                              data-testid={`panel-filter-clear-${parentMO.id}`}
-                            >Clear</button>
-                          )}
-                        </div>
                         <div className="overflow-x-auto sticky-header-scroll">
                           <table className="w-full data-table"><thead><tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
-                          <tbody>{renderMORow(parentMO, 0, activePanelFilter, panelSearch[parentMO.id] || '', panelStatus[parentMO.id] || '')}</tbody></table>
+                          <tbody>{renderMORow(parentMO, 0, activePanelFilter)}</tbody></table>
                         </div>
                       </details>
                     );
