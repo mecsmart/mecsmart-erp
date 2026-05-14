@@ -123,6 +123,9 @@ export default function CRMPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const canMarketingEdit = user?.role === 'admin' || user?.permissions?.crm_marketing?.includes('create') || user?.permissions?.crm_marketing?.includes('edit');
+  // Tax Invoices live under the Accounts module (moved out of Marketing). Edits
+  // require `accounts.create` or `accounts.edit`. Admins always pass.
+  const canAccountsEdit = user?.role === 'admin' || user?.permissions?.accounts?.includes('create') || user?.permissions?.accounts?.includes('edit');
   const canSupportEdit = user?.role === 'admin' || user?.permissions?.crm_support?.includes('create') || user?.permissions?.crm_support?.includes('edit');
   // Configuration-page permissions — page is visible to anyone with `view`,
   // but Save buttons require `edit`. Admins always pass.
@@ -198,7 +201,7 @@ export default function CRMPage() {
         <ProformasPanel customers={customers} search={search} onRefresh={fetchData} canEdit={canMarketingEdit} />
       )}
       {activeTab === 'marketing' && activeSub === 'tax-invoices' && (
-        <TaxInvoicesPanel customers={customers} search={search} onRefresh={fetchData} canEdit={canMarketingEdit} />
+        <TaxInvoicesPanel customers={customers} search={search} onRefresh={fetchData} canEdit={canAccountsEdit} />
       )}
       {activeTab === 'marketing' && activeSub === 'packing-lists' && (
         <PackingListsPanel search={search} canEdit={canMarketingEdit} />

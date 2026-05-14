@@ -9796,6 +9796,34 @@ async def migrate_compact_fy_number_series():
         logger.info(f"[migrate] Normalized {count_fy} FY field(s) and stripped {count_prefix} prefix trailer(s) in number_series")
 
 
+async def migrate_purchase_invoices_perm_to_accounts():
+    """One-time migration: copy any existing role_group permissions for
+    `purchase_invoices` onto the new `accounts` module. The old module key is
+    no longer rendered in the Permissions UI, so anyone with PI access pre-
+    rename would otherwise lose access. We do NOT delete the legacy key — that
+    keeps the migration idempotent and reversible if needed.
+    """
+    try:
+        cursor = db.role_groups.find({"permissions.purchase_invoices": {"$exists": True}}, {"_id": 0, "id": 1, "permissions": 1})
+        migrated = 0
+        async for rg in cursor:
+            perms = rg.get("permissions") or {}
+            legacy = perms.get("purchase_invoices") or []
+            current_accounts = perms.get("accounts") or []
+            # Merge — union of both lists, preserving any newly-granted accounts perms.
+            merged = list({*current_accounts, *legacy})
+            if set(merged) != set(current_accounts):
+                await db.role_groups.update_one(
+                    {"id": rg["id"]},
+                    {"$set": {"permissions.accounts": merged}}
+                )
+                migrated += 1
+        if migrated:
+            logger.info(f"[migrate] Backfilled accounts permission on {migrated} role group(s) from legacy purchase_invoices")
+    except Exception as e:
+        logger.exception(f"migrate_purchase_invoices_perm_to_accounts failed: {e}")
+
+
 @app.on_event("startup")
 async def startup():
     # Create indexes
@@ -9824,6 +9852,7 @@ async def startup():
     await migrate_sc_jw_charges_from_bom()
     await migrate_refresh_tax_invoice_qrs()
     await migrate_compact_fy_number_series()
+    await migrate_purchase_invoices_perm_to_accounts()
     
     # Write credentials file (dev environment only, non-fatal on Windows/other OS)
     try:
@@ -9923,7 +9952,7 @@ async def get_grns_pending_invoice(request: Request):
 @purchase_invoices_router.post("", status_code=201)
 async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request):
     user = await get_current_user(request)
-    _require_access(user, ["admin", "production_manager"], module="purchase_invoices", action="create")
+    _require_access(user, ["admin", "production_manager"], module="accounts", action="create")
     count = await db.purchase_invoices.count_documents({})
     inv_number = f"PI-{str(count + 1).zfill(6)}"
     
@@ -10036,7 +10065,7 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request)
 @purchase_invoices_router.put("/{invoice_id}")
 async def update_purchase_invoice(invoice_id: str, data: PurchaseInvoiceUpdate, request: Request):
     user = await get_current_user(request)
-    _require_access(user, ["admin", "production_manager"], module="purchase_invoices", action="edit")
+    _require_access(user, ["admin", "production_manager"], module="accounts", action="edit")
     invoice = await db.purchase_invoices.find_one({"id": invoice_id})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -10113,7 +10142,7 @@ async def update_purchase_invoice(invoice_id: str, data: PurchaseInvoiceUpdate, 
 @purchase_invoices_router.post("/{invoice_id}/approve")
 async def approve_purchase_invoice(invoice_id: str, request: Request):
     user = await get_current_user(request)
-    _require_access(user, ["admin"], module="purchase_invoices", action="edit")
+    _require_access(user, ["admin"], module="accounts", action="edit")
     invoice = await db.purchase_invoices.find_one({"id": invoice_id})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -10125,7 +10154,7 @@ async def approve_purchase_invoice(invoice_id: str, request: Request):
 @purchase_invoices_router.post("/{invoice_id}/mark-paid")
 async def mark_invoice_paid(invoice_id: str, request: Request):
     user = await get_current_user(request)
-    _require_access(user, ["admin"], module="purchase_invoices", action="edit")
+    _require_access(user, ["admin"], module="accounts", action="edit")
     invoice = await db.purchase_invoices.find_one({"id": invoice_id})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -13292,6 +13321,7 @@ async def list_tax_invoices(request: Request, status: Optional[str] = None):
 @crm_router.post("/tax-invoices", status_code=201)
 async def create_tax_invoice(data: TaxInvoiceCreate, request: Request):
     user = await get_current_user(request)
+    _require_access(user, ["admin", "production_manager"], module="accounts", action="create")
     if not data.lines:
         raise HTTPException(status_code=400, detail="At least one line is required")
     invoice_no = await _get_next_number("tax_invoice")
@@ -13343,7 +13373,8 @@ async def create_tax_invoice(data: TaxInvoiceCreate, request: Request):
 
 @crm_router.put("/tax-invoices/{tid}")
 async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request):
-    await get_current_user(request)
+    user = await get_current_user(request)
+    _require_access(user, ["admin", "production_manager"], module="accounts", action="edit")
     existing = await db.tax_invoices.find_one({"id": tid})
     if not existing:
         raise HTTPException(status_code=404, detail="Tax Invoice not found")
@@ -13386,7 +13417,8 @@ async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request)
 
 @crm_router.delete("/tax-invoices/{tid}")
 async def delete_tax_invoice(tid: str, request: Request):
-    await get_current_user(request)
+    user = await get_current_user(request)
+    _require_access(user, ["admin"], module="accounts", action="delete")
     existing = await db.tax_invoices.find_one({"id": tid})
     if not existing:
         raise HTTPException(status_code=404, detail="Tax Invoice not found")

@@ -5,7 +5,7 @@ import {
   Factory, LayoutDashboard, Package, FileStack, Calculator, ClipboardCheck,
   Warehouse, LogOut, Menu, X, User, ChevronDown, ChevronRight,
   Truck, ShoppingCart, Settings2, Users, Building2, Shield, FileText, Wrench, Cog,
-  Headphones, Megaphone, AlertTriangle, PanelLeftClose, PanelLeftOpen
+  Headphones, Megaphone, AlertTriangle, PanelLeftClose, PanelLeftOpen, Wallet
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -23,7 +23,6 @@ const inventoryGroupItems = [
   { name: 'Suppliers', href: '/suppliers', icon: Truck, module: 'suppliers' },
   { name: 'MRP', href: '/mrp', icon: Calculator, module: 'mrp' },
   { name: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart, module: 'purchase_orders' },
-  { name: 'Purchase Invoices', href: '/purchase-invoices', icon: FileText, module: 'purchase_orders' },
   { name: 'Configuration', href: '/inventory/configuration', icon: Cog, module: 'inventory_configuration' },
 ];
 
@@ -55,10 +54,13 @@ const crmMarketingItems = [
   { name: 'Customers', href: '/customers', icon: Users, module: 'customers' },
   { name: 'Quotations', href: '/crm?tab=marketing&sub=quotations', icon: FileText, module: 'crm_marketing' },
   { name: 'Proforma Invoices', href: '/crm?tab=marketing&sub=proformas', icon: FileStack, module: 'crm_marketing' },
-  { name: 'Tax Invoices', href: '/crm?tab=marketing&sub=tax-invoices', icon: Calculator, module: 'crm_marketing' },
-  { name: 'Packing Lists', href: '/crm?tab=marketing&sub=packing-lists', icon: Package, module: 'crm_marketing' },
   { name: 'Products', href: '/items', icon: Package, module: 'items' },
   { name: 'Configuration', href: '/crm?tab=marketing&sub=configuration', icon: Cog, module: 'marketing_configuration' },
+];
+
+const accountsGroupItems = [
+  { name: 'Purchase Invoices', href: '/purchase-invoices', icon: FileText, module: 'accounts' },
+  { name: 'Tax Invoices', href: '/crm?tab=marketing&sub=tax-invoices', icon: Calculator, module: 'accounts' },
 ];
 
 const crmSupportItems = [
@@ -106,6 +108,10 @@ export default function Layout() {
   const [jobWorkOpen, setJobWorkOpen] = useState(() => {
     return location.pathname === '/job-work';
   });
+  const [accountsOpen, setAccountsOpen] = useState(() => {
+    return location.pathname === '/purchase-invoices'
+      || (location.pathname === '/crm' && new URLSearchParams(location.search).get('sub') === 'tax-invoices');
+  });
   const [crmOpen, setCrmOpen] = useState(() => location.pathname === '/crm');
   const [crmMarketingOpen, setCrmMarketingOpen] = useState(() => {
     const params = new URLSearchParams(location.search);
@@ -124,6 +130,7 @@ export default function Layout() {
   const filteredAfterGroup = afterGroupNavItems.filter(item => canView(item.module));
   const filteredStores = storesGroupItems.filter(item => canView(item.module));
   const filteredJobWork = jobWorkGroupItems.filter(item => canView(item.module));
+  const filteredAccounts = accountsGroupItems.filter(item => canView(item.module));
   const filteredCRMMarketing = crmMarketingItems.filter(item => canView(item.module));
   const filteredCRMSupport = crmSupportItems.filter(item => canView(item.module));
   const filteredBottom = bottomNavItems.filter(item => canView(item.module));
@@ -131,6 +138,7 @@ export default function Layout() {
   const showProductionGroup = filteredProduction.length > 0;
   const showStoresGroup = filteredStores.length > 0;
   const showJobWorkGroup = filteredJobWork.length > 0;
+  const showAccountsGroup = filteredAccounts.length > 0;
   const showCRMGroup = canView('crm_marketing') || canView('crm_support') || filteredCRMMarketing.length > 0 || filteredCRMSupport.length > 0;
 
   const allNavItems = user?.role === 'admin'
@@ -470,6 +478,39 @@ export default function Layout() {
                               `flex items-center space-x-2 px-3 py-1.5 text-sm rounded-sm transition-colors ${location.pathname + location.search === item.href ? 'text-white bg-[#1D3557]' : 'text-[#9CA3AF] hover:text-white hover:bg-[#1F2937]'}`
                             }
                             data-testid={`nav-jw-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
+                          >
+                            <item.icon className="w-4 h-4" />
+                            <span>{item.name}</span>
+                          </NavLink>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              )}
+
+              {/* Accounts Group — Purchase Invoices (was Inventory) + Tax Invoices (was Marketing) */}
+              {showAccountsGroup && (
+                <li>
+                  {renderGroupHeader({
+                    icon: Wallet,
+                    label: 'Accounts',
+                    isOpen: accountsOpen,
+                    setOpen: setAccountsOpen,
+                    isActive: location.pathname === '/purchase-invoices' || (location.pathname === '/crm' && location.search.includes('sub=tax-invoices')),
+                    testId: 'nav-accounts-group',
+                  })}
+                  {isExpanded && accountsOpen && (
+                    <ul className="ml-4 mt-1 space-y-0.5 border-l border-[#374151] pl-3">
+                      {filteredAccounts.map(item => (
+                        <li key={item.name}>
+                          <NavLink
+                            to={item.href}
+                            onClick={() => setSidebarOpen(false)}
+                            className={({ isActive }) =>
+                              `flex items-center space-x-2 px-3 py-1.5 text-sm rounded-sm transition-colors ${location.pathname + location.search === item.href ? 'text-white bg-[#1D3557]' : 'text-[#9CA3AF] hover:text-white hover:bg-[#1F2937]'}`
+                            }
+                            data-testid={`nav-accounts-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
                           >
                             <item.icon className="w-4 h-4" />
                             <span>{item.name}</span>

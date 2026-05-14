@@ -33,8 +33,8 @@ export default function PurchaseInvoicePage() {
   const isAdmin = user?.role === 'admin';
   // Permission-driven visibility: admin always allowed, else granular permissions.
   const canEdit = isAdmin
-    || hasPermission('purchase_invoices', 'create')
-    || hasPermission('purchase_invoices', 'edit');
+    || hasPermission('accounts', 'create')
+    || hasPermission('accounts', 'edit');
 
   const fetchData = useCallback(async () => {
     setLoading(true);

@@ -1733,3 +1733,4 @@ credentials.json
 *.key
 .credentials
 frontend/node_modules/.cache/default-development/131.pack
+frontend/node_modules/.cache/default-development/134.pack

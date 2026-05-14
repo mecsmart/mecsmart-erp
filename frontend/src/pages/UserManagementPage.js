@@ -44,7 +44,9 @@ const MODULE_GROUPS = [
     { key: 'inventory_configuration', label: 'Inventory Configuration' },
     { key: 'mrp', label: 'MRP' },
     { key: 'purchase_orders', label: 'Purchase Orders' },
-    { key: 'purchase_invoices', label: 'Purchase Invoice' },
+  ] },
+  { main: 'Accounts', subs: [
+    { key: 'accounts', label: 'Purchase Invoices & Tax Invoices' },
   ] },
   { main: 'Stores', subs: [
     { key: 'stores', label: 'Warehouses / Stock / Transfer History / GRN' },
