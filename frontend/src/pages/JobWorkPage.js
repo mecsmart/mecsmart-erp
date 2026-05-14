@@ -587,7 +587,7 @@ export default function JobWorkPage() {
           const charges = l.processing_charges || fallback.charges || 0;
           const rmCost = l.rate || fallback.bom_rollup_cost || 0;
           const description = l.item_description || fallback.item_description || '';
-          const processName = fallback.process_name || '';
+          const processName = l.process_name || fallback.process_name || '';
           return { it, qty, charges, rmCost, description, processName };
         }) : jwParts.map(p => {
           const pit = p.item || items.find(it => it.id === p.item_id) || {};
@@ -993,7 +993,7 @@ export default function JobWorkPage() {
 
       {/* Create Order Dialog */}
       <Dialog open={orderDialog} onOpenChange={setOrderDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="font-[Chivo]">{editingOrder ? 'Edit Subcontract Order' : 'New Subcontract Order'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3">
             <div className="grid grid-cols-2 gap-4">
@@ -1018,13 +1018,13 @@ export default function JobWorkPage() {
               </div>
               <div className="border rounded-sm overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead><tr className="bg-[#E1EFFE]"><th className="text-left py-2 px-2 text-xs">Part (FG/SA)</th><th className="text-left py-2 px-2 text-xs">Description / Remarks</th><th className="text-right py-2 px-2 text-xs w-20">Qty</th><th className="text-right py-2 px-2 text-xs w-28">Process Cost/Unit</th><th className="text-right py-2 px-2 text-xs w-24">Total</th><th className="w-8"></th></tr></thead>
+                  <thead><tr className="bg-[#E1EFFE]"><th className="text-left py-2 px-2 text-xs">Part No &amp; Name / Description / Op</th><th className="text-right py-2 px-2 text-xs w-24">Qty</th><th className="text-right py-2 px-2 text-xs w-32">Process Cost/Unit</th><th className="text-right py-2 px-2 text-xs w-28">Total</th><th className="w-8"></th></tr></thead>
                   <tbody>
                     {orderForm.job_work_parts.map((p, idx) => {
                       const total = (p.quantity || 0) * (p.charges || 0);
                       return (
-                        <tr key={idx} className="border-t">
-                          <td className="py-1 px-2">
+                        <tr key={idx} className="border-t align-top">
+                          <td className="py-2 px-2">
                             <SearchableItemSelect
                               items={items}
                               value={p.item_id}
@@ -1033,6 +1033,15 @@ export default function JobWorkPage() {
                               placeholder="Search part by code / name…"
                               testId={`jw-part-${idx}-item`}
                             />
+                            {/* Description input — inline, beneath the part name (mirrors Manual DC stacked layout) */}
+                            <input
+                              type="text"
+                              value={p.item_description || ''}
+                              onChange={e => updateJWPart(idx, 'item_description', e.target.value)}
+                              placeholder="Description / spec / remarks"
+                              className="w-full mt-1 px-2 py-1 border border-[#E5E7EB] rounded-sm text-xs"
+                              data-testid={`jw-part-${idx}-description`}
+                            />
                             {p.process_name && (
                               <div className="text-[10px] text-[#723B13] mt-1" data-testid={`jw-part-${idx}-process`}>Outsourced op: <span className="font-semibold">{p.process_name}</span></div>
                             )}
@@ -1040,24 +1049,14 @@ export default function JobWorkPage() {
                               <div className="text-[10px] text-[#1E429F] mt-1" data-testid={`jw-part-${idx}-processes`}>Processes: {p.process_names.join(', ')}</div>
                             )}
                           </td>
-                          <td className="py-1 px-2">
-                            <input
-                              type="text"
-                              value={p.item_description || ''}
-                              onChange={e => updateJWPart(idx, 'item_description', e.target.value)}
-                              placeholder="Description / spec / remarks"
-                              className="w-full px-2 py-1 border rounded-sm text-xs"
-                              data-testid={`jw-part-${idx}-description`}
-                            />
-                          </td>
-                          <td className="py-1 px-2"><input type="number" min="1" value={p.quantity} onChange={e => updateJWPart(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
-                          <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={p.charges} onChange={e => updateJWPart(idx, 'charges', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
-                          <td className="py-1 px-2 mono text-right text-xs font-medium">{formatCurrency(total)}</td>
-                          <td className="py-1 px-1"><button onClick={() => removeJWPart(idx)} className="text-[#9B1C1C] p-1"><X className="w-3 h-3" /></button></td>
+                          <td className="py-2 px-2"><input type="number" min="1" value={p.quantity} onChange={e => updateJWPart(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                          <td className="py-2 px-2"><input type="number" min="0" step="0.01" value={p.charges} onChange={e => updateJWPart(idx, 'charges', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+                          <td className="py-2 px-2 mono text-right text-xs font-medium">{formatCurrency(total)}</td>
+                          <td className="py-2 px-1"><button onClick={() => removeJWPart(idx)} className="text-[#9B1C1C] p-1"><X className="w-3 h-3" /></button></td>
                         </tr>
                       );
                     })}
-                    {orderForm.job_work_parts.length === 0 && <tr><td colSpan="6" className="text-center py-2 text-xs text-[#9CA3AF]">No parts added</td></tr>}
+                    {orderForm.job_work_parts.length === 0 && <tr><td colSpan="5" className="text-center py-2 text-xs text-[#9CA3AF]">No parts added</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -1264,7 +1263,7 @@ export default function JobWorkPage() {
 
       {/* Send DC Dialog */}
       <Dialog open={dcDialog} onOpenChange={setDcDialog}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="font-[Chivo]">Send Materials (DC) - {dcOrder?.order_number}{dcOrder?.fg_item_name ? ` — ${dcOrder.fg_item_name}` : ''}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3">
             <div><label className="block text-sm font-semibold mb-1">From Warehouse</label>
@@ -1295,17 +1294,23 @@ export default function JobWorkPage() {
                       return (
                         <tr key={idx} className="border-t">
                           <td className="py-2 px-2 mono text-xs">{idx + 1}</td>
-                          <td className="py-2 px-2">
+                          <td className="py-2 px-2 align-top">
                             <div className="text-xs">
                               <span className="mono font-semibold">{it.part_number || '-'}</span>
                               <span className="mx-1">—</span>
                               <span>{it.name || '-'}</span>
                             </div>
+                            {/* Editable description inline below part name (matches Edit SC + Manual DC style) */}
+                            <input
+                              type="text"
+                              value={l.item_description || ''}
+                              onChange={e => { const ls = [...dcLines]; ls[idx].item_description = e.target.value; setDcLines(ls); }}
+                              placeholder="Description / spec / remarks"
+                              className="w-full mt-1 px-2 py-1 border border-[#E5E7EB] rounded-sm text-xs"
+                              data-testid={`dc-desc-${idx}`}
+                            />
                             {l.process_name && (
-                              <div className="text-[10px] text-[#723B13] mt-0.5">Op: <span className="font-semibold">{l.process_name}</span></div>
-                            )}
-                            {l.item_description && (
-                              <div className="text-[10px] text-[#6B7280] italic mt-0.5" data-testid={`dc-desc-${idx}`}>{l.item_description}</div>
+                              <div className="text-[10px] text-[#723B13] mt-1">Op: <span className="font-semibold">{l.process_name}</span></div>
                             )}
                           </td>
                           <td className="py-2 px-2 mono text-xs">{it.hsn_code || '-'}</td>

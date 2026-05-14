@@ -1,0 +1,64 @@
+{
+  "summary": "Iteration 112 - JW Dialog Layout Polish Testing Complete. All 5 frontend tests PASSED. Edit SC dialog and Send DC dialog now use max-w-5xl (1024px) width with stacked-cell layout (description input below item name, no separate Description column). DC print template correctly renders Part#/Name, Op badge, and description in Part cell.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_112.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Edit Subcontract Order dialog uses max-w-5xl (1024px width) - VERIFIED",
+    "Edit SC dialog has stacked layout: SearchableItemSelect on top, description input below (data-testid jw-part-{idx}-description), Outsourced op badge below that",
+    "No separate Description/Remarks column in Edit SC dialog - description is inline in Part cell",
+    "Send Materials (DC) dialog for Job Card OS uses max-w-5xl (1024px width) - VERIFIED",
+    "Send DC dialog has stacked layout: Part#/Name on top, editable description input below (data-testid dc-desc-{idx}), Op badge below",
+    "Send DC dialog shows SPECIFIC per-op cost in Charges/Unit column (Fix from iteration 111 verified)",
+    "DC print template renders Part cell with: Part#/Name on line 1, Op: <process_name> on line 2 (bronze #723B13), description on line 3 (italic gray)",
+    "Manual DC dialog also uses max-w-5xl (1024px width) with combined 'Item Name & Description' column"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "frontend": "100% (5/5 tests passed)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None - used existing test data",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "JW Dialog Layout Polish verified. Edit SC and Send DC dialogs now use max-w-5xl (1024px) width with stacked-cell layout. Description input is inline below item name in Part cell (no separate Description column). DC print template renders Part#/Name, Op badge (bronze), and description (gray italic) in Part cell. All data-testid attributes are in place: jw-part-{idx}-description, dc-desc-{idx}, dc-charges-{idx}.",
+  "tests_executed": {
+    "frontend": [
+      {"test": "Edit Subcontract Order Dialog Width", "status": "PASSED", "details": "Dialog width is 1024px (max-w-5xl)"},
+      {"test": "Edit SC Dialog Stacked Layout", "status": "PASSED", "details": "Found description input with data-testid jw-part-0-description, visible below item name. No separate Description column header."},
+      {"test": "Send Materials (DC) Dialog Width", "status": "PASSED", "details": "Dialog width is 1024px (max-w-5xl)"},
+      {"test": "Send DC Dialog Stacked Layout", "status": "PASSED", "details": "Found description input with data-testid dc-desc-0, Charges/Unit input with dc-charges-0 showing specific per-op cost (100)"},
+      {"test": "Description Persistence Regression", "status": "PASSED", "details": "Description 'Test description 99442.995993186' persisted correctly after save and reload"}
+    ]
+  },
+  "features_verified": {
+    "edit_sc_dialog_width": "max-w-5xl (1024px) - wider than before",
+    "edit_sc_stacked_layout": "Part cell contains: SearchableItemSelect, description input (jw-part-{idx}-description), Outsourced op badge",
+    "edit_sc_no_separate_desc_column": "Header is 'Part No & Name / Description / Op' - combined, not separate",
+    "send_dc_dialog_width": "max-w-5xl (1024px) - wider than before",
+    "send_dc_stacked_layout": "Part cell contains: Part#/Name, editable description input (dc-desc-{idx}), Op badge",
+    "send_dc_specific_charges": "Charges/Unit shows specific per-op cost (verified value: 100)",
+    "dc_print_template": "Part cell renders: Part#/Name (line 1), Op: <process_name> (line 2, bronze), description (line 3, gray italic)",
+    "manual_dc_dialog_width": "max-w-5xl (1024px)",
+    "description_persistence": "item_description persists across save/reload"
+  },
+  "screenshots": [
+    ".screenshots/jw_page_loaded.png",
+    ".screenshots/edit_sc_dialog.png",
+    ".screenshots/send_dc_dialog.png",
+    ".screenshots/challans_page.png",
+    ".screenshots/print_dc_dialog.png",
+    ".screenshots/regression_test.png",
+    ".screenshots/manual_dc_dialog.png"
+  ]
+}
