@@ -156,8 +156,25 @@ export default function CustomersPage() {
   return (
     <div className="space-y-4" data-testid="customers-page">
       <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
-        <div>
+        <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-bold font-[Chivo] text-[#1D3557]">Customers</h1>
+          <Select value={statusFilter} onValueChange={v => setStatusFilter(v === 'all' ? '' : v)}>
+            <SelectTrigger className="w-36 h-8 text-xs" data-testid="customer-status-filter"><SelectValue placeholder="All Statuses" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
+            </SelectContent>
+          </Select>
+          {isAdmin && (
+            <Select value={scopeFilter} onValueChange={setScopeFilter}>
+              <SelectTrigger className="w-36 h-8 text-xs" data-testid="customer-scope-filter"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Contacts</SelectItem>
+                <SelectItem value="mine">Own Contacts</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
         </div>
         {canCreate && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
@@ -315,26 +332,6 @@ export default function CustomersPage() {
               </div>
             </DialogContent>
           </Dialog>
-        )}
-      </div>
-
-      <div className="flex items-center space-x-3">
-        <Select value={statusFilter} onValueChange={v => setStatusFilter(v === 'all' ? '' : v)}>
-          <SelectTrigger className="w-48" data-testid="customer-status-filter"><SelectValue placeholder="All Statuses" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-          </SelectContent>
-        </Select>
-        {isAdmin && (
-          <Select value={scopeFilter} onValueChange={setScopeFilter}>
-            <SelectTrigger className="w-48" data-testid="customer-scope-filter"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Contacts</SelectItem>
-              <SelectItem value="mine">Own Contacts</SelectItem>
-            </SelectContent>
-          </Select>
         )}
       </div>
 

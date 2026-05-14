@@ -141,12 +141,12 @@ export default function CRMPage() {
 
   return (
     <div className="space-y-4" data-testid="crm-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-xs text-[#6B7280]">CRM · {crumbMain}{crumbSub ? ` · ${crumbSub}` : ''}</div>
-          <h1 className="text-2xl font-bold font-[Chivo] text-[#1D3557]">{crumbSub || `${crumbMain} ${activeTab === 'support' ? 'Pipeline' : activeTab === 'marketing' ? 'Pipeline' : ''}`}</h1>
-        </div>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div>
+            <div className="text-[10px] text-[#6B7280]">CRM · {crumbMain}{crumbSub ? ` · ${crumbSub}` : ''}</div>
+            <h1 className="text-xl font-bold font-[Chivo] text-[#1D3557]">{crumbSub || `${crumbMain} ${activeTab === 'support' ? 'Pipeline' : activeTab === 'marketing' ? 'Pipeline' : ''}`}</h1>
+          </div>
           <div className="relative">
             <Search className="w-4 h-4 text-[#9CA3AF] absolute left-3 top-1/2 -translate-y-1/2" />
             <input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="search-input w-64" data-testid="crm-search" />

@@ -172,8 +172,12 @@ export default function MRPPage() {
   return (
     <div className="space-y-4" data-testid="mrp-page">
       <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
-        <div>
+        <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-bold font-[Chivo] text-[#1D3557]">Material Requirements Planning</h1>
+          <div className="relative w-64">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9CA3AF]" />
+            <input type="text" value={mrpSearch} onChange={(e) => setMrpSearch(e.target.value)} placeholder="Search by part number or name…" className="pl-8 pr-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs w-full focus:outline-none focus:border-[#1D3557]" data-testid="mrp-search-input" />
+          </div>
         </div>
       </div>
 
@@ -203,13 +207,6 @@ export default function MRPPage() {
             <div><p className="kpi-label">Est. Purchase Cost</p><p className="kpi-value">{formatCurrency(totalEstimatedCost)}</p></div>
             <DollarSign className="w-8 h-8 text-[#03543F]" />
           </div>
-        </div>
-      </div>
-
-      <div className="card-flat p-3">
-        <div className="relative w-72">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-          <input type="text" value={mrpSearch} onChange={(e) => setMrpSearch(e.target.value)} placeholder="Search by part number or name..." className="search-input text-sm" data-testid="mrp-search-input" />
         </div>
       </div>
 

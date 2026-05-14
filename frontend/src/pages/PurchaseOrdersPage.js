@@ -274,22 +274,11 @@ export default function PurchaseOrdersPage() {
   return (
     <div className="space-y-4" data-testid="purchase-orders-page">
       <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
-        <div>
+        <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Purchase Orders</h1>
-        </div>
-        {canCreate && (
-          <button onClick={openCreateDialog} className="btn-primary flex items-center space-x-2" data-testid="create-po-btn">
-            <Plus className="w-4 h-4" /><span>Create PO</span>
-          </button>
-        )}
-      </div>
-
-      {/* Filter */}
-      <div className="card-flat p-4">
-        <div className="flex items-center gap-4">
           <Select value={statusFilter || undefined} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
-            <SelectTrigger className="w-48" data-testid="po-status-filter">
-              <Filter className="w-4 h-4 mr-2" />
+            <SelectTrigger className="w-36 h-8 text-xs" data-testid="po-status-filter">
+              <Filter className="w-3 h-3 mr-1" />
               <SelectValue placeholder="All Statuses" />
             </SelectTrigger>
             <SelectContent>
@@ -299,17 +288,17 @@ export default function PurchaseOrdersPage() {
               ))}
             </SelectContent>
           </Select>
-          {statusFilter && (
-            <button onClick={() => setStatusFilter('')} className="btn-secondary flex items-center space-x-1">
-              <X className="w-4 h-4" /><span>Clear</span>
-            </button>
-          )}
-          <div className="flex-1" />
-          <div className="relative w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-            <input type="text" value={poSearch} onChange={(e) => setPoSearch(e.target.value)} placeholder="Search PO, supplier, item..." className="search-input text-sm" data-testid="po-search-input" />
+          {statusFilter && <button onClick={() => setStatusFilter('')} className="text-[10px] text-[#9B1C1C] hover:underline">Clear</button>}
+          <div className="relative w-64">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9CA3AF]" />
+            <input type="text" value={poSearch} onChange={(e) => setPoSearch(e.target.value)} placeholder="Search PO, supplier, item…" className="pl-8 pr-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs w-full focus:outline-none focus:border-[#1D3557]" data-testid="po-search-input" />
           </div>
         </div>
+        {canCreate && (
+          <button onClick={openCreateDialog} className="btn-primary flex items-center space-x-2" data-testid="create-po-btn">
+            <Plus className="w-4 h-4" /><span>Create PO</span>
+          </button>
+        )}
       </div>
 
       {/* Orders List */}

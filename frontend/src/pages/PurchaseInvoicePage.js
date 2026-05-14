@@ -266,8 +266,24 @@ export default function PurchaseInvoicePage() {
   return (
     <div className="space-y-4" data-testid="purchase-invoice-page">
       <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
-        <div>
+        <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Purchase Invoices</h1>
+          <Select value={statusFilter || 'all'} onValueChange={v => setStatusFilter(v === 'all' ? '' : v)}>
+            <SelectTrigger className="w-36 h-8 text-xs" data-testid="invoice-status-filter"><SelectValue placeholder="All Statuses" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="draft">Draft</SelectItem>
+              <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="paid">Paid</SelectItem>
+            </SelectContent>
+          </Select>
+          {statusFilter && <button onClick={() => setStatusFilter('')} className="text-[10px] text-[#9B1C1C] hover:underline">Clear</button>}
+          <span className="text-[10px] text-[#6B7280]">{invoices.length} invoices</span>
+          {pendingGRNs.length > 0 && <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-0.5 rounded">{pendingGRNs.length} GRN(s) pending invoice</span>}
+          <div className="relative w-56">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9CA3AF]" />
+            <input type="text" value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="Search invoice, supplier…" className="pl-8 pr-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs w-full focus:outline-none focus:border-[#1D3557]" data-testid="invoice-search-input" />
+          </div>
         </div>
         {canEdit && (
           <div className="flex items-center gap-2">
@@ -279,27 +295,6 @@ export default function PurchaseInvoicePage() {
             </button>
           </div>
         )}
-      </div>
-
-      {/* Filter */}
-      <div className="flex items-center gap-3">
-        <Select value={statusFilter || 'all'} onValueChange={v => setStatusFilter(v === 'all' ? '' : v)}>
-          <SelectTrigger className="w-48" data-testid="invoice-status-filter"><SelectValue placeholder="All Statuses" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="draft">Draft</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="paid">Paid</SelectItem>
-          </SelectContent>
-        </Select>
-        {statusFilter && <button onClick={() => setStatusFilter('')} className="text-xs text-[#4B5563] hover:text-[#1D3557]">Clear</button>}
-        <span className="text-xs text-[#6B7280]">{invoices.length} invoices</span>
-        {pendingGRNs.length > 0 && <span className="text-xs text-[#723B13] bg-[#FDF6B2] px-2 py-0.5 rounded">{pendingGRNs.length} GRN(s) pending invoice</span>}
-        <div className="flex-1" />
-        <div className="relative w-72">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-          <input type="text" value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="Search invoice, supplier..." className="search-input text-sm" data-testid="invoice-search-input" />
-        </div>
       </div>
 
       {/* KPI cards */}
