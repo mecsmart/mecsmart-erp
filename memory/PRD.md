@@ -19,6 +19,15 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-05-14 (5 user-driven UI polish items — DONE & VERIFIED ✅):**
+  1. **Inventory-Stock single-line header** (`/app/frontend/src/pages/InventoryPage.js`): Stock-tab search + Category + Group + 'Low Stock Only' checkbox + Clear merged into the sticky page header alongside Reconcile / Create Item / New Transaction buttons. Filters auto-hide on the Transactions tab. Old filter card below the tabs removed.
+  2. **Suppliers single-line header** (`/app/frontend/src/pages/SuppliersPage.js`): Search + Status filter + Clear merged into the sticky page header with Add Supplier; standalone filter card removed.
+  3. **MO Routing column fix** (`/app/frontend/src/pages/ManufacturingPage.js` line ~1601): Previously showed `-` for child MOs because `wo.routing` is null on child MOs (they inherit ops from BOM `parent_routings` via `operations_status`). Added a fallback: when `wo.routing?.name` is empty, join `wo.operations_status[*].operation_name` with `→` so users see e.g. `Cutting → Welding → Inspection`. Verified MO-000661/663 now shows `Final Assembly` / `Assembly` instead of `-`.
+  4. **BOM per-FG search** (`/app/frontend/src/pages/BOMPage.js`): Added a per-FG `panelSearch` state and a search input inside each colored FG panel header (white-on-color styling). Filters the explosion rows by `part_number` / `name` / `description` — same UX as MO's per-FG search.
+  5. **BOM panel View + Refresh icons removed** (`/app/frontend/src/pages/BOMPage.js`): The Eye (View) and RefreshCw (Refresh Costs) icons in the FG panel header have been removed per user request. Print / Export / PARTS / Edit / Revise / Delete remain. Unused `Eye` and `RefreshCw` imports cleaned up.
+  6. **Testing**: `testing_agent_v3_fork` iteration 117 — 100% pass; 0 console errors; BOM Edit dialog still opens correctly.
+
+
 - **2026-05-14 (Tab-page single-line headers + global single-window scroll — DONE & VERIFIED ✅):**
   1. **`.sticky-header-scroll` CSS fixed** (`/app/frontend/src/index.css`): Removed `max-height: calc(100vh - 220px)` and the `overflow: auto` on the wrapper; now uses `overflow-x: auto; overflow-y: visible`. Eliminates the inner table viewport (multi-window scroll) on Purchase Orders, Items/Products, MRP, Warehouses, JobWork tables. Page now scrolls as a single window everywhere, so the un-pinned brand header reliably scrolls away.
   2. **Job Work page sticky header** (`/app/frontend/src/pages/JobWorkPage.js`): Header now reads `Job Work / <tab-label> (count)` driven by `activeTab` (Subcontract Orders / Delivery Challans / Receipts). The tab-specific action button (`New Subcontract Order` / `Create DC`) sits inline on the same line. The duplicate inner section card-headers were removed. Receipts heading is now part of the main page header (per user request).
