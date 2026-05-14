@@ -173,11 +173,29 @@ export default function MRPPage() {
     <div className="space-y-4" data-testid="mrp-page">
       <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-xl font-bold font-[Chivo] text-[#1D3557]">Material Requirements Planning</h1>
-          <div className="relative w-64">
+          <h1 className="text-xl font-bold font-[Chivo] text-[#1D3557]">MRP <span className="text-[#6B7280] font-medium">/</span> <span className="text-[#111827]">{activeTab === 'demand' ? 'Material Demand' : 'Purchase Suggestions'}</span></h1>
+          <div className="relative w-56">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9CA3AF]" />
-            <input type="text" value={mrpSearch} onChange={(e) => setMrpSearch(e.target.value)} placeholder="Search by part number or name…" className="pl-8 pr-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs w-full focus:outline-none focus:border-[#1D3557]" data-testid="mrp-search-input" />
+            <input type="text" value={mrpSearch} onChange={(e) => setMrpSearch(e.target.value)} placeholder="Search part / name…" className="pl-8 pr-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs w-full focus:outline-none focus:border-[#1D3557]" data-testid="mrp-search-input" />
           </div>
+          {activeTab === 'demand' && (
+            <>
+              <Select value={selectedPO || 'all'} onValueChange={(v) => setSelectedPO(v === 'all' ? '' : v)}>
+                <SelectTrigger className="w-64 h-8 text-xs" data-testid="mrp-po-filter">
+                  <SelectValue placeholder="All Sales Orders" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Outstanding Sales Orders</SelectItem>
+                  {productionOrders.filter(po => ['confirmed', 'planned', 'released', 'in_progress'].includes(po.status) && !['completed', 'cancelled'].includes(po.status)).map(po => (
+                    <SelectItem key={po.id} value={po.id}>{po.order_number} - {po.item?.name || 'Unknown'} (Qty: {po.quantity})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedPO && (
+                <button onClick={() => setSelectedPO('')} className="text-[10px] text-[#9B1C1C] hover:underline">Clear</button>
+              )}
+            </>
+          )}
         </div>
       </div>
 
@@ -217,23 +235,6 @@ export default function MRPPage() {
         </TabsList>
 
         <TabsContent value="demand" className="mt-4">
-          <div className="flex items-center gap-3 mb-4">
-            <Select value={selectedPO || 'all'} onValueChange={(v) => setSelectedPO(v === 'all' ? '' : v)}>
-              <SelectTrigger className="w-72" data-testid="mrp-po-filter">
-                <SelectValue placeholder="All Sales Orders" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Outstanding Sales Orders</SelectItem>
-                {productionOrders.filter(po => ['confirmed', 'planned', 'released', 'in_progress'].includes(po.status) && !['completed', 'cancelled'].includes(po.status)).map(po => (
-                  <SelectItem key={po.id} value={po.id}>{po.order_number} - {po.item?.name || 'Unknown'} (Qty: {po.quantity})</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedPO && (
-              <button onClick={() => setSelectedPO('')} className="text-xs text-[#4B5563] hover:text-[#1D3557]">Clear</button>
-            )}
-          </div>
-
           {selectedCount > 0 && activeTab === 'demand' && (
             <div className="flex items-center justify-between bg-[#E1EFFE] border border-[#93C5FD] rounded-sm px-4 py-3 mb-4" data-testid="demand-selected-banner">
               <span className="text-sm font-medium text-[#1E429F]">{selectedCount} item(s) selected</span>

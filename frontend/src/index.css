@@ -273,11 +273,12 @@ code, .mono {
   background-image: linear-gradient(to right, transparent 3px, #1D3557 3px, #1D3557 6px, transparent 6px);
 }
 
-/* Sticky-header wrapper: use on the overflow container that wraps the table.
-   Using max-height instead of a hard height lets small tables shrink naturally. */
+/* Sticky-header wrapper: horizontal-only scrolling so the page scrolls as a
+   single window. Table thead uses `position: sticky` and now sticks to the
+   viewport top (since there is no ancestor with vertical overflow). */
 .sticky-header-scroll {
-  @apply overflow-auto;
-  max-height: calc(100vh - 220px);
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 .sticky-header-scroll table thead th,

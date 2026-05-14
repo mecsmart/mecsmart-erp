@@ -453,8 +453,41 @@ export default function WarehousesPage() {
   return (
     <div className="space-y-4" data-testid="warehouses-page">
       <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
-        <div>
-          <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Stores & Warehouses</h1>
+        <div className="flex items-center gap-3 flex-wrap">
+          <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">
+            Stores
+            {activeTab === 'stock' && <><span className="text-[#6B7280] font-medium"> / </span><span className="text-[#1D3557]">Stock</span></>}
+            {activeTab === 'warehouses' && <><span className="text-[#6B7280] font-medium"> / </span><span className="text-[#1D3557]">Warehouses</span></>}
+            {activeTab === 'transfers' && <><span className="text-[#6B7280] font-medium"> / </span><span className="text-[#1D3557]">Transfer History</span></>}
+            {activeTab === 'grn' && <><span className="text-[#6B7280] font-medium"> / </span><span className="text-[#1D3557]">GRN</span></>}
+            {activeTab === 'packing-lists' && <><span className="text-[#6B7280] font-medium"> / </span><span className="text-[#1D3557]">Packing Lists</span></>}
+          </h1>
+          {activeTab === 'stock' && (
+            <>
+              <div className="relative w-56">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9CA3AF]" />
+                <input type="text" value={storesStockSearch} onChange={(e) => setStoresStockSearch(e.target.value)} placeholder="Search part / name…" className="pl-8 pr-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs w-full focus:outline-none focus:border-[#1D3557]" data-testid="stores-stock-search" />
+              </div>
+              <select value={storesStockCategory} onChange={(e) => setStoresStockCategory(e.target.value)} className="px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs h-8" data-testid="stores-stock-category-filter">
+                <option value="">All Categories</option>
+                <option value="raw_material">Raw Material</option>
+                <option value="component">Component</option>
+                <option value="sub_assembly">Sub-Assembly</option>
+                <option value="finished_good">Finished Good</option>
+              </select>
+              <select value={storesStockGroup} onChange={(e) => setStoresStockGroup(e.target.value)} className="px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs h-8" data-testid="stores-stock-group-filter">
+                <option value="">All Groups</option>
+                {itemGroups.map(g => (
+                  <option key={g.id || g._id || g.code} value={g.id || g._id || g.code}>
+                    {g.code ? `${g.code} — ${g.name}` : g.name}
+                  </option>
+                ))}
+              </select>
+              {(storesStockCategory || storesStockGroup || storesStockSearch) && (
+                <button onClick={() => { setStoresStockCategory(''); setStoresStockGroup(''); setStoresStockSearch(''); }} className="text-[10px] text-[#9B1C1C] hover:underline">Clear</button>
+              )}
+            </>
+          )}
         </div>
         <div className="flex items-center space-x-2">
           {canEdit && (
@@ -659,6 +692,16 @@ export default function WarehousesPage() {
               </Dialog>
             </>
           )}
+          {activeTab === 'grn' && (
+            <button
+              type="button"
+              onClick={() => setManualGrnOpen(true)}
+              className="btn-primary flex items-center gap-2"
+              data-testid="manual-grn-btn"
+            >
+              <Plus className="w-4 h-4" /><span>Manual GRN (no PO)</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -689,44 +732,6 @@ export default function WarehousesPage() {
 
         {/* Stock Tab - Inventory Overview */}
         <TabsContent value="stock" className="mt-4">
-          <div className="card-flat p-2 mb-3">
-            <div className="flex items-center gap-2 flex-nowrap min-w-0">
-              <div className="relative flex-shrink min-w-[160px] max-w-[280px] w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-                <input type="text" value={storesStockSearch} onChange={(e) => setStoresStockSearch(e.target.value)} placeholder="Search by part number or name..." className="search-input text-sm h-9" data-testid="stores-stock-search" />
-              </div>
-              <select
-                value={storesStockCategory}
-                onChange={(e) => setStoresStockCategory(e.target.value)}
-                className="input-field text-sm !w-40 h-9 flex-shrink-0"
-                data-testid="stores-stock-category-filter"
-              >
-                <option value="">All Categories</option>
-                <option value="raw_material">Raw Material</option>
-                <option value="component">Component</option>
-                <option value="sub_assembly">Sub-Assembly</option>
-                <option value="finished_good">Finished Good</option>
-              </select>
-              <select
-                value={storesStockGroup}
-                onChange={(e) => setStoresStockGroup(e.target.value)}
-                className="input-field text-sm !w-44 h-9 flex-shrink-0"
-                data-testid="stores-stock-group-filter"
-              >
-                <option value="">All Groups</option>
-                {itemGroups.map(g => (
-                  <option key={g.id || g._id || g.code} value={g.id || g._id || g.code}>
-                    {g.code ? `${g.code} — ${g.name}` : g.name}
-                  </option>
-                ))}
-              </select>
-              {(storesStockCategory || storesStockGroup || storesStockSearch) && (
-                <button onClick={() => { setStoresStockCategory(''); setStoresStockGroup(''); setStoresStockSearch(''); }} className="btn-secondary flex items-center space-x-1 text-sm h-9 flex-shrink-0">
-                  <X className="w-4 h-4" /><span>Clear</span>
-                </button>
-              )}
-            </div>
-          </div>
           <div className="card-flat overflow-hidden">
             {loading ? (
               <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div></div>
@@ -967,18 +972,6 @@ export default function WarehousesPage() {
 
         {/* GRN Tab */}
         <TabsContent value="grn" className="mt-4 space-y-4">
-          {/* Manual GRN button */}
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => setManualGrnOpen(true)}
-              className="btn-primary flex items-center gap-2 text-sm"
-              data-testid="manual-grn-btn"
-            >
-              <Plus className="w-4 h-4" /> Manual GRN (no PO)
-            </button>
-          </div>
-
           {/* Pending POs for GRN */}
           {pendingPOs.length > 0 && (
             <div className="card-flat overflow-hidden">

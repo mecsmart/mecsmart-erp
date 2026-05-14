@@ -677,8 +677,28 @@ export default function JobWorkPage() {
   return (
     <div className="space-y-3" data-testid="jobwork-page">
       <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
-        <div>
-          <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Job Work / Subcontracting</h1>
+        <div className="flex items-center gap-3 flex-wrap">
+          <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">
+            Job Work
+            <span className="text-[#6B7280] font-medium"> / </span>
+            <span className="text-[#1D3557]">
+              {activeTab === 'orders' && <>Subcontract Orders <span className="text-xs text-[#6B7280] font-normal">({orders.length})</span></>}
+              {activeTab === 'challans' && <>Delivery Challans <span className="text-xs text-[#6B7280] font-normal">({challans.length})</span></>}
+              {activeTab === 'receipts' && <>Receipts <span className="text-xs text-[#6B7280] font-normal">({receipts.length})</span></>}
+            </span>
+          </h1>
+        </div>
+        <div className="flex items-center gap-2">
+          {activeTab === 'orders' && canCreate && (
+            <button onClick={() => setOrderDialog(true)} className="btn-primary flex items-center space-x-2" data-testid="create-jw-order-btn">
+              <Plus className="w-4 h-4" /><span>New Subcontract Order</span>
+            </button>
+          )}
+          {activeTab === 'challans' && canCreate && (
+            <button type="button" onClick={openManualDC} className="btn-primary flex items-center space-x-2" data-testid="create-manual-dc-btn">
+              <Plus className="w-4 h-4" /><span>Create DC</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -699,13 +719,7 @@ export default function JobWorkPage() {
         {/* Subcontract Orders */}
         {activeTab === 'orders' && (
         <div className="card-flat">
-          <div className="px-4 py-3 flex items-center justify-between font-semibold text-[#111827] border-b border-[#E5E7EB]" data-testid="jw-section-header-orders">
-            <span className="flex items-center gap-2"><Truck className="w-4 h-4 text-[#1D3557]" /> Subcontract Orders <span className="text-xs text-[#6B7280] font-normal">({orders.length})</span></span>
-          </div>
           <div className="px-4 pb-4 pt-4">
-          <div className="flex justify-end mb-4">
-            {canCreate && <button onClick={() => setOrderDialog(true)} className="btn-primary flex items-center space-x-2" data-testid="create-jw-order-btn"><Plus className="w-4 h-4" /><span>New Subcontract Order</span></button>}
-          </div>
           <div className="card-flat overflow-hidden">
             {orders.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><Truck className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No subcontract orders</p></div>
@@ -838,16 +852,6 @@ export default function JobWorkPage() {
         {/* Delivery Challans */}
         {activeTab === 'challans' && (
         <div className="card-flat">
-          <div className="px-4 py-3 flex items-center justify-between font-semibold text-[#111827] border-b border-[#E5E7EB]" data-testid="jw-section-header-challans">
-            <span className="flex items-center gap-2"><FileText className="w-4 h-4 text-[#1D3557]" /> Delivery Challans <span className="text-xs text-[#6B7280] font-normal">({challans.length})</span></span>
-            <span className="flex items-center gap-2">
-              {canCreate && (
-                <button type="button" onClick={openManualDC} className="btn-primary text-xs px-3 py-1.5 flex items-center gap-1" data-testid="create-manual-dc-btn">
-                  <Plus className="w-3 h-3" /> Create DC
-                </button>
-              )}
-            </span>
-          </div>
           <div className="px-4 pb-4 pt-4">
           <div className="card-flat overflow-hidden">
             {challans.length === 0 ? (
@@ -953,9 +957,6 @@ export default function JobWorkPage() {
         {/* Receipts */}
         {activeTab === 'receipts' && (
         <div className="card-flat">
-          <div className="px-4 py-3 flex items-center justify-between font-semibold text-[#111827] border-b border-[#E5E7EB]" data-testid="jw-section-header-receipts">
-            <span className="flex items-center gap-2"><Package className="w-4 h-4 text-[#1D3557]" /> Receipts <span className="text-xs text-[#6B7280] font-normal">({receipts.length})</span></span>
-          </div>
           <div className="px-4 pb-4 pt-4">
           <div className="card-flat overflow-hidden">
             {receipts.length === 0 ? (
