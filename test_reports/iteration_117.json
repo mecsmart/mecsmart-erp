@@ -1,0 +1,83 @@
+{
+  "summary": "Frontend testing completed for 5 UI changes: (1) Inventory-Stock single-line header with inline filters, (2) Suppliers single-line header with search + status filter, (3) MO Routing column fix showing operation names for child MOs, (4) BOM per-FG search input in panel headers, (5) BOM panel Eye/RefreshCw icon removal. All features working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_117.json"],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend only)", "frontend": "100%"},
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 117 verified 5 UI changes: (1) Inventory page single-line sticky header with search, category filter, group filter, Low Stock Only checkbox, and action buttons - filters correctly hide on Transactions tab. (2) Suppliers page single-line sticky header with search and status filter. (3) Manufacturing page Routing column now shows operation names (e.g., 'Final Assembly', 'Assembly') for child MOs instead of '-' - derived from operations_status fallback. (4) BOM page per-FG search input in colored panel headers filters explosion rows by part_number/name. (5) BOM panel Eye (View) and RefreshCw (Refresh) icons removed from FG panel headers. BOM Edit dialog still opens correctly (handleEdit reference resolves).",
+  "tests_performed": {
+    "inventory_page": {
+      "single_line_header": {
+        "title": "Inventory Management - PASS",
+        "search_input": "data-testid='inventory-stock-search' visible - PASS",
+        "category_filter": "data-testid='inventory-category-filter' visible - PASS",
+        "group_filter": "data-testid='inventory-group-filter' visible - PASS",
+        "low_stock_checkbox": "data-testid='low-stock-filter' visible - PASS",
+        "reconcile_btn": "Reconcile Reservations button visible - PASS",
+        "create_item_btn": "Create Item button visible - PASS",
+        "new_transaction_btn": "New Transaction button visible - PASS"
+      },
+      "no_duplicate_filters": "Only 1 search input on page - PASS",
+      "transactions_tab_filter_hide": "Stock-specific filters hidden on Transactions tab - PASS"
+    },
+    "suppliers_page": {
+      "single_line_header": {
+        "title": "Suppliers - PASS",
+        "search_input": "data-testid='supplier-search-input' visible - PASS",
+        "status_filter": "data-testid='supplier-status-filter' visible - PASS",
+        "add_supplier_btn": "Add Supplier button visible - PASS"
+      },
+      "no_duplicate_filters": "Only 1 search input on page - PASS",
+      "old_filter_card_removed": "No separate filter card below header - PASS"
+    },
+    "manufacturing_page": {
+      "routing_column_fix": {
+        "fg_mo_routing": "MO-000650 (FG) shows 'Final Assembly' - PASS",
+        "child_mo_routing": "MO-000651 (SA) shows 'Assembly' - PASS",
+        "operations_status_fallback": "Routing derived from operations_status when wo.routing.name absent - PASS"
+      }
+    },
+    "bom_page": {
+      "per_fg_search": {
+        "search_input_visible": "data-testid='bom-panel-search-{pid}' visible in panel header - PASS",
+        "search_filters_rows": "Search filters explosion rows by part_number/name - PASS"
+      },
+      "icon_removal": {
+        "eye_icon_removed": "0 Eye (View) icons on page - PASS",
+        "refresh_icon_removed": "0 RefreshCw icons on page - PASS"
+      },
+      "panel_header_buttons": {
+        "print_btn": "Print button visible - PASS",
+        "export_btn": "Export/Download button visible - PASS",
+        "parts_btn": "PARTS button visible - PASS",
+        "edit_btn": "Edit (pencil) button visible - PASS",
+        "revise_btn": "Revise (GitBranch) button visible - PASS",
+        "delete_btn": "Delete (Trash2) button visible - PASS"
+      },
+      "edit_dialog_regression": {
+        "dialog_opens": "Edit BOM dialog opens correctly - PASS",
+        "handleEdit_resolves": "handleEdit reference still resolves - PASS"
+      }
+    },
+    "console_errors": {
+      "inventory": "0 errors after login - PASS",
+      "suppliers": "0 errors - PASS",
+      "manufacturing": "0 errors - PASS",
+      "bom": "0 errors - PASS"
+    }
+  }
+}

@@ -1598,7 +1598,13 @@ export default function ManufacturingPage() {
                               </p>
                             )}
                           </td>
-                          <td className="text-sm">{wo.routing?.name || '-'}</td>
+                          <td className="text-sm">{(() => {
+                            if (wo.routing?.name) return wo.routing.name;
+                            const opsList = wo.operations_status || [];
+                            if (!opsList.length) return '-';
+                            const names = opsList.map(op => typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : (op.operation_name || '')).filter(Boolean);
+                            return names.length ? names.join(' → ') : '-';
+                          })()}</td>
                           <td className="text-right mono">{wo.quantity_completed || 0}/{wo.quantity}</td>
                           <td style={{minWidth:'110px'}}>
                             <div className="flex items-center gap-2">

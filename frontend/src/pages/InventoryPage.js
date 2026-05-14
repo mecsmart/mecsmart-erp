@@ -287,8 +287,50 @@ export default function InventoryPage() {
   return (
     <div className="space-y-4" data-testid="inventory-page">
       <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
-        <div>
+        <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Inventory Management</h1>
+          {activeTab === 'stock' && (
+            <>
+              <div className="relative w-56">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9CA3AF]" />
+                <input type="text" value={stockSearch} onChange={(e) => setStockSearch(e.target.value)} placeholder="Search part / name…" className="pl-8 pr-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs w-full focus:outline-none focus:border-[#1D3557]" data-testid="inventory-stock-search" />
+              </div>
+              <Select value={categoryFilter || 'all'} onValueChange={(v) => setCategoryFilter(v === 'all' ? '' : v)}>
+                <SelectTrigger className="w-36 h-8 text-xs" data-testid="inventory-category-filter">
+                  <Filter className="w-3 h-3 mr-1" />
+                  <SelectValue placeholder="All Categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  <SelectItem value="raw_material">Raw Material</SelectItem>
+                  <SelectItem value="component">Component</SelectItem>
+                  <SelectItem value="sub_assembly">Sub-Assembly</SelectItem>
+                  <SelectItem value="finished_good">Finished Good</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={groupFilter || 'all'} onValueChange={(v) => setGroupFilter(v === 'all' ? '' : v)}>
+                <SelectTrigger className="w-44 h-8 text-xs" data-testid="inventory-group-filter">
+                  <Filter className="w-3 h-3 mr-1" />
+                  <SelectValue placeholder="All Groups" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Groups</SelectItem>
+                  {itemGroups.map(g => (
+                    <SelectItem key={g.id || g._id || g.code} value={g.id || g._id || g.code}>
+                      {g.code ? `${g.code} — ${g.name}` : g.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <label className="flex items-center space-x-1 cursor-pointer text-xs text-[#111827]">
+                <input type="checkbox" checked={showLowStock} onChange={(e) => setShowLowStock(e.target.checked)} className="rounded" data-testid="low-stock-filter" />
+                <span>Low Stock Only</span>
+              </label>
+              {(showLowStock || categoryFilter || groupFilter || stockSearch) && (
+                <button onClick={() => { setShowLowStock(false); setCategoryFilter(''); setGroupFilter(''); setStockSearch(''); }} className="text-[10px] text-[#9B1C1C] hover:underline">Clear</button>
+              )}
+            </>
+          )}
         </div>
         <div className="flex items-center gap-2">
         {user?.role === 'admin' && (
@@ -477,80 +519,6 @@ export default function InventoryPage() {
         </TabsList>
 
         <TabsContent value="stock" className="mt-4">
-          {/* Filters */}
-          <div className="card-flat p-4 mb-4">
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="relative w-72">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-                <input
-                  type="text"
-                  value={stockSearch}
-                  onChange={(e) => setStockSearch(e.target.value)}
-                  placeholder="Search by part number or name…"
-                  className="search-input text-sm"
-                  data-testid="inventory-stock-search"
-                />
-              </div>
-              <label className="flex items-center space-x-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showLowStock}
-                  onChange={(e) => setShowLowStock(e.target.checked)}
-                  className="rounded"
-                  data-testid="low-stock-filter"
-                />
-                <span className="text-sm font-medium text-[#111827]">Show Low Stock Only</span>
-              </label>
-              <Select value={categoryFilter || 'all'} onValueChange={(v) => setCategoryFilter(v === 'all' ? '' : v)}>
-                <SelectTrigger className="w-48" data-testid="inventory-category-filter">
-                  <Filter className="w-4 h-4 mr-2" />
-                  <SelectValue placeholder="All Categories" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Categories</SelectItem>
-                  <SelectItem value="raw_material">Raw Material</SelectItem>
-                  <SelectItem value="component">Component</SelectItem>
-                  <SelectItem value="sub_assembly">Sub-Assembly</SelectItem>
-                  <SelectItem value="finished_good">Finished Good</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={groupFilter || 'all'} onValueChange={(v) => setGroupFilter(v === 'all' ? '' : v)}>
-                <SelectTrigger className="w-56 relative" data-testid="inventory-group-filter">
-                  <Filter className="w-4 h-4 mr-2" />
-                  <SelectValue placeholder="All Groups" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Groups</SelectItem>
-                  {itemGroups.map(g => (
-                    <SelectItem key={g.id || g._id || g.code} value={g.id || g._id || g.code}>
-                      {g.code ? `${g.code} — ${g.name}` : g.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {groupFilter && (
-                <button
-                  type="button"
-                  onClick={() => setGroupFilter('')}
-                  className="btn-secondary flex items-center space-x-1 text-xs h-9 -ml-1"
-                  title="Clear group filter"
-                  data-testid="inventory-group-filter-clear"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-              {(showLowStock || categoryFilter || groupFilter || stockSearch) && (
-                <button 
-                  onClick={() => { setShowLowStock(false); setCategoryFilter(''); setGroupFilter(''); setStockSearch(''); }} 
-                  className="btn-secondary flex items-center space-x-1"
-                >
-                  <X className="w-4 h-4" />
-                  <span>Clear</span>
-                </button>
-              )}
-            </div>
-          </div>
-
           <div className="card-flat overflow-hidden">
             {loading ? (
               <div className="flex items-center justify-center h-48">

@@ -16,13 +16,11 @@ import {
   Edit2, 
   Trash2,
   Copy,
-  Eye,
   X,
   GitBranch,
   AlertCircle,
   Download,
   Upload,
-  RefreshCw,
   Search,
   Printer
 } from 'lucide-react';
@@ -77,6 +75,10 @@ export default function BOMPage() {
   const [expandedBomPanels, setExpandedBomPanels] = useState({});
   const [allExplosions, setAllExplosions] = useState({});
   const [bomSearch, setBomSearch] = useState('');
+  // Per-FG (per-parent-pid) search input shown in the BOM panel header.
+  // Filters the explosion rows of that FG against part number / name.
+  const [panelSearch, setPanelSearch] = useState({});
+  const setPanelSearchFor = (pid, v) => setPanelSearch(p => ({ ...p, [pid]: v }));
 
   // Deep-link: dashboard quick action sends ?action=new to open Create dialog.
   const location = useLocation();
@@ -1708,7 +1710,13 @@ export default function BOMPage() {
                 const parentItem = group.item;
                 const activeBom = group.boms.find(b => b.status === 'active') || group.boms[0];
                 const explosion = allExplosions[activeBom?.id];
-                const explosionRows = explosion ? flattenRows(explosion.explosion) : [];
+                const allRows = explosion ? flattenRows(explosion.explosion) : [];
+                const pSearch = (panelSearch[pid] || '').trim().toLowerCase();
+                const explosionRows = !pSearch ? allRows : allRows.filter(r => (
+                  (r.item?.part_number || '').toLowerCase().includes(pSearch) ||
+                  (r.item?.name || '').toLowerCase().includes(pSearch) ||
+                  (r.item?.description || '').toLowerCase().includes(pSearch)
+                ));
                 const totalCost = explosion?.total_rollup_cost || 0;
                 
                 return (
@@ -1748,39 +1756,27 @@ export default function BOMPage() {
                         {activeBom && <span className="text-xs bg-white/15 px-2 py-0.5 rounded">Rev {activeBom.revision} - {activeBom.status}</span>}
                       </div>
                       <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        {/* Per-FG search input — filters explosion rows below by
+                            part_number / name / description. Same UX as MO
+                            page's per-FG search. */}
+                        {activeBom && (
+                          <div className="relative" onClick={(e) => e.stopPropagation()}>
+                            <Search className="w-3 h-3 absolute left-1.5 top-1/2 -translate-y-1/2 text-white/70" />
+                            <input
+                              type="text"
+                              placeholder="Search part / name…"
+                              value={panelSearch[pid] || ''}
+                              onChange={(e) => setPanelSearchFor(pid, e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="pl-5 pr-1.5 py-0.5 bg-white/10 placeholder-white/60 text-white border border-white/30 rounded-sm text-[11px] w-48 focus:outline-none focus:bg-white/20"
+                              data-testid={`bom-panel-search-${pid}`}
+                            />
+                          </div>
+                        )}
                         {canSeeProcessCost && explosion?.fg_process_cost_per_unit > 0 && (
                           <span className="text-[11px] bg-[#FDF6B2] text-[#723B13] px-2 py-0.5 rounded mono font-medium" title="FG Parent Process Cost per unit">FG Process: {formatCurrency(explosion.fg_process_cost_per_unit)}</span>
                         )}
                         {canSeeRollupCost && <span className="mono text-sm font-bold">Total: {formatCurrency(totalCost)}</span>}
-                        {activeBom && <button onClick={async (e) => {
-                          e.stopPropagation();
-                          // The refresh button must update the INLINE PANEL state
-                          // (`allExplosions[bomId]`) — not the modal-only state
-                          // `bomExplosion`. Previously this called
-                          // `fetchBomExplosion()` which only set the View-dialog
-                          // state, so clicking refresh while the panel was open
-                          // had no visible effect on the costs shown in the panel.
-                          try {
-                            const { data } = await api.get(`/api/bom/${activeBom.id}/explode`);
-                            setAllExplosions(prev => ({ ...prev, [activeBom.id]: data }));
-                            // Also refresh the batched rollup so other unexpanded
-                            // panels reflect any upstream item-cost changes.
-                            try {
-                              const { data: rollups } = await api.get(`/api/bom/rollup-costs?status=${statusFilter || 'active'}`);
-                              setAllExplosions(prev => {
-                                const next = { ...prev };
-                                Object.entries(rollups || {}).forEach(([bid, r]) => {
-                                  const existing = next[bid] || {};
-                                  // Don't clobber explosion arrays already loaded.
-                                  next[bid] = { ...existing, ...r };
-                                });
-                                return next;
-                              });
-                            } catch {}
-                          } catch (err) {
-                            console.error('Refresh BOM costs failed:', err);
-                          }
-                        }} className="p-1 hover:bg-white/20 rounded" title="Refresh Costs (re-pull from BOM)" data-testid={`refresh-bom-${pid}`}><RefreshCw className="w-4 h-4" /></button>}
                         {activeBom && (
                           <button
                             onClick={async (e) => {
@@ -1806,7 +1802,6 @@ export default function BOMPage() {
                         )}
                         {activeBom && <button onClick={(e) => { e.stopPropagation(); handleBomExport(activeBom.id); }} className="p-1 hover:bg-white/20 rounded" title="Export this BOM (full tree)" data-testid={`export-bom-${pid}`}><Download className="w-4 h-4" /></button>}
                         {activeBom && <button onClick={(e) => { e.stopPropagation(); handleBomPartsExport(activeBom.id); }} className="p-1 hover:bg-white/20 rounded text-[10px] font-semibold tracking-wide" title="Export aggregated parts list for this FG (1 row per leaf part)" data-testid={`export-bom-parts-${pid}`}>PARTS</button>}
-                        <button onClick={(e) => { e.stopPropagation(); handleView(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="View"><Eye className="w-4 h-4" /></button>
                         {canEdit && <button onClick={(e) => { e.stopPropagation(); handleEdit(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="Edit"><Edit2 className="w-4 h-4" /></button>}
                         {canEdit && <button onClick={(e) => { e.stopPropagation(); handleRevise(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="Revise"><GitBranch className="w-4 h-4" /></button>}
                         {user?.role === 'admin' && <button onClick={(e) => { e.stopPropagation(); handleDelete(activeBom); }} className="p-1 hover:bg-white/20 rounded" title="Delete"><Trash2 className="w-4 h-4" /></button>}
