@@ -20,7 +20,17 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-14 (newest)** — **JW: exhaustive routing cost search + PUT permission expansion (DONE & VERIFIED ✅):** Two follow-up fixes for user's persistent issues.
+- **2026-05-14 (newest)** — **JW top-margin + duplicate Receive-via-GRN fix + MO per-FG filters (DONE & VERIFIED ✅):** Two unrelated UX fixes.
+  1. **JW page tightening**: Reduced top section spacing (h1 → text-xl, removed "Send materials to subcontractors..." subtitle, `space-y-6` → `space-y-3`, KPI cards `p-4 gap-4` → `p-3 gap-3`). The page now starts with the order table much closer to the breadcrumb.
+  2. **JW Receive-via-GRN duplicate**: Job Card OS rows have both `reference_operation_seqs` AND `job_work_parts`, so two render conditions both matched, producing a doubled badge. Merged the two render blocks into one broader condition — single badge per row.
+  3. **MO page — Focus family inline → per-FG filter row**: Removed the global "Focus family" button that appeared on every parent WO row inside the renderMORow tree (it set a GLOBAL filter that hid other FGs entirely, which was confusing). In its place, added a per-FG filter row that renders DIRECTLY under each FG group header with:
+     - **Search input** (`panel-search-{fgId}`) — case-insensitive match on item part_number, name, wo_number; depth>0 rows only.
+     - **Status dropdown** (`panel-status-{fgId}`) — All / Pending / In Progress / Outsourced / Completed / Cancelled.
+     - **Clear** button (appears only when a filter is active).
+     - Filters are scoped per-FG; sibling FG groups are untouched. Existing SG-only / Parts-only category pills on the FG header continue to work and stack with the new filters.
+  - **Verification** (iteration 115): 13/13 frontend Playwright tests pass.
+
+- **2026-05-14** — **JW: exhaustive routing cost search + PUT permission expansion (DONE & VERIFIED ✅):** Two follow-up fixes for user's persistent issues.
   1. **`find_routing_cost` rewritten to scan all candidate BOMs**: Previous version checked only ONE BOM (first match by parent_item_id, then first by components.item_id). Production data could have the routing op defined on a parent FG BOM's component-line entry while the part's own BOM has different ops — those weren't found. Now iterates over EVERY active BOM (and then inactive as fallback) for both placements, returning the first non-zero match. Also added a small "Refresh cost" button next to each Outsourced op badge in the Edit SC dialog so users can force-recompute on demand.
   2. **PUT /api/job-work/orders/{id} permission expanded**: Backend required `job_work.edit` permission; frontend `canEdit` ALSO included users with `job_work.create`. Mismatch caused non-admin/non-production-manager users to see an Edit button, type their changes, hit Save → silent 403. Now PUT accepts admin/production_manager/inventory_manager roles OR users with `edit` or `create` permission on the `job_work` module.
   - **Verification** (iteration 114): 26/26 tests pass (9 new + 7 iteration 113 + 10 iteration 108 regression). Permission test confirms users with only `job_work.create` can now successfully update SC `job_work_parts`. 403 still returned for users with no relevant permission.
