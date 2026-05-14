@@ -675,20 +675,19 @@ export default function JobWorkPage() {
   if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div></div>;
 
   return (
-    <div className="space-y-6" data-testid="jobwork-page">
+    <div className="space-y-3" data-testid="jobwork-page">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold font-[Chivo] text-[#111827]">Job Work / Subcontracting</h1>
-          <p className="text-sm text-[#4B5563]">Send materials to subcontractors and receive processed goods</p>
+          <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Job Work / Subcontracting</h1>
         </div>
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="card-flat p-4"><p className="kpi-label">Active Orders</p><p className="kpi-value">{orders.filter(o => ['confirmed', 'in_progress'].includes(o.status)).length}</p></div>
-        <div className="card-flat p-4"><p className="kpi-label">Materials Sent</p><p className="kpi-value">{challans.length}</p></div>
-        <div className="card-flat p-4"><p className="kpi-label">Materials Received</p><p className="kpi-value">{receipts.length}</p></div>
-        <div className="card-flat p-4"><p className="kpi-label">Processing Charges</p><p className="kpi-value">{formatCurrency(orders.reduce((s, o) => s + (o.processing_charges || 0), 0))}</p></div>
+      <div className="grid grid-cols-4 gap-3">
+        <div className="card-flat p-3"><p className="kpi-label">Active Orders</p><p className="kpi-value">{orders.filter(o => ['confirmed', 'in_progress'].includes(o.status)).length}</p></div>
+        <div className="card-flat p-3"><p className="kpi-label">Materials Sent</p><p className="kpi-value">{challans.length}</p></div>
+        <div className="card-flat p-3"><p className="kpi-label">Materials Received</p><p className="kpi-value">{receipts.length}</p></div>
+        <div className="card-flat p-3"><p className="kpi-label">Processing Charges</p><p className="kpi-value">{formatCurrency(orders.reduce((s, o) => s + (o.processing_charges || 0), 0))}</p></div>
       </div>
 
       {/* Sections are now rendered one at a time based on the sidebar's
@@ -805,12 +804,8 @@ export default function JobWorkPage() {
                               {o.status === 'in_progress' && o.subcontract_type !== 'without_material' && sentQty >= totalQty && (
                                 <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium">Receive via GRN ({o.order_number})</span>
                               )}
-                              {/* Job OS (without_material with job_work_parts): After DC sent, show Receive via GRN - NO PO needed */}
+                              {/* Job OS / Job Card OS (without_material with job_work_parts): After DC sent, show Receive via GRN - NO PO needed. Covers BOTH consolidated Job Card OS (has reference_operation_seqs) AND plain MO→SC without RM. */}
                               {o.subcontract_type === 'without_material' && o.job_work_parts?.length > 0 && o.dc_created && o.status === 'in_progress' && (
-                                <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium">Receive via GRN ({o.order_number})</span>
-                              )}
-                              {/* Job Card OS: shows "Receive via GRN" after DC sent. No PO needed. */}
-                              {(o.reference_operation_seqs?.length || o.reference_operation_seq) && o.subcontract_type === 'without_material' && o.dc_created && o.status === 'in_progress' && (
                                 <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium">Receive via GRN ({o.order_number})</span>
                               )}
                               {/* Plain MO→SC without material (no job-card reference): Create PO → GRN */}

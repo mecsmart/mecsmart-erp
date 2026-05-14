@@ -1,0 +1,64 @@
+{
+  "summary": "Iteration 115 - MecSmart ERP Two UX Fixes Testing Complete. All 13 tests PASSED. (Fix 1) JW page top section uses tighter spacing - h1 reduced to text-xl, subtitle paragraph removed, space-y-3 instead of space-y-6, KPI cards p-3 + gap-3. No duplicate 'Receive via GRN' badges found on Job Card OS rows. (Fix 2) MO page renderMORow rows NO LONGER show inline 'Focus family' button. Per-FG search and status filters render correctly under each FG group header with all expected options.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_115.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "JobWorkPage.js line 678: Main container uses space-y-3 for tighter spacing",
+    "JobWorkPage.js line 681: h1 uses text-xl class (reduced from larger size)",
+    "JobWorkPage.js line 686-690: KPI grid uses gap-3 and cards use p-3 for compact layout",
+    "JobWorkPage.js lines 804-810: Single 'Receive via GRN' badge block covers both SC with RM and Job OS/Job Card OS cases - no duplicate rendering",
+    "ManufacturingPage.js line 83-86: panelSearch and panelStatus state with helpers for per-FG filtering",
+    "ManufacturingPage.js line 1499: renderMORow accepts search & statusFilter parameters and filters depth>0 rows accordingly",
+    "ManufacturingPage.js lines 1705-1738: Per-FG filter row with search input, status select, and conditional Clear button"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend only testing)",
+    "frontend": "100% (13/13 tests passed)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None - used existing data",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 115 UX fixes verified: (1) JW page top section has tighter spacing with text-xl h1, no subtitle, space-y-3, p-3 KPI cards with gap-3. No duplicate 'Receive via GRN' badges on Job Card OS rows. (2) MO page has no 'Focus family' buttons (data-testid^='focus-family-' returns 0 matches). Per-FG filter rows render under each FG group header with search input (panel-search-{fgId}), status select (panel-status-{fgId}) with options All Statuses/Pending/In Progress/Outsourced/Completed/Cancelled, and Clear button that appears only when filter is active. Category pills (All/SG only/Parts only) still work independently.",
+  "tests_executed": {
+    "jw_page_tests": [
+      {"test": "JW page top section spacing - space-y-3 container", "status": "PASSED"},
+      {"test": "JW page h1 with text-xl class", "status": "PASSED"},
+      {"test": "JW page subtitle text removed", "status": "PASSED"},
+      {"test": "JW page KPI grid with gap-3", "status": "PASSED"},
+      {"test": "JW page KPI cards with p-3", "status": "PASSED"},
+      {"test": "JW page no duplicate 'Receive via GRN' badges", "status": "PASSED", "details": "Found 65 badges across 320 order rows, no row had more than 1 badge"}
+    ],
+    "mo_page_tests": [
+      {"test": "MO page no 'Focus family' buttons (data-testid^='focus-family-')", "status": "PASSED", "details": "0 matches found"},
+      {"test": "MO page per-FG filter rows exist (panel-filters-*)", "status": "PASSED", "details": "Found 523 per-FG filter rows"},
+      {"test": "MO page per-FG search input (panel-search-*)", "status": "PASSED"},
+      {"test": "MO page per-FG status select with all options", "status": "PASSED", "details": "Options: All Statuses, Pending, In Progress, Outsourced, Completed, Cancelled"},
+      {"test": "MO page Clear button appears when filter active", "status": "PASSED"}
+    ],
+    "regression_tests": [
+      {"test": "Edit SC dialog opens with wide layout (max-w-5xl)", "status": "PASSED"},
+      {"test": "Category pills (All/SG only/Parts only) present", "status": "PASSED", "details": "Found 3/3 category pill buttons"}
+    ]
+  },
+  "features_verified": {
+    "jw_page_tighter_spacing": "h1 text-xl, no subtitle, space-y-3, KPI cards p-3 + gap-3",
+    "jw_page_no_duplicate_grn_badge": "Job Card OS rows show exactly one 'Receive via GRN' badge",
+    "mo_page_no_focus_family_button": "Inline 'Focus family' button removed from renderMORow",
+    "mo_page_per_fg_filters": "Per-FG search and status filters render under each FG group header",
+    "mo_page_filter_clear_button": "Clear button appears only when a filter is active",
+    "regression_category_pills": "All/SG only/Parts only category pills still work independently"
+  }
+}
