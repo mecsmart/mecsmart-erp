@@ -1,0 +1,69 @@
+{
+  "summary": "Iteration 111 - JW Process OS Self-Heal Testing Complete. All 8 new tests PASSED + 10 regression tests from iteration 108 PASSED (18 total). GET /api/job-work/orders correctly self-heals stale charges with specific routing cost when process_name is set.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_111_jw_process_self_heal.py",
+    "/app/backend/tests/test_iteration_108_jw_process_cost_fixes.py",
+    "/app/test_reports/pytest/pytest_iteration_111.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GET /api/job-work/orders correctly self-heals stale charges via find_routing_cost(item_id, process_name) when process_name is set",
+    "When find_routing_cost returns 0 (op not in any BOM), stored charges are preserved (no destructive override)",
+    "Full MO-SC parts (no process_name) still refresh from combined BOM fg_process_cost as before",
+    "bom_rollup_cost continues to refresh as Total/Unit (rm_cost + process_cost) independent of charges override",
+    "Sent/completed SCs (status NOT in draft/in_progress) are NOT modified (is_live check preserves historical data)",
+    "find_routing_cost correctly searches both (a) item's own BOM parent_routings AND (b) component-line routings on parent BOM"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_111_jw_process_self_heal.py"
+  ],
+  "success_rate": {
+    "backend": "100% (18/18 tests passed - 8 new + 10 regression)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST_111_ prefixed items, BOMs, suppliers, and orders during tests (cleaned up after tests)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "JW Process OS Self-Heal verified. GET /api/job-work/orders now self-heals legacy SCs that were polluted with combined process cost. The fix correctly overrides stale stored charges with find_routing_cost(item_id, process_name) for any job_work_parts row where process_name is set. When routing not found (returns 0), stored value is preserved. Full MO-SC (no process_name) still uses combined fg_process_cost. Sent/completed SCs are NOT modified.",
+  "tests_executed": {
+    "backend": [
+      {"test": "TestJWProcessSelfHeal::test_self_heal_overrides_stale_charges_with_specific_routing_cost", "status": "PASSED", "details": "Verified 4 components with polluted charges (140.61, 82.99, 201.10, 89.91) were self-healed to specific Powder Coating costs (90.61, 52.99, 101.10, 49.91)"},
+      {"test": "TestJWProcessSelfHeal::test_self_heal_preserves_stored_when_routing_not_found", "status": "PASSED", "details": "Verified stored charges 999.99 preserved when routing not found in BOM"},
+      {"test": "TestJWProcessSelfHeal::test_full_mo_sc_uses_combined_fg_process_cost", "status": "PASSED", "details": "Verified Full MO-SC (no process_name) uses combined fg_process_cost=600"},
+      {"test": "TestJWProcessSelfHeal::test_bom_rollup_cost_refreshes_independently", "status": "PASSED", "details": "Verified charges=50 (specific) and bom_rollup_cost=250 (Total/Unit) refresh independently"},
+      {"test": "TestJWProcessSelfHeal::test_sent_completed_sc_not_modified", "status": "PASSED", "details": "Verified sent SC charges 999.99 preserved (is_live check)"},
+      {"test": "TestJWProcessSelfHeal::test_find_routing_cost_from_component_line_routings", "status": "PASSED", "details": "Verified component-line routing cost 125.25 used when item appears as component in parent BOM"},
+      {"test": "TestRegressionIteration108Tests::test_routing_cost_endpoint_returns_specific_op_cost", "status": "PASSED", "details": "Regression: /api/bom/routing-cost returns specific op cost"},
+      {"test": "TestRegressionIteration108Tests::test_put_preserves_process_name_and_charges", "status": "PASSED", "details": "Regression: PUT preserves process_name and per-op charges"}
+    ],
+    "regression_iteration_108": [
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_returns_specific_op_cost", "status": "PASSED"},
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_returns_zero_for_unknown_op", "status": "PASSED"},
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_requires_auth", "status": "PASSED"},
+      {"test": "TestJobWorkOrderPreservation::test_put_preserves_process_name_and_charges_on_job_card_os", "status": "PASSED"},
+      {"test": "TestJobWorkOrderPreservation::test_put_preserves_item_description", "status": "PASSED"},
+      {"test": "TestJobWorkOrderPreservation::test_put_allows_updating_item_description", "status": "PASSED"},
+      {"test": "TestJobWorkOrderCreate::test_post_accepts_process_name_and_uses_specific_routing_cost", "status": "PASSED"},
+      {"test": "TestJobWorkOrderCreate::test_post_accepts_item_description", "status": "PASSED"},
+      {"test": "TestJobWorkOrderCreate::test_post_without_process_name_uses_combined_cost", "status": "PASSED"},
+      {"test": "TestMultiLineJobCardOS::test_multi_line_same_item_different_ops_preserved", "status": "PASSED"}
+    ]
+  },
+  "features_verified": {
+    "self_heal_specific_routing_cost": "GET /api/job-work/orders overrides stale stored charges with find_routing_cost(item_id, process_name) when process_name is set",
+    "preserve_when_routing_not_found": "When find_routing_cost returns 0 (op not in any BOM), stored value is preserved (no destructive override)",
+    "full_mo_sc_combined_cost": "Full MO-SC parts (no process_name) still refresh from combined BOM fg_process_cost",
+    "bom_rollup_cost_independent": "bom_rollup_cost continues to refresh as Total/Unit (rm_cost + process_cost) independent of charges override",
+    "sent_completed_not_modified": "Sent/completed SCs (status NOT in draft/in_progress) are NOT modified (is_live check)",
+    "find_routing_cost_both_scenarios": "find_routing_cost searches both (a) item's own BOM parent_routings AND (b) component-line routings on parent BOM"
+  }
+}
