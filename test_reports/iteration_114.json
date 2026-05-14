@@ -1,0 +1,77 @@
+{
+  "summary": "Iteration 114 - find_routing_cost Multi-BOM Search & PUT Permission Fixes Testing Complete. All 26 tests PASSED (9 new iteration 114 + 7 iteration 113 + 10 iteration 108 regression). The find_routing_cost function now correctly scans ALL BOMs where an item appears (as parent OR as component), finding routing costs even when defined on a parent FG's BOM component-line. PUT /api/job-work/orders/{id} now accepts users with job_work.create permission (not just edit).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_114_find_routing_cost_permissions.py",
+    "/app/backend/tests/test_iteration_113_completed_sc_self_heal.py",
+    "/app/backend/tests/test_iteration_108_jw_process_cost_fixes.py",
+    "/app/test_reports/pytest/pytest_iteration_114.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "find_routing_cost (lines 412-444) now uses async for loops to scan ALL BOMs where item appears as parent or component, preferring active BOMs first",
+    "PUT /api/job-work/orders/{id} (line 10560-10563) now accepts users with role in (admin, production_manager, inventory_manager) OR with 'edit' or 'create' permission on 'job_work' module",
+    "Note: In current system design, ALL non-admin users get role='inventory_manager' (derived from role_group), so the permission check effectively allows all authenticated users to update SCs",
+    "The multi-BOM search may have slight performance impact on large BOM databases, but should still complete sub-second for typical use cases"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_114_find_routing_cost_permissions.py"
+  ],
+  "success_rate": {
+    "backend": "100% (26/26 tests passed - 9 new + 7 iteration 113 + 10 iteration 108 regression)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST_114_ prefixed items, BOMs, suppliers, role_groups, users, and orders during tests (cleaned up after tests)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 114 fixes verified: (1) find_routing_cost now scans ALL BOMs where item appears as parent or component, finding routing costs even when defined on a parent FG's BOM component-line (not just the item's own BOM). This fixes the user's issue where Powder Coating cost (37.61) was not found because it was defined on the parent FG's BOM, not on the component's own BOM. (2) PUT /api/job-work/orders/{id} now accepts users with job_work.create permission (not just edit), matching frontend's canEdit logic. Note: In current system design, all non-admin users get role='inventory_manager' which is in the allowed roles list, so effectively all authenticated users can update SCs.",
+  "tests_executed": {
+    "iteration_114_new": [
+      {"test": "TestFindRoutingCostMultiBOMSearch::test_find_routing_cost_from_parent_fg_bom_component_line", "status": "PASSED", "details": "Verified find_routing_cost finds Powder Coating cost (37.61) from parent FG BOM's component-line when component has no own BOM"},
+      {"test": "TestFindRoutingCostMultiBOMSearch::test_find_routing_cost_prefers_items_own_bom_over_parent", "status": "PASSED", "details": "Verified find_routing_cost prefers item's own BOM cost over parent BOM cost"},
+      {"test": "TestFindRoutingCostMultiBOMSearch::test_find_routing_cost_scans_multiple_parent_boms", "status": "PASSED", "details": "Verified find_routing_cost scans multiple parent BOMs to find routing cost"},
+      {"test": "TestPUTJobWorkOrderPermissions::test_put_accepts_user_with_job_work_create_permission", "status": "PASSED", "details": "Verified PUT accepts user with only job_work.create permission"},
+      {"test": "TestPUTJobWorkOrderPermissions::test_put_accepts_inventory_manager_role", "status": "PASSED", "details": "Verified PUT accepts user with inventory_manager role"},
+      {"test": "TestPUTJobWorkOrderPermissions::test_put_rejects_unauthenticated_user", "status": "PASSED", "details": "Verified PUT rejects unauthenticated requests with 401"},
+      {"test": "TestRegressionIteration113::test_routing_cost_endpoint_still_works", "status": "PASSED", "details": "Regression: /api/bom/routing-cost endpoint works correctly"},
+      {"test": "TestRegressionIteration113::test_job_card_os_self_heal_still_works", "status": "PASSED", "details": "Regression: GET /api/job-work/orders self-heals Job Card OS lines"},
+      {"test": "TestRegressionIteration113::test_put_preserves_process_name_and_charges", "status": "PASSED", "details": "Regression: PUT preserves process_name and per-op charges"}
+    ],
+    "iteration_113_regression": [
+      {"test": "TestCompletedSCSelfHeal::test_completed_sc_job_card_os_self_heals_charges", "status": "PASSED"},
+      {"test": "TestCompletedSCSelfHeal::test_closed_sc_job_card_os_self_heals_charges", "status": "PASSED"},
+      {"test": "TestCompletedSCSelfHeal::test_sent_sc_job_card_os_self_heals_charges", "status": "PASSED"},
+      {"test": "TestCompletedSCSelfHeal::test_self_heal_preserves_when_routing_not_found", "status": "PASSED"},
+      {"test": "TestFullMOSCIsLiveGating::test_completed_full_mo_sc_preserves_charges", "status": "PASSED"},
+      {"test": "TestFullMOSCIsLiveGating::test_draft_full_mo_sc_auto_refreshes_charges", "status": "PASSED"},
+      {"test": "TestBomRollupIsLiveGating::test_completed_sc_preserves_bom_rollup_cost", "status": "PASSED"}
+    ],
+    "iteration_108_regression": [
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_returns_specific_op_cost", "status": "PASSED"},
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_returns_zero_for_unknown_op", "status": "PASSED"},
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_requires_auth", "status": "PASSED"},
+      {"test": "TestJobWorkOrderPreservation::test_put_preserves_process_name_and_charges_on_job_card_os", "status": "PASSED"},
+      {"test": "TestJobWorkOrderPreservation::test_put_preserves_item_description", "status": "PASSED"},
+      {"test": "TestJobWorkOrderPreservation::test_put_allows_updating_item_description", "status": "PASSED"},
+      {"test": "TestJobWorkOrderCreate::test_post_accepts_process_name_and_uses_specific_routing_cost", "status": "PASSED"},
+      {"test": "TestJobWorkOrderCreate::test_post_accepts_item_description", "status": "PASSED"},
+      {"test": "TestJobWorkOrderCreate::test_post_without_process_name_uses_combined_cost", "status": "PASSED"},
+      {"test": "TestMultiLineJobCardOS::test_multi_line_same_item_different_ops_preserved", "status": "PASSED"}
+    ]
+  },
+  "features_verified": {
+    "find_routing_cost_multi_bom_search": "find_routing_cost now scans ALL BOMs where item appears as parent or component, finding routing costs from parent FG BOMs",
+    "put_accepts_create_permission": "PUT /api/job-work/orders/{id} now accepts users with job_work.create permission (not just edit)",
+    "put_accepts_inventory_manager": "PUT /api/job-work/orders/{id} accepts inventory_manager role",
+    "all_iteration_113_features": "All iteration 113 features (completed SC self-heal, is_live gating) still working",
+    "all_iteration_108_features": "All iteration 108 features (routing-cost endpoint, PUT preservation, POST with process_name) still working"
+  }
+}

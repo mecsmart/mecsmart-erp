@@ -410,23 +410,37 @@ def routing_cost_for_process(bom: Dict[str, Any], item_id: str, process_name: st
 
 
 async def find_routing_cost(item_id: str, process_name: str) -> float:
-    """Search any BOM (as parent or as component) for the given item + process and return its cost."""
+    """Search any BOM (as parent or as component) for the given item + process and return its cost.
+
+    Searches BOTH:
+      (a) the item's own BOM(s) — `parent_routings` for the named op
+      (b) every BOM where this item appears as a component — that component's `routings` for the named op
+
+    Multiple matches: returns the FIRST non-zero match. Scans every candidate
+    BOM rather than just the first (older versions only checked one), so the
+    cost is found even when the routing op is defined on a non-default
+    parent BOM (e.g., the FG BOM that uses this part).
+    """
     if not item_id or not process_name:
         return 0.0
-    # First: item as parent
-    bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
-    if not bom:
-        bom = await db.boms.find_one({"parent_item_id": item_id}, {"_id": 0})
-    if bom:
+    # (a) item as parent — try every BOM, prefer active first.
+    async for bom in db.boms.find({"parent_item_id": item_id, "status": "active"}, {"_id": 0}):
         c = routing_cost_for_process(bom, item_id, process_name)
         if c:
             return c
-    # Second: item as a component in any BOM
-    parent_bom = await db.boms.find_one({"components.item_id": item_id, "status": "active"}, {"_id": 0})
-    if not parent_bom:
-        parent_bom = await db.boms.find_one({"components.item_id": item_id}, {"_id": 0})
-    if parent_bom:
-        return routing_cost_for_process(parent_bom, item_id, process_name)
+    async for bom in db.boms.find({"parent_item_id": item_id, "status": {"$ne": "active"}}, {"_id": 0}):
+        c = routing_cost_for_process(bom, item_id, process_name)
+        if c:
+            return c
+    # (b) item as component — try every BOM that lists it, prefer active.
+    async for parent_bom in db.boms.find({"components.item_id": item_id, "status": "active"}, {"_id": 0}):
+        c = routing_cost_for_process(parent_bom, item_id, process_name)
+        if c:
+            return c
+    async for parent_bom in db.boms.find({"components.item_id": item_id, "status": {"$ne": "active"}}, {"_id": 0}):
+        c = routing_cost_for_process(parent_bom, item_id, process_name)
+        if c:
+            return c
     return 0.0
 
 class ProductionOrderLine(BaseModel):
@@ -10539,7 +10553,14 @@ async def create_subcontract_order(data: SubcontractOrderCreate, request: Reques
 @jobwork_router.put("/orders/{order_id}")
 async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, request: Request):
     user = await get_current_user(request)
-    _require_access(user, ["admin", "production_manager"], module="job_work", action="edit")
+    # Accept either edit OR create permission on job_work (a user who can create
+    # an SC should logically also be able to amend it — matches the frontend's
+    # canEdit fallback which includes canCreate). inventory_manager added so
+    # role-group users with only that role can amend descriptions/quantities.
+    if user.get("role") not in ("admin", "production_manager", "inventory_manager"):
+        perms = (user.get("permissions") or {}).get("job_work") or []
+        if not ({"edit", "create"} & set(perms)):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
     order = await db.subcontract_orders.find_one({"id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")

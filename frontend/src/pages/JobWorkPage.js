@@ -1043,7 +1043,24 @@ export default function JobWorkPage() {
                               data-testid={`jw-part-${idx}-description`}
                             />
                             {p.process_name && (
-                              <div className="text-[10px] text-[#723B13] mt-1" data-testid={`jw-part-${idx}-process`}>Outsourced op: <span className="font-semibold">{p.process_name}</span></div>
+                              <div className="text-[10px] mt-1 flex items-center gap-1.5" data-testid={`jw-part-${idx}-process`}>
+                                <span className="text-[#723B13]">Outsourced op: <span className="font-semibold">{p.process_name}</span></span>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (!p.item_id || !p.process_name) return;
+                                    try {
+                                      const { data } = await api.get(`/api/bom/routing-cost`, { params: { item_id: p.item_id, process_name: p.process_name } });
+                                      const cur = [...orderForm.job_work_parts];
+                                      cur[idx] = { ...cur[idx], charges: data.cost || 0 };
+                                      setOrderForm({ ...orderForm, job_work_parts: cur });
+                                    } catch {}
+                                  }}
+                                  className="text-[10px] text-[#1D3557] hover:bg-[#E1EFFE] px-1.5 py-0.5 border border-[#1D3557] rounded-sm"
+                                  data-testid={`jw-part-${idx}-refresh-cost`}
+                                  title="Recompute charges from current BOM routing"
+                                >Refresh cost</button>
+                              </div>
                             )}
                             {!p.process_name && p.process_names && p.process_names.length > 0 && (
                               <div className="text-[10px] text-[#1E429F] mt-1" data-testid={`jw-part-${idx}-processes`}>Processes: {p.process_names.join(', ')}</div>
