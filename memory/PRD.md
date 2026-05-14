@@ -20,7 +20,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-14 (newest)** — **JW top-margin + duplicate Receive-via-GRN fix + MO per-FG filters (DONE & VERIFIED ✅):** Two unrelated UX fixes.
+- **2026-05-14 (newest)** — **MO page: Family focus on SG only + per-FG search/status filter (DONE & VERIFIED ✅):**
+  1. Removed Family focus button from FG header. Family focus button now appears **only on SG (sub_assembly) rows** that have children — clicking sets the global familyFilterWoId and limits the view to that SG's family.
+  2. When an SG family focus is active and the focused SG belongs to a given FG, that FG header renders an inline **"Focused: MO-XXXXXX [×]"** clear chip (data-testid `clear-family-focus-{fgId}`). Click → resets the focus instantly without scrolling to the SG row.
+  3. Each FG header now has on the right side (after the X MO(s) count): a **search input** (`panel-search-{fgId}`) and a **status dropdown** (`panel-status-{fgId}`). Both scope ONLY to the SG/Part WOs under that FG; the root FG row stays visible.
+  4. Original toolbar Search + Create MO + "All Statuses" + "X of Y orders" — all kept in their original location.
+  5. Bug fix: imported `X as XIcon` from lucide-react and used the alias in the clear chip (X is not defined runtime error fixed).
+
+- **2026-05-14** — **JW top-margin + duplicate Receive-via-GRN fix + GRN partial-receipt hardening (DONE & VERIFIED ✅):** Two unrelated UX fixes.
   1. **JW page tightening**: Reduced top section spacing (h1 → text-xl, removed "Send materials to subcontractors..." subtitle, `space-y-6` → `space-y-3`, KPI cards `p-4 gap-4` → `p-3 gap-3`). The page now starts with the order table much closer to the breadcrumb.
   2. **JW Receive-via-GRN duplicate**: Job Card OS rows have both `reference_operation_seqs` AND `job_work_parts`, so two render conditions both matched, producing a doubled badge. Merged the two render blocks into one broader condition — single badge per row.
   3. **MO page — Focus family inline → per-FG filter row**: Removed the global "Focus family" button that appeared on every parent WO row inside the renderMORow tree (it set a GLOBAL filter that hid other FGs entirely, which was confusing). In its place, added a per-FG filter row that renders DIRECTLY under each FG group header with:

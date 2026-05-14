@@ -78,6 +78,12 @@ export default function ManufacturingPage() {
   // does NOT clear the filter; the user keeps working in the same tree
   // until they explicitly click the Clear button.
   const [familyFilterWoId, setFamilyFilterWoId] = useState(null);
+  // Per-FG search & status filters — apply only to SG / Parts rows under a
+  // given FG group. Keyed by FG WO id; empty means no filter.
+  const [panelSearch, setPanelSearch] = useState({});
+  const [panelStatus, setPanelStatus] = useState({});
+  const setPanelSearchFor = (fgId, q) => setPanelSearch(prev => ({ ...prev, [fgId]: q }));
+  const setPanelStatusFor = (fgId, s) => setPanelStatus(prev => ({ ...prev, [fgId]: s }));
   
   // Operation start/stop dialog
   const [opDialog, setOpDialog] = useState({ open: false, mode: '', sequence: 0 });
@@ -1490,7 +1496,7 @@ export default function ManufacturingPage() {
                   // a given <details> tree (defends against any malformed parent chain).
                   let renderedIds = new Set();
 
-                  const renderMORow = (wo, depth = 0, panelFilter = '') => {
+                  const renderMORow = (wo, depth = 0, panelFilter = '', search = '', statusFilter = '') => {
                     if (!wo || renderedIds.has(wo.id)) return null;
                     // Per-panel category filter — root FG (depth 0) always renders;
                     // a descendant that doesn't match the filter is hidden, BUT we
@@ -1500,7 +1506,26 @@ export default function ManufacturingPage() {
                     if (panelFilter && depth > 0 && getWoCategory(wo) !== panelFilter) {
                       renderedIds.add(wo.id);
                       const kids = workOrders.filter(w => w.parent_wo_id === wo.id);
-                      return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter))}</React.Fragment>;
+                      return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter))}</React.Fragment>;
+                    }
+                    // Per-FG search (SG/Parts under THIS FG) — case-insensitive
+                    // match on item part_number, item name, or MO number. Root
+                    // FG (depth 0) is always shown.
+                    if (search && depth > 0) {
+                      const q = search.toLowerCase();
+                      const it = wo.item || items.find(i => i.id === wo.item_id) || {};
+                      const hay = `${it.part_number || ''} ${it.name || ''} ${wo.wo_number || ''}`.toLowerCase();
+                      if (!hay.includes(q)) {
+                        renderedIds.add(wo.id);
+                        const kids = workOrders.filter(w => w.parent_wo_id === wo.id);
+                        return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter))}</React.Fragment>;
+                      }
+                    }
+                    // Per-FG status (SG/Parts under THIS FG) — root FG always shown.
+                    if (statusFilter && depth > 0 && wo.status !== statusFilter) {
+                      renderedIds.add(wo.id);
+                      const kids = workOrders.filter(w => w.parent_wo_id === wo.id);
+                      return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter))}</React.Fragment>;
                     }
                     renderedIds.add(wo.id);
                     const progress = getWOProgress(wo);
@@ -1550,6 +1575,21 @@ export default function ManufacturingPage() {
                             {depth > 0 && <span className="text-[#1D3557] mr-1">└→</span>}
                             <span className="mono font-medium">{wo.wo_number}</span>
                             <span className="ml-1 text-[10px] px-1 py-0.5 rounded font-semibold text-white" style={{backgroundColor: getCatColor(wo)}}>{getCatLabel(wo)}</span>
+                            {/* Family-focus button — ONLY on SG (sub_assembly)
+                                rows that have at least one descendant. Clicking
+                                sets the global familyFilterWoId, which limits
+                                the entire view to this SG and its children. */}
+                            {getWoCategory(wo) === 'sub_assembly' && children.length > 0 && familyFilterWoId !== wo.id && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setFamilyFilterWoId(wo.id); }}
+                                className="ml-2 inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-[#F3F4F6] hover:bg-[#E1EFFE] text-[#4B5563] hover:text-[#1D3557] border border-[#E5E7EB]"
+                                title="Filter the view to this SG and its sub-parts"
+                                data-testid={`focus-family-${wo.id}`}
+                              >
+                                <Filter className="w-3 h-3" />
+                                <span>Family focus</span>
+                              </button>
+                            )}
                           </td>
                           <td>
                             <span className="mono text-sm">{wo.item?.part_number || '-'}</span>
@@ -1606,7 +1646,7 @@ export default function ManufacturingPage() {
                             )}
                           </td>
                         </tr>
-                        {children.map(c => renderMORow(c, depth + 1, panelFilter))}
+                        {children.map(c => renderMORow(c, depth + 1, panelFilter, search, statusFilter))}
                       </React.Fragment>
                     );
                   };
@@ -1637,6 +1677,19 @@ export default function ManufacturingPage() {
                       walk(parentMO.id);
                       return cats;
                     })();
+                    // Determine if the active family focus is a descendant of
+                    // this FG (so we can show a 'Clear focus' chip inline on
+                    // the FG header).
+                    const focusBelongsToThisFG = (() => {
+                      if (!familyFilterWoId) return false;
+                      let cur = workOrders.find(w => w.id === familyFilterWoId);
+                      while (cur) {
+                        if (cur.id === parentMO.id) return true;
+                        cur = workOrders.find(w => w.id === cur.parent_wo_id);
+                      }
+                      return false;
+                    })();
+                    const focusedWO = focusBelongsToThisFG ? workOrders.find(w => w.id === familyFilterWoId) : null;
                     return (
                       <details key={parentMO.id} open={parentMO.status !== 'completed'} className="border rounded-sm overflow-hidden">
                         <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none flex-wrap" style={{borderLeft: `4px solid ${catColor}`}}>
@@ -1647,18 +1700,20 @@ export default function ManufacturingPage() {
                           <span className="text-[10px] px-1.5 py-0.5 rounded text-white font-semibold" style={{backgroundColor: catColor}}>{getCatLabel(parentMO)}</span>
                           <span className={`text-[10px] px-1 rounded ${parentMO.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : parentMO.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : 'bg-[#FDF6B2] text-[#723B13]'}`}>{parentMO.status?.replace('_',' ')}</span>
                           {parentMO.is_subcontract && <span className="text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">Sub-Contract</span>}
-                          {/* Family focus — focuses the GLOBAL list to ONLY this FG's
-                              family (the FG + all its descendant SGs/Parts). Click
-                              again on the active pill to unfocus. */}
-                          {children.length > 0 && (
+                          {/* Inline Clear-focus chip — appears on the FG header
+                              whenever the active family focus is on an SG/Part
+                              under THIS FG. Lets the user dismiss focus without
+                              scrolling to the SG row. */}
+                          {focusedWO && (
                             <button
-                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFamilyFilterWoId(familyFilterWoId === parentMO.id ? null : parentMO.id); }}
-                              className={`text-[10px] px-1.5 py-0.5 rounded-sm flex items-center gap-1 border ${familyFilterWoId === parentMO.id ? 'bg-[#1D3557] text-white border-[#1D3557]' : 'bg-white text-[#1D3557] border-[#1D3557] hover:bg-[#E1EFFE]'}`}
-                              data-testid={`family-focus-${parentMO.id}`}
-                              title="Focus the global list to only this FG family"
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFamilyFilterWoId(null); }}
+                              className="text-[10px] bg-[#1D3557] text-white px-1.5 py-0.5 rounded-sm flex items-center gap-1 hover:bg-[#152744]"
+                              data-testid={`clear-family-focus-${parentMO.id}`}
+                              title="Clear family focus"
                             >
                               <Filter className="w-3 h-3" />
-                              {familyFilterWoId === parentMO.id ? 'Focused' : 'Family focus'}
+                              Focused: {focusedWO.wo_number}
+                              <XIcon className="w-3 h-3 ml-0.5" />
                             </button>
                           )}
                           {/* Per-FG child filter — only render if this FG has
@@ -1687,11 +1742,42 @@ export default function ManufacturingPage() {
                               )}
                             </div>
                           )}
-                          <span className="text-xs text-[#6B7280] ml-auto">{1 + children.length} MO(s)</span>
+                          <span className="text-xs text-[#6B7280]">{1 + children.length} MO(s)</span>
+                          {/* Per-FG search + status filter (SG / Parts under
+                              THIS FG only). Placed on the right side of the FG
+                              header. */}
+                          <div className="ml-auto flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            <div className="relative">
+                              <Search className="w-3 h-3 absolute left-1.5 top-1/2 -translate-y-1/2 text-[#6B7280]" />
+                              <input
+                                type="text"
+                                placeholder="Search SG/Part…"
+                                value={panelSearch[parentMO.id] || ''}
+                                onChange={(e) => setPanelSearchFor(parentMO.id, e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="pl-5 pr-1.5 py-0.5 border border-[#D1D5DB] rounded-sm text-[11px] w-44 focus:outline-none focus:border-[#1D3557]"
+                                data-testid={`panel-search-${parentMO.id}`}
+                              />
+                            </div>
+                            <select
+                              value={panelStatus[parentMO.id] || ''}
+                              onChange={(e) => setPanelStatusFor(parentMO.id, e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="px-1.5 py-0.5 border border-[#D1D5DB] rounded-sm text-[11px] bg-white focus:outline-none focus:border-[#1D3557]"
+                              data-testid={`panel-status-${parentMO.id}`}
+                            >
+                              <option value="">All</option>
+                              <option value="pending">Pending</option>
+                              <option value="in_progress">In Progress</option>
+                              <option value="outsourced">Outsourced</option>
+                              <option value="completed">Completed</option>
+                              <option value="cancelled">Cancelled</option>
+                            </select>
+                          </div>
                         </summary>
                         <div className="overflow-x-auto sticky-header-scroll">
                           <table className="w-full data-table"><thead><tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
-                          <tbody>{renderMORow(parentMO, 0, activePanelFilter)}</tbody></table>
+                          <tbody>{renderMORow(parentMO, 0, activePanelFilter, panelSearch[parentMO.id] || '', panelStatus[parentMO.id] || '')}</tbody></table>
                         </div>
                       </details>
                     );
