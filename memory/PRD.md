@@ -19,6 +19,17 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-05-14 (Accounts menu + permission module — DONE & VERIFIED ✅):**
+  1. **New Accounts sidebar group** (`/app/frontend/src/components/Layout.js`): Added a collapsible Accounts group with `Wallet` icon between Job Work and Settings. Children: Purchase Invoices (`/purchase-invoices`) and Tax Invoices (`/crm?tab=marketing&sub=tax-invoices`).
+  2. **Removed from old locations**: Purchase Invoices no longer appears under Inventory; Tax Invoices and Packing Lists no longer appear under CRM → Marketing dropdown (Stores → Packing Lists remains intact).
+  3. **New `accounts` permission module** (`/app/backend/core/permissions.py`): Replaces the old `purchase_invoices` module in `ALL_MODULES` and `DEFAULT_PERMISSIONS` (admin/production_manager/inventory_manager all granted view/create/edit by default). The Permissions UI now exposes `Accounts` as a top-level row.
+  4. **Backend gates switched** (`/app/backend/server.py`): All 4 purchase-invoice endpoints (`POST`, `PUT`, `approve`, `mark-paid`) now check `module="accounts"`. The 3 tax-invoice mutating endpoints (`POST`, `PUT`, `DELETE`) now require `_require_access(..., module="accounts", ...)` — previously had no module gate.
+  5. **One-time migration** (`migrate_purchase_invoices_perm_to_accounts`): On startup, any existing role group with `permissions.purchase_invoices` has those actions unioned into `permissions.accounts`. Verified — 1 role group auto-migrated in this environment.
+  6. **Frontend permission switches**: `PurchaseInvoicePage.js` now checks `accounts` for canEdit; `CRMPage.js` introduced `canAccountsEdit` and passes it to `TaxInvoicesPanel` instead of the old `canMarketingEdit`.
+  7. **User Management grid** (`UserManagementPage.js`): Added new `Accounts` main module group with `accounts` sub-module (label "Purchase Invoices & Tax Invoices"). Old `purchase_invoices` sub removed from Inventory section.
+  8. **Testing**: `testing_agent_v3_fork` iteration 118 — 100% pass (7 backend tests + full frontend regression). No console errors.
+
+
 - **2026-05-14 (5 user-driven UI polish items — DONE & VERIFIED ✅):**
   1. **Inventory-Stock single-line header** (`/app/frontend/src/pages/InventoryPage.js`): Stock-tab search + Category + Group + 'Low Stock Only' checkbox + Clear merged into the sticky page header alongside Reconcile / Create Item / New Transaction buttons. Filters auto-hide on the Transactions tab. Old filter card below the tabs removed.
   2. **Suppliers single-line header** (`/app/frontend/src/pages/SuppliersPage.js`): Search + Status filter + Clear merged into the sticky page header with Add Supplier; standalone filter card removed.
