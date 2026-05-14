@@ -1,0 +1,78 @@
+{
+  "summary": "Iteration 113 - Completed SC Self-Heal Fix Testing Complete. All 25 tests PASSED (7 new + 8 iteration 111 + 10 iteration 108 regression). GET /api/job-work/orders now self-heals Job Card OS lines (with process_name) regardless of SC status (draft, in_progress, completed, closed, sent). Combined-cost auto-refresh for Full MO-SC lines still respects is_live gating.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_113_completed_sc_self_heal.py",
+    "/app/backend/tests/test_iteration_111_jw_process_self_heal.py",
+    "/app/backend/tests/test_iteration_108_jw_process_cost_fixes.py",
+    "/app/test_reports/pytest/pytest_iteration_113.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GET /api/job-work/orders self-heal for Job Card OS lines (process_name set) now runs for ALL SCs regardless of status — display-only correction, DB untouched",
+    "Combined-cost auto-refresh for Full MO-SC lines (no process_name) still gated by is_live (draft/in_progress only)",
+    "bom_rollup_cost and process_names auto-refresh still gated by is_live — no change there",
+    "When find_routing_cost returns 0 (op not in any BOM), stored value is preserved (no destructive override)",
+    "Code change is minimal and surgical: lines 10420-10432 in server.py now run outside the is_live block"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_113_completed_sc_self_heal.py",
+    "/app/backend/tests/test_iteration_111_jw_process_self_heal.py"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25 tests passed - 7 new + 8 iteration 111 + 10 iteration 108 regression)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST_113_ prefixed items, BOMs, suppliers, and orders during tests (cleaned up after tests)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 113 fix verified: GET /api/job-work/orders now self-heals Job Card OS lines (with process_name) for ALL SC statuses including completed/closed/sent. This fixes the user's issue where SC Edit dialog showed combined cost (90.61) instead of specific per-op cost (37.61) for completed SCs. The fix is display-only (DB untouched). Full MO-SC lines (no process_name) still respect is_live gating for combined-cost auto-refresh.",
+  "tests_executed": {
+    "iteration_113_new": [
+      {"test": "TestCompletedSCSelfHeal::test_completed_sc_job_card_os_self_heals_charges", "status": "PASSED", "details": "Verified completed SC with polluted charges=90.61 self-healed to 37.61 (specific Powder Coating cost)"},
+      {"test": "TestCompletedSCSelfHeal::test_closed_sc_job_card_os_self_heals_charges", "status": "PASSED", "details": "Verified closed SC self-heals Job Card OS lines"},
+      {"test": "TestCompletedSCSelfHeal::test_sent_sc_job_card_os_self_heals_charges", "status": "PASSED", "details": "Verified sent SC self-heals Job Card OS lines"},
+      {"test": "TestCompletedSCSelfHeal::test_self_heal_preserves_when_routing_not_found", "status": "PASSED", "details": "Verified stored charges preserved when find_routing_cost returns 0"},
+      {"test": "TestFullMOSCIsLiveGating::test_completed_full_mo_sc_preserves_charges", "status": "PASSED", "details": "Verified Full MO-SC (no process_name) on completed SC does NOT auto-refresh charges"},
+      {"test": "TestFullMOSCIsLiveGating::test_draft_full_mo_sc_auto_refreshes_charges", "status": "PASSED", "details": "Verified Full MO-SC on draft SC DOES auto-refresh charges"},
+      {"test": "TestBomRollupIsLiveGating::test_completed_sc_preserves_bom_rollup_cost", "status": "PASSED", "details": "Verified bom_rollup_cost on completed SC is preserved (is_live gating intact)"}
+    ],
+    "iteration_111_updated": [
+      {"test": "TestJWProcessSelfHeal::test_self_heal_overrides_stale_charges_with_specific_routing_cost", "status": "PASSED"},
+      {"test": "TestJWProcessSelfHeal::test_self_heal_preserves_stored_when_routing_not_found", "status": "PASSED"},
+      {"test": "TestJWProcessSelfHeal::test_full_mo_sc_uses_combined_fg_process_cost", "status": "PASSED"},
+      {"test": "TestJWProcessSelfHeal::test_bom_rollup_cost_refreshes_independently", "status": "PASSED"},
+      {"test": "TestJWProcessSelfHeal::test_sent_completed_sc_self_heals_job_card_os", "status": "PASSED", "details": "UPDATED to reflect new behavior"},
+      {"test": "TestJWProcessSelfHeal::test_find_routing_cost_from_component_line_routings", "status": "PASSED"},
+      {"test": "TestRegressionIteration108Tests::test_routing_cost_endpoint_returns_specific_op_cost", "status": "PASSED"},
+      {"test": "TestRegressionIteration108Tests::test_put_preserves_process_name_and_charges", "status": "PASSED"}
+    ],
+    "iteration_108_regression": [
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_returns_specific_op_cost", "status": "PASSED"},
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_returns_zero_for_unknown_op", "status": "PASSED"},
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_requires_auth", "status": "PASSED"},
+      {"test": "TestJobWorkOrderPreservation::test_put_preserves_process_name_and_charges_on_job_card_os", "status": "PASSED"},
+      {"test": "TestJobWorkOrderPreservation::test_put_preserves_item_description", "status": "PASSED"},
+      {"test": "TestJobWorkOrderPreservation::test_put_allows_updating_item_description", "status": "PASSED"},
+      {"test": "TestJobWorkOrderCreate::test_post_accepts_process_name_and_uses_specific_routing_cost", "status": "PASSED"},
+      {"test": "TestJobWorkOrderCreate::test_post_accepts_item_description", "status": "PASSED"},
+      {"test": "TestJobWorkOrderCreate::test_post_without_process_name_uses_combined_cost", "status": "PASSED"},
+      {"test": "TestMultiLineJobCardOS::test_multi_line_same_item_different_ops_preserved", "status": "PASSED"}
+    ]
+  },
+  "features_verified": {
+    "completed_sc_self_heal": "GET /api/job-work/orders self-heals Job Card OS lines (process_name set) even on completed/closed/sent SCs",
+    "preserve_when_routing_not_found": "When find_routing_cost returns 0, stored value is preserved (no destructive override)",
+    "full_mo_sc_is_live_gating": "Full MO-SC lines (no process_name) combined-cost auto-refresh still gated by is_live",
+    "bom_rollup_is_live_gating": "bom_rollup_cost and process_names auto-refresh still gated by is_live",
+    "all_iteration_108_features": "All iteration 108 features (routing-cost endpoint, PUT preservation, POST with process_name) still working"
+  }
+}

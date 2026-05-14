@@ -10417,13 +10417,21 @@ async def get_subcontract_orders(request: Request, status: str = None):
                     line["rate"] = round(_tu, 2)
         for part in order.get("job_work_parts", []):
             part["item"] = items_map.get(part.get("item_id"))
-            # Auto-refresh / self-heal charges for live SCs:
-            #   • Job Card OS line (process_name set) → override stored
-            #     `charges` with find_routing_cost(item_id, process_name).
-            #     This self-heals legacy SCs that were polluted with the
-            #     combined process cost before iteration 109's PUT fix.
-            #   • Full MO-SC line (no process_name) → refresh from the
-            #     combined FG process cost as before.
+            # Self-heal `charges` for Job Card OS lines (process_name set) on
+            # EVERY response — not gated on is_live — because legacy data
+            # polluted with the combined process cost needs to be corrected
+            # for display regardless of the SC's current status. This is a
+            # display-only override; the DB row is untouched.
+            process_name = (part.get("process_name") or "").strip()
+            if process_name and part.get("item_id"):
+                try:
+                    _specific = await find_routing_cost(part.get("item_id"), process_name)
+                except Exception:
+                    _specific = 0.0
+                if _specific:
+                    part["charges"] = round(float(_specific), 2)
+            # Auto-refresh combined cost for Full MO-SC lines (no process_name)
+            # on LIVE SCs only — preserves audit snapshot on completed SCs.
             if is_live and part.get("item_id"):
                 iid = part["item_id"]
                 if iid not in bom_cost_cache:
@@ -10432,18 +10440,6 @@ async def get_subcontract_orders(request: Request, status: str = None):
                     except Exception:
                         bom_cost_cache[iid] = None
                 _bc = bom_cost_cache[iid]
-                process_name = (part.get("process_name") or "").strip()
-                if process_name:
-                    # Self-heal: pull SPECIFIC routing cost. Only override
-                    # when we actually find a non-zero specific cost; if the
-                    # op isn't in any BOM (returns 0) we leave the stored
-                    # value alone so manually-keyed charges aren't wiped.
-                    try:
-                        _specific = await find_routing_cost(part.get("item_id"), process_name)
-                    except Exception:
-                        _specific = 0.0
-                    if _specific:
-                        part["charges"] = round(float(_specific), 2)
                 if _bc:
                     _fg = round(_bc.get("fg_process_cost", 0) or 0, 2)
                     _total_unit = round((_bc.get("rm_cost", 0) or 0) + (_bc.get("process_cost", 0) or 0), 2)

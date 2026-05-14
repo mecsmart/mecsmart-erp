@@ -372,10 +372,12 @@ class TestJWProcessSelfHeal:
             f"bom_rollup_cost incorrect! Expected 250, got {part.get('bom_rollup_cost')}"
         print(f"✓ charges={part['charges']} (specific), bom_rollup_cost={part.get('bom_rollup_cost')} (Total/Unit)")
     
-    def test_sent_completed_sc_not_modified(self, api_client):
+    def test_sent_completed_sc_self_heals_job_card_os(self, api_client):
         """
-        REGRESSION: Sent/completed SCs (status NOT in draft/in_progress) — the auto-refresh
-        block is skipped entirely (is_live check), so historical data is untouched.
+        UPDATED (Iteration 113): Sent/completed SCs with Job Card OS lines (process_name set)
+        ARE now self-healed. The is_live gating was removed for specific-op override.
+        
+        Note: Full MO-SC lines (no process_name) on sent/completed SCs are still NOT modified.
         """
         item_id = self._create_test_item(api_client, "SENT")
         
@@ -418,11 +420,12 @@ class TestJWProcessSelfHeal:
             {"id": order_id},
             {"$set": {
                 "status": "sent",
-                "job_work_parts.0.charges": 999.99  # Historical polluted value
+                "reference_operation_seqs": [1],
+                "job_work_parts.0.charges": 300.0  # Polluted: combined cost (100+200)
             }}
         )
         
-        # GET should NOT modify sent SC
+        # GET should NOW self-heal sent SC for Job Card OS lines (iteration 113 fix)
         list_resp = api_client.get(f"{BASE_URL}/api/job-work/orders")
         assert list_resp.status_code == 200
         orders = list_resp.json()
@@ -430,10 +433,10 @@ class TestJWProcessSelfHeal:
         order = next((o for o in orders if o["id"] == order_id), None)
         assert order is not None
         
-        # Charges should be preserved (not self-healed)
-        assert order["job_work_parts"][0]["charges"] == 999.99, \
-            f"Sent SC was modified! Expected 999.99, got {order['job_work_parts'][0]['charges']}"
-        print(f"✓ Sent SC charges preserved: {order['job_work_parts'][0]['charges']}")
+        # Charges should be self-healed to specific Powder Coating cost (200)
+        assert order["job_work_parts"][0]["charges"] == 200, \
+            f"Sent SC NOT self-healed! Expected 200, got {order['job_work_parts'][0]['charges']}"
+        print(f"✓ Sent SC Job Card OS self-healed: {order['job_work_parts'][0]['charges']}")
     
     def test_find_routing_cost_from_component_line_routings(self, api_client):
         """
