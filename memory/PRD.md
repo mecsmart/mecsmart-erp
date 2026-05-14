@@ -20,7 +20,11 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-14 (newest)** — **MO + Items pages: sticky-on-scroll header + MO collapsed by default (DONE & VERIFIED ✅):**
+- **2026-05-14 (newest)** — **MO page FG scroll fix + Items single-line header (DONE & VERIFIED ✅):**
+  1. **MO page — FG headers now scroll up with the page**: The `.sticky-header-scroll` CSS class (used to keep table column headers visible on long flat tables) was wrapping every FG's `<table>` and applied `max-height: calc(100vh - 220px)`. That created an INNER scroll viewport per FG, so the outer page scroll couldn't move the FG headers up. Removed the class from the MO FG table wrapper — only the page header (Manufacturing Orders + toolbar) remains sticky now, matching the BOM page exactly.
+  2. **Items & Parts page — single-line header**: Moved Search input, All Categories, All Groups filters all inline with the page header (title + Export + Import + Add Item). Removed the separate filter card row entirely. Header is sticky-on-scroll and stays pinned.
+
+- **2026-05-14** — **MO + Items pages: sticky-on-scroll header + MO collapsed by default (DONE & VERIFIED ✅):**
   1. Applied the BOM page's sticky-header pattern (`sticky top-0 z-30 bg-white py-2 border-b -mx-6 px-6`) to the **Manufacturing Orders** page header and the **Items & Parts** page header. Title + toolbar stays pinned at the top while scrolling through 100s of rows.
   2. **All FG groups on the MO page are now collapsed by default** (removed `open={parentMO.status !== 'completed'}` from the `<details>` element). User clicks the chevron to expand a specific FG's tree.
 

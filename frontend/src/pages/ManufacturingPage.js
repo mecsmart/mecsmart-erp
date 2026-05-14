@@ -1799,7 +1799,7 @@ export default function ManufacturingPage() {
                             </select>
                           </div>
                         </summary>
-                        <div className="overflow-x-auto sticky-header-scroll">
+                        <div className="overflow-x-auto">
                           <table className="w-full data-table"><thead><tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
                           <tbody>{renderMORow(parentMO, 0, activePanelFilter, panelSearch[parentMO.id] || '', panelStatus[parentMO.id] || '', familyMask)}</tbody></table>
                         </div>

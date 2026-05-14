@@ -475,10 +475,68 @@ export default function ItemsPage() {
 
   return (
     <div className="space-y-4" data-testid="items-page">
-      <div className="flex items-center justify-between sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
-        <div>
-          <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Items & Parts</h1>
-          <p className="text-xs text-[#4B5563]">Manage your inventory items and parts catalog</p>
+      <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div>
+            <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Items & Parts</h1>
+            <p className="text-[10px] text-[#4B5563]">Inventory items and parts catalog</p>
+          </div>
+          {/* Search + Category + Group inline with the header (single line). */}
+          <div className="relative w-56">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9CA3AF]" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8 pr-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs w-full focus:outline-none focus:border-[#1D3557]"
+              placeholder="Search part number / name…"
+              data-testid="items-search-input"
+            />
+          </div>
+          <Select value={categoryFilter || 'all'} onValueChange={(v) => setCategoryFilter(v === 'all' ? '' : v)}>
+            <SelectTrigger className="w-36 h-8 text-xs" data-testid="items-category-filter">
+              <Filter className="w-3 h-3 mr-1" />
+              <SelectValue placeholder="All Categories" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Categories</SelectItem>
+              {categories.map((cat) => (
+                <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="relative w-44">
+            <Select value={groupFilter || 'all'} onValueChange={(v) => setGroupFilter(v === 'all' ? '' : v)}>
+              <SelectTrigger className="h-8 text-xs" data-testid="items-group-filter">
+                <Filter className="w-3 h-3 mr-1" />
+                <SelectValue placeholder="All Groups" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Groups</SelectItem>
+                {itemGroups
+                  .filter(g => !categoryFilter || !g.parent_category || g.parent_category === categoryFilter)
+                  .map(g => (
+                    <SelectItem key={g.id} value={g.id}>
+                      {g.name} {g.parent_category ? `(${g.parent_category.replace('_', ' ')})` : ''} · {g.item_count ?? 0}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            {groupFilter && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setGroupFilter(''); }}
+                className="absolute right-7 top-1/2 -translate-y-1/2 p-0.5 text-[#9CA3AF] hover:text-[#9B1C1C] z-10"
+                title="Clear group filter"
+                data-testid="items-group-filter-clear"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+          {(categoryFilter || groupFilter) && (
+            <button onClick={() => { setCategoryFilter(''); setGroupFilter(''); }} className="text-[10px] text-[#9B1C1C] hover:underline">Clear</button>
+          )}
         </div>
         <div className="flex items-center space-x-2">
           <div className="relative">
@@ -1006,77 +1064,6 @@ export default function ItemsPage() {
             </DialogContent>
           </Dialog>
         )}
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="card-flat p-4">
-        <div className="flex flex-wrap gap-4">
-          <div className="flex-1 min-w-[200px]">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="search-input"
-                placeholder="Search by part number or name..."
-                data-testid="items-search-input"
-              />
-            </div>
-          </div>
-          <div className="w-48">
-            <Select value={categoryFilter || 'all'} onValueChange={(v) => setCategoryFilter(v === 'all' ? '' : v)}>
-              <SelectTrigger data-testid="items-category-filter">
-                <Filter className="w-4 h-4 mr-2" />
-                <SelectValue placeholder="All Categories" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                {categories.map((cat) => (
-                  <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="w-48 relative">
-            <Select value={groupFilter || 'all'} onValueChange={(v) => setGroupFilter(v === 'all' ? '' : v)}>
-              <SelectTrigger data-testid="items-group-filter">
-                <Filter className="w-4 h-4 mr-2" />
-                <SelectValue placeholder="All Groups" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Groups</SelectItem>
-                {itemGroups
-                  .filter(g => !categoryFilter || !g.parent_category || g.parent_category === categoryFilter)
-                  .map(g => (
-                    <SelectItem key={g.id} value={g.id}>
-                      {g.name} {g.parent_category ? `(${g.parent_category.replace('_', ' ')})` : ''} · {g.item_count ?? 0}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            {/* Inline clear (X) — one-click un-select. The outer Clear button
-                only shows when categoryFilter is set; this gives the user a
-                shortcut even when only the group filter is active. */}
-            {groupFilter && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setGroupFilter(''); }}
-                className="absolute right-8 top-1/2 -translate-y-1/2 p-0.5 text-[#9CA3AF] hover:text-[#9B1C1C] z-10"
-                title="Clear group filter"
-                data-testid="items-group-filter-clear"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-          {(categoryFilter || groupFilter) && (
-            <button onClick={() => { setCategoryFilter(''); setGroupFilter(''); }} className="btn-secondary flex items-center space-x-1">
-              <X className="w-4 h-4" />
-              <span>Clear</span>
-            </button>
-          )}
         </div>
       </div>
 
