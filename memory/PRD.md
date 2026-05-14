@@ -20,7 +20,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-14 (newest)** — **JW DC: style match + per-op cost override on unsent DCs (DONE & VERIFIED ✅):**
+- **2026-05-14 (newest)** — **JW SC list — self-heal polluted charges on GET (DONE & VERIFIED ✅):** User showed a screenshot where the SC Edit dialog still displayed COMBINED process cost on parts tagged with a specific outsourced op (`Powder Coating`). Iterations 109/110 stopped further pollution but didn't actively heal SCs whose stored `charges` was already wrong from older code. Applied the same self-heal pattern previously used on `/dc-lines` to `GET /api/job-work/orders`:
+   - For every `job_work_parts` line on a live (draft/in_progress) SC where `process_name` is set, the response's `charges` is now overridden with `find_routing_cost(item_id, process_name)`. The override only fires when the lookup returns a non-zero value (so manually-keyed costs aren't wiped when the op isn't found in any BOM).
+   - Falls back to existing combined-cost auto-refresh for Full MO-SC lines (no `process_name`).
+   - **Verification** (iteration 111): 8 new tests + 10 regression tests = 18/18 pass. Synthetic data mirroring the user's case (4 components, each with `parent_routings`=[{generic_op, cost}, {Powder Coating, X}], stored charges polluted with combined sum) was healed correctly to each part's specific Powder Coating cost.
+   - User must redeploy to push to production after testing in preview.
+
+- **2026-05-14** — **JW DC: style match + per-op cost override on unsent DCs (DONE & VERIFIED ✅):**
   1. **Fix 1 — Send Materials (DC) dialog styled like Manual DC**: The Job Card OS DC dialog's Part column now stacks three lines vertically per row (mirroring Manual DC's item-cell layout):
      - Line 1: `<part_number>` (bold mono) — `<item_name>`
      - Line 2: `Op: <process_name>` (small bronze)
