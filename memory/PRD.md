@@ -20,7 +20,12 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Excel:** `openpyxl` (server-side only)
 
 ## Changelog (recent)
-- **2026-05-14 (newest)** — **MO page: Family focus on SG only + per-FG search/status filter (DONE & VERIFIED ✅):**
+- **2026-05-14 (newest)** — **MO page refinement v2 (DONE & VERIFIED ✅):**
+  1. **Family focus no longer hides other FG-MOs**: Removed the global `familyWoIds` filter from `filteredWorkOrders`. Family focus is now a **per-FG visual narrowing** — applied only inside the FG that contains the focused SG via a `familyMask` Set. Other FGs render fully unchanged.
+  2. **Removed the global "Family: MO-XXX" chip** from the toolbar. The clear-focus indicator now lives ONLY as the inline `Focused: MO-XXX [×]` chip on the FG header that owns the focused SG.
+  3. **Moved global toolbar (All Statuses + count + Search + Create MO button) inline with the Manufacturing Orders page header** (top-right corner). Saves vertical space; the old toolbar row is removed.
+
+- **2026-05-14** — **MO page: Family focus on SG only + per-FG search/status filter (DONE & VERIFIED ✅):**
   1. Removed Family focus button from FG header. Family focus button now appears **only on SG (sub_assembly) rows** that have children — clicking sets the global familyFilterWoId and limits the view to that SG's family.
   2. When an SG family focus is active and the focused SG belongs to a given FG, that FG header renders an inline **"Focused: MO-XXXXXX [×]"** clear chip (data-testid `clear-family-focus-{fgId}`). Click → resets the focus instantly without scrolling to the SG row.
   3. Each FG header now has on the right side (after the X MO(s) count): a **search input** (`panel-search-{fgId}`) and a **status dropdown** (`panel-status-{fgId}`). Both scope ONLY to the SG/Part WOs under that FG; the root FG row stays visible.

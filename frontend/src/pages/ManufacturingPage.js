@@ -783,7 +783,9 @@ export default function ManufacturingPage() {
   const filteredWorkOrders = (woStatusFilter
     ? workOrders.filter(wo => wo.status === woStatusFilter)
     : workOrders).filter(wo => {
-      if (familyWoIds && !familyWoIds.has(wo.id)) return false;
+      // familyWoIds is intentionally NOT applied here — family focus is a
+      // per-FG visual narrowing handled inside the FG render block. Other
+      // FGs must remain fully visible regardless of family focus state.
       if (!moSearch.trim()) return true;
       const q = moSearch.toLowerCase();
       return wo.wo_number?.toLowerCase().includes(q) || wo.item?.part_number?.toLowerCase().includes(q) || wo.item?.name?.toLowerCase().includes(q);
@@ -1015,12 +1017,42 @@ export default function ManufacturingPage() {
   };
 
   return (
-    <div className="space-y-6" data-testid="manufacturing-page">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4" data-testid="manufacturing-page">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Manufacturing Orders</h1>
           <p className="text-xs text-[#4B5563]">Work centers, routings, and manufacturing order tracking</p>
         </div>
+        {/* Global toolbar — moved inline with the page header (top-right) so
+            it doesn't consume an extra row of vertical space. Only render
+            when on the work-orders tab. */}
+        {activeTab === 'work-orders' && (
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <Select value={woStatusFilter || 'all'} onValueChange={(v) => setWoStatusFilter(v === 'all' ? '' : v)}>
+              <SelectTrigger className="w-40 h-9 text-sm" data-testid="wo-status-filter-top">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+            <span className="text-[11px] text-[#6B7280] whitespace-nowrap">{filteredWorkOrders.length} of {workOrders.length}</span>
+            <div className="relative w-56">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
+              <input type="text" value={moSearch} onChange={(e) => setMoSearch(e.target.value)} placeholder="Search MO, item..." className="search-input text-sm" data-testid="mo-search-input" />
+            </div>
+            {canCreate && (
+              <button onClick={() => setIsWorkOrderDialogOpen(true)} className="btn-primary flex items-center space-x-2" data-testid="create-work-order-btn">
+                <Plus className="w-4 h-4" />
+                <span>Create Manufacturing Order</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -1051,51 +1083,13 @@ export default function ManufacturingPage() {
 
         {/* Work Orders Tab */}
         <TabsContent value="work-orders" className="mt-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <Select value={woStatusFilter || 'all'} onValueChange={(v) => setWoStatusFilter(v === 'all' ? '' : v)}>
-                <SelectTrigger className="w-48" data-testid="wo-status-filter">
-                  <SelectValue placeholder="All Statuses" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Statuses</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="in_progress">In Progress</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                  <SelectItem value="cancelled">Cancelled</SelectItem>
-                </SelectContent>
-              </Select>
-              {woStatusFilter && (
-                <button onClick={() => setWoStatusFilter('')} className="text-xs text-[#4B5563] hover:text-[#1D3557] flex items-center gap-1" data-testid="wo-clear-filter">
-                  <span>Clear</span>
-                </button>
-              )}
-              {/* Active family filter chip — visible only when a parent MO is being focused on. */}
-              {familyFilterWoId && (
-                <div className="flex items-center gap-1 px-2 py-1 bg-[#E1EFFE] border border-[#1D3557] rounded-sm text-xs" data-testid="family-filter-chip">
-                  <Filter className="w-3 h-3 text-[#1D3557]" />
-                  <span className="text-[#1D3557] font-medium">Family: {familyFilterLabel}</span>
-                  <button onClick={() => setFamilyFilterWoId(null)} className="text-[#1D3557] hover:text-[#9B1C1C] ml-1" data-testid="family-filter-clear" title="Clear family filter">
-                    <XIcon className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
-              <span className="text-xs text-[#6B7280]">{filteredWorkOrders.length} of {workOrders.length} orders</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="relative w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-                <input type="text" value={moSearch} onChange={(e) => setMoSearch(e.target.value)} placeholder="Search MO, item..." className="search-input text-sm" data-testid="mo-search-input" />
-              </div>
-            {canCreate && (
-              <Dialog open={isWorkOrderDialogOpen} onOpenChange={setIsWorkOrderDialogOpen}>
-                <DialogTrigger asChild>
-                  <button className="btn-primary flex items-center space-x-2" data-testid="create-work-order-btn">
-                    <Plus className="w-4 h-4" />
-                    <span>Create Manufacturing Order</span>
-                  </button>
-                </DialogTrigger>
-                <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          {/* The toolbar (status filter + count + search + Create button) is
+              now rendered inline with the page header above. We keep the
+              Dialog itself here, controlled by isWorkOrderDialogOpen, so the
+              Create flow continues to work. */}
+          {canCreate && (
+            <Dialog open={isWorkOrderDialogOpen} onOpenChange={setIsWorkOrderDialogOpen}>
+              <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle className="font-[Chivo]">Create Manufacturing Order</DialogTitle>
                   </DialogHeader>
@@ -1434,8 +1428,6 @@ export default function ManufacturingPage() {
                 </DialogContent>
               </Dialog>
             )}
-            </div>
-          </div>
 
           <div className="card-flat overflow-hidden">
             {loading ? (
@@ -1462,29 +1454,26 @@ export default function ManufacturingPage() {
                   // family (instead of within the whole FG tree). E.g. focusing
                   // on an SG then choosing "Parts only" shows just the Parts
                   // under that SG.
+                  // We ALWAYS render every FG root regardless of familyFilterWoId.
+                  // The family-focus filter is applied at the per-FG level inside
+                  // the FG block (the FG that contains the focused SG narrows its
+                  // tree; other FGs render unchanged).
                   const woById = new Map(workOrders.map(w => [w.id, w]));
                   const rootIdsOrder = [];
                   const rootIdSet = new Set();
-                  if (familyFilterWoId) {
-                    if (woById.has(familyFilterWoId)) {
-                      rootIdSet.add(familyFilterWoId);
-                      rootIdsOrder.push(familyFilterWoId);
+                  for (const wo of filteredWorkOrders) {
+                    let cursor = wo;
+                    const visited = new Set();
+                    while (cursor && cursor.parent_wo_id && !visited.has(cursor.id)) {
+                      visited.add(cursor.id);
+                      const parent = woById.get(cursor.parent_wo_id);
+                      if (!parent) break;
+                      cursor = parent;
                     }
-                  } else {
-                    for (const wo of filteredWorkOrders) {
-                      let cursor = wo;
-                      const visited = new Set();
-                      while (cursor && cursor.parent_wo_id && !visited.has(cursor.id)) {
-                        visited.add(cursor.id);
-                        const parent = woById.get(cursor.parent_wo_id);
-                        if (!parent) break;
-                        cursor = parent;
-                      }
-                      const rootId = cursor?.id;
-                      if (rootId && !rootIdSet.has(rootId)) {
-                        rootIdSet.add(rootId);
-                        rootIdsOrder.push(rootId);
-                      }
+                    const rootId = cursor?.id;
+                    if (rootId && !rootIdSet.has(rootId)) {
+                      rootIdSet.add(rootId);
+                      rootIdsOrder.push(rootId);
                     }
                   }
                   const rootMOs = rootIdsOrder.map(id => woById.get(id)).filter(Boolean);
@@ -1496,8 +1485,17 @@ export default function ManufacturingPage() {
                   // a given <details> tree (defends against any malformed parent chain).
                   let renderedIds = new Set();
 
-                  const renderMORow = (wo, depth = 0, panelFilter = '', search = '', statusFilter = '') => {
+                  const renderMORow = (wo, depth = 0, panelFilter = '', search = '', statusFilter = '', familyMask = null) => {
                     if (!wo || renderedIds.has(wo.id)) return null;
+                    // Family-focus mask — if a familyMask Set is provided (only
+                    // for the FG containing the focused SG), hide any WO that
+                    // isn't in the mask. Depth 0 (the FG root) is always shown
+                    // so the FG header / row stays visible.
+                    if (familyMask && depth > 0 && !familyMask.has(wo.id)) {
+                      renderedIds.add(wo.id);
+                      const kids = workOrders.filter(w => w.parent_wo_id === wo.id);
+                      return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter, familyMask))}</React.Fragment>;
+                    }
                     // Per-panel category filter — root FG (depth 0) always renders;
                     // a descendant that doesn't match the filter is hidden, BUT we
                     // still walk into its own children at the SAME depth so any
@@ -1506,7 +1504,7 @@ export default function ManufacturingPage() {
                     if (panelFilter && depth > 0 && getWoCategory(wo) !== panelFilter) {
                       renderedIds.add(wo.id);
                       const kids = workOrders.filter(w => w.parent_wo_id === wo.id);
-                      return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter))}</React.Fragment>;
+                      return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter, familyMask))}</React.Fragment>;
                     }
                     // Per-FG search (SG/Parts under THIS FG) — case-insensitive
                     // match on item part_number, item name, or MO number. Root
@@ -1518,14 +1516,14 @@ export default function ManufacturingPage() {
                       if (!hay.includes(q)) {
                         renderedIds.add(wo.id);
                         const kids = workOrders.filter(w => w.parent_wo_id === wo.id);
-                        return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter))}</React.Fragment>;
+                        return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter, familyMask))}</React.Fragment>;
                       }
                     }
                     // Per-FG status (SG/Parts under THIS FG) — root FG always shown.
                     if (statusFilter && depth > 0 && wo.status !== statusFilter) {
                       renderedIds.add(wo.id);
                       const kids = workOrders.filter(w => w.parent_wo_id === wo.id);
-                      return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter))}</React.Fragment>;
+                      return <React.Fragment key={wo.id}>{kids.map(c => renderMORow(c, depth, panelFilter, search, statusFilter, familyMask))}</React.Fragment>;
                     }
                     renderedIds.add(wo.id);
                     const progress = getWOProgress(wo);
@@ -1646,7 +1644,7 @@ export default function ManufacturingPage() {
                             )}
                           </td>
                         </tr>
-                        {children.map(c => renderMORow(c, depth + 1, panelFilter, search, statusFilter))}
+                        {children.map(c => renderMORow(c, depth + 1, panelFilter, search, statusFilter, familyMask))}
                       </React.Fragment>
                     );
                   };
@@ -1690,6 +1688,32 @@ export default function ManufacturingPage() {
                       return false;
                     })();
                     const focusedWO = focusBelongsToThisFG ? workOrders.find(w => w.id === familyFilterWoId) : null;
+                    // Build a familyMask Set ONLY for the FG that owns the
+                    // focused SG. Includes: ancestors-up-to-FG of focused WO,
+                    // focused WO itself, and all descendants. Anything outside
+                    // this set in this FG is hidden by renderMORow.
+                    const familyMask = (() => {
+                      if (!focusedWO) return null;
+                      const mask = new Set();
+                      // Ancestors (walk up from focused → FG root, exclusive of FG root since FG is depth 0).
+                      let cur = focusedWO;
+                      while (cur && cur.id !== parentMO.id) {
+                        mask.add(cur.id);
+                        cur = workOrders.find(w => w.id === cur.parent_wo_id);
+                      }
+                      // Descendants.
+                      const stack = [focusedWO];
+                      while (stack.length) {
+                        const node = stack.pop();
+                        for (const w of workOrders) {
+                          if (w.parent_wo_id === node.id && !mask.has(w.id)) {
+                            mask.add(w.id);
+                            stack.push(w);
+                          }
+                        }
+                      }
+                      return mask;
+                    })();
                     return (
                       <details key={parentMO.id} open={parentMO.status !== 'completed'} className="border rounded-sm overflow-hidden">
                         <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none flex-wrap" style={{borderLeft: `4px solid ${catColor}`}}>
@@ -1777,7 +1801,7 @@ export default function ManufacturingPage() {
                         </summary>
                         <div className="overflow-x-auto sticky-header-scroll">
                           <table className="w-full data-table"><thead><tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
-                          <tbody>{renderMORow(parentMO, 0, activePanelFilter, panelSearch[parentMO.id] || '', panelStatus[parentMO.id] || '')}</tbody></table>
+                          <tbody>{renderMORow(parentMO, 0, activePanelFilter, panelSearch[parentMO.id] || '', panelStatus[parentMO.id] || '', familyMask)}</tbody></table>
                         </div>
                       </details>
                     );
