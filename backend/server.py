@@ -669,6 +669,8 @@ class JobWorkPartItem(BaseModel):
     item_id: str
     quantity: float = 0
     charges: float = 0
+    process_name: Optional[str] = None  # Specific routing op being outsourced (Job Card OS) — falsy/null on Full MO-SC.
+    item_description: Optional[str] = None  # User-editable description / remarks shown on DC.
 
 class SubcontractOrderCreate(BaseModel):
     supplier_id: str
@@ -1931,6 +1933,22 @@ async def get_all_bom_rollup_costs(request: Request, status: Optional[str] = "ac
         }
     return out
 
+@bom_router.get("/costs/{item_id}")
+async def get_bom_costs_for_item(item_id: str, request: Request):
+    """Return BOM-based RM cost, process cost, and process names for an item."""
+    await get_current_user(request)
+    return await compute_bom_costs(item_id)
+
+@bom_router.get("/routing-cost")
+async def get_specific_routing_cost(request: Request, item_id: str, process_name: str):
+    """Return the per-unit cost of a SPECIFIC routing operation on an item.
+    Used by Job Card OS flows where one particular routing op is outsourced
+    and we need that op's cost (not the combined process_cost across all
+    routings)."""
+    await get_current_user(request)
+    cost = await find_routing_cost(item_id, process_name)
+    return {"item_id": item_id, "process_name": process_name, "cost": cost}
+
 @bom_router.get("/{bom_id}")
 async def get_bom(bom_id: str, request: Request):
     await get_current_user(request)
@@ -1954,12 +1972,6 @@ async def get_bom(bom_id: str, request: Request):
             comp["child_bom_id"] = child_bom.get("id")
     
     return bom
-
-@bom_router.get("/costs/{item_id}")
-async def get_bom_costs_for_item(item_id: str, request: Request):
-    """Return BOM-based RM cost, process cost, and process names for an item."""
-    await get_current_user(request)
-    return await compute_bom_costs(item_id)
 
 @bom_router.get("/{bom_id}/explode")
 async def explode_bom(bom_id: str, request: Request, levels: int = 10):
@@ -10454,14 +10466,24 @@ async def create_subcontract_order(data: SubcontractOrderCreate, request: Reques
     enriched_parts = []
     for p in (data.job_work_parts or []):
         bom_costs = await compute_bom_costs(p.item_id)
-        charges = p.charges if p.charges else bom_costs["process_cost"]
+        # When a specific outsource routing is named (Job Card OS), use its
+        # per-op cost. Otherwise default to the combined BOM process cost
+        # (Full MO-SC without RM scenario).
+        if p.charges:
+            charges = p.charges
+        elif p.process_name:
+            charges = await find_routing_cost(p.item_id, p.process_name) or bom_costs["process_cost"]
+        else:
+            charges = bom_costs["process_cost"]
         enriched_parts.append({
             "item_id": p.item_id,
             "quantity": p.quantity,
             "charges": charges,
             "received_quantity": 0,
             "bom_rollup_cost": bom_costs["rm_cost"],
-            "process_names": bom_costs.get("process_names", [])
+            "process_names": bom_costs.get("process_names", []),
+            "process_name": p.process_name or "",
+            "item_description": p.item_description or "",
         })
     
     order_doc = {
@@ -10500,17 +10522,69 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
     if data.status is not None:
         update_data["status"] = data.status
     if data.job_work_parts is not None:
+        # Preserve existing per-line context (process_name, wo_id, etc.) by
+        # matching incoming entries to the original job_work_parts. Matching
+        # priority: (item_id, process_name) > (item_id alone if process_name
+        # not provided by the client). This is critical for Job Card OS SCs
+        # where each line carries a SPECIFIC routing op and its per-op cost
+        # — without this preservation, a save-without-change wipes the
+        # per-op `charges` and replaces it with the combined process cost.
+        existing_jwp = list(order.get("job_work_parts", []) or [])
+        # is_job_card_os: SC was auto-created from a Job Card outsource action
+        # — has reference_operation_seqs. In that case, each line's charges
+        # must be the SPECIFIC routing's cost (not the combined total).
+        is_job_card_os = bool(order.get("reference_operation_seqs") or order.get("reference_operation_seq"))
+
+        def _find_existing(item_id_in: str, process_name_in: Optional[str]):
+            # Prefer exact (item_id, process_name) match — required when the
+            # same item appears in multiple ops on a consolidated Job Card OS.
+            if process_name_in:
+                for ex in existing_jwp:
+                    if ex.get("item_id") == item_id_in and (ex.get("process_name") or "") == process_name_in:
+                        return ex
+            for ex in existing_jwp:
+                if ex.get("item_id") == item_id_in:
+                    return ex
+            return None
+
         enriched_jwp = []
         for p in data.job_work_parts:
+            ex = _find_existing(p.item_id, p.process_name)
+            # Determine process_name: prefer client value, else existing, else
+            # blank.
+            process_name = p.process_name or (ex.get("process_name") if ex else "") or ""
+
             bom_costs = await compute_bom_costs(p.item_id)
-            charges = p.charges if p.charges else bom_costs["process_cost"]
+            # Charges resolution priority:
+            #   1. Client-supplied charges (user edited the row)
+            #   2. Existing per-op charges if available (preserve auto-created
+            #      Job Card OS cost)
+            #   3. Specific routing cost via find_routing_cost (Job Card OS or
+            #      whenever a process_name is known)
+            #   4. Combined BOM process_cost (Full MO-SC without per-op
+            #      context)
+            if p.charges:
+                charges = p.charges
+            elif ex and ex.get("charges"):
+                charges = ex.get("charges")
+            elif process_name:
+                charges = await find_routing_cost(p.item_id, process_name)
+                if not charges and not is_job_card_os:
+                    charges = bom_costs["process_cost"]
+            else:
+                charges = bom_costs["process_cost"] if not is_job_card_os else 0
+
             enriched_jwp.append({
                 "item_id": p.item_id,
                 "quantity": p.quantity,
                 "charges": charges,
-                "received_quantity": 0,
+                "received_quantity": (ex.get("received_quantity", 0) if ex else 0),
                 "bom_rollup_cost": bom_costs["rm_cost"],
-                "process_names": bom_costs.get("process_names", [])
+                "process_names": bom_costs.get("process_names", []),
+                "process_name": process_name,
+                "item_description": (p.item_description if p.item_description is not None else (ex.get("item_description") if ex else "")) or "",
+                # Preserve any auto-creation references
+                "wo_id": (ex.get("wo_id") if ex else None),
             })
         update_data["job_work_parts"] = enriched_jwp
         

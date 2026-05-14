@@ -1,0 +1,87 @@
+{
+  "summary": "Iteration 108 - JW Process Cost Fixes Testing. Verified 3 user-reported issues: (1) routing-cost endpoint works correctly, (2) item_description field persists, (3) Add Part buttons at top+bottom present. Found 1 BUG: GET /api/job-work/orders list endpoint overwrites per-op charges with combined BOM process_cost for live SCs.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/job-work/orders",
+        "issue": "List endpoint overwrites per-op charges with combined BOM fg_process_cost for live (draft/in_progress) SCs. Lines 10414-10415 in server.py: 'if _fg: part[\"charges\"] = _fg' unconditionally overwrites charges, wiping out per-op charges preserved during PUT. This breaks Job Card OS SCs where each line has a SPECIFIC routing's cost.",
+        "priority": "HIGH",
+        "root_cause": "The auto-refresh logic at lines 10402-10420 doesn't check if the part has a process_name (indicating per-op charges). It should skip overwriting charges when process_name is set.",
+        "suggested_fix": "Add condition: 'if _fg and not part.get(\"process_name\"): part[\"charges\"] = _fg'"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_108_jw_process_cost_fixes.py",
+    "/app/test_reports/pytest/pytest_iteration_108.xml"
+  ],
+  "action_items": [
+    "FIX BUG: In GET /api/job-work/orders (server.py ~line 10414), add condition to NOT overwrite charges when part has process_name set. Change 'if _fg: part[\"charges\"] = _fg' to 'if _fg and not part.get(\"process_name\"): part[\"charges\"] = _fg'"
+  ],
+  "critical_code_review_comments": [
+    "server.py line 10414-10415: Auto-refresh logic overwrites per-op charges unconditionally. Should preserve charges when process_name is set (Job Card OS).",
+    "PUT /api/job-work/orders preservation logic at lines 10538-10588 is correct - it properly matches by (item_id, process_name) and preserves existing charges.",
+    "POST /api/job-work/orders at lines 10472-10477 correctly uses find_routing_cost when process_name is provided.",
+    "GET /api/bom/routing-cost endpoint at line 1942 is correctly placed BEFORE the /{bom_id} wildcard route."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_108_jw_process_cost_fixes.py"
+  ],
+  "success_rate": {
+    "backend": "80% (8/10 tests passed - 2 failed due to list endpoint bug)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST_108_ prefixed items, BOMs, suppliers, and orders during tests",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "The GET /api/job-work/orders list endpoint has a bug that overwrites per-op charges. After main agent fixes line 10414 to add 'and not part.get(\"process_name\")' condition, rerun test_iteration_108_jw_process_cost_fixes.py to verify all 10 tests pass.",
+  "tests_executed": {
+    "backend": [
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_returns_specific_op_cost", "status": "PASSED", "details": "GET /api/bom/routing-cost returns correct per-op cost (500 for LC Cutting, 200 for Bending, 300 for Welding)"},
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_returns_zero_for_unknown_op", "status": "PASSED", "details": "Returns 0.0 for non-existent operation"},
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_requires_auth", "status": "PASSED", "details": "Returns 401 for unauthenticated requests"},
+      {"test": "TestJobWorkOrderPreservation::test_put_preserves_process_name_and_charges_on_job_card_os", "status": "FAILED", "details": "PUT correctly preserves charges, but GET list endpoint overwrites them. Expected 100, got 300 (combined cost)"},
+      {"test": "TestJobWorkOrderPreservation::test_put_preserves_item_description", "status": "PASSED", "details": "item_description field preserved after PUT without changes"},
+      {"test": "TestJobWorkOrderPreservation::test_put_allows_updating_item_description", "status": "PASSED", "details": "item_description can be updated to new value"},
+      {"test": "TestJobWorkOrderCreate::test_post_accepts_process_name_and_uses_specific_routing_cost", "status": "PASSED", "details": "POST with process_name='Op_B' correctly sets charges to 250 (specific op cost)"},
+      {"test": "TestJobWorkOrderCreate::test_post_accepts_item_description", "status": "PASSED", "details": "POST persists item_description field"},
+      {"test": "TestJobWorkOrderCreate::test_post_without_process_name_uses_combined_cost", "status": "PASSED", "details": "POST without process_name uses combined BOM process_cost (300)"},
+      {"test": "TestMultiLineJobCardOS::test_multi_line_same_item_different_ops_preserved", "status": "FAILED", "details": "Multi-line preservation works in PUT, but GET list endpoint overwrites. Expected Cutting=100, Grinding=150, got 450 (combined)"}
+    ],
+    "frontend": [
+      {"test": "Add Part button at TOP", "status": "PASSED", "details": "data-testid=jw-add-part-top found and clickable"},
+      {"test": "Add Part button at BOTTOM", "status": "PASSED", "details": "data-testid=jw-add-part-bottom found and clickable"},
+      {"test": "Description/Remarks column", "status": "PASSED", "details": "Column header 'Description / Remarks' visible in dialog"},
+      {"test": "Description input field", "status": "PASSED", "details": "data-testid=jw-part-{idx}-description input fields present and editable"},
+      {"test": "Outsourced op badge", "status": "PASSED", "details": "data-testid=jw-part-{idx}-process badges show 'Outsourced op: Cutting' and 'Outsourced op: Grinding'"}
+    ]
+  },
+  "features_verified": {
+    "routing_cost_endpoint": "GET /api/bom/routing-cost returns specific per-op cost correctly",
+    "post_with_process_name": "POST /api/job-work/orders uses find_routing_cost when process_name provided",
+    "post_item_description": "POST persists item_description field",
+    "put_preservation": "PUT preserves process_name, charges, and item_description (but GET list overwrites charges)",
+    "frontend_add_part_buttons": "Both top and bottom Add Part buttons present",
+    "frontend_description_column": "Description/Remarks column with editable inputs",
+    "frontend_outsourced_op_badge": "Outsourced op badge shows process_name for Job Card OS rows"
+  },
+  "rca_of_the_issue": {
+    "bug": "GET /api/job-work/orders overwrites per-op charges",
+    "location": "server.py lines 10402-10420",
+    "root_cause": "Auto-refresh logic at line 10414 unconditionally overwrites charges with fg_process_cost for live SCs. It doesn't check if the part has a process_name (indicating per-op charges from Job Card OS).",
+    "reproduction_steps": [
+      "1. Create a Job Card OS SC with process_name='Cutting' and charges=100",
+      "2. Set reference_operation_seqs to mark it as Job Card OS",
+      "3. Call GET /api/job-work/orders",
+      "4. Observe that charges is now 300 (combined cost) instead of 100 (per-op cost)"
+    ],
+    "mitigation": "Change line 10414 from 'if _fg:' to 'if _fg and not part.get(\"process_name\"):' to skip overwriting charges when process_name is set"
+  }
+}

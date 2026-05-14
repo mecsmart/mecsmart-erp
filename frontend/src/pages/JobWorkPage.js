@@ -129,11 +129,15 @@ export default function JobWorkPage() {
   const addOrderLine = () => setOrderForm({ ...orderForm, lines: [...orderForm.lines, { item_id: '', quantity: 0, rate: 0 }] });
   const removeOrderLine = (idx) => setOrderForm({ ...orderForm, lines: orderForm.lines.filter((_, i) => i !== idx) });
   const updateOrderLine = (idx, field, val) => { const lines = [...orderForm.lines]; lines[idx] = { ...lines[idx], [field]: val }; setOrderForm({ ...orderForm, lines }); };
-  const addJWPart = () => setOrderForm({ ...orderForm, job_work_parts: [...orderForm.job_work_parts, { item_id: '', quantity: 0, charges: 0 }] });
+  const addJWPart = () => setOrderForm({ ...orderForm, job_work_parts: [...orderForm.job_work_parts, { item_id: '', quantity: 0, charges: 0, item_description: '', process_name: '' }] });
   const removeJWPart = (idx) => setOrderForm({ ...orderForm, job_work_parts: orderForm.job_work_parts.filter((_, i) => i !== idx) });
   const updateJWPart = (idx, field, val) => { const parts = [...orderForm.job_work_parts]; parts[idx] = { ...parts[idx], [field]: val }; setOrderForm({ ...orderForm, job_work_parts: parts }); };
 
-  // Auto-populate charges from BOM when user selects an item for a JW part
+  // Auto-populate charges from BOM when user selects an item for a JW part.
+  // Charges resolution priority:
+  //   1) Existing user-entered charges (don't clobber)
+  //   2) For Job Card OS rows (have a process_name): the specific routing's cost
+  //   3) Combined BOM process cost (Full MO-SC fallback)
   const updateJWPartItem = async (idx, item_id) => {
     const parts = [...orderForm.job_work_parts];
     parts[idx] = { ...parts[idx], item_id };
@@ -142,11 +146,24 @@ export default function JobWorkPage() {
     try {
       const { data } = await api.get(`/api/bom/costs/${item_id}`);
       const cur = [...orderForm.job_work_parts];
+      const existing = cur[idx] || {};
+      const isJobCardOS = !!(editingOrder?.reference_operation_seqs?.length || editingOrder?.reference_operation_seq);
+      let autoCharges = existing.charges;
+      if (!autoCharges) {
+        if (isJobCardOS && existing.process_name) {
+          try {
+            const { data: rc } = await api.get(`/api/bom/routing-cost`, { params: { item_id, process_name: existing.process_name } });
+            autoCharges = rc.cost || 0;
+          } catch { autoCharges = 0; }
+        } else {
+          autoCharges = data.process_cost || 0;
+        }
+      }
       cur[idx] = {
-        ...cur[idx],
+        ...existing,
         item_id,
-        charges: cur[idx].charges || data.process_cost || 0,
-        process_names: data.process_names || []
+        charges: autoCharges,
+        process_names: data.process_names || [],
       };
       setOrderForm({ ...orderForm, job_work_parts: cur });
     } catch (e) { /* silent */ }
@@ -190,7 +207,14 @@ export default function JobWorkPage() {
       processing_charges: order.processing_charges || 0,
       notes: order.notes || '',
       lines: order.lines?.map(l => ({ item_id: l.item_id, quantity: l.quantity, rate: l.rate || 0 })) || [],
-      job_work_parts: order.job_work_parts?.map(p => ({ item_id: p.item_id, quantity: p.quantity, charges: p.charges || 0 })) || [],
+      job_work_parts: order.job_work_parts?.map(p => ({
+        item_id: p.item_id,
+        quantity: p.quantity,
+        charges: p.charges || 0,
+        process_name: p.process_name || '',
+        item_description: p.item_description || '',
+        process_names: p.process_names || [],
+      })) || [],
     });
     setOrderDialog(true);
   };
@@ -558,15 +582,20 @@ export default function JobWorkPage() {
           const fallback = jwByItem[l.item_id] || {};
           const charges = l.processing_charges || fallback.charges || 0;
           const rmCost = l.rate || fallback.bom_rollup_cost || 0;
-          return { it, qty, charges, rmCost };
+          const description = l.item_description || fallback.item_description || '';
+          const processName = fallback.process_name || '';
+          return { it, qty, charges, rmCost, description, processName };
         }) : jwParts.map(p => {
           const pit = p.item || items.find(it => it.id === p.item_id) || {};
-          return { it: pit, qty: p.quantity || 0, charges: p.charges || 0, rmCost: p.bom_rollup_cost || pit.unit_cost || 0 };
+          return { it: pit, qty: p.quantity || 0, charges: p.charges || 0, rmCost: p.bom_rollup_cost || pit.unit_cost || 0, description: p.item_description || '', processName: p.process_name || '' };
         });
         const body = rows.map((r, i) => {
           const totalCharges = r.qty * r.charges;
           const totalAmount = r.qty * r.rmCost;
-          return `<tr><td>${i+1}</td><td>${r.it.part_number || '-'}, ${r.it.name || '-'}</td><td>${r.it.hsn_code || '-'}</td><td class="text-right mono">${r.qty}</td><td>${r.it.unit_of_measure || 'Nos'}</td><td class="text-right mono">${currencySymbol}${fmtAmt(r.charges)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalCharges)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(r.rmCost)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalAmount)}</td></tr>`;
+          const partCell = `${r.it.part_number || '-'}, ${r.it.name || '-'}` +
+            (r.processName ? `<br/><span class="sub-text" style="font-size:9px;color:#723B13;">Op: ${r.processName}</span>` : '') +
+            (r.description ? `<br/><span class="sub-text" style="font-size:9px;">${r.description}</span>` : '');
+          return `<tr><td>${i+1}</td><td>${partCell}</td><td>${r.it.hsn_code || '-'}</td><td class="text-right mono">${r.qty}</td><td>${r.it.unit_of_measure || 'Nos'}</td><td class="text-right mono">${currencySymbol}${fmtAmt(r.charges)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalCharges)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(r.rmCost)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalAmount)}</td></tr>`;
         }).join('');
         const grandCharges = rows.reduce((s, r) => s + r.qty * r.charges, 0);
         const grandAmount = rows.reduce((s, r) => s + r.qty * r.rmCost, 0);
@@ -981,11 +1010,11 @@ export default function JobWorkPage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm font-semibold text-[#1D3557]">Job Work Parts (FG/SA/Parts)</label>
-                <button onClick={addJWPart} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1"><Plus className="w-3 h-3" />Add Part</button>
+                <button onClick={addJWPart} className="text-xs text-[#1D3557] hover:underline flex items-center gap-1" data-testid="jw-add-part-top"><Plus className="w-3 h-3" />Add Part</button>
               </div>
               <div className="border rounded-sm overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead><tr className="bg-[#E1EFFE]"><th className="text-left py-2 px-2 text-xs">Part (FG/SA)</th><th className="text-right py-2 px-2 text-xs w-20">Qty</th><th className="text-right py-2 px-2 text-xs w-28">Process Cost/Unit</th><th className="text-right py-2 px-2 text-xs w-24">Total</th><th className="w-8"></th></tr></thead>
+                  <thead><tr className="bg-[#E1EFFE]"><th className="text-left py-2 px-2 text-xs">Part (FG/SA)</th><th className="text-left py-2 px-2 text-xs">Description / Remarks</th><th className="text-right py-2 px-2 text-xs w-20">Qty</th><th className="text-right py-2 px-2 text-xs w-28">Process Cost/Unit</th><th className="text-right py-2 px-2 text-xs w-24">Total</th><th className="w-8"></th></tr></thead>
                   <tbody>
                     {orderForm.job_work_parts.map((p, idx) => {
                       const total = (p.quantity || 0) * (p.charges || 0);
@@ -1000,9 +1029,22 @@ export default function JobWorkPage() {
                               placeholder="Search part by code / name…"
                               testId={`jw-part-${idx}-item`}
                             />
-                            {p.process_names && p.process_names.length > 0 && (
+                            {p.process_name && (
+                              <div className="text-[10px] text-[#723B13] mt-1" data-testid={`jw-part-${idx}-process`}>Outsourced op: <span className="font-semibold">{p.process_name}</span></div>
+                            )}
+                            {!p.process_name && p.process_names && p.process_names.length > 0 && (
                               <div className="text-[10px] text-[#1E429F] mt-1" data-testid={`jw-part-${idx}-processes`}>Processes: {p.process_names.join(', ')}</div>
                             )}
+                          </td>
+                          <td className="py-1 px-2">
+                            <input
+                              type="text"
+                              value={p.item_description || ''}
+                              onChange={e => updateJWPart(idx, 'item_description', e.target.value)}
+                              placeholder="Description / spec / remarks"
+                              className="w-full px-2 py-1 border rounded-sm text-xs"
+                              data-testid={`jw-part-${idx}-description`}
+                            />
                           </td>
                           <td className="py-1 px-2"><input type="number" min="1" value={p.quantity} onChange={e => updateJWPart(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
                           <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={p.charges} onChange={e => updateJWPart(idx, 'charges', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
@@ -1011,9 +1053,13 @@ export default function JobWorkPage() {
                         </tr>
                       );
                     })}
-                    {orderForm.job_work_parts.length === 0 && <tr><td colSpan="5" className="text-center py-2 text-xs text-[#9CA3AF]">No parts added</td></tr>}
+                    {orderForm.job_work_parts.length === 0 && <tr><td colSpan="6" className="text-center py-2 text-xs text-[#9CA3AF]">No parts added</td></tr>}
                   </tbody>
                 </table>
+              </div>
+              {/* Bottom Add Part hanger — saves scrolling up on long lists. */}
+              <div className="mt-2 flex justify-end">
+                <button onClick={addJWPart} className="text-xs text-[#1D3557] hover:bg-[#E1EFFE] flex items-center gap-1 px-3 py-1.5 border border-dashed border-[#1D3557] rounded-sm" data-testid="jw-add-part-bottom"><Plus className="w-3 h-3" />Add Part</button>
               </div>
             </div>
             
