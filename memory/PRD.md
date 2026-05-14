@@ -19,6 +19,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-05-14 (Tab-page single-line headers + global single-window scroll — DONE & VERIFIED ✅):**
+  1. **`.sticky-header-scroll` CSS fixed** (`/app/frontend/src/index.css`): Removed `max-height: calc(100vh - 220px)` and the `overflow: auto` on the wrapper; now uses `overflow-x: auto; overflow-y: visible`. Eliminates the inner table viewport (multi-window scroll) on Purchase Orders, Items/Products, MRP, Warehouses, JobWork tables. Page now scrolls as a single window everywhere, so the un-pinned brand header reliably scrolls away.
+  2. **Job Work page sticky header** (`/app/frontend/src/pages/JobWorkPage.js`): Header now reads `Job Work / <tab-label> (count)` driven by `activeTab` (Subcontract Orders / Delivery Challans / Receipts). The tab-specific action button (`New Subcontract Order` / `Create DC`) sits inline on the same line. The duplicate inner section card-headers were removed. Receipts heading is now part of the main page header (per user request).
+  3. **Warehouses (Stores) page sticky header** (`/app/frontend/src/pages/WarehousesPage.js`): Header reads `Stores / <tab-label>`. Stock-tab inline filters (search + Category + Group + Clear) are merged into the header. GRN tab now exposes `Manual GRN (no PO)` button in the header. Old duplicate filter row and Manual GRN button inside the tab body were removed.
+  4. **MRP page sticky header** (`/app/frontend/src/pages/MRPPage.js`): Header reads `MRP / <Material Demand | Purchase Suggestions>`. The Sales Order filter previously buried inside the Demand tab is now inline in the header (auto-hidden on the Suggestions tab). Search input is also in the header.
+  5. **Testing**: `testing_agent_v3_fork` (iteration 116) ran full regression — 100% pass on all single-line header tab variants, dialog openers, inline filters, and single-window scroll behavior.
+
+
 ## Changelog (recent)
 - **2026-05-14 (newest)** — **Global single-line headers + brand-hides-on-scroll + Inventory New-Transaction speed (DONE & VERIFIED ✅):**
   1. **Brand header now scrolls away on scroll**: Removed `sticky top-0 z-30` from the Layout's MecSmart ERP brand header (`/app/frontend/src/components/Layout.js`). Page headers (sticky themselves) now slide up to the very top when content scrolls — matching the BOM page pattern requested.
