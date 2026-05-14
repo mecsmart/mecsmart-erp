@@ -59,8 +59,8 @@ const crmMarketingItems = [
 ];
 
 const accountsGroupItems = [
-  { name: 'Purchase Invoices', href: '/purchase-invoices', icon: FileText, module: 'accounts' },
-  { name: 'Tax Invoices', href: '/crm?tab=marketing&sub=tax-invoices', icon: Calculator, module: 'accounts' },
+  { name: 'Purchase Invoices', href: '/purchase-invoices', icon: FileText, module: 'purchase_invoices' },
+  { name: 'Tax Invoices', href: '/crm?tab=marketing&sub=tax-invoices', icon: Calculator, module: 'tax_invoices' },
 ];
 
 const crmSupportItems = [

@@ -1,0 +1,70 @@
+{
+  "summary": "Completed testing for iteration 119: (1) BOM page single-line header with Status filter + Search + Export/Import/Create buttons - PASS, (2) Accounts permission split into separate purchase_invoices + tax_invoices modules - PASS, (3) MO Routing column vertical stack with blue text (#1E429F) and 11px font - PASS. All features working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_119.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 119 verified three features: (1) BOM page header rewrite - single-line sticky header contains 'Bill of Materials' title, Status filter (data-testid='bom-status-filter'), Search input (data-testid='bom-search-input'), Export, Import, and Create BOM buttons. Old standalone filter card is removed. (2) Accounts permission split - /api/users/modules returns both 'purchase_invoices' and 'tax_invoices' (not 'accounts'). User Management > Role Groups > Add Role Group shows ACCOUNTS section with TWO separate sub-rows: 'Purchase Invoices' and 'Tax Invoices', each with their own Read/Create/Write/Delete/All checkboxes. (3) MO Routing column - displays routing names in blue (#1E429F), 11px font, stacked vertically (one per line). Backend migration log shows '[migrate] Split/backfilled purchase_invoices + tax_invoices on 1 role group(s)'. Sidebar Accounts group shows both PI + TI links.",
+  "tests_performed": {
+    "bom_page_header": {
+      "sticky_header_found": "PASS",
+      "title_bill_of_materials": "PASS",
+      "status_filter_in_header": "PASS - data-testid='bom-status-filter'",
+      "search_input_in_header": "PASS - data-testid='bom-search-input'",
+      "export_button_in_header": "PASS",
+      "import_button_in_header": "PASS",
+      "create_bom_button_in_header": "PASS",
+      "old_filter_card_removed": "PASS",
+      "create_dialog_opens": "PASS"
+    },
+    "manufacturing_routing_column": {
+      "routing_spans_found": "PASS - 5 spans with expected styling",
+      "font_size_11px": "PASS",
+      "color_blue_1E429F": "PASS - rgb(30, 66, 159)",
+      "vertical_stack_layout": "PASS - flex flex-col gap-0.5",
+      "font_medium": "PASS"
+    },
+    "accounts_permission_split": {
+      "api_modules_purchase_invoices": "PASS - in modules list",
+      "api_modules_tax_invoices": "PASS - in modules list",
+      "api_modules_accounts_removed": "PASS - NOT in modules list",
+      "role_group_dialog_accounts_header": "PASS",
+      "role_group_dialog_purchase_invoices_row": "PASS",
+      "role_group_dialog_tax_invoices_row": "PASS",
+      "role_group_dialog_old_combined_row_gone": "PASS",
+      "purchase_invoices_checkbox": "PASS - data-testid='group-perm-purchase_invoices-view'",
+      "tax_invoices_checkbox": "PASS - data-testid='group-perm-tax_invoices-view'"
+    },
+    "backend_migration": {
+      "migration_log": "PASS - '[migrate] Split/backfilled purchase_invoices + tax_invoices on 1 role group(s)'",
+      "role_groups_have_both_modules": "PASS - AllPermsTest has both purchase_invoices and tax_invoices"
+    },
+    "regression": {
+      "sidebar_accounts_group": "PASS",
+      "sidebar_purchase_invoices_link": "PASS",
+      "sidebar_tax_invoices_link": "PASS",
+      "purchase_invoices_page_loads": "PASS - no errors",
+      "tax_invoices_page_loads": "PASS - no errors",
+      "bom_page_loads": "PASS"
+    }
+  }
+}

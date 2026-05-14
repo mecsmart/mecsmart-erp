@@ -46,7 +46,8 @@ const MODULE_GROUPS = [
     { key: 'purchase_orders', label: 'Purchase Orders' },
   ] },
   { main: 'Accounts', subs: [
-    { key: 'accounts', label: 'Purchase Invoices & Tax Invoices' },
+    { key: 'purchase_invoices', label: 'Purchase Invoices' },
+    { key: 'tax_invoices', label: 'Tax Invoices' },
   ] },
   { main: 'Stores', subs: [
     { key: 'stores', label: 'Warehouses / Stock / Transfer History / GRN' },

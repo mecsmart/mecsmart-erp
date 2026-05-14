@@ -885,10 +885,27 @@ export default function BOMPage() {
 
   return (
     <div className="space-y-3" data-testid="bom-page">
-      <div className="flex items-center justify-between sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
-        <div>
+      <div className="flex items-center justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
+        <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Bill of Materials</h1>
-          <p className="text-xs text-[#4B5563]">Manage product structures and component relationships</p>
+          <Select value={statusFilter || 'all'} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
+            <SelectTrigger className="w-36 h-8 text-xs" data-testid="bom-status-filter">
+              <SelectValue placeholder="All Statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              {statusOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {statusFilter && (
+            <button onClick={() => setStatusFilter('')} className="text-[10px] text-[#9B1C1C] hover:underline">Clear</button>
+          )}
+          <div className="relative w-64">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9CA3AF]" />
+            <input type="text" value={bomSearch} onChange={(e) => setBomSearch(e.target.value)} placeholder="Search BOM by part number or name…" className="pl-8 pr-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs w-full focus:outline-none focus:border-[#1D3557]" data-testid="bom-search-input" />
+          </div>
         </div>
         <div className="flex items-center space-x-2">
           <button onClick={handleBomExport} className="btn-secondary flex items-center space-x-1 text-sm" data-testid="export-bom-btn">
@@ -1491,41 +1508,6 @@ export default function BOMPage() {
           })()}
         </DialogContent>
       </Dialog>
-
-      {/* Status Filter & Search */}
-      <div className="card-flat px-3 py-2">
-        <div className="flex items-center gap-3">
-          <Select value={statusFilter || 'all'} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
-            <SelectTrigger className="w-48" data-testid="bom-status-filter">
-              <SelectValue placeholder="All Statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              {statusOptions.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {statusFilter && (
-            <button onClick={() => setStatusFilter('')} className="btn-secondary flex items-center space-x-1">
-              <X className="w-4 h-4" />
-              <span>Clear</span>
-            </button>
-          )}
-          <div className="flex-1" />
-          <div className="relative w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-            <input
-              type="text"
-              value={bomSearch}
-              onChange={(e) => setBomSearch(e.target.value)}
-              placeholder="Search BOM by part number or name..."
-              className="search-input text-sm"
-              data-testid="bom-search-input"
-            />
-          </div>
-        </div>
-      </div>
 
       {/* BOMs List - Multi-Level Explosion Table View */}
       <div className="card-flat overflow-hidden">
