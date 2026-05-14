@@ -1,0 +1,61 @@
+{
+  "summary": "Iteration 110 - JW DC Fixes #2 Testing Complete. All 7 backend tests PASSED. Frontend DC dialog correctly displays Part/Op/Description stacked vertically with proper styling.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_110_jw_dc_fixes.py",
+    "/app/test_reports/pytest/pytest_iteration_110.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend dc-lines endpoint correctly overrides stale charges with find_routing_cost when process_name is set and routing exists",
+    "Backend challans list correctly self-heals draft Job Card OS DCs with specific routing cost",
+    "Backend preserves sent/completed DC charges (audit preservation)",
+    "Frontend DC dialog correctly renders Part# — Name on line 1, Op: <process_name> on line 2 (bronze), <item_description> on line 3 (italic gray)",
+    "data-testid='dc-desc-{idx}' correctly added for description elements"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_110_jw_dc_fixes.py"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 tests passed)",
+    "frontend": "100% (DC dialog UI verified)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST_110_ prefixed items, BOMs, suppliers, and orders during tests (cleaned up after tests)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "JW DC Fixes #2 verified. GET /api/job-work/orders/{sc_id}/dc-lines correctly overrides stale charges with specific routing cost when process_name is set. GET /api/job-work/challans self-heals draft Job Card OS DCs. POST /api/job-work/challans persists item_description and process_name. Frontend DC dialog displays Part/Op/Description stacked vertically.",
+  "tests_executed": {
+    "backend": [
+      {"test": "TestDCLinesChargesOverride::test_dc_lines_overrides_stale_charges_with_specific_routing_cost", "status": "PASSED", "details": "Verified dc-lines overrides polluted 1000 → 500 (LC Cutting cost)"},
+      {"test": "TestDCLinesChargesOverride::test_dc_lines_keeps_stored_charges_when_routing_not_found", "status": "PASSED", "details": "Verified dc-lines keeps stored 999 when routing not found"},
+      {"test": "TestChallansListSelfHeal::test_challans_list_self_heals_draft_job_os_dc_charges", "status": "PASSED", "details": "Verified challans list self-heals draft DC processing_charges 2500 → 500"},
+      {"test": "TestChallansListSelfHeal::test_challans_list_does_not_modify_sent_dc", "status": "PASSED", "details": "Verified sent DC processing_charges preserved at 2500 (audit)"},
+      {"test": "TestDCCreatePersistsNewFields::test_dc_create_persists_item_description_and_process_name", "status": "PASSED", "details": "Verified POST /challans persists item_description and process_name"},
+      {"test": "TestRegressionFullMOSC::test_full_mo_sc_dc_lines_uses_stored_charges", "status": "PASSED", "details": "Verified Full MO-SC (no reference_operation_seqs) uses stored combined charges"},
+      {"test": "TestRegressionFullMOSC::test_full_mo_sc_challans_not_self_healed", "status": "PASSED", "details": "Verified Full MO-SC draft DCs NOT self-healed"}
+    ],
+    "frontend": [
+      {"test": "DC Dialog UI - Part/Op/Description stacked display", "status": "PASSED", "details": "Verified Part# — Name on line 1, Op: <process_name> on line 2 (bronze), <item_description> on line 3 (italic gray)"},
+      {"test": "DC Dialog UI - data-testid attributes", "status": "PASSED", "details": "Verified data-testid='dc-desc-{idx}' present for description elements"},
+      {"test": "DC Dialog UI - Charges/Unit display", "status": "PASSED", "details": "Verified charges input fields with correct values"}
+    ]
+  },
+  "features_verified": {
+    "dc_lines_charges_override": "GET /api/job-work/orders/{sc_id}/dc-lines overrides stale charges with find_routing_cost when process_name is set and routing exists",
+    "dc_lines_keeps_stored_when_not_found": "When routing not found (find_routing_cost returns 0), stored charges are kept",
+    "challans_self_heal": "GET /api/job-work/challans self-heals draft Job Card OS DCs with specific routing cost",
+    "challans_audit_preservation": "Sent/completed DCs are NOT modified (audit preservation)",
+    "dc_create_new_fields": "POST /api/job-work/challans persists item_description and process_name in dc_doc.lines",
+    "regression_full_mo_sc": "Full MO-SC (without reference_operation_seqs) dc-lines/challans do NOT alter charges",
+    "frontend_dc_dialog_style": "DC dialog renders Part/Op/Description stacked vertically with correct styling"
+  }
+}

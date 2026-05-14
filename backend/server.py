@@ -664,6 +664,8 @@ class JobWorkLineItem(BaseModel):
     quantity: float
     rate: Optional[float] = 0
     processing_charges: Optional[float] = 0  # Per-unit processing charge (used on Job Card OS DC lines)
+    item_description: Optional[str] = None  # Per-line description carried over to DC
+    process_name: Optional[str] = None  # Specific outsourced routing op (Job Card OS lines)
 
 class JobWorkPartItem(BaseModel):
     item_id: str
@@ -10304,9 +10306,16 @@ async def export_purchase_invoices_bulk_tally(request: Request, payload: dict = 
 @jobwork_router.get("/orders/{sc_id}/dc-lines")
 async def get_dc_lines_for_job_os(sc_id: str, request: Request):
     """Expand a Job Card OS SC's job_work_parts for the DC table. Returns one row per Part
-    with: qty, charges_per_unit (processing), rm_cost_per_unit (BOM rollup). This matches
-    the user-specified DC format: Part | HSN | Qty | UOM | Charges/Unit | Total Charges |
-    RM Cost/Unit | Total Amount."""
+    with: qty, charges_per_unit (processing), rm_cost_per_unit (BOM rollup), item_description.
+
+    Charges_per_unit resolution:
+      - When the part has a `process_name` (specific outsourced routing op),
+        always recompute from `find_routing_cost(item_id, process_name)` so
+        stale stored values (legacy data polluted by older save flows) don't
+        leak through. This guarantees the DC dialog ALWAYS shows the specific
+        op's per-unit cost rather than the combined process cost.
+      - Otherwise, fall back to the stored `charges` value.
+    """
     await get_current_user(request)
     sc = await db.subcontract_orders.find_one({"id": sc_id}, {"_id": 0})
     if not sc:
@@ -10315,7 +10324,14 @@ async def get_dc_lines_for_job_os(sc_id: str, request: Request):
     for jp in sc.get("job_work_parts", []):
         part_item = await db.items.find_one({"id": jp.get("item_id")}, {"_id": 0}) or {}
         qty = float(jp.get("quantity", 0) or 0)
+        process_name = (jp.get("process_name") or "").strip()
+        # Stored charges first
         charges_per_unit = float(jp.get("charges", 0) or 0)
+        # Override with specific routing cost when process_name is set.
+        if process_name:
+            specific = await find_routing_cost(jp.get("item_id"), process_name)
+            if specific:
+                charges_per_unit = float(specific)
         rm_cost_per_unit = float(jp.get("bom_rollup_cost", 0) or 0)
         out_lines.append({
             "type": "part",
@@ -10326,6 +10342,8 @@ async def get_dc_lines_for_job_os(sc_id: str, request: Request):
             "rm_cost_per_unit": rm_cost_per_unit,
             "total_charges": round(qty * charges_per_unit, 2),
             "total_amount": round(qty * rm_cost_per_unit, 2),
+            "item_description": jp.get("item_description") or "",
+            "process_name": process_name,
         })
     return out_lines
 
@@ -10794,8 +10812,38 @@ async def get_delivery_challans(request: Request):
         dc_supplier_id = dc.get("supplier_id") or (order.get("supplier_id") if order else None)
         dc["supplier"] = suppliers_map.get(dc_supplier_id) if dc_supplier_id else None
         dc["is_manual"] = bool(dc.get("is_manual"))
+        # For Job Card OS DCs that are still UNSENT (status=draft), override the
+        # stored per-line processing_charges with the SPECIFIC outsourced
+        # routing's cost computed from the parent SC's job_work_parts +
+        # find_routing_cost. This self-heals draft DCs that were saved while
+        # the SC carried a polluted combined `charges` value. Sent/completed
+        # DCs are left untouched (their snapshot must be preserved for audit).
+        dc_is_draft_job_os = (
+            order is not None
+            and (dc.get("status") or "").lower() in ("draft", "open", "")
+            and order.get("subcontract_type") == "without_material"
+            and (order.get("reference_operation_seqs") or order.get("reference_operation_seq"))
+        )
+        jwp_lookup = {}
+        if dc_is_draft_job_os:
+            for jp in order.get("job_work_parts", []) or []:
+                # Key by item_id only — the typical Job Card OS DC has 1 part
+                # per item. For consolidated SCs with the same item under
+                # multiple ops, prefer the first matching entry; user can
+                # always edit the value in the dialog.
+                jwp_lookup.setdefault(jp.get("item_id"), jp)
         for line in dc.get("lines", []):
             line["item"] = items_map.get(line.get("item_id"))
+            if dc_is_draft_job_os:
+                jp = jwp_lookup.get(line.get("item_id"))
+                if jp and jp.get("process_name"):
+                    specific = await find_routing_cost(jp.get("item_id"), jp.get("process_name"))
+                    if specific:
+                        line["processing_charges"] = float(specific)
+                        line["_overridden_specific_op"] = True
+                # Surface description for the DC table / print template.
+                if jp and jp.get("item_description") and not line.get("item_description"):
+                    line["item_description"] = jp.get("item_description")
         if order:
             for part in order.get("job_work_parts", []):
                 part["item"] = items_map.get(part.get("item_id"))
@@ -11082,7 +11130,9 @@ async def create_delivery_challan(data: DCCreate, request: Request):
             "item_id": line.item_id,
             "quantity": line.quantity,
             "rate": line.rate or 0,
-            "processing_charges": line.processing_charges or 0
+            "processing_charges": line.processing_charges or 0,
+            "item_description": line.item_description or "",
+            "process_name": line.process_name or "",
         })
         
         # Update sent quantity in order lines

@@ -249,6 +249,8 @@ export default function JobWorkPage() {
         charges_per_unit: l.charges_per_unit || 0,
         rm_cost_per_unit: l.rm_cost_per_unit || 0,
         item: l.item,
+        item_description: l.item_description || '',
+        process_name: l.process_name || '',
         type: 'part',
       })));
       setDcWarehouse('');
@@ -270,6 +272,8 @@ export default function JobWorkPage() {
         quantity: l.quantity,
         rate: l.rm_cost_per_unit || 0,
         processing_charges: l.charges_per_unit || 0,
+        item_description: l.item_description || '',
+        process_name: l.process_name || '',
       }) : ({ item_id: l.item_id, quantity: l.quantity, rate: l.rate || 0 }));
       const skipDeduct = isJobOS;
       const { data } = await api.post('/api/job-work/challans', { subcontract_order_id: dcOrder.id, lines: payloadLines, warehouse_id: dcWarehouse, notes: isJobOS ? 'Job Card OS DC' : '', skip_stock_deduct: skipDeduct });
@@ -1291,7 +1295,19 @@ export default function JobWorkPage() {
                       return (
                         <tr key={idx} className="border-t">
                           <td className="py-2 px-2 mono text-xs">{idx + 1}</td>
-                          <td className="py-2 px-2"><span className="mono text-xs font-medium">{it.part_number || '-'}</span>, {it.name || '-'}</td>
+                          <td className="py-2 px-2">
+                            <div className="text-xs">
+                              <span className="mono font-semibold">{it.part_number || '-'}</span>
+                              <span className="mx-1">—</span>
+                              <span>{it.name || '-'}</span>
+                            </div>
+                            {l.process_name && (
+                              <div className="text-[10px] text-[#723B13] mt-0.5">Op: <span className="font-semibold">{l.process_name}</span></div>
+                            )}
+                            {l.item_description && (
+                              <div className="text-[10px] text-[#6B7280] italic mt-0.5" data-testid={`dc-desc-${idx}`}>{l.item_description}</div>
+                            )}
+                          </td>
                           <td className="py-2 px-2 mono text-xs">{it.hsn_code || '-'}</td>
                           <td className="py-2 px-2 text-right">
                             <input type="number" min="1" value={l.quantity} onChange={e => { const ls = [...dcLines]; ls[idx].quantity = parseFloat(e.target.value) || 0; setDcLines(ls); }} className="w-20 px-2 py-1 border rounded-sm mono text-right text-xs" data-testid={`dc-qty-${idx}`} />
