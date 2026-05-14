@@ -1,0 +1,54 @@
+{
+  "summary": "Iteration 109 - JW Process OS Fix Verification PASSED. All 10 backend tests pass including the 2 previously failing tests. Regression test confirms Full MO-SC auto-refresh behavior preserved.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_108_jw_process_cost_fixes.py",
+    "/app/test_reports/pytest/pytest_iteration_109.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fix verified: server.py line 10418-10419 now correctly checks `has_specific_op = bool(part.get('process_name'))` and skips charges overwrite when process_name is set."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (10/10 tests passed + regression test passed)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST_108_ and TEST_109_REG_ prefixed items, BOMs, suppliers, and orders during tests (cleaned up)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "JW Process OS fix verified. GET /api/job-work/orders now correctly preserves per-op charges when process_name is set (Job Card OS), while still auto-refreshing charges for Full MO-SC (no process_name).",
+  "tests_executed": {
+    "backend": [
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_returns_specific_op_cost", "status": "PASSED"},
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_returns_zero_for_unknown_op", "status": "PASSED"},
+      {"test": "TestRoutingCostEndpoint::test_routing_cost_requires_auth", "status": "PASSED"},
+      {"test": "TestJobWorkOrderPreservation::test_put_preserves_process_name_and_charges_on_job_card_os", "status": "PASSED"},
+      {"test": "TestJobWorkOrderPreservation::test_put_preserves_item_description", "status": "PASSED"},
+      {"test": "TestJobWorkOrderPreservation::test_put_allows_updating_item_description", "status": "PASSED"},
+      {"test": "TestJobWorkOrderCreate::test_post_accepts_process_name_and_uses_specific_routing_cost", "status": "PASSED"},
+      {"test": "TestJobWorkOrderCreate::test_post_accepts_item_description", "status": "PASSED"},
+      {"test": "TestJobWorkOrderCreate::test_post_without_process_name_uses_combined_cost", "status": "PASSED"},
+      {"test": "TestMultiLineJobCardOS::test_multi_line_same_item_different_ops_preserved", "status": "PASSED"},
+      {"test": "Regression: Full MO-SC auto-refresh behavior", "status": "PASSED", "details": "Verified that Full MO-SC (no process_name) still auto-refreshes charges from combined BOM process_cost when BOM is updated"}
+    ]
+  },
+  "features_verified": {
+    "job_card_os_charges_preserved": "GET /api/job-work/orders no longer overwrites per-op charges when process_name is set",
+    "full_mo_sc_auto_refresh": "Full MO-SC (no process_name) still auto-refreshes charges from combined BOM process_cost",
+    "put_preservation": "PUT preserves process_name, charges, and item_description correctly",
+    "multi_line_preservation": "Multi-line Job Card OS with same item but different ops preserves each line's charges"
+  },
+  "fix_applied": {
+    "location": "server.py lines 10418-10419",
+    "change": "Added `has_specific_op = bool(part.get('process_name'))` and changed condition to `if _fg and not has_specific_op:` to skip charges overwrite when process_name is set"
+  }
+}

@@ -10399,7 +10399,11 @@ async def get_subcontract_orders(request: Request, status: str = None):
                     line["rate"] = round(_tu, 2)
         for part in order.get("job_work_parts", []):
             part["item"] = items_map.get(part.get("item_id"))
-            # Auto-refresh charges/bom_rollup from latest BOM for live SCs
+            # Auto-refresh charges/bom_rollup from latest BOM for live SCs —
+            # but ONLY when this line has no specific outsourced routing op
+            # (`process_name`). When process_name is set (Job Card OS), the
+            # stored `charges` IS that specific op's per-unit cost and MUST
+            # NOT be replaced by the combined FG process cost across all ops.
             if is_live and part.get("item_id"):
                 iid = part["item_id"]
                 if iid not in bom_cost_cache:
@@ -10411,7 +10415,8 @@ async def get_subcontract_orders(request: Request, status: str = None):
                 if _bc:
                     _fg = round(_bc.get("fg_process_cost", 0) or 0, 2)
                     _total_unit = round((_bc.get("rm_cost", 0) or 0) + (_bc.get("process_cost", 0) or 0), 2)
-                    if _fg:
+                    has_specific_op = bool(part.get("process_name"))
+                    if _fg and not has_specific_op:
                         part["charges"] = _fg
                     if _total_unit:
                         part["bom_rollup_cost"] = _total_unit
