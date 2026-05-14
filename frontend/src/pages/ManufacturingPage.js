@@ -1018,7 +1018,7 @@ export default function ManufacturingPage() {
 
   return (
     <div className="space-y-4" data-testid="manufacturing-page">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
+      <div className="flex items-start justify-between gap-3 flex-wrap sticky top-0 z-30 bg-white py-2 border-b border-[#E5E7EB] -mx-6 px-6">
         <div>
           <h1 className="text-xl font-bold font-[Chivo] text-[#111827]">Manufacturing Orders</h1>
           <p className="text-xs text-[#4B5563]">Work centers, routings, and manufacturing order tracking</p>
@@ -1715,7 +1715,7 @@ export default function ManufacturingPage() {
                       return mask;
                     })();
                     return (
-                      <details key={parentMO.id} open={parentMO.status !== 'completed'} className="border rounded-sm overflow-hidden">
+                      <details key={parentMO.id} className="border rounded-sm overflow-hidden">
                         <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none flex-wrap" style={{borderLeft: `4px solid ${catColor}`}}>
                           <ChevronRight className="w-4 h-4 text-[#4B5563]" />
                           <span className="mono font-bold text-sm" style={{color: catColor}}>{parentMO.wo_number}</span>
