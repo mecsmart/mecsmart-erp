@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Users, Edit2, Trash2, Phone, Mail, MapPin, Filter, X, Search, Loader2 } from 'lucide-react';
@@ -7,6 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 
 export default function CustomersPage() {
   const { user, hasPermission } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
   const [states, setStates] = useState([]);
   const [users, setUsers] = useState([]);  // All users, used to populate the Salesperson multi-select (admin only)
@@ -31,6 +34,21 @@ export default function CustomersPage() {
   const canDelete = hasPermission('customers', 'delete') || isAdmin;
 
   useEffect(() => { fetchData(); }, [statusFilter, scopeFilter]);
+
+  // Auto-open the Add dialog when arriving with `?action=add` (used by
+  // Quotation page's `+ Add Customer` button so users can land on a fully-
+  // featured form — including GSTIN fetch, salesperson assignment etc).
+  // When `returnTo` is present we'll navigate back after a successful save.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('action') === 'add') {
+      resetForm();
+      setIsDialogOpen(true);
+    }
+    // Run once per location change — re-running on every render would
+    // reopen the dialog after the user closed it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -58,13 +76,24 @@ export default function CustomersPage() {
 
   const handleSubmit = async () => {
     try {
+      let savedId = editingCustomer?.id;
       if (editingCustomer) {
         await api.put(`/api/customers/${editingCustomer.id}`, formData);
       } else {
-        await api.post('/api/customers', formData);
+        const res = await api.post('/api/customers', formData);
+        savedId = res.data?.id;
       }
       setIsDialogOpen(false);
       resetForm();
+      // If we were launched by Quotation/PO with a returnTo target, navigate
+      // back to it now and pass the new customer id so the originating page
+      // can auto-select it in its picker.
+      const params = new URLSearchParams(location.search);
+      const returnTo = params.get('returnTo');
+      if (returnTo === 'quotation' && savedId) {
+        navigate(`/crm?tab=marketing&sub=quotations&newCustomerId=${savedId}`);
+        return;
+      }
       fetchData();
     } catch (error) {
       alert(error.response?.data?.detail || 'Failed to save customer');
@@ -177,7 +206,19 @@ export default function CustomersPage() {
           )}
         </div>
         {canCreate && (
-          <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
+          <Dialog open={isDialogOpen} onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if (!open) {
+              resetForm();
+              // If the user opened the dialog via `?action=add&returnTo=...`
+              // and then cancelled, take them back to the originating page so
+              // they don't end up stranded on /customers.
+              const params = new URLSearchParams(location.search);
+              if (params.get('action') === 'add' && params.get('returnTo') === 'quotation') {
+                navigate('/crm?tab=marketing&sub=quotations');
+              }
+            }
+          }}>
             <DialogTrigger asChild>
               <button className="btn-primary flex items-center space-x-2" data-testid="add-customer-btn">
                 <Plus className="w-4 h-4" /><span>Add Customer</span>

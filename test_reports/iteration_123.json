@@ -1,0 +1,58 @@
+{
+  "summary": "Iteration 123 testing completed. All features verified: (1) JW SC Short-Close backend endpoint works correctly - admin-only (403 for non-admin), returns correct response structure, updates SC status to 'short_closed', protects GRN'd lines, and has re-call protection (400 for already short_closed). (2) JW SC Short-Close UI works - button appears for confirmed/sent/in_progress SCs, shows detailed confirm dialog, and updates status after confirmation. (3) Quotation + Add Customer redirect flow works - navigates to /customers?action=add&returnTo=quotation, auto-opens full Add Customer dialog, and returns to quotations with new customer preselected. (4) PO + Add Supplier redirect flow works - navigates to /suppliers?action=add&returnTo=po, auto-opens full Add Supplier dialog. (5) Cancel flows work - closing dialog returns to originating page without newCustomerId/newSupplierId params.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "All dialogs",
+        "issues": ["Console warning: Missing `Description` or `aria-describedby` for DialogContent - accessibility improvement needed (carried over from previous iterations)"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_123.py",
+    "/app/test_reports/pytest/pytest_iteration_123.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_123.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 123 verified: (1) JW SC Short-Close endpoint POST /api/job-work/orders/{id}/short-close - admin-only, returns {ok:true, released_operations:[], cancelled_pos:[]}, sets status to 'short_closed' with timestamps, protects GRN'd lines (received_quantity > 0), returns 400 for already short_closed orders. (2) Short-Close UI button appears for SC orders with status in ['confirmed','sent','in_progress'], shows detailed confirm dialog explaining consequences, updates status after confirmation. (3) Quotation + Add Customer flow: clicking + button navigates to /customers?action=add&returnTo=quotation, full Add Customer dialog auto-opens (with GSTIN, salespersons, address fields), after save returns to /crm?tab=marketing&sub=quotations&newCustomerId=<id> with new customer preselected in New Quotation dialog. (4) PO + Add Supplier flow: clicking + button navigates to /suppliers?action=add&returnTo=po, full Add Supplier dialog auto-opens, after save returns to /purchase-orders?newSupplierId=<id>. (5) Cancel flows work correctly - closing dialog returns to originating page.",
+  "features_tested": {
+    "jw_sc_short_close_backend": {
+      "status": "PASS",
+      "details": "POST /api/job-work/orders/{id}/short-close endpoint works correctly. Admin-only (403 for non-admin), returns {ok:true, released_operations:[], cancelled_pos:[]}, sets SC status to 'short_closed' with short_closed_at/short_closed_by timestamps, protects GRN'd lines (operations with received_quantity > 0 are not released), returns 400 for already short_closed/completed/cancelled orders."
+    },
+    "jw_sc_short_close_ui": {
+      "status": "PASS",
+      "details": "Short Close button (data-testid='short-close-sc-{id}') appears for SC orders with status in ['confirmed','sent','in_progress']. Clicking shows detailed browser confirm dialog explaining: SC will be marked Short Closed, source MO operations without GRN will be released to pending, linked draft POs will be cancelled. After confirmation, shows success alert with operations released count."
+    },
+    "quotation_add_customer_redirect": {
+      "status": "PASS",
+      "details": "Clicking + Add Customer (data-testid='quotation-customer-add') in New Quotation dialog navigates to /customers?action=add&returnTo=quotation. Full Add Customer dialog auto-opens with all fields (Code, Name, GSTIN with Fetch, State, Contact Person, Email, Phone, Payment Terms, Address, Salespersons assignment). After saving, returns to /crm?tab=marketing&sub=quotations with newCustomerId param, New Quotation dialog auto-opens with new customer preselected."
+    },
+    "quotation_add_customer_cancel": {
+      "status": "PASS",
+      "details": "Closing the Add Customer dialog (via X button or Escape) when opened from Quotation returns to /crm?tab=marketing&sub=quotations without newCustomerId param."
+    },
+    "po_add_supplier_redirect": {
+      "status": "PASS",
+      "details": "Clicking + Add Supplier (data-testid='po-supplier-add') in Create PO dialog navigates to /suppliers?action=add&returnTo=po. Full Add Supplier dialog auto-opens with all fields (Supplier Code, Company Name, Contact Person, Email, Phone, Payment Terms, Address, GSTIN with Fetch, State, Lead Time, Rating, Status)."
+    }
+  },
+  "mocked_apis_note": "GSTIN lookup endpoints run in SANDBOX mode - returns sample data for valid GSTINs"
+}

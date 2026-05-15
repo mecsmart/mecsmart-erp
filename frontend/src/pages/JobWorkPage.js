@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
-import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, FileText, Edit2, Printer, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, XCircle, FileText, Edit2, Printer, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -222,6 +222,28 @@ export default function JobWorkPage() {
   const handleConfirmOrder = async (id) => {
     try { await api.post(`/api/job-work/orders/${id}/confirm`); fetchData(); }
     catch (e) { alert(e.response?.data?.detail || 'Failed to confirm'); }
+  };
+
+  // Admin-only short close — terminates a running JW SC mid-way and releases
+  // source MO operations that haven't been GRN'd. Triggers a confirm prompt
+  // because the action is destructive: the SC's status becomes
+  // `short_closed` (terminal) and linked draft POs are auto-cancelled.
+  const handleShortCloseSC = async (order) => {
+    const msg = `Short close ${order.order_number}?\n\nThis will:\n• Mark the SC as Short Closed (terminal).\n• Release all source MO operations that haven't been GRN'd back to "pending".\n• Cancel any linked draft Purchase Order.\n\nOperations with received quantity > 0 must be reversed via the GRN page first.`;
+    if (!window.confirm(msg)) return;
+    try {
+      const { data } = await api.post(`/api/job-work/orders/${order.id}/short-close`);
+      const releasedCount = (data?.released_operations || []).length;
+      const cancelledPos = (data?.cancelled_pos || []).filter(Boolean);
+      alert(
+        `Short-closed ${order.order_number}.\n` +
+        `${releasedCount} operation${releasedCount === 1 ? '' : 's'} released back to source MO.\n` +
+        (cancelledPos.length ? `Cancelled draft PO${cancelledPos.length === 1 ? '' : 's'}: ${cancelledPos.join(', ')}` : '')
+      );
+      fetchData();
+    } catch (e) {
+      alert(e.response?.data?.detail || 'Failed to short close');
+    }
   };
 
   // DC
@@ -834,6 +856,23 @@ export default function JobWorkPage() {
                               )}
                               {o.status === 'completed' && (
                                 <span className="text-[10px] text-[#03543F] bg-[#DEF7EC] px-2 py-1 rounded font-medium">Completed</span>
+                              )}
+                              {o.status === 'short_closed' && (
+                                <span className="text-[10px] text-[#9B1C1C] bg-[#FDE8E8] px-2 py-1 rounded font-medium">Short Closed</span>
+                              )}
+                              {/* Admin-only Short Close — release source MO ops mid-way.
+                                  Visible only while the SC is in a working state so it
+                                  acts as an emergency stop without polluting the list
+                                  of completed/cancelled orders. */}
+                              {isAdmin && ['confirmed', 'sent', 'in_progress'].includes(o.status) && (
+                                <button
+                                  onClick={() => handleShortCloseSC(o)}
+                                  className="btn-secondary text-xs px-2 py-1 text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]"
+                                  data-testid={`short-close-sc-${o.id}`}
+                                  title="Short Close (admin only) — releases source MO operations"
+                                >
+                                  <XCircle className="w-3 h-3 inline mr-1" />Short Close
+                                </button>
                               )}
                             </div>
                           </td>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -19,6 +20,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 
 export default function SuppliersPage() {
   const { user, hasPermission } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
@@ -57,6 +60,19 @@ export default function SuppliersPage() {
     fetchSuppliers();
     fetchStates();
   }, [statusFilter]);
+
+  // Auto-open Add dialog when arriving via `?action=add` from PO. The same
+  // querystring flow used by Customers↔Quotation is reused here so PO users
+  // get the FULL supplier form (GSTIN fetch, rating, lead time) without
+  // duplicating the dialog inside the PO page.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('action') === 'add') {
+      resetForm();
+      setIsDialogOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
   const fetchStates = async () => {
     try {
@@ -150,14 +166,24 @@ export default function SuppliersPage() {
       return;
     }
     try {
+      let savedId = editingSupplier?.id;
       if (editingSupplier) {
         await api.put(`/api/suppliers/${editingSupplier.id}`, formData);
       } else {
-        await api.post('/api/suppliers', formData);
+        const res = await api.post('/api/suppliers', formData);
+        savedId = res.data?.id;
       }
       setIsDialogOpen(false);
       setEditingSupplier(null);
       resetForm();
+      // Return to PO page with new supplier auto-selected when launched via
+      // /suppliers?action=add&returnTo=po. Cancel path is handled in the
+      // Dialog onOpenChange below.
+      const params = new URLSearchParams(location.search);
+      if (params.get('returnTo') === 'po' && savedId) {
+        navigate(`/purchase-orders?newSupplierId=${savedId}`);
+        return;
+      }
       fetchSuppliers();
     } catch (error) {
       console.error('Failed to save supplier:', error);
@@ -256,6 +282,10 @@ export default function SuppliersPage() {
             if (!open) {
               setEditingSupplier(null);
               resetForm();
+              const params = new URLSearchParams(location.search);
+              if (params.get('action') === 'add' && params.get('returnTo') === 'po') {
+                navigate('/purchase-orders');
+              }
             }
           }}>
             <DialogTrigger asChild>

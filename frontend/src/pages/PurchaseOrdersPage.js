@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
@@ -36,6 +37,8 @@ const emptyForm = {
 export default function PurchaseOrdersPage() {
   const { user, hasPermission } = useAuth();
   const { formatCurrency, currencySymbol, companySettings } = useCompanySettings();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [suppliers, setSuppliers] = useState([]);
   const [items, setItems] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -82,6 +85,25 @@ export default function PurchaseOrdersPage() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // After returning from /suppliers?action=add&returnTo=po we get
+  // `?newSupplierId=<id>` on the URL. Auto-open the New PO dialog and
+  // pre-select that supplier so the user resumes their flow seamlessly.
+  // The param is stripped after consumption to avoid re-opening on
+  // browser refresh.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const newSupplierId = params.get('newSupplierId');
+    if (!newSupplierId) return;
+    const sup = suppliers.find(s => s.id === newSupplierId);
+    if (!sup) return; // wait until suppliers list refreshes with the new one
+    setEditingPO(null);
+    setFormData({ ...emptyForm, supplier_id: sup.id, lines: [], additional_charges: [] });
+    setIsDialogOpen(true);
+    params.delete('newSupplierId');
+    navigate(`${location.pathname}${params.toString() ? `?${params.toString()}` : ''}`, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, suppliers]);
 
   const filteredOrders = (statusFilter ? allOrders.filter(po => po.status === statusFilter) : allOrders).filter(po => {
     if (!poSearch.trim()) return true;
@@ -441,7 +463,7 @@ export default function PurchaseOrdersPage() {
                       user can create a new supplier without leaving the PO form. */}
                   <button
                     type="button"
-                    onClick={() => { setQuickPartyEditing(null); setQuickPartyOpen(true); }}
+                    onClick={() => navigate('/suppliers?action=add&returnTo=po')}
                     className="px-2 bg-[#03543F] text-white rounded hover:bg-[#03493A] text-sm"
                     title="Add new supplier"
                     data-testid="po-supplier-add"

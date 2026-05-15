@@ -10845,12 +10845,12 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
         update_data["job_work_parts"] = enriched_jwp
 
         # ------------------------------------------------------------------
-        # Restore source MO operations when a JW line is REMOVED or qty is
-        # REDUCED — so the user can re-outsource that work to a different
-        # vendor without manually editing the MO. Compare existing vs new
+        # Auto-restore source MO operations when a JW line is REMOVED or qty
+        # is REDUCED — so the user can re-outsource to a different vendor
+        # without manually editing the MO. Compare existing vs new
         # job_work_parts keyed by (wo_id, process_name). Skip lines that
-        # already have received_quantity > 0 (those have been partially or
-        # fully GRN'd and cannot be safely returned to the source MO).
+        # already have received_quantity > 0 (those are mid-flight — admin
+        # must use the dedicated Short Close button on the SC instead).
         # ------------------------------------------------------------------
         def _key(p):
             return (p.get("wo_id") or "", (p.get("process_name") or "").strip())
@@ -10858,14 +10858,11 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
         for p in enriched_jwp:
             k = _key(p)
             new_by_key[k] = new_by_key.get(k, 0) + (p.get("quantity") or 0)
-        restored = []  # [(wo_id, process_name, qty_returned)]
         for old in existing_jwp:
             k = _key(old)
-            if not k[0]:  # No source WO — nothing to restore (manual SC).
+            if not k[0]:
                 continue
             if (old.get("received_quantity") or 0) > 0:
-                # Don't reverse anything that's been GRN'd against. Leave the
-                # SC line alone — the user must reverse the GRN first.
                 continue
             old_qty = old.get("quantity") or 0
             new_qty = new_by_key.get(k, 0)
@@ -10882,10 +10879,6 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
                 if isinstance(op_name, dict):
                     op_name = op_name.get("name", "")
                 if op.get("outsource_sc_order_id") == order_id and op_name == k[1]:
-                    # Either the line is removed entirely (new_qty == 0) or
-                    # we're only reducing — for partial reductions we keep
-                    # the OS link but reduce the run's planned qty. For full
-                    # removal, clear OS fields and revert op back to pending.
                     if new_qty <= 0:
                         for f in (
                             "is_job_work", "job_work_supplier_id", "outsource_status",
@@ -10895,7 +10888,6 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
                         ):
                             op.pop(f, None)
                         op["status"] = "pending"
-                        # Drop the OS run row we appended on outsource creation.
                         runs = op.get("runs") or []
                         op["runs"] = [r for r in runs if not (r.get("operator") or "").startswith("OS: ")]
                     else:
@@ -10907,10 +10899,7 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
                     break
             if updated:
                 await db.work_orders.update_one({"id": k[0]}, {"$set": {"operations_status": ops}})
-                restored.append((k[0], k[1], qty_returned))
 
-        # Sync SC-level reference arrays: if a WO has no remaining lines on
-        # this SC, drop it from reference_wo_ids / reference_operation_seqs.
         remaining_wo_ids = {p.get("wo_id") for p in enriched_jwp if p.get("wo_id")}
         if order.get("reference_wo_ids"):
             update_data["reference_wo_ids"] = [w for w in order["reference_wo_ids"] if w in remaining_wo_ids]
@@ -10975,11 +10964,121 @@ async def confirm_subcontract_order(order_id: str, request: Request):
     return await db.subcontract_orders.find_one({"id": order_id}, {"_id": 0})
 
 
+@jobwork_router.post("/orders/{order_id}/short-close")
+async def short_close_subcontract_order(order_id: str, request: Request):
+    """Admin-only: short-close an in-progress JW SC order.
+
+    Use when a subcontract operation cannot be completed as planned and the
+    user wants to release the source MO operations so the work can resume
+    in-house or be re-outsourced. This is intentionally a manual escalation
+    button (sits next to the row actions for admins only) — not an automatic
+    side-effect of editing the SC (which is non-destructive per user request).
+
+    Behaviour:
+      - SC `status` flipped to `short_closed` (a terminal state).
+      - For each linked WO operation that was outsourced to this SC and has
+        NOT been GRN'd (received_quantity == 0 on the corresponding line):
+          * outsource_* and is_job_work / operator fields cleared.
+          * status reverted to `pending`.
+          * The OS run row (operator starts with "OS: ") is removed.
+      - Operations whose SC line has any received_quantity > 0 are LEFT
+        ALONE — they represent partially-delivered work and must be
+        reconciled via the GRN reversal flow.
+      - Linked draft PO (if any) is also marked cancelled so it doesn't
+        accidentally get confirmed afterwards.
+    """
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can short-close a subcontract order")
+    order = await db.subcontract_orders.find_one({"id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("status") in ("short_closed", "completed", "cancelled"):
+        raise HTTPException(status_code=400, detail=f"Cannot short-close — status is already {order.get('status')}")
+
+    # Build a {wo_id -> {process_name -> received_qty}} lookup so we can
+    # skip operations that already have GRN'd output against them.
+    jwp = order.get("job_work_parts") or []
+    grn_lookup: dict = {}
+    for p in jwp:
+        wid = p.get("wo_id")
+        if not wid:
+            continue
+        pname = (p.get("process_name") or "").strip()
+        rq = p.get("received_quantity") or 0
+        grn_lookup.setdefault(wid, {})[pname] = grn_lookup.get(wid, {}).get(pname, 0) + rq
+
+    # Iterate over every WO this SC references (handles both
+    # reference_wo_id [legacy single] and reference_wo_ids [consolidated]).
+    wo_ids = list(order.get("reference_wo_ids") or [])
+    legacy = order.get("reference_wo_id")
+    if legacy and legacy not in wo_ids:
+        wo_ids.append(legacy)
+    released = []  # [(wo_number, operation_name)]
+    for wid in wo_ids:
+        wo = await db.work_orders.find_one({"id": wid})
+        if not wo:
+            continue
+        ops = wo.get("operations_status") or []
+        any_updated = False
+        for op in ops:
+            op_name = op.get("operation_name") or ""
+            if isinstance(op_name, dict):
+                op_name = op_name.get("name", "")
+            if op.get("outsource_sc_order_id") != order_id:
+                continue
+            received = grn_lookup.get(wid, {}).get(op_name, 0)
+            if received > 0:
+                # Partially / fully GRN'd — must be reconciled via GRN
+                # reversal flow, not by short-close.
+                continue
+            for f in (
+                "is_job_work", "job_work_supplier_id", "outsource_status",
+                "outsource_supplier_name", "outsource_charges",
+                "outsource_sc_order_id", "outsource_sc_order_number",
+                "actual_start", "operator",
+            ):
+                op.pop(f, None)
+            op["status"] = "pending"
+            runs = op.get("runs") or []
+            op["runs"] = [r for r in runs if not (r.get("operator") or "").startswith("OS: ")]
+            any_updated = True
+            released.append((wo.get("wo_number"), op_name))
+        if any_updated:
+            await db.work_orders.update_one({"id": wid}, {"$set": {"operations_status": ops}})
+
+    # Cancel any linked draft PO that hasn't been confirmed yet.
+    cancelled_pos = []
+    async for draft_po in db.purchase_orders.find(
+        {"$or": [{"reference_sc_order_id": order_id}, {"reference_sc_order_ids": order_id}], "status": "draft"},
+        {"_id": 0, "id": 1, "po_number": 1},
+    ):
+        await db.purchase_orders.update_one(
+            {"id": draft_po["id"]},
+            {"$set": {"status": "cancelled", "cancelled_reason": f"SC {order.get('order_number')} short-closed by admin", "cancelled_at": datetime.now(timezone.utc), "cancelled_by": user["id"]}},
+        )
+        cancelled_pos.append(draft_po.get("po_number"))
+
+    await db.subcontract_orders.update_one(
+        {"id": order_id},
+        {"$set": {
+            "status": "short_closed",
+            "short_closed_at": datetime.now(timezone.utc),
+            "short_closed_by": user["id"],
+            "updated_at": datetime.now(timezone.utc),
+        }},
+    )
+    return {
+        "ok": True,
+        "released_operations": [{"wo_number": w, "operation_name": o} for w, o in released],
+        "cancelled_pos": cancelled_pos,
+    }
+
+
 @jobwork_router.post("/create-po")
 async def create_po_from_sc(request: Request, data: dict = Body(...)):
     """Create a single PO from one or multiple SC orders (same supplier)"""
     user = await get_current_user(request)
-    
     # Support single or multiple SC order IDs
     sc_order_ids = data.get("subcontract_order_ids", [])
     if not sc_order_ids:

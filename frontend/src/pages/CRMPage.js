@@ -972,6 +972,8 @@ const QuotationLineRow = React.memo(function QuotationLineRow({
 function QuotationsPanel({ quotations, leads, customers, items, search, onRefresh, canEdit, prefillFromLead, onPrefillConsumed }) {
   const { user } = useAuth();
   const { companySettings } = useCompanySettings();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [waShare, setWaShare] = useState({ open: false, doc: null });
   const [dialog, setDialog] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -1062,6 +1064,32 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
       onPrefillConsumed && onPrefillConsumed();
     }
   }, [prefillFromLead, openDialog, onPrefillConsumed]);
+
+  // Auto-open New Quotation + pre-select customer when returning from the
+  // standalone Customers page (after the user clicked + Add Customer and
+  // saved a new contact). The URL carries `?newCustomerId=<id>`. We strip
+  // the param after consumption so navigating away/back doesn't keep
+  // reopening the dialog.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const newCustomerId = params.get('newCustomerId');
+    if (!newCustomerId) return;
+    const cust = customers.find(c => c.id === newCustomerId);
+    if (!cust) return; // customers list hasn't loaded the new record yet
+    setEditing(null);
+    setForm({
+      ...emptyForm,
+      customer_id: cust.id,
+      customer_name: cust.name || '',
+      contact_person: cust.contact_person || '',
+      email: cust.email || '',
+      phone: cust.phone || '',
+    });
+    setDialog(true);
+    params.delete('newCustomerId');
+    navigate(`${location.pathname}${params.toString() ? `?${params.toString()}` : ''}`, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, customers]);
 
   const addLine = useCallback(() => setForm(f => ({ ...f, lines: [...f.lines, emptyQuotationLine()] })), []);
   const removeLine = useCallback((idx) => setForm(f => ({ ...f, lines: f.lines.length > 1 ? f.lines.filter((_, i) => i !== idx) : f.lines })), []);
@@ -1359,7 +1387,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   {/* Inline + Add and ✎ Edit (Odoo-style) */}
                   <button
                     type="button"
-                    onClick={() => { setQuickPartyEditing(null); setQuickPartyOpen(true); }}
+                    onClick={() => navigate('/customers?action=add&returnTo=quotation')}
                     className="px-2 bg-[#03543F] text-white rounded hover:bg-[#03493A] text-sm"
                     title="Add new customer"
                     data-testid="quotation-customer-add"
