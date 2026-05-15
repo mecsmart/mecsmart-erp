@@ -23,6 +23,11 @@ export default function SuppliersPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const [suppliers, setSuppliers] = useState([]);
+  // Persisted grid/table view-mode toggle — same UX as Customers page.
+  const [viewMode, setViewMode] = useState(() => {
+    try { return localStorage.getItem('suppliers_view_mode') || 'grid'; } catch { return 'grid'; }
+  });
+  useEffect(() => { try { localStorage.setItem('suppliers_view_mode', viewMode); } catch {} }, [viewMode]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
@@ -49,12 +54,14 @@ export default function SuppliersPage() {
   });
 
   const [states, setStates] = useState([]);
+  const getStateName = (code) => {
+    const s = (states || []).find(x => x.code === code);
+    return s?.name || code || '';
+  };
+  const canEdit = hasPermission('suppliers', 'create') || hasPermission('suppliers', 'edit') || user?.role === 'admin';
+  const canDelete = hasPermission('suppliers', 'delete') || user?.role === 'admin';
   const [gstinLookupLoading, setGstinLookupLoading] = useState(false);
   const [gstinLookupError, setGstinLookupError] = useState('');
-  // Permission-driven visibility: admin always allowed, else granular permissions.
-  const canEdit = user?.role === 'admin'
-    || hasPermission('suppliers', 'create')
-    || hasPermission('suppliers', 'edit');
 
   useEffect(() => {
     fetchSuppliers();
@@ -275,6 +282,11 @@ export default function SuppliersPage() {
           {(statusFilter || supplierSearch) && (
             <button onClick={() => { setStatusFilter(''); setSupplierSearch(''); }} className="text-[10px] text-[#9B1C1C] hover:underline">Clear</button>
           )}
+          {/* Grid / Table view toggle — view preference persists. */}
+          <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden text-xs" data-testid="supplier-view-toggle">
+            <button type="button" onClick={() => setViewMode('grid')} className={`px-2 py-1 ${viewMode === 'grid' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`} data-testid="supplier-view-grid" title="Grid view">Grid</button>
+            <button type="button" onClick={() => setViewMode('table')} className={`px-2 py-1 border-l border-[#D1D5DB] ${viewMode === 'table' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`} data-testid="supplier-view-table" title="Table view">Table</button>
+          </div>
         </div>
         {canEdit && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => {
@@ -532,6 +544,54 @@ export default function SuppliersPage() {
           <Truck className="w-12 h-12 mb-2 text-[#9CA3AF]" />
           <p>No suppliers found</p>
         </div>
+      ) : viewMode === 'table' ? (
+        (() => {
+          const q = (supplierSearch || '').toLowerCase().trim();
+          const list = !q ? suppliers : suppliers.filter(s =>
+            s.name?.toLowerCase().includes(q) || s.code?.toLowerCase().includes(q) || s.contact_person?.toLowerCase().includes(q) || s.gstin?.toLowerCase().includes(q)
+          );
+          return (
+            <div className="card-flat overflow-x-auto" data-testid="suppliers-table-view">
+              <table className="w-full text-xs">
+                <thead className="bg-[#F3F4F6] text-[#374151]">
+                  <tr>
+                    <th className="text-left px-2 py-2">Code</th>
+                    <th className="text-left px-2 py-2">Name</th>
+                    <th className="text-left px-2 py-2">GSTIN</th>
+                    <th className="text-left px-2 py-2">Contact</th>
+                    <th className="text-left px-2 py-2">Phone</th>
+                    <th className="text-left px-2 py-2">City / State</th>
+                    <th className="text-center px-2 py-2">Rating</th>
+                    <th className="text-center px-2 py-2">Status</th>
+                    {canEdit && <th className="text-center px-2 py-2 w-20">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map(s => (
+                    <tr key={s.id} className="border-t border-[#E5E7EB] hover:bg-[#F9FAFB]" data-testid={`supplier-row-${s.code}`}>
+                      <td className="px-2 py-1.5 mono">{s.code}</td>
+                      <td className="px-2 py-1.5 font-medium">{s.name}</td>
+                      <td className="px-2 py-1.5 mono">{s.gstin || '-'}</td>
+                      <td className="px-2 py-1.5">{s.contact_person || '-'}</td>
+                      <td className="px-2 py-1.5">{s.phone || '-'}</td>
+                      <td className="px-2 py-1.5">{[s.city, s.state || getStateName(s.state_code)].filter(Boolean).join(', ') || '-'}</td>
+                      <td className="px-2 py-1.5 text-center">{s.rating ? '★'.repeat(s.rating) : '-'}</td>
+                      <td className="px-2 py-1.5 text-center">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${s.status === 'active' ? 'bg-[#DEF7EC] text-[#03543F]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>{s.status}</span>
+                      </td>
+                      {canEdit && (
+                        <td className="px-2 py-1.5 text-center">
+                          <button onClick={() => handleEdit(s)} className="text-[#1D3557] hover:bg-[#F3F4F6] p-1 rounded" data-testid={`edit-supplier-${s.code}`}><Edit2 className="w-3.5 h-3.5" /></button>
+                          {canDelete && <button onClick={() => handleDelete(s)} className="text-[#9B1C1C] hover:bg-[#FDE8E8] p-1 rounded ml-1" data-testid={`delete-supplier-${s.code}`}><Trash2 className="w-3.5 h-3.5" /></button>}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {suppliers.filter(s => {

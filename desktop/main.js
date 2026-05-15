@@ -214,6 +214,19 @@ function createMainWindow(serverUrl) {
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
+  // CRITICAL: Force-clear the HTTP cache before loading the server URL.
+  // Electron caches the React bundle aggressively across launches — once
+  // the bundle is cached, the desktop app continues to render the OLD
+  // version even after the on-prem React build is updated on the server.
+  // Users reported "Edit not working" (typing into qty/price/etc. produced
+  // no state change) because the cached bundle was missing the post-iter-120
+  // callback fixes. Clearing the cache on every launch guarantees the latest
+  // build is fetched. Small one-time download cost (~few hundred KB),
+  // negligible on LAN.
+  try {
+    mainWindow.webContents.session.clearCache().catch(() => {});
+  } catch { /* clearCache may not exist on older Electron — ignore */ }
+
   // Persist window size on resize.
   mainWindow.on('close', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {

@@ -524,7 +524,7 @@ export default function ManufacturingPage() {
           // banner in the dialog already make the consequence clear. Previously a
           // window.confirm() here was silently blocked in the preview iframe, breaking
           // the OS flow entirely.
-          payload = { status: 'in_progress', operator: suppliers.find(s => s.id === opForm.outsource_supplier_id)?.name || 'Outsourced', quantity_completed: opForm.quantity, notes: opForm.notes, is_outsource: true, outsource_supplier_id: opForm.outsource_supplier_id, outsource_charges: opForm.outsource_charges, work_center_id: opForm.work_center_id || '' };
+          payload = { status: 'in_progress', operator: suppliers.find(s => s.id === opForm.outsource_supplier_id)?.name || 'Outsourced', quantity_completed: opForm.quantity, outsource_quantity: opForm.quantity, notes: opForm.notes, is_outsource: true, outsource_supplier_id: opForm.outsource_supplier_id, outsource_charges: opForm.outsource_charges, work_center_id: opForm.work_center_id || '' };
         } else {
           if (!opForm.operator.trim()) { alert('Operator name is required'); return; }
           if (!opForm.work_center_id) { alert('Work Center is required'); return; }

@@ -844,6 +844,11 @@ class WorkOrderOperationUpdate(BaseModel):
     is_outsource: Optional[bool] = None
     outsource_supplier_id: Optional[str] = None
     outsource_charges: Optional[float] = None
+    # PARTIAL OS support — the user can outsource just a subset of the WO's
+    # qty (e.g. 30 of 100 pcs go to vendor; the remaining 70 are still
+    # available to Start in-house). When omitted/zero we fall back to the
+    # full MO qty (legacy behaviour).
+    outsource_quantity: Optional[float] = None
     work_center_id: Optional[str] = None
     process_cost_per_unit: Optional[float] = None
     run_number: Optional[int] = None  # Target specific run when stopping/completing a parallel operator
@@ -7328,6 +7333,17 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             
             supplier = await db.suppliers.find_one({"id": op_data.outsource_supplier_id}, {"_id": 0})
             supplier_name = supplier.get("name", "Outsourced") if supplier else "Outsourced"
+
+            # Partial OS qty handling: if the user entered a smaller qty than
+            # the full MO, only that subset is shipped to the vendor — the
+            # remainder remains on the operation as pending so the user can
+            # still Start it in-house (or outsource it again to a different
+            # vendor later). When omitted or >= MO qty, behave as before
+            # (full operation outsourced).
+            os_qty = float(op_data.outsource_quantity or 0)
+            if os_qty <= 0 or os_qty > mo_qty:
+                os_qty = float(mo_qty)
+            is_partial_os = os_qty < float(mo_qty)
             
             # For operation outsourcing: SC lines = Part/SA item only (NOT RM)
             wo_item = await db.items.find_one({"id": wo.get("item_id")}, {"_id": 0})
@@ -7355,7 +7371,7 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                             outsource_charges = pjwp["charges"]
                             break
             
-            sc_part = {"item_id": wo.get("item_id"), "quantity": mo_qty, "charges": outsource_charges, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost, 2), "process_name": op_name, "wo_id": wo_id}
+            sc_part = {"item_id": wo.get("item_id"), "quantity": os_qty, "charges": outsource_charges, "received_quantity": 0, "bom_rollup_cost": round(bom_rollup_cost, 2), "process_name": op_name, "wo_id": wo_id}
             sc_lines = []  # No RM lines for operation outsourcing — only the part goes and comes back
             
             # Check for existing SC order for same supplier (consolidate across all MOs).
@@ -7396,7 +7412,7 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                 found_jwp = False
                 for jp in jwp:
                     if jp.get("item_id") == wo.get("item_id") and jp.get("process_name", "") == target_op.get("operation_name", ""):
-                        jp["quantity"] += mo_qty
+                        jp["quantity"] += os_qty
                         # charges are per-unit — update only if not already set
                         if not jp.get("charges") and outsource_charges:
                             jp["charges"] = outsource_charges
@@ -7461,13 +7477,18 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             target_op["outsource_sc_order_number"] = sc_order_doc.get("order_number", "")
             target_op["operator"] = f"OS: {supplier_name}"
             target_op["actual_start"] = target_op.get("actual_start") or datetime.now(timezone.utc)
-            target_op["status"] = "in_progress"
-            
+            # For PARTIAL OS we want the user to still be able to Start the
+            # remaining qty in-house. So we leave the operation in `pending`
+            # state when only part of the qty has gone out; only flip to
+            # `in_progress` once the full qty is outsourced.
+            target_op["status"] = "pending" if is_partial_os else "in_progress"
+            target_op["outsourced_quantity"] = (target_op.get("outsourced_quantity") or 0) + os_qty
+
             runs = target_op.get("runs", [])
             runs.append({
                 "run_number": len(runs) + 1,
                 "operator": f"OS: {supplier_name}",
-                "quantity_planned": mo_qty,
+                "quantity_planned": os_qty,
                 "quantity_completed": 0,
                 "started_at": datetime.now(timezone.utc),
                 "ended_at": None,
@@ -10945,19 +10966,38 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
         update_data["job_work_parts"] = enriched_jwp
 
         # ------------------------------------------------------------------
+        # Fix 4 — Block qty INCREASE: a JW SC line's quantity can only be
+        # reduced or kept the same. Increasing would require a new outsource
+        # event on the source MO (so material/process flows stay auditable).
+        # New lines (no matching wo+process pair in existing_jwp) ARE allowed
+        # so a manual SC can grow extra rows.
+        # ------------------------------------------------------------------
+        def _key(p):
+            return (p.get("wo_id") or "", (p.get("process_name") or "").strip())
+        existing_qty_by_key = {}
+        for ex in existing_jwp:
+            k = _key(ex)
+            existing_qty_by_key[k] = existing_qty_by_key.get(k, 0) + (ex.get("quantity") or 0)
+        new_qty_by_key = {}
+        for p in enriched_jwp:
+            k = _key(p)
+            new_qty_by_key[k] = new_qty_by_key.get(k, 0) + (p.get("quantity") or 0)
+        for k, new_qty in new_qty_by_key.items():
+            old_qty = existing_qty_by_key.get(k, 0)
+            if old_qty > 0 and new_qty > old_qty:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot increase quantity on SC line (process '{k[1] or 'N/A'}'). Existing: {old_qty}, requested: {new_qty}. To outsource MORE, start a fresh outsource on the source MO.",
+                )
+
+        # ------------------------------------------------------------------
         # Auto-restore source MO operations when a JW line is REMOVED or qty
         # is REDUCED — so the user can re-outsource to a different vendor
         # without manually editing the MO. Compare existing vs new
         # job_work_parts keyed by (wo_id, process_name). Skip lines that
         # already have received_quantity > 0 (those are mid-flight — admin
-        # must use the dedicated Short Close button on the SC instead).
+        # must use the per-operation Short Close button instead).
         # ------------------------------------------------------------------
-        def _key(p):
-            return (p.get("wo_id") or "", (p.get("process_name") or "").strip())
-        new_by_key = {}
-        for p in enriched_jwp:
-            k = _key(p)
-            new_by_key[k] = new_by_key.get(k, 0) + (p.get("quantity") or 0)
         for old in existing_jwp:
             k = _key(old)
             if not k[0]:
@@ -10965,7 +11005,7 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
             if (old.get("received_quantity") or 0) > 0:
                 continue
             old_qty = old.get("quantity") or 0
-            new_qty = new_by_key.get(k, 0)
+            new_qty = new_qty_by_key.get(k, 0)
             qty_returned = old_qty - new_qty
             if qty_returned <= 0:
                 continue

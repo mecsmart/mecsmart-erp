@@ -4,6 +4,7 @@ import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, XCircle, FileText, Edit2, Printer, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { SearchableSelect } from '../components/SearchableSelect';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -860,20 +861,6 @@ export default function JobWorkPage() {
                               {o.status === 'short_closed' && (
                                 <span className="text-[10px] text-[#9B1C1C] bg-[#FDE8E8] px-2 py-1 rounded font-medium">Short Closed</span>
                               )}
-                              {/* Admin-only Short Close — release source MO ops mid-way.
-                                  Visible only while the SC is in a working state so it
-                                  acts as an emergency stop without polluting the list
-                                  of completed/cancelled orders. */}
-                              {isAdmin && ['confirmed', 'sent', 'in_progress'].includes(o.status) && (
-                                <button
-                                  onClick={() => handleShortCloseSC(o)}
-                                  className="btn-secondary text-xs px-2 py-1 text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]"
-                                  data-testid={`short-close-sc-${o.id}`}
-                                  title="Short Close (admin only) — releases source MO operations"
-                                >
-                                  <XCircle className="w-3 h-3 inline mr-1" />Short Close
-                                </button>
-                              )}
                             </div>
                           </td>
                         </tr>
@@ -1034,10 +1021,16 @@ export default function JobWorkPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-semibold mb-1">Supplier *</label>
-                <Select value={orderForm.supplier_id} onValueChange={v => setOrderForm({...orderForm, supplier_id: v})}>
-                  <SelectTrigger data-testid="jw-supplier-select"><SelectValue placeholder="Select" /></SelectTrigger>
-                  <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.code} - {s.name}</SelectItem>)}</SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={suppliers}
+                  value={orderForm.supplier_id}
+                  onChange={(v) => setOrderForm({ ...orderForm, supplier_id: v })}
+                  getLabel={(s) => s?.name || ''}
+                  getSecondary={(s) => s?.code || ''}
+                  matchFields={['name', 'code', 'gstin', 'phone']}
+                  placeholder="Type supplier name / code / GSTIN…"
+                  testId="jw-supplier-select"
+                />
               </div>
               <div>
                 <label className="block text-sm font-semibold mb-1">Expected Return Date</label>
@@ -1175,10 +1168,16 @@ export default function JobWorkPage() {
             <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2">
                 <label className="block text-sm font-semibold mb-1">Supplier *</label>
-                <Select value={manualDcForm.supplier_id} onValueChange={(v) => setManualDcForm({ ...manualDcForm, supplier_id: v })}>
-                  <SelectTrigger data-testid="manual-dc-supplier"><SelectValue placeholder="Select supplier..." /></SelectTrigger>
-                  <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}{s.gstin ? ` (${s.gstin})` : ''}</SelectItem>)}</SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={suppliers}
+                  value={manualDcForm.supplier_id}
+                  onChange={(v) => setManualDcForm({ ...manualDcForm, supplier_id: v })}
+                  getLabel={(s) => s?.name || ''}
+                  getSecondary={(s) => s?.gstin ? `GSTIN: ${s.gstin}` : (s?.code || '')}
+                  matchFields={['name', 'code', 'gstin', 'phone']}
+                  placeholder="Type supplier name / code / GSTIN…"
+                  testId="manual-dc-supplier"
+                />
               </div>
               <div>
                 <label className="block text-sm font-semibold mb-1">Purpose</label>

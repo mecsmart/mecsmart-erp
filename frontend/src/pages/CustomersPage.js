@@ -11,6 +11,14 @@ export default function CustomersPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
+  // Search + view-mode are pure client-side: filter happens in `filtered`
+  // below, and view-mode (`grid` vs `table`) is persisted to localStorage
+  // so it survives navigation. Default = grid to match existing user habit.
+  const [search, setSearch] = useState('');
+  const [viewMode, setViewMode] = useState(() => {
+    try { return localStorage.getItem('customers_view_mode') || 'grid'; } catch { return 'grid'; }
+  });
+  useEffect(() => { try { localStorage.setItem('customers_view_mode', viewMode); } catch {} }, [viewMode]);
   const [states, setStates] = useState([]);
   const [users, setUsers] = useState([]);  // All users, used to populate the Salesperson multi-select (admin only)
   const [loading, setLoading] = useState(true);
@@ -204,6 +212,35 @@ export default function CustomersPage() {
               </SelectContent>
             </Select>
           )}
+          <div className="relative w-56">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9CA3AF]" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search name / contact / GSTIN…"
+              className="pl-8 pr-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs w-full focus:outline-none focus:border-[#1D3557]"
+              data-testid="customer-search-input"
+            />
+          </div>
+          {/* Grid / Table view toggle — view preference persists across
+              page navigations via localStorage (see CustomersPage state). */}
+          <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden text-xs" data-testid="customer-view-toggle">
+            <button
+              type="button"
+              onClick={() => setViewMode('grid')}
+              className={`px-2 py-1 ${viewMode === 'grid' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+              data-testid="customer-view-grid"
+              title="Grid view"
+            >Grid</button>
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              className={`px-2 py-1 border-l border-[#D1D5DB] ${viewMode === 'table' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+              data-testid="customer-view-table"
+              title="Table view"
+            >Table</button>
+          </div>
         </div>
         {canCreate && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => {
@@ -376,63 +413,119 @@ export default function CustomersPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {loading ? (
-          <div className="col-span-3 flex items-center justify-center h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div></div>
-        ) : customers.length === 0 ? (
-          <div className="col-span-3 flex flex-col items-center justify-center h-48 text-[#4B5563]">
-            <Users className="w-12 h-12 mb-2 text-[#9CA3AF]" />
-            <p>No customers found</p>
-          </div>
-        ) : customers.map(c => (
-          <div key={c.id} className="card-flat p-4 hover:shadow-md transition-shadow" data-testid={`customer-card-${c.code}`}>
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h3 className="font-semibold text-[#1D3557]">{c.name}</h3>
-                <p className="mono text-sm text-[#4B5563]">{c.code}</p>
-              </div>
-              <span className={`status-badge ${c.status === 'active' ? 'bg-[#DEF7EC] text-[#03543F]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>{c.status}</span>
+      {(() => {
+        // Apply client-side search filter — covers name, code, contact,
+        // email, phone, and GSTIN so users can hunt by any of those.
+        const q = (search || '').trim().toLowerCase();
+        const filtered = !q ? customers : customers.filter(c =>
+          (c.name || '').toLowerCase().includes(q)
+          || (c.code || '').toLowerCase().includes(q)
+          || (c.contact_person || '').toLowerCase().includes(q)
+          || (c.email || '').toLowerCase().includes(q)
+          || (c.phone || '').toLowerCase().includes(q)
+          || (c.gstin || '').toLowerCase().includes(q)
+        );
+        if (loading) return (
+          <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div></div>
+        );
+        if (filtered.length === 0) return (
+          <div className="flex flex-col items-center justify-center h-48 text-[#4B5563]"><Users className="w-12 h-12 mb-2 text-[#9CA3AF]" /><p>No customers found</p></div>
+        );
+        if (viewMode === 'table') {
+          return (
+            <div className="card-flat overflow-x-auto" data-testid="customers-table-view">
+              <table className="w-full text-xs">
+                <thead className="bg-[#F3F4F6] text-[#374151]">
+                  <tr>
+                    <th className="text-left px-2 py-2">Code</th>
+                    <th className="text-left px-2 py-2">Name</th>
+                    <th className="text-left px-2 py-2">GSTIN</th>
+                    <th className="text-left px-2 py-2">Contact</th>
+                    <th className="text-left px-2 py-2">Phone</th>
+                    <th className="text-left px-2 py-2">City / State</th>
+                    <th className="text-center px-2 py-2">Status</th>
+                    {canEditAny && <th className="text-center px-2 py-2 w-20">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(c => (
+                    <tr key={c.id} className="border-t border-[#E5E7EB] hover:bg-[#F9FAFB]" data-testid={`customer-row-${c.code}`}>
+                      <td className="px-2 py-1.5 mono">{c.code}</td>
+                      <td className="px-2 py-1.5 font-medium">{c.name}</td>
+                      <td className="px-2 py-1.5 mono">{c.gstin || '-'}</td>
+                      <td className="px-2 py-1.5">{c.contact_person || '-'}</td>
+                      <td className="px-2 py-1.5">{c.phone || '-'}</td>
+                      <td className="px-2 py-1.5">{[c.city, c.state || getStateName(c.state_code)].filter(Boolean).join(', ') || '-'}</td>
+                      <td className="px-2 py-1.5 text-center">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${c.status === 'active' ? 'bg-[#DEF7EC] text-[#03543F]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>{c.status}</span>
+                      </td>
+                      {canEditAny && (
+                        <td className="px-2 py-1.5 text-center">
+                          <button onClick={() => handleEdit(c)} className="text-[#1D3557] hover:bg-[#F3F4F6] p-1 rounded" data-testid={`edit-customer-${c.code}`}><Edit2 className="w-3.5 h-3.5" /></button>
+                          {canDelete && <button onClick={() => handleDelete(c)} className="text-[#9B1C1C] hover:bg-[#FDE8E8] p-1 rounded ml-1" data-testid={`delete-customer-${c.code}`}><Trash2 className="w-3.5 h-3.5" /></button>}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            {c.gstin && (
-              <div className="mb-2 px-2 py-1 bg-[#E1EFFE] rounded-sm">
-                <span className="text-xs text-[#4B5563]">GSTIN: </span>
-                <span className="mono text-sm font-medium text-[#1E429F]">{c.gstin}</span>
-              </div>
-            )}
-            {c.state_code && (
-              <div className="mb-2 flex items-center text-sm text-[#4B5563]">
-                <MapPin className="w-3 h-3 mr-1" />{c.city ? `${c.city}, ` : ''}{c.state || getStateName(c.state_code)}{c.pin_code ? ` - ${c.pin_code}` : ''}
-              </div>
-            )}
-            <div className="space-y-1 text-sm text-[#4B5563]">
-              {c.contact_person && <div className="flex items-center"><Users className="w-3 h-3 mr-2" />{c.contact_person}</div>}
-              {c.phone && <div className="flex items-center"><Phone className="w-3 h-3 mr-2" />{c.phone}</div>}
-              {c.email && <div className="flex items-center"><Mail className="w-3 h-3 mr-2" />{c.email}</div>}
-            </div>
-            {isAdmin && (c.assigned_user_ids || []).length > 0 && (
-              <div className="mt-2 flex items-start gap-1 text-[11px]" data-testid={`customer-salespersons-${c.code}`}>
-                <span className="text-[#6B7280] uppercase tracking-wide shrink-0">Salespersons:</span>
-                <div className="flex flex-wrap gap-1">
-                  {(c.assigned_user_ids || []).map(uid => {
-                    const u = users.find(x => x.id === uid);
-                    return (
-                      <span key={uid} className="inline-flex items-center px-1.5 py-0.5 bg-[#E1EFFE] text-[#1E429F] rounded-sm text-[10px] font-medium">
-                        {u ? (u.name || u.email) : uid.slice(0, 6)}
-                      </span>
-                    );
-                  })}
+          );
+        }
+        // Grid (default)
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filtered.map(c => (
+              <div key={c.id} className="card-flat p-4 hover:shadow-md transition-shadow" data-testid={`customer-card-${c.code}`}>
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold text-[#1D3557]">{c.name}</h3>
+                    <p className="mono text-sm text-[#4B5563]">{c.code}</p>
+                  </div>
+                  <span className={`status-badge ${c.status === 'active' ? 'bg-[#DEF7EC] text-[#03543F]' : 'bg-[#F3F4F6] text-[#4B5563]'}`}>{c.status}</span>
                 </div>
+                {c.gstin && (
+                  <div className="mb-2 px-2 py-1 bg-[#E1EFFE] rounded-sm">
+                    <span className="text-xs text-[#4B5563]">GSTIN: </span>
+                    <span className="mono text-sm font-medium text-[#1E429F]">{c.gstin}</span>
+                  </div>
+                )}
+                {c.state_code && (
+                  <div className="mb-2 flex items-center text-sm text-[#4B5563]">
+                    <MapPin className="w-3 h-3 mr-1" />{c.city ? `${c.city}, ` : ''}{c.state || getStateName(c.state_code)}{c.pin_code ? ` - ${c.pin_code}` : ''}
+                  </div>
+                )}
+                <div className="space-y-1 text-sm text-[#4B5563]">
+                  {c.contact_person && <div className="flex items-center"><Users className="w-3 h-3 mr-2" />{c.contact_person}</div>}
+                  {c.phone && <div className="flex items-center"><Phone className="w-3 h-3 mr-2" />{c.phone}</div>}
+                  {c.email && <div className="flex items-center"><Mail className="w-3 h-3 mr-2" />{c.email}</div>}
+                </div>
+                {isAdmin && (c.assigned_user_ids || []).length > 0 && (
+                  <div className="mt-2 flex items-start gap-1 text-[11px]" data-testid={`customer-salespersons-${c.code}`}>
+                    <span className="text-[#6B7280] uppercase tracking-wide shrink-0">Salespersons:</span>
+                    <div className="flex flex-wrap gap-1">
+                      {(c.assigned_user_ids || []).map(uid => {
+                        const u = users.find(x => x.id === uid);
+                        return (
+                          <span key={uid} className="inline-flex items-center px-1.5 py-0.5 bg-[#E1EFFE] text-[#1E429F] rounded-sm text-[10px] font-medium">
+                            {u ? (u.name || u.email) : uid.slice(0, 6)}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {canEditAny && (
+                  <div className="flex space-x-2 mt-3 pt-3 border-t border-[#E5E7EB]">
+                    <button onClick={() => handleEdit(c)} className="text-[#1D3557] hover:bg-[#F3F4F6] p-1 rounded" data-testid={`edit-customer-${c.code}`}><Edit2 className="w-4 h-4" /></button>
+                    {canDelete && <button onClick={() => handleDelete(c)} className="text-[#9B1C1C] hover:bg-[#FDE8E8] p-1 rounded" data-testid={`delete-customer-${c.code}`}><Trash2 className="w-4 h-4" /></button>}
+                  </div>
+                )}
               </div>
-            )}
-            {canEditAny && (
-              <div className="flex space-x-2 mt-3 pt-3 border-t border-[#E5E7EB]">
-                <button onClick={() => handleEdit(c)} className="text-[#1D3557] hover:bg-[#F3F4F6] p-1 rounded" data-testid={`edit-customer-${c.code}`}><Edit2 className="w-4 h-4" /></button>
-                {canDelete && <button onClick={() => handleDelete(c)} className="text-[#9B1C1C] hover:bg-[#FDE8E8] p-1 rounded" data-testid={`delete-customer-${c.code}`}><Trash2 className="w-4 h-4" /></button>}
-              </div>
-            )}
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })()}
     </div>
   );
 }
