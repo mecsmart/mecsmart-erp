@@ -67,6 +67,14 @@ export function QuickAddPartyDialog({ open, onOpenChange, kind = 'supplier', edi
 
   // Pull supplier/customer details from Appyflow GSTIN API. Same endpoint
   // used by the standalone Suppliers/Customers pages — saves typing.
+  //
+  // RESPONSE SHAPE (from /api/{suppliers,customers}/lookup-gstin):
+  //   {legal_name, trade_name, state_code_from_gstin,
+  //    principal_address: {building, street, locality, city, pin_code,
+  //                        state_name, full}, sandbox_mode, status}
+  // Earlier this method tried `data.state` / `data.city` / `data.pin_code`,
+  // which never matched — fields stayed empty on the PO/Quotation party
+  // dialogs while the standalone Customers/Suppliers pages worked fine.
   const lookupGstin = async () => {
     const g = (form.gstin || '').trim().toUpperCase();
     if (!g || g.length < 15) {
@@ -78,20 +86,29 @@ export function QuickAddPartyDialog({ open, onOpenChange, kind = 'supplier', edi
     try {
       const endpoint = isSupplier ? '/api/suppliers/lookup-gstin' : '/api/customers/lookup-gstin';
       const { data } = await api.post(endpoint, { gstin: g });
-      if (data && data.success !== false) {
-        setForm(f => ({
-          ...f,
-          name: f.name || data.legal_name || data.trade_name || f.name,
-          state: f.state || data.state || f.state,
-          state_code: f.state_code || data.state_code || f.state_code,
-          city: f.city || data.city || f.city,
-          pin_code: f.pin_code || data.pin_code || f.pin_code,
-          address: f.address || data.address || f.address,
-          gstin: g,
-        }));
-        toast.success('GSTIN details fetched');
+      const addr = data?.principal_address || {};
+      // Map state name → 2-letter code from our /api/settings/states list
+      // when the GSTIN-derived code isn't present.
+      let stCode = data?.state_code_from_gstin || '';
+      if (!stCode && addr.state_name) {
+        const m = states.find(s => (s.name || '').toLowerCase() === (addr.state_name || '').toLowerCase());
+        if (m) stCode = m.code;
+      }
+      const composedAddr = [addr.building, addr.street, addr.locality].filter(Boolean).join(', ') || addr.full || '';
+      setForm(f => ({
+        ...f,
+        name: f.name || data?.legal_name || data?.trade_name || f.name,
+        state: f.state || addr.state_name || f.state,
+        state_code: f.state_code || stCode || f.state_code,
+        city: f.city || addr.city || f.city,
+        pin_code: f.pin_code || (addr.pin_code ? String(addr.pin_code).replace(/\D/g, '').slice(0, 6) : '') || f.pin_code,
+        address: f.address || composedAddr,
+        gstin: g,
+      }));
+      if (data?.sandbox_mode) {
+        toast.warning('Appyflow returned a SANDBOX/free-tier sample. Verify or upgrade plan for real data.');
       } else {
-        setGstinLookupError(data?.error || 'Could not fetch GSTIN details');
+        toast.success('GSTIN details fetched');
       }
     } catch (e) {
       setGstinLookupError(e.response?.data?.detail || 'GSTIN lookup failed');

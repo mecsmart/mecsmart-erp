@@ -6168,6 +6168,19 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
     bom = await db.boms.find_one({"parent_item_id": fg_item_id, "status": "active"}, {"_id": 0})
     collected = []
     if bom:
+        # Pre-compute allocations across all open MOs so we can show
+        # planners the FREE stock (current_stock − allocated_by_others).
+        # Read once for the whole set of components.
+        open_mos = await db.work_orders.find(
+            {"materials_reserved": True, "status": {"$in": ["pending", "in_progress"]}, "id": {"$ne": wo_id}},
+            {"_id": 0, "reserved_materials": 1},
+        ).to_list(5000)
+        allocated_by_others: dict = {}
+        for mo in open_mos:
+            for rm in (mo.get("reserved_materials") or []):
+                rid = rm.get("item_id")
+                if rid:
+                    allocated_by_others[rid] = allocated_by_others.get(rid, 0) + (rm.get("allocated_qty") or 0)
         for comp in bom.get("components", []) or []:
             if comp.get("is_alternate"):
                 continue
@@ -6178,6 +6191,10 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
             citem = await db.items.find_one({"id": cid}, {"_id": 0})
             if not citem:
                 continue
+            on_hand = float(citem.get("current_stock") or 0)
+            allocated = float(allocated_by_others.get(cid, 0))
+            available = max(0.0, on_hand - allocated)
+            shortage = max(0.0, comp_qty - available)
             collected.append({
                 "item_id": cid,
                 "item": citem.get("part_number", ""),
@@ -6186,6 +6203,8 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
                 "quantity": comp_qty,
                 "uom": citem.get("unit_of_measure") or citem.get("uom") or "pcs",
                 "unit_cost": float(citem.get("purchase_price") or 0),
+                "available_stock": available,
+                "shortage": shortage,
             })
 
     # Consolidate duplicates (same item listed twice in the BOM) while
@@ -10824,6 +10843,77 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
                 "wo_id": (ex.get("wo_id") if ex else None),
             })
         update_data["job_work_parts"] = enriched_jwp
+
+        # ------------------------------------------------------------------
+        # Restore source MO operations when a JW line is REMOVED or qty is
+        # REDUCED — so the user can re-outsource that work to a different
+        # vendor without manually editing the MO. Compare existing vs new
+        # job_work_parts keyed by (wo_id, process_name). Skip lines that
+        # already have received_quantity > 0 (those have been partially or
+        # fully GRN'd and cannot be safely returned to the source MO).
+        # ------------------------------------------------------------------
+        def _key(p):
+            return (p.get("wo_id") or "", (p.get("process_name") or "").strip())
+        new_by_key = {}
+        for p in enriched_jwp:
+            k = _key(p)
+            new_by_key[k] = new_by_key.get(k, 0) + (p.get("quantity") or 0)
+        restored = []  # [(wo_id, process_name, qty_returned)]
+        for old in existing_jwp:
+            k = _key(old)
+            if not k[0]:  # No source WO — nothing to restore (manual SC).
+                continue
+            if (old.get("received_quantity") or 0) > 0:
+                # Don't reverse anything that's been GRN'd against. Leave the
+                # SC line alone — the user must reverse the GRN first.
+                continue
+            old_qty = old.get("quantity") or 0
+            new_qty = new_by_key.get(k, 0)
+            qty_returned = old_qty - new_qty
+            if qty_returned <= 0:
+                continue
+            wo = await db.work_orders.find_one({"id": k[0]})
+            if not wo:
+                continue
+            ops = wo.get("operations_status") or []
+            updated = False
+            for op in ops:
+                op_name = (op.get("operation_name") or "")
+                if isinstance(op_name, dict):
+                    op_name = op_name.get("name", "")
+                if op.get("outsource_sc_order_id") == order_id and op_name == k[1]:
+                    # Either the line is removed entirely (new_qty == 0) or
+                    # we're only reducing — for partial reductions we keep
+                    # the OS link but reduce the run's planned qty. For full
+                    # removal, clear OS fields and revert op back to pending.
+                    if new_qty <= 0:
+                        for f in (
+                            "is_job_work", "job_work_supplier_id", "outsource_status",
+                            "outsource_supplier_name", "outsource_charges",
+                            "outsource_sc_order_id", "outsource_sc_order_number",
+                            "actual_start", "operator",
+                        ):
+                            op.pop(f, None)
+                        op["status"] = "pending"
+                        # Drop the OS run row we appended on outsource creation.
+                        runs = op.get("runs") or []
+                        op["runs"] = [r for r in runs if not (r.get("operator") or "").startswith("OS: ")]
+                    else:
+                        runs = op.get("runs") or []
+                        for r in runs:
+                            if (r.get("operator") or "").startswith("OS: "):
+                                r["quantity_planned"] = max(0, (r.get("quantity_planned") or 0) - qty_returned)
+                    updated = True
+                    break
+            if updated:
+                await db.work_orders.update_one({"id": k[0]}, {"$set": {"operations_status": ops}})
+                restored.append((k[0], k[1], qty_returned))
+
+        # Sync SC-level reference arrays: if a WO has no remaining lines on
+        # this SC, drop it from reference_wo_ids / reference_operation_seqs.
+        remaining_wo_ids = {p.get("wo_id") for p in enriched_jwp if p.get("wo_id")}
+        if order.get("reference_wo_ids"):
+            update_data["reference_wo_ids"] = [w for w in order["reference_wo_ids"] if w in remaining_wo_ids]
         
         # Only auto-recalculate RM lines if this SC was NOT created via create-sc (smart resolution)
         # SC orders with reference_wo_ids have already been smart-resolved — preserve their lines

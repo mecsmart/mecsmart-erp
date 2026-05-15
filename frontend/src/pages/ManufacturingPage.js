@@ -825,8 +825,7 @@ export default function ManufacturingPage() {
   // Generate a PDF of the Material Requirement list. Mirrors the
   // `printWorkOrder` HTML/CSS so finance / stores users get a familiar layout.
   const printMaterialReq = (wo, materials, company) => {
-    const sym = company?.primary_currency === 'USD' ? '$' : '\u20B9';
-    const totalCost = (materials || []).reduce((s, m) => s + (m.quantity || 0) * (m.unit_cost || 0), 0);
+    const totalShortage = (materials || []).reduce((s, m) => s + (m.shortage || 0), 0);
     const html = `<!DOCTYPE html><html><head><title>Material Requirement - ${wo.wo_number || ''}</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -845,6 +844,8 @@ export default function ManufacturingPage() {
       .text-center { text-align: center; }
       .mono { font-family: 'Courier New', monospace; }
       .total-row { font-weight: bold; background: #f0f4f8 !important; }
+      .short { color: #9B1C1C; font-weight: bold; }
+      .ok { color: #03543F; }
       @media print { body { padding: 10px; } }
     </style></head><body>
     ${buildLetterheadHTML(company || {})}
@@ -856,14 +857,21 @@ export default function ManufacturingPage() {
     </div>
     ${materials.length > 0 ? `
     <table>
-      <thead><tr><th>Part No.</th><th>Material</th><th class="text-right">Qty</th><th>UOM</th><th class="text-right">Unit Cost</th><th class="text-right">Total Cost</th></tr></thead>
-      <tbody>${materials.map(m => `<tr>
+      <thead><tr>
+        <th>Part No.</th><th>Material</th>
+        <th class="text-right">Required</th><th>UOM</th>
+        <th class="text-right">Available Stock</th>
+        <th class="text-right">Shortage</th>
+      </tr></thead>
+      <tbody>${materials.map(m => {
+        const short = m.shortage || 0;
+        return `<tr>
         <td class="mono">${m.item || ''}</td><td>${m.name || ''}</td>
         <td class="text-right mono">${m.quantity}</td><td>${m.uom || 'pcs'}</td>
-        <td class="text-right mono">${sym}${(m.unit_cost || 0).toFixed(2)}</td>
-        <td class="text-right mono">${sym}${(m.quantity * (m.unit_cost || 0)).toFixed(2)}</td>
-      </tr>`).join('')}
-      <tr class="total-row"><td colspan="5" class="text-right">Total Material Cost</td><td class="text-right mono">${sym}${fmtAmt(totalCost)}</td></tr>
+        <td class="text-right mono">${m.available_stock || 0}</td>
+        <td class="text-right mono ${short > 0 ? 'short' : 'ok'}">${short > 0 ? short : '-'}</td>
+      </tr>`;}).join('')}
+      <tr class="total-row"><td colspan="5" class="text-right">Total Shortage</td><td class="text-right mono ${totalShortage > 0 ? 'short' : 'ok'}">${totalShortage > 0 ? fmtAmt(totalShortage) : '-'}</td></tr>
       </tbody>
     </table>` : '<p style="color:#888;margin:10px 0;">No material requirements (no active BOM or zero-quantity components).</p>'}
     </body></html>`;
@@ -2859,27 +2867,26 @@ export default function ManufacturingPage() {
                       <tr>
                         <th className="text-left px-2 py-1.5">Part No.</th>
                         <th className="text-left px-2 py-1.5">Material</th>
-                        <th className="text-right px-2 py-1.5">Qty</th>
+                        <th className="text-right px-2 py-1.5">Required</th>
                         <th className="text-left px-2 py-1.5">UOM</th>
-                        <th className="text-right px-2 py-1.5">Unit Cost</th>
-                        <th className="text-right px-2 py-1.5">Total</th>
+                        <th className="text-right px-2 py-1.5">Available Stock</th>
+                        <th className="text-right px-2 py-1.5">Shortage</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {matReqDialog.materials.map((m, i) => (
-                        <tr key={i} className={i % 2 ? 'bg-[#F9FAFB]' : ''}>
-                          <td className="px-2 py-1 font-mono">{m.item || ''}</td>
-                          <td className="px-2 py-1">{m.name || ''}</td>
-                          <td className="px-2 py-1 text-right font-mono">{m.quantity}</td>
-                          <td className="px-2 py-1">{m.uom || 'pcs'}</td>
-                          <td className="px-2 py-1 text-right font-mono">{(m.unit_cost || 0).toFixed(2)}</td>
-                          <td className="px-2 py-1 text-right font-mono">{((m.quantity || 0) * (m.unit_cost || 0)).toFixed(2)}</td>
-                        </tr>
-                      ))}
-                      <tr className="font-semibold bg-[#F0F4F8]">
-                        <td colSpan={5} className="px-2 py-1.5 text-right">Total Material Cost</td>
-                        <td className="px-2 py-1.5 text-right font-mono">{fmtAmt(matReqDialog.materials.reduce((s, m) => s + (m.quantity || 0) * (m.unit_cost || 0), 0))}</td>
-                      </tr>
+                      {matReqDialog.materials.map((m, i) => {
+                        const shortage = m.shortage || 0;
+                        return (
+                          <tr key={i} className={i % 2 ? 'bg-[#F9FAFB]' : ''}>
+                            <td className="px-2 py-1 font-mono">{m.item || ''}</td>
+                            <td className="px-2 py-1">{m.name || ''}</td>
+                            <td className="px-2 py-1 text-right font-mono">{m.quantity}</td>
+                            <td className="px-2 py-1">{m.uom || 'pcs'}</td>
+                            <td className="px-2 py-1 text-right font-mono">{(m.available_stock || 0)}</td>
+                            <td className={`px-2 py-1 text-right font-mono ${shortage > 0 ? 'text-[#9B1C1C] font-semibold' : 'text-[#03543F]'}`}>{shortage > 0 ? shortage : '-'}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
