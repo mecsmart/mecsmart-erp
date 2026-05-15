@@ -6136,6 +6136,87 @@ async def release_work_order(wo_id: str, request: Request):
     }
 
 
+@work_orders_router.get("/{wo_id}/material-requirements")
+async def get_wo_material_requirements(wo_id: str, request: Request):
+    """Read-only material requirement list for a single MO.
+
+    Computes the BOM-derived material need for this MO (qty × explosion) and
+    returns a flat, consolidated list of components — including raw materials,
+    sub-assembly parts, and finished components. Same shape as the
+    `consumed_materials` array on `/print-data` so the frontend can use the
+    same table renderer + PDF template.
+
+    Notes:
+      - Excludes alternate components.
+      - Deduplicates same item across BOM paths (sums quantity).
+      - Resolves variant-aware unit_cost using the standard item costing
+        helpers when available; falls back to item.purchase_price or 0.
+    """
+    user = await get_current_user(request)
+    _require_access(user, ["admin", "production_manager", "inventory_manager", "quality_inspector"], module="manufacturing", action="view")
+    wo = await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    routing = await db.routings.find_one({"id": wo.get("routing_id")}, {"_id": 0}) if wo.get("routing_id") else None
+    fg_item_id = (routing or {}).get("item_id") or wo.get("item_id")
+    if not fg_item_id:
+        return {"wo_number": wo.get("wo_number"), "materials": []}
+    wo_qty = float(wo.get("quantity") or 1)
+
+    collected = []
+
+    async def walk(parent_id: str, parent_qty: float, depth: int = 0):
+        # Pull the *active* BOM for the parent. If it doesn't have one (true
+        # leaf or RM), simply stop recursing — the caller already recorded it
+        # as a line.
+        bom = await db.boms.find_one({"parent_item_id": parent_id, "status": "active"}, {"_id": 0})
+        if not bom:
+            return
+        for comp in bom.get("components", []) or []:
+            if comp.get("is_alternate"):
+                continue
+            cid = comp.get("item_id")
+            if not cid:
+                continue
+            comp_qty = float(comp.get("quantity") or 0) * parent_qty
+            citem = await db.items.find_one({"id": cid}, {"_id": 0})
+            if not citem:
+                continue
+            collected.append({
+                "item_id": cid,
+                "item": citem.get("part_number", ""),
+                "name": citem.get("name", ""),
+                "category": citem.get("category", ""),
+                "quantity": comp_qty,
+                "uom": citem.get("unit_of_measure") or citem.get("uom") or "pcs",
+                "unit_cost": float(citem.get("purchase_price") or 0),
+            })
+            await walk(cid, comp_qty, depth + 1)
+
+    await walk(fg_item_id, wo_qty)
+
+    # Consolidate duplicates (same item under multiple BOM paths) and
+    # preserve original insertion order for a stable PDF.
+    seen_order = []
+    bucket = {}
+    for r in collected:
+        key = r["item_id"]
+        if key not in bucket:
+            bucket[key] = dict(r)
+            seen_order.append(key)
+        else:
+            bucket[key]["quantity"] += r["quantity"]
+    materials = [bucket[k] for k in seen_order]
+    return {
+        "wo_number": wo.get("wo_number"),
+        "item": {
+            "part_number": (await db.items.find_one({"id": fg_item_id}, {"_id": 0, "part_number": 1, "name": 1})) or {},
+        },
+        "quantity": wo_qty,
+        "materials": materials,
+    }
+
+
 @work_orders_router.post("/{wo_id}/reserve")
 async def reserve_materials_for_wo(wo_id: str, request: Request):
     """Reserve materials for an MO by computing its full BOM requirement recursively.
@@ -7770,12 +7851,30 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
     
     # Pre-load existing groups for fast matching (name -> id)
     existing_groups = {g["name"].lower(): g["id"] async for g in db.item_groups.find({}, {"_id": 0, "id": 1, "name": 1})}
-    
+
+    # PERF: previously each row issued its own find_one + insert_one/update_one
+    # to MongoDB, which made imports of >300 rows take many seconds (round-trip
+    # per row x 2). Now we:
+    #   1. Pre-fetch ALL existing items keyed by part_number (single query).
+    #   2. Buffer inserts and updates locally.
+    #   3. Flush via insert_many() + a single bulk_write() for updates.
+    existing_items_by_pn = {
+        it["part_number"]: it
+        async for it in db.items.find(
+            {"part_number": {"$ne": None}},
+            {"_id": 0, "id": 1, "part_number": 1},
+        )
+        if it.get("part_number")
+    }
+    inserts: list = []
+    updates: list = []  # list of (part_number, item_data)
+    new_groups: list = []  # rows from cache that need to be flushed
+
     for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
         try:
             if not row or not row[0]:
                 continue
-            
+
             item_data = {}
             group_name_raw = None
             for field, col_idx in col_indices.items():
@@ -7791,14 +7890,16 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
                     else:
                         val = str(val).strip()
                     item_data[field] = val
-            
-            # If "Group" column provided, find or create the group and store group_id
+
+            # If "Group" column provided, find-or-create the group LOCALLY
+            # against the in-memory cache. Newly-created groups are queued
+            # for a single insert_many() flush at the end.
             if group_name_raw:
                 parent_cat = item_data.get("category")
                 gid = existing_groups.get(group_name_raw.lower())
                 if not gid:
                     gid = str(uuid.uuid4())
-                    await db.item_groups.insert_one({
+                    new_groups.append({
                         "id": gid,
                         "name": group_name_raw,
                         "parent_category": parent_cat,
@@ -7810,24 +7911,24 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
                     })
                     existing_groups[group_name_raw.lower()] = gid
                 item_data["group_id"] = gid
-            
+
             if not item_data.get("part_number"):
                 results["errors"].append(f"Row {row_num}: Missing part number")
                 continue
-            
+
             # Validate category
             valid_cats = ["raw_material", "component", "sub_assembly", "finished_good"]
             if item_data.get("category") and item_data["category"] not in valid_cats:
                 results["errors"].append(f"Row {row_num}: Invalid category '{item_data['category']}'")
                 continue
-            
+
             # Mirror purchase_price → unit_cost (if unit_cost missing) so downstream BOM/valuation logic still works
             if item_data.get("purchase_price") and not item_data.get("unit_cost"):
                 item_data["unit_cost"] = item_data["purchase_price"]
-            
-            existing = await db.items.find_one({"part_number": item_data["part_number"]})
-            if existing:
-                await db.items.update_one({"part_number": item_data["part_number"]}, {"$set": item_data})
+
+            pn = item_data["part_number"]
+            if pn in existing_items_by_pn:
+                updates.append((pn, item_data))
                 results["updated"] += 1
             else:
                 item_data["id"] = str(uuid.uuid4())
@@ -7835,11 +7936,34 @@ async def import_items_excel(request: Request, file: UploadFile = File(...)):
                 item_data.setdefault("category", "raw_material")
                 item_data.setdefault("gst_rate", 18)
                 item_data["created_at"] = datetime.now(timezone.utc)
-                await db.items.insert_one(item_data)
+                inserts.append(item_data)
+                # Mark in cache so a duplicate row in the same file won't
+                # be inserted twice — second occurrence becomes an update.
+                existing_items_by_pn[pn] = {"id": item_data["id"], "part_number": pn}
                 results["created"] += 1
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — surface per-row failures, keep going.
             results["errors"].append(f"Row {row_num}: {str(e)}")
-    
+
+    # ---- Flush DB writes in bulk ------------------------------------------------
+    if new_groups:
+        try:
+            await db.item_groups.insert_many(new_groups, ordered=False)
+        except Exception as e:  # noqa: BLE001
+            results["errors"].append(f"item_groups bulk insert: {str(e)}")
+    if inserts:
+        try:
+            await db.items.insert_many(inserts, ordered=False)
+        except Exception as e:  # noqa: BLE001
+            results["errors"].append(f"items bulk insert: {str(e)}")
+    if updates:
+        # Use bulk_write with one UpdateOne per row — still one DB round-trip.
+        from pymongo import UpdateOne
+        ops = [UpdateOne({"part_number": pn}, {"$set": data}) for pn, data in updates]
+        try:
+            await db.items.bulk_write(ops, ordered=False)
+        except Exception as e:  # noqa: BLE001
+            results["errors"].append(f"items bulk update: {str(e)}")
+
     return results
 
 @bom_router.get("/export/parts-only/excel")

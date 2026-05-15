@@ -913,6 +913,62 @@ function emptyQuotationLine() {
   return { item_id: '', description: '', hsn_code: '', quantity: 1, uom: 'Nos', rate: 0, discount_pct: 0, gst_rate: 18 };
 }
 
+// Memoized line row for the Quotation editor. Extracted so a keystroke on
+// one row no longer re-renders all rows (each row was previously paying the
+// full cost of a 1200-item SearchableItemSelect on every keystroke). The
+// comparator stays strict — re-render only when this row's data, items
+// reference, or callback refs change.
+const QuotationLineRow = React.memo(function QuotationLineRow({
+  line, idx, items, currency, formatCurrency, canRemove, updateLine, removeLine, onPickItem, rowProps,
+}) {
+  const gross = (parseFloat(line.quantity) || 0) * (parseFloat(line.rate) || 0);
+  const disc = gross * ((parseFloat(line.discount_pct) || 0) / 100);
+  const amount = gross - disc;
+  return (
+    <tr data-testid={`quotation-line-${idx}`} {...rowProps}>
+      <td className="row-num drag-handle" title="Drag to reorder">{idx + 1}</td>
+      <td>
+        <div className="px-1 py-1 space-y-1">
+          <SearchableItemSelect
+            items={items}
+            value={line.item_id}
+            onChange={(v) => { if (!v) updateLine(idx, { item_id: '' }); else onPickItem(idx, v); }}
+            placeholder="Type part no / name…"
+            showCategory={false}
+            testId={`quotation-line-item-${idx}`}
+          />
+          <textarea rows={2} className="grid-textarea" value={line.description} onChange={e => updateLine(idx, { description: e.target.value })} placeholder="Description (auto-filled — editable)" data-testid={`quotation-line-desc-${idx}`} />
+        </div>
+      </td>
+      <td><input type="text" className="grid-input mono" value={line.hsn_code || ''} onChange={e => updateLine(idx, { hsn_code: e.target.value })} data-testid={`quotation-line-hsn-${idx}`} placeholder="HSN" /></td>
+      <td><input type="number" step="0.01" className="grid-input mono num" value={line.quantity} onChange={e => updateLine(idx, { quantity: e.target.value })} data-testid={`quotation-line-qty-${idx}`} /></td>
+      <td><input type="text" className="grid-input" value={line.uom} onChange={e => updateLine(idx, { uom: e.target.value })} /></td>
+      <td><input type="number" step="0.01" className="grid-input mono num" value={line.rate} onChange={e => updateLine(idx, { rate: e.target.value })} data-testid={`quotation-line-rate-${idx}`} /></td>
+      <td><input type="number" step="0.01" className="grid-input mono num" value={line.discount_pct || 0} onChange={e => updateLine(idx, { discount_pct: e.target.value })} data-testid={`quotation-line-discount-${idx}`} /></td>
+      <td><input type="number" step="0.01" className="grid-input mono num" value={line.gst_rate} onChange={e => updateLine(idx, { gst_rate: e.target.value })} /></td>
+      <td className="static-cell amount">{formatCurrency(amount, currency)}</td>
+      <td className="remove-cell">
+        {canRemove && (
+          <button className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded p-1" onClick={() => removeLine(idx)} title="Remove" data-testid={`quotation-line-remove-${idx}`}><X className="w-3 h-3" /></button>
+        )}
+      </td>
+    </tr>
+  );
+}, (prev, next) => (
+  prev.line === next.line
+  && prev.idx === next.idx
+  && prev.items === next.items
+  && prev.currency === next.currency
+  && prev.canRemove === next.canRemove
+  && prev.formatCurrency === next.formatCurrency
+  && prev.updateLine === next.updateLine
+  && prev.removeLine === next.removeLine
+  && prev.onPickItem === next.onPickItem
+  // rowProps from useDraggableRows is created fresh per render; do NOT include
+  // it in the comparator or the memo never hits. The DnD handlers reference
+  // the latest `next` array via closure capture, so this is safe.
+));
+
 function QuotationsPanel({ quotations, leads, customers, items, search, onRefresh, canEdit, prefillFromLead, onPrefillConsumed }) {
   const { user } = useAuth();
   const { companySettings } = useCompanySettings();
@@ -1007,25 +1063,31 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     }
   }, [prefillFromLead, openDialog, onPrefillConsumed]);
 
-  const addLine = () => setForm(f => ({ ...f, lines: [...f.lines, emptyQuotationLine()] }));
-  const removeLine = (idx) => setForm(f => ({ ...f, lines: f.lines.length > 1 ? f.lines.filter((_, i) => i !== idx) : f.lines }));
-  const updateLine = (idx, patch) => setForm(f => ({ ...f, lines: f.lines.map((l, i) => i === idx ? { ...l, ...patch } : l) }));
+  const addLine = useCallback(() => setForm(f => ({ ...f, lines: [...f.lines, emptyQuotationLine()] })), []);
+  const removeLine = useCallback((idx) => setForm(f => ({ ...f, lines: f.lines.length > 1 ? f.lines.filter((_, i) => i !== idx) : f.lines })), []);
+  // Stable updater — wrapped so the memoized QuotationLineRow doesn't re-render
+  // every keystroke on other rows. Functional setState avoids closing over a
+  // stale `form` snapshot.
+  const updateLine = useCallback((idx, patch) => setForm(f => ({ ...f, lines: f.lines.map((l, i) => i === idx ? { ...l, ...patch } : l) })), []);
   const { getRowProps: getQuotationRowProps } = useDraggableRows(
     form.lines,
     (next) => setForm(f => ({ ...f, lines: next })),
   );
-  const onPickItem = (idx, itemId) => {
-    const it = items.find(i => i.id === itemId);
-    updateLine(idx, {
-      item_id: itemId,
-      // Pre-fill the editable Description column from items.description if present; else leave empty/editable
-      description: it?.description || '',
-      hsn_code: it?.hsn_code || '',
-      uom: it?.uom || 'Nos',
-      rate: it?.sale_price || it?.unit_cost || 0,
-      gst_rate: it?.gst_rate ?? 18,
+  const onPickItem = useCallback((idx, itemId) => {
+    setForm(f => {
+      const it = (items || []).find(i => i.id === itemId);
+      const lines = f.lines.map((line, i) => i === idx ? {
+        ...line,
+        item_id: itemId,
+        description: it?.description || '',
+        hsn_code: it?.hsn_code || '',
+        uom: it?.uom || 'Nos',
+        rate: it?.sale_price || it?.unit_cost || 0,
+        gst_rate: it?.gst_rate ?? 18,
+      } : line);
+      return { ...f, lines };
     });
-  };
+  }, [items]);
 
   const totals = React.useMemo(() => {
     let sub = 0, gst = 0, discount = 0;
@@ -1430,41 +1492,21 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                     </tr>
                   </thead>
                   <tbody>
-                    {form.lines.map((l, idx) => {
-                      const gross = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
-                      const disc = gross * ((parseFloat(l.discount_pct) || 0) / 100);
-                      const amount = gross - disc;
-                      return (
-                        <tr key={idx} data-testid={`quotation-line-${idx}`} {...getQuotationRowProps(idx)}>
-                          <td className="row-num drag-handle" title="Drag to reorder">{idx + 1}</td>
-                          <td>
-                            <div className="px-1 py-1 space-y-1">
-                              <SearchableItemSelect
-                                items={items}
-                                value={l.item_id}
-                                onChange={(v) => { if (!v) updateLine(idx, { item_id: '' }); else onPickItem(idx, v); }}
-                                placeholder="Type part no / name…"
-                                showCategory={false}
-                                testId={`quotation-line-item-${idx}`}
-                              />
-                              <textarea rows={2} className="grid-textarea" value={l.description} onChange={e => updateLine(idx, { description: e.target.value })} placeholder="Description (auto-filled — editable)" data-testid={`quotation-line-desc-${idx}`} />
-                            </div>
-                          </td>
-                          <td><input type="text" className="grid-input mono" value={l.hsn_code || ''} onChange={e => updateLine(idx, { hsn_code: e.target.value })} data-testid={`quotation-line-hsn-${idx}`} placeholder="HSN" /></td>
-                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.quantity} onChange={e => updateLine(idx, { quantity: e.target.value })} data-testid={`quotation-line-qty-${idx}`} /></td>
-                          <td><input type="text" className="grid-input" value={l.uom} onChange={e => updateLine(idx, { uom: e.target.value })} /></td>
-                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.rate} onChange={e => updateLine(idx, { rate: e.target.value })} data-testid={`quotation-line-rate-${idx}`} /></td>
-                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.discount_pct || 0} onChange={e => updateLine(idx, { discount_pct: e.target.value })} data-testid={`quotation-line-discount-${idx}`} /></td>
-                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.gst_rate} onChange={e => updateLine(idx, { gst_rate: e.target.value })} /></td>
-                          <td className="static-cell amount">{formatCurrency(amount, form.currency)}</td>
-                          <td className="remove-cell">
-                            {form.lines.length > 1 && (
-                              <button className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded p-1" onClick={() => removeLine(idx)} title="Remove" data-testid={`quotation-line-remove-${idx}`}><X className="w-3 h-3" /></button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {form.lines.map((l, idx) => (
+                      <QuotationLineRow
+                        key={idx}
+                        line={l}
+                        idx={idx}
+                        items={items}
+                        currency={form.currency}
+                        formatCurrency={formatCurrency}
+                        canRemove={form.lines.length > 1}
+                        updateLine={updateLine}
+                        removeLine={removeLine}
+                        onPickItem={onPickItem}
+                        rowProps={getQuotationRowProps(idx)}
+                      />
+                    ))}
                   </tbody>
                   <tfoot>
                     <tr>

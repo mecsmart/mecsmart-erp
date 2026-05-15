@@ -22,6 +22,7 @@ import {
   PackageCheck,
   PackageX,
   Filter,
+  FileText,
   X as XIcon
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
@@ -29,6 +30,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
+import { toast } from 'sonner';
 import { fmtAmt } from '../utils/numberFormat';
 
 // Patch a single WO row in the flat array — used after preview-confirmed
@@ -90,6 +92,10 @@ export default function ManufacturingPage() {
   
   // MO Start result dialog (replaces browser alert)
   const [startResultDialog, setStartResultDialog] = useState({ open: false, success: null, data: null });
+  // Material Requirement dialog — read-only BOM-derived list for a single MO.
+  // Same shape as `consumed_materials` so we can reuse the same table renderer
+  // and PDF template. Triggered from the per-MO actions cell ("Material Req").
+  const [matReqDialog, setMatReqDialog] = useState({ open: false, loading: false, wo: null, materials: [], company: null });
   const [opForm, setOpForm] = useState({ operator: '', quantity: 0, quality_result: 'accept', reject_qty: 0, rework_qty: 0, notes: '', is_outsource: false, outsource_supplier_id: '', outsource_charges: 0, process_cost_per_unit: 0, run_number: null });
 
   // Subcontract dialog
@@ -790,6 +796,79 @@ export default function ManufacturingPage() {
       const q = moSearch.toLowerCase();
       return wo.wo_number?.toLowerCase().includes(q) || wo.item?.part_number?.toLowerCase().includes(q) || wo.item?.name?.toLowerCase().includes(q);
     });
+
+  // Open the Material Requirement dialog for a given MO. Pulls the BOM-
+  // derived list from the new read-only endpoint and the company letterhead
+  // for the PDF render path. We reuse `/print-data` for company info so the
+  // PDF stays visually identical to the Print MO output.
+  const openMaterialReq = async (wo) => {
+    setMatReqDialog({ open: true, loading: true, wo, materials: [], company: null });
+    try {
+      const [reqRes, printRes] = await Promise.all([
+        api.get(`/api/work-orders/${wo.id}/material-requirements`),
+        api.get(`/api/work-orders/${wo.id}/print-data`),
+      ]);
+      setMatReqDialog({
+        open: true,
+        loading: false,
+        wo,
+        materials: reqRes.data?.materials || [],
+        company: printRes.data?.company || {},
+      });
+    } catch (e) {
+      console.error('material-requirements fetch failed:', e);
+      toast.error('Could not load material requirements');
+      setMatReqDialog({ open: false, loading: false, wo: null, materials: [], company: null });
+    }
+  };
+
+  // Generate a PDF of the Material Requirement list. Mirrors the
+  // `printWorkOrder` HTML/CSS so finance / stores users get a familiar layout.
+  const printMaterialReq = (wo, materials, company) => {
+    const sym = company?.primary_currency === 'USD' ? '$' : '\u20B9';
+    const totalCost = (materials || []).reduce((s, m) => s + (m.quantity || 0) * (m.unit_cost || 0), 0);
+    const html = `<!DOCTYPE html><html><head><title>Material Requirement - ${wo.wo_number || ''}</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #111; padding: 20px; }
+      ${letterheadCSS('#1D3557')}
+      .title { font-size: 14px; font-weight: bold; color: #1D3557; margin: 10px 0 5px; text-transform: uppercase; }
+      .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px; }
+      .info-box { border: 1px solid #ddd; padding: 6px 8px; }
+      .info-box label { font-size: 9px; color: #888; text-transform: uppercase; display: block; }
+      .info-box span { font-weight: 600; font-size: 11px; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+      th { background: #1D3557; color: white; padding: 5px 8px; text-align: left; font-size: 10px; text-transform: uppercase; }
+      td { padding: 5px 8px; border-bottom: 1px solid #ddd; font-size: 11px; }
+      tr:nth-child(even) { background: #f9f9f9; }
+      .text-right { text-align: right; }
+      .text-center { text-align: center; }
+      .mono { font-family: 'Courier New', monospace; }
+      .total-row { font-weight: bold; background: #f0f4f8 !important; }
+      @media print { body { padding: 10px; } }
+    </style></head><body>
+    ${buildLetterheadHTML(company || {})}
+    <div class="title">Material Requirement: ${wo.wo_number || ''}</div>
+    <div class="info-grid">
+      <div class="info-box"><label>Item</label><span class="mono">${wo.item?.part_number || ''}</span> - ${wo.item?.name || ''}</div>
+      <div class="info-box"><label>MO Quantity</label><span class="mono">${wo.quantity || 0}</span></div>
+      <div class="info-box"><label>Status</label><span>${(wo.status || '').replace('_',' ').toUpperCase()}</span></div>
+    </div>
+    ${materials.length > 0 ? `
+    <table>
+      <thead><tr><th>Part No.</th><th>Material</th><th class="text-right">Qty</th><th>UOM</th><th class="text-right">Unit Cost</th><th class="text-right">Total Cost</th></tr></thead>
+      <tbody>${materials.map(m => `<tr>
+        <td class="mono">${m.item || ''}</td><td>${m.name || ''}</td>
+        <td class="text-right mono">${m.quantity}</td><td>${m.uom || 'pcs'}</td>
+        <td class="text-right mono">${sym}${(m.unit_cost || 0).toFixed(2)}</td>
+        <td class="text-right mono">${sym}${(m.quantity * (m.unit_cost || 0)).toFixed(2)}</td>
+      </tr>`).join('')}
+      <tr class="total-row"><td colspan="5" class="text-right">Total Material Cost</td><td class="text-right mono">${sym}${fmtAmt(totalCost)}</td></tr>
+      </tbody>
+    </table>` : '<p style="color:#888;margin:10px 0;">No material requirements (no active BOM or zero-quantity components).</p>'}
+    </body></html>`;
+    downloadHtmlAsPdf(html, `MaterialReq-${wo.wo_number || wo.id}.pdf`);
+  };
 
   const printWorkOrder = async (wo) => {
     try {
@@ -1600,20 +1679,39 @@ export default function ManufacturingPage() {
                           </td>
                           <td>
                             {(() => {
-                              let names = [];
-                              if (wo.routing?.name) {
-                                names = [wo.routing.name];
-                              } else {
-                                names = (wo.operations_status || [])
-                                  .map(op => typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : (op.operation_name || ''))
-                                  .filter(Boolean);
+                              const opsList = (wo.operations_status || []);
+                              // Build [name, status] pairs. Prefer ops_status so
+                              // we can show per-operation status pills; fall back
+                              // to wo.routing.name (no status known) when there
+                              // are no ops_status entries.
+                              let entries = opsList.map(op => ({
+                                name: typeof op.operation_name === 'object' && op.operation_name !== null
+                                  ? (op.operation_name.name || '')
+                                  : (op.operation_name || ''),
+                                status: (op.status || '').toLowerCase(),
+                              })).filter(e => e.name);
+                              if (!entries.length && wo.routing?.name) {
+                                entries = [{ name: wo.routing.name, status: '' }];
                               }
-                              if (!names.length) return <span className="text-xs text-[#9CA3AF]">-</span>;
+                              if (!entries.length) return <span className="text-xs text-[#9CA3AF]">-</span>;
+                              const statusPill = (st) => {
+                                if (st === 'completed' || st === 'done') return { label: 'Done', cls: 'bg-[#DEF7EC] text-[#03543F]' };
+                                if (st === 'in_progress' || st === 'started') return { label: 'In Progress', cls: 'bg-[#FEF3C7] text-[#92400E]' };
+                                if (st === 'paused') return { label: 'Paused', cls: 'bg-[#E5E7EB] text-[#374151]' };
+                                if (st === 'pending' || st === '' ) return { label: 'Pending', cls: 'bg-[#F3F4F6] text-[#6B7280]' };
+                                return { label: st, cls: 'bg-[#F3F4F6] text-[#6B7280]' };
+                              };
                               return (
                                 <div className="flex flex-col gap-0.5">
-                                  {names.map((n, ri) => (
-                                    <span key={ri} className="text-[11px] text-[#1E429F] font-medium leading-tight">{n}</span>
-                                  ))}
+                                  {entries.map((e, ri) => {
+                                    const p = statusPill(e.status);
+                                    return (
+                                      <div key={ri} className="flex items-center gap-1.5">
+                                        <span className="text-[11px] text-[#1E429F] font-medium leading-tight">{e.name}</span>
+                                        <span className={`text-[9px] px-1 py-px rounded leading-tight ${p.cls}`} title={`Routing status: ${p.label}`}>{p.label}</span>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               );
                             })()}
@@ -1641,7 +1739,11 @@ export default function ManufacturingPage() {
                               <span className="text-xs text-[#6B7280]">Covered by parent SC</span>
                             ) : (
                             <div className="flex items-center flex-wrap gap-1">
-                              {/* RESERVED badge removed — auto-reserve on MO create is implicit; no need to clutter the UI. */}
+                              {/* Material Req — BOM-derived demand for THIS MO. Read-only, always
+                                  visible (regardless of status) so users can sanity-check what
+                                  the MO will consume. Triggers a small dialog with a PDF
+                                  download button. */}
+                              <button onClick={() => openMaterialReq(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`material-req-wo-${wo.id}`} title="Material Requirement (read-only)"><FileText className="w-3 h-3 inline mr-0.5" />Mat. Req</button>
                               {canDelete && ['pending', 'released'].includes(wo.status) && !wo.parent_wo_id && (
                                 <button onClick={() => {
                                   if (window.confirm(`Cancel Manufacturing Order ${wo.wo_number}?\n\nThis releases any reserved child stock back. Cannot be undone.`)) {
@@ -2714,6 +2816,85 @@ export default function ManufacturingPage() {
               )}
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Material Requirement Dialog — read-only BOM-derived material list
+          for a single MO. Mirrors the consumption list shape so users can
+          compare planned-vs-actual at a glance. PDF download uses the same
+          letterhead template. */}
+      <Dialog open={matReqDialog.open} onOpenChange={(o) => { if (!o) setMatReqDialog({ open: false, loading: false, wo: null, materials: [], company: null }); }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-[Chivo] flex items-center gap-2">
+              <FileText className="w-5 h-5 text-[#1D3557]" />
+              Material Requirement — {matReqDialog.wo?.wo_number || ''}
+            </DialogTitle>
+          </DialogHeader>
+          {matReqDialog.loading ? (
+            <div className="py-8 text-center text-sm text-[#6B7280]">Computing requirements…</div>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="border border-[#E5E7EB] rounded p-2">
+                  <div className="text-[10px] uppercase text-[#9CA3AF]">Item</div>
+                  <div className="font-mono">{matReqDialog.wo?.item?.part_number || ''}</div>
+                  <div className="text-[#374151]">{matReqDialog.wo?.item?.name || ''}</div>
+                </div>
+                <div className="border border-[#E5E7EB] rounded p-2">
+                  <div className="text-[10px] uppercase text-[#9CA3AF]">MO Quantity</div>
+                  <div className="font-mono text-base">{matReqDialog.wo?.quantity || 0}</div>
+                </div>
+                <div className="border border-[#E5E7EB] rounded p-2">
+                  <div className="text-[10px] uppercase text-[#9CA3AF]">Status</div>
+                  <div>{(matReqDialog.wo?.status || '').replace('_', ' ').toUpperCase()}</div>
+                </div>
+              </div>
+              {matReqDialog.materials.length === 0 ? (
+                <div className="py-4 text-sm text-[#6B7280] text-center">No active BOM or zero-quantity components.</div>
+              ) : (
+                <div className="overflow-x-auto border border-[#E5E7EB] rounded">
+                  <table className="w-full text-xs">
+                    <thead className="bg-[#1D3557] text-white">
+                      <tr>
+                        <th className="text-left px-2 py-1.5">Part No.</th>
+                        <th className="text-left px-2 py-1.5">Material</th>
+                        <th className="text-right px-2 py-1.5">Qty</th>
+                        <th className="text-left px-2 py-1.5">UOM</th>
+                        <th className="text-right px-2 py-1.5">Unit Cost</th>
+                        <th className="text-right px-2 py-1.5">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {matReqDialog.materials.map((m, i) => (
+                        <tr key={i} className={i % 2 ? 'bg-[#F9FAFB]' : ''}>
+                          <td className="px-2 py-1 font-mono">{m.item || ''}</td>
+                          <td className="px-2 py-1">{m.name || ''}</td>
+                          <td className="px-2 py-1 text-right font-mono">{m.quantity}</td>
+                          <td className="px-2 py-1">{m.uom || 'pcs'}</td>
+                          <td className="px-2 py-1 text-right font-mono">{(m.unit_cost || 0).toFixed(2)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{((m.quantity || 0) * (m.unit_cost || 0)).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                      <tr className="font-semibold bg-[#F0F4F8]">
+                        <td colSpan={5} className="px-2 py-1.5 text-right">Total Material Cost</td>
+                        <td className="px-2 py-1.5 text-right font-mono">{fmtAmt(matReqDialog.materials.reduce((s, m) => s + (m.quantity || 0) * (m.unit_cost || 0), 0))}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <button onClick={() => setMatReqDialog({ open: false, loading: false, wo: null, materials: [], company: null })} className="btn-secondary text-sm" data-testid="material-req-close">Close</button>
+                <button
+                  onClick={() => printMaterialReq(matReqDialog.wo, matReqDialog.materials, matReqDialog.company)}
+                  className="btn-primary text-sm flex items-center gap-1"
+                  disabled={matReqDialog.materials.length === 0}
+                  data-testid="material-req-print"
+                ><Printer className="w-3.5 h-3.5" /> Download PDF</button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

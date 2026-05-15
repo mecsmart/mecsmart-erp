@@ -135,7 +135,27 @@ export async function downloadHtmlAsPdf(html, filename, options = {}) {
   document.body.appendChild(iframe);
 
   const cleanup = () => {
-    setTimeout(() => { try { iframe.remove(); } catch { /* noop */ } }, 1000);
+    // CRITICAL: `iframe.contentWindow.print()` is non-blocking in modern
+    // Chromium/Edge/Firefox when "Save as PDF" is the destination — the
+    // browser opens a Print Preview UI and only writes the PDF when the
+    // user actually clicks "Save". If we remove the iframe before that
+    // happens, the print job loses its source DOM and the saved file is
+    // 0 bytes (reported on Quotations specifically because their cover
+    // page makes users linger longer in the Print Preview).
+    //
+    // The reliable signal is the `afterprint` event, which fires on the
+    // iframe's window once the dialog closes (regardless of Save/Cancel).
+    // We listen and only then remove the iframe. A 5-minute fallback
+    // ensures the iframe doesn't leak if the event never fires.
+    let removed = false;
+    const remove = () => {
+      if (removed) return;
+      removed = true;
+      try { iframe.remove(); } catch { /* noop */ }
+    };
+    try { iframe.contentWindow.addEventListener('afterprint', remove, { once: true }); } catch { /* noop */ }
+    window.addEventListener('afterprint', remove, { once: true });
+    setTimeout(remove, 5 * 60 * 1000); // hard safety: 5 minutes
   };
 
   try {

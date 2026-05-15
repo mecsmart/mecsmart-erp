@@ -8,6 +8,65 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { SearchableSelect } from '../components/SearchableSelect';
 import { SearchableItemSelect } from '../components/SearchableItemSelect';
 
+// Memoized invoice line row. Extracted so a keystroke on row N's qty/rate
+// only re-renders that row instead of the entire dialog (which previously
+// re-rendered all N rows, each with a heavy SearchableItemSelect pass).
+// Custom comparator keeps the memo strict: re-render iff this row's data,
+// items reference, manualMode, or formatCurrency reference changed.
+const PILineRow = React.memo(function PILineRow({ line, idx, items, manualMode, formatCurrency, updateLine, removeLine }) {
+  const it = items.find(i => i.id === line.item_id);
+  const lineAmt = line.quantity * line.unit_price - (line.discount || 0);
+  return (
+    <tr className="border-t">
+      <td className="py-1 px-2">
+        {manualMode ? (
+          <SearchableItemSelect
+            items={items}
+            value={line.item_id || ''}
+            onChange={(id) => {
+              const picked = items.find(i => i.id === id);
+              updateLine(idx, 'item_id', id);
+              if (picked) {
+                updateLine(idx, 'unit_price', picked.purchase_price || picked.unit_cost || 0);
+                updateLine(idx, 'gst_rate', picked.gst_rate || 18);
+                updateLine(idx, 'hsn_code', picked.hsn_code || '');
+              }
+            }}
+            placeholder="Type part # or name…"
+            testId={`manual-pi-line-item-${idx}`}
+          />
+        ) : (
+          <>
+            <div className="text-xs"><span className="mono font-medium">{it?.part_number || '-'}</span> {it?.name || ''}</div>
+            {line.is_process_charge && <div className="text-[10px] text-[#723B13] bg-[#FDF6B2] inline-block px-1 rounded mt-0.5" data-testid={`inv-line-process-${idx}`}>Processing Charge</div>}
+          </>
+        )}
+        {line.description !== undefined && (
+          <input type="text" placeholder="Description (optional)" value={line.description || ''} onChange={e => updateLine(idx, 'description', e.target.value)} className="w-full mt-1 px-2 py-0.5 border rounded-sm text-[10px] italic" />
+        )}
+      </td>
+      <td className="py-1 px-2"><input type="number" min="0" value={line.quantity} onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" data-testid={`pi-line-qty-${idx}`} /></td>
+      <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={line.unit_price} onChange={e => updateLine(idx, 'unit_price', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" data-testid={`pi-line-rate-${idx}`} /></td>
+      <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={line.discount || 0} onChange={e => updateLine(idx, 'discount', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
+      <td className="py-1 px-2">
+        <select value={line.gst_rate} onChange={e => updateLine(idx, 'gst_rate', parseFloat(e.target.value))} className="w-full px-1 py-1 border rounded-sm text-xs">
+          {[0,5,12,18,28].map(r => <option key={r} value={r}>{r}%</option>)}
+        </select>
+      </td>
+      <td className="py-1 px-2 text-right mono text-xs font-medium">{formatCurrency(lineAmt)}</td>
+      <td className="py-1 px-1"><button onClick={() => removeLine(idx)} className="text-[#9B1C1C] hover:text-[#DC2626] p-1"><X className="w-3 h-3" /></button></td>
+    </tr>
+  );
+}, (prev, next) => (
+  prev.line === next.line
+  && prev.idx === next.idx
+  && prev.items === next.items
+  && prev.manualMode === next.manualMode
+  && prev.formatCurrency === next.formatCurrency
+  && prev.updateLine === next.updateLine
+  && prev.removeLine === next.removeLine
+));
+
 export default function PurchaseInvoicePage() {
   const { user, hasPermission } = useAuth();
   const { formatCurrency } = useCompanySettings();
@@ -119,13 +178,18 @@ export default function PurchaseInvoicePage() {
     });
   };
 
-  const addLine = () => setFormData({ ...formData, lines: [...formData.lines, { item_id: '', quantity: 0, unit_price: 0, discount: 0, hsn_code: '', gst_rate: 18, is_process_charge: false, description: '' }] });
-  const removeLine = (idx) => setFormData({ ...formData, lines: formData.lines.filter((_, i) => i !== idx) });
-  const updateLine = (idx, field, val) => {
-    const lines = [...formData.lines];
-    lines[idx] = { ...lines[idx], [field]: val };
-    setFormData({ ...formData, lines });
-  };
+  const addLine = useCallback(() => setFormData(fd => ({ ...fd, lines: [...fd.lines, { item_id: '', quantity: 0, unit_price: 0, discount: 0, hsn_code: '', gst_rate: 18, is_process_charge: false, description: '' }] })), []);
+  const removeLine = useCallback((idx) => setFormData(fd => ({ ...fd, lines: fd.lines.filter((_, i) => i !== idx) })), []);
+  // Stable updater — wrapped in useCallback so memoized PILineRow doesn't re-
+  // render on every parent state change. Functional setState avoids closing
+  // over a stale formData snapshot, which lets the row be a pure component.
+  const updateLine = useCallback((idx, field, val) => {
+    setFormData(fd => {
+      const lines = [...fd.lines];
+      lines[idx] = { ...lines[idx], [field]: val };
+      return { ...fd, lines };
+    });
+  }, []);
 
   const calcSubtotal = () => formData.lines.reduce((s, l) => s + (l.quantity * l.unit_price - (l.discount || 0)), 0);
   const calcChargesSubtotal = () => (formData.additional_charges || []).reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
@@ -577,51 +641,18 @@ export default function PurchaseInvoicePage() {
                         <th className="w-8"></th>
                       </tr></thead>
                       <tbody>
-                        {formData.lines.map((line, idx) => {
-                          const it = items.find(i => i.id === line.item_id);
-                          const lineAmt = line.quantity * line.unit_price - (line.discount || 0);
-                          return (
-                            <tr key={idx} className="border-t">
-                              <td className="py-1 px-2">
-                                {manualMode ? (
-                                  <SearchableItemSelect
-                                    items={items}
-                                    value={line.item_id || ''}
-                                    onChange={(id) => {
-                                      const picked = items.find(i => i.id === id);
-                                      updateLine(idx, 'item_id', id);
-                                      if (picked) {
-                                        updateLine(idx, 'unit_price', picked.purchase_price || picked.unit_cost || 0);
-                                        updateLine(idx, 'gst_rate', picked.gst_rate || 18);
-                                        updateLine(idx, 'hsn_code', picked.hsn_code || '');
-                                      }
-                                    }}
-                                    placeholder="Type part # or name…"
-                                    testId={`manual-pi-line-item-${idx}`}
-                                  />
-                                ) : (
-                                  <>
-                                    <div className="text-xs"><span className="mono font-medium">{it?.part_number || '-'}</span> {it?.name || ''}</div>
-                                    {line.is_process_charge && <div className="text-[10px] text-[#723B13] bg-[#FDF6B2] inline-block px-1 rounded mt-0.5" data-testid={`inv-line-process-${idx}`}>Processing Charge</div>}
-                                  </>
-                                )}
-                                {line.description !== undefined && (
-                                  <input type="text" placeholder="Description (optional)" value={line.description || ''} onChange={e => updateLine(idx, 'description', e.target.value)} className="w-full mt-1 px-2 py-0.5 border rounded-sm text-[10px] italic" />
-                                )}
-                              </td>
-                              <td className="py-1 px-2"><input type="number" min="0" value={line.quantity} onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
-                              <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={line.unit_price} onChange={e => updateLine(idx, 'unit_price', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
-                              <td className="py-1 px-2"><input type="number" min="0" step="0.01" value={line.discount || 0} onChange={e => updateLine(idx, 'discount', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
-                              <td className="py-1 px-2">
-                                <select value={line.gst_rate} onChange={e => updateLine(idx, 'gst_rate', parseFloat(e.target.value))} className="w-full px-1 py-1 border rounded-sm text-xs">
-                                  {[0,5,12,18,28].map(r => <option key={r} value={r}>{r}%</option>)}
-                                </select>
-                              </td>
-                              <td className="py-1 px-2 text-right mono text-xs font-medium">{formatCurrency(lineAmt)}</td>
-                              <td className="py-1 px-1"><button onClick={() => removeLine(idx)} className="text-[#9B1C1C] hover:text-[#DC2626] p-1"><X className="w-3 h-3" /></button></td>
-                            </tr>
-                          );
-                        })}
+                        {formData.lines.map((line, idx) => (
+                          <PILineRow
+                            key={idx}
+                            line={line}
+                            idx={idx}
+                            items={items}
+                            manualMode={manualMode}
+                            formatCurrency={formatCurrency}
+                            updateLine={updateLine}
+                            removeLine={removeLine}
+                          />
+                        ))}
                       </tbody>
                     </table>
                   </div>
