@@ -253,15 +253,18 @@ export const SearchableItemSelect = ({
                 className="block w-full text-left px-3 py-1.5 text-sm hover:bg-[#F3F4F6] border-b border-[#F9FAFB] last:border-0"
                 data-testid={`${testId || 'ss'}-option-${i.id}`}
               >
-                <div className="flex items-center gap-2">
-                  <span className="mono font-semibold text-xs">{i.part_number}</span>
-                  <span className="truncate">{i.name}</span>
+                <div className="flex items-start gap-2">
+                  <span className="mono font-semibold text-xs shrink-0">{i.part_number}</span>
+                  {/* Allow the name to wrap onto multiple lines so long item
+                      names are visible without hover (user feedback: search
+                      results were getting truncated to ellipsis). */}
+                  <span className="break-words">{i.name}</span>
                   {showCategory && i.category && (
                     <span className="ml-auto text-[10px] text-[#6B7280] italic shrink-0">({i.category.replace('_', ' ')})</span>
                   )}
                 </div>
                 {i.description && (
-                  <div className="text-[11px] text-[#6B7280] truncate mt-0.5">{i.description}</div>
+                  <div className="text-[11px] text-[#6B7280] break-words mt-0.5">{i.description}</div>
                 )}
               </button>
             ))

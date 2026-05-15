@@ -6140,17 +6140,17 @@ async def release_work_order(wo_id: str, request: Request):
 async def get_wo_material_requirements(wo_id: str, request: Request):
     """Read-only material requirement list for a single MO.
 
-    Computes the BOM-derived material need for this MO (qty × explosion) and
-    returns a flat, consolidated list of components — including raw materials,
-    sub-assembly parts, and finished components. Same shape as the
-    `consumed_materials` array on `/print-data` so the frontend can use the
-    same table renderer + PDF template.
+    Returns the IMMEDIATE components from the MO item's own active BOM
+    (single level, no recursion). For an FG MO, that's the FG's direct
+    components (typically SAs + parts). For an SG/Part MO, that's the
+    SG/Part's direct components (typically raw materials). Mirrors the
+    `consumed_materials` shape so the frontend can reuse the same renderer
+    and PDF template.
 
     Notes:
       - Excludes alternate components.
-      - Deduplicates same item across BOM paths (sums quantity).
-      - Resolves variant-aware unit_cost using the standard item costing
-        helpers when available; falls back to item.purchase_price or 0.
+      - Deduplicates same item that may appear twice in the same BOM
+        (sums quantity).
     """
     user = await get_current_user(request)
     _require_access(user, ["admin", "production_manager", "inventory_manager", "quality_inspector"], module="manufacturing", action="view")
@@ -6163,22 +6163,18 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
         return {"wo_number": wo.get("wo_number"), "materials": []}
     wo_qty = float(wo.get("quantity") or 1)
 
+    # Top-level only — fetch the ACTIVE BOM for this MO's item and emit one
+    # row per non-alternate component. No recursion into child BOMs.
+    bom = await db.boms.find_one({"parent_item_id": fg_item_id, "status": "active"}, {"_id": 0})
     collected = []
-
-    async def walk(parent_id: str, parent_qty: float, depth: int = 0):
-        # Pull the *active* BOM for the parent. If it doesn't have one (true
-        # leaf or RM), simply stop recursing — the caller already recorded it
-        # as a line.
-        bom = await db.boms.find_one({"parent_item_id": parent_id, "status": "active"}, {"_id": 0})
-        if not bom:
-            return
+    if bom:
         for comp in bom.get("components", []) or []:
             if comp.get("is_alternate"):
                 continue
             cid = comp.get("item_id")
             if not cid:
                 continue
-            comp_qty = float(comp.get("quantity") or 0) * parent_qty
+            comp_qty = float(comp.get("quantity") or 0) * wo_qty
             citem = await db.items.find_one({"id": cid}, {"_id": 0})
             if not citem:
                 continue
@@ -6191,12 +6187,9 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
                 "uom": citem.get("unit_of_measure") or citem.get("uom") or "pcs",
                 "unit_cost": float(citem.get("purchase_price") or 0),
             })
-            await walk(cid, comp_qty, depth + 1)
 
-    await walk(fg_item_id, wo_qty)
-
-    # Consolidate duplicates (same item under multiple BOM paths) and
-    # preserve original insertion order for a stable PDF.
+    # Consolidate duplicates (same item listed twice in the BOM) while
+    # preserving original order for a stable PDF.
     seen_order = []
     bucket = {}
     for r in collected:
@@ -10030,7 +10023,25 @@ async def get_purchase_invoices(request: Request, status: str = None):
         query["status"] = status
     invoices = await db.purchase_invoices.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     for inv in invoices:
-        supplier = await db.suppliers.find_one({"id": inv.get("supplier_id")}, {"_id": 0})
+        # JW-based PIs may not carry supplier_id on the invoice doc itself —
+        # the supplier lives on the linked subcontract order. Walk that chain
+        # so the list always shows a supplier name even for JW invoices.
+        supplier_id = inv.get("supplier_id")
+        jw_order = None
+        jw_id = inv.get("jw_order_id") or inv.get("sc_order_id")
+        if not supplier_id and inv.get("grn_id"):
+            grn = await db.grn.find_one({"id": inv["grn_id"]}, {"_id": 0, "supplier_id": 1, "jw_order_id": 1, "sc_order_id": 1, "po_id": 1})
+            if grn:
+                supplier_id = grn.get("supplier_id") or supplier_id
+                jw_id = jw_id or grn.get("jw_order_id") or grn.get("sc_order_id")
+                if not inv.get("po_id") and grn.get("po_id"):
+                    inv["po_id"] = grn["po_id"]
+        if jw_id and not jw_order:
+            jw_order = await db.subcontract_orders.find_one({"id": jw_id}, {"_id": 0})
+            if jw_order:
+                inv["jw_order"] = jw_order
+                supplier_id = supplier_id or jw_order.get("supplier_id")
+        supplier = await db.suppliers.find_one({"id": supplier_id}, {"_id": 0}) if supplier_id else None
         inv["supplier"] = supplier
         if inv.get("po_id"):
             po = await db.purchase_orders.find_one({"id": inv["po_id"]}, {"_id": 0})

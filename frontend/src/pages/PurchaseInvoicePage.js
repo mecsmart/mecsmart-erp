@@ -499,9 +499,23 @@ export default function PurchaseInvoicePage() {
                  invoice is being modified. The GRN/supplier/PO are immutable post-creation. */
               <div className="bg-[#F0F4F8] border border-[#D1D5DB] rounded-sm p-4 text-xs grid grid-cols-2 gap-2">
                 <div><span className="text-[#6B7280]">Invoice #:</span> <span className="mono font-semibold">{editingInvoice.invoice_no}</span></div>
-                <div><span className="text-[#6B7280]">Supplier:</span> <span className="font-medium">{editingInvoice.supplier_name || editingInvoice.supplier_id}</span></div>
-                {editingInvoice.po_number && <div><span className="text-[#6B7280]">PO #:</span> <span className="mono">{editingInvoice.po_number}</span></div>}
-                {editingInvoice.grn_number && <div><span className="text-[#6B7280]">GRN #:</span> <span className="mono">{editingInvoice.grn_number}</span></div>}
+                <div><span className="text-[#6B7280]">Supplier:</span> <span className="font-medium">{
+                  editingInvoice.supplier?.name
+                  || editingInvoice.supplier_name
+                  || editingInvoice.jw_order?.supplier_name
+                  || (suppliers.find(s => s.id === editingInvoice.supplier_id)?.name)
+                  || editingInvoice.supplier_id
+                  || '-'
+                }</span></div>
+                {(editingInvoice.po?.po_number || editingInvoice.po_number) && (
+                  <div><span className="text-[#6B7280]">PO #:</span> <span className="mono">{editingInvoice.po?.po_number || editingInvoice.po_number}</span></div>
+                )}
+                {editingInvoice.jw_order?.order_number && (
+                  <div><span className="text-[#6B7280]">JW Order:</span> <span className="mono">{editingInvoice.jw_order.order_number}</span></div>
+                )}
+                {(editingInvoice.grn?.grn_number || editingInvoice.grn_number) && (
+                  <div><span className="text-[#6B7280]">GRN #:</span> <span className="mono">{editingInvoice.grn?.grn_number || editingInvoice.grn_number}</span></div>
+                )}
               </div>
             ) : (
               /* GRN Selection with search */

@@ -1,0 +1,61 @@
+{
+  "summary": "Iteration 121 testing completed. All 6 features tested: (1) MO Material Requirements single-level BOM - PASS (backend returns exactly 5 top-level components for FG-001, no recursive explosion), (2) Purchase Invoice supplier resolution - PASS (PI-000022 shows supplier='Steel Masters Pvt. Ltd.' with full object), (3) PI Edit dialog supplier display - PASS (dialog shows 'Supplier: Steel Masters Pvt. Ltd.'), (4) Quotation item search full names - PASS (dropdown shows full item names with wrapping, e.g. 'Pump Assembly · Motor Power: 2HP, Voltage: 220V'), (5) MO Mat Req dialog - PASS (opens correctly, shows 'No active BOM' for items without BOM), (6) No console errors on tested pages - PASS.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "All dialogs",
+        "issues": ["Console warning: Missing `Description` or `aria-describedby` for DialogContent - accessibility improvement needed (carried over from iteration 120)"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_121.py",
+    "/app/test_reports/pytest/pytest_iteration_121.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_121.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 121 fixes verified: (1) MO Material Requirements endpoint now returns ONLY immediate BOM components (single level, no recursion). For MO-000003 (FG-001 Hydraulic Press 50T, qty=2), returns exactly 5 components: Steel Sheet 4mm (20 sheet), Pump Assembly (8 pcs), Control Valve (8 pcs), Electric Motor 5HP (2 pcs), Control Panel (2 pcs). Previously returned recursive explosion (500+ sheets). (2) Purchase Invoice list endpoint resolves supplier from JW order fallback when PI doc lacks supplier_id. PI-000022 shows supplier object with name='Steel Masters Pvt. Ltd.'. (3) PI Edit dialog reads supplier?.name correctly - shows 'Supplier: Steel Masters Pvt. Ltd.' in summary card. (4) Quotation item search dropdown shows full item names with break-words CSS (no truncation). (5) MO Mat Req dialog works correctly - shows materials table for items with active BOM, shows 'No active BOM or zero-quantity components' for items without.",
+  "features_tested": {
+    "mo_material_requirements_single_level": {
+      "status": "PASS",
+      "details": "GET /api/work-orders/0d6feaa7-08ca-4016-a568-206205a5e665/material-requirements returns exactly 5 top-level components (Steel Sheet 4mm, Pump Assembly, Control Valve, Electric Motor 5HP, Control Panel). No recursive explosion."
+    },
+    "purchase_invoice_supplier_resolution": {
+      "status": "PASS",
+      "details": "GET /api/purchase-invoices returns supplier object with name/code/gstin for each invoice. PI-000022 has supplier.name='Steel Masters Pvt. Ltd.'"
+    },
+    "pi_edit_dialog_supplier_display": {
+      "status": "PASS",
+      "details": "Edit dialog for PI-000022 shows 'Invoice #: TEST-INV-002' and 'Supplier: Steel Masters Pvt. Ltd.' in summary card"
+    },
+    "quotation_item_search_full_names": {
+      "status": "PASS",
+      "details": "New Quotation dialog item search shows full item names with wrapping. Searching 'pump' shows 'Pump Assembly · Motor Power: 2HP, Voltage: 220V' on multiple lines"
+    },
+    "mo_mat_req_dialog": {
+      "status": "PASS",
+      "details": "Material Requirement dialog opens correctly. Shows item name, MO quantity, status. For items without active BOM, shows 'No active BOM or zero-quantity components.'"
+    },
+    "no_console_errors": {
+      "status": "PASS",
+      "details": "No critical console errors on /purchase-invoices, /crm?tab=marketing&sub=quotations, /manufacturing pages"
+    }
+  }
+}
