@@ -19,6 +19,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-05-15 (Mat Req top-level only + Quotation search full names + PI supplier display — DONE & VERIFIED ✅):**
+  1. **MO Mat Req single-level** (`/app/backend/server.py` material-requirements endpoint): Replaced the recursive `walk()` with a single-level BOM lookup. For an FG MO, returns only the FG's direct active-BOM components (SAs + parts); for an SG/Part MO, returns only that item's direct components (RMs). Verified MO-000003 (FG-001 Hydraulic Press 50T, qty 2) now returns exactly 5 rows (was 500+ via recursion).
+  2. **Quotation item search full names** (`/app/frontend/src/components/SearchableItemSelect.jsx`): Removed `truncate` on the dropdown matches list. Both `item.name` and `item.description` rows now use `break-words` + `items-start` so long names wrap onto multiple lines instead of being clipped with ellipsis.
+  3. **PI Edit dialog supplier/PO display** (`/app/frontend/src/pages/PurchaseInvoicePage.js`): Summary card was reading flat keys (`supplier_name`, `po_number`, `grn_number`) which the backend doesn't return — backend attaches `supplier`, `po`, `grn` populated objects. Switched to `supplier?.name` / `po?.po_number` / `grn?.grn_number` with a fallback chain (supplier.name → jw_order.supplier_name → suppliers-array lookup → supplier_id).
+  4. **Backend supplier resolution** (`/app/backend/server.py` `get_purchase_invoices`): For JW-based invoices the PI doc may lack `supplier_id`. List now walks PI → GRN → JW order → `subcontract_orders.supplier_id` so the supplier always resolves where possible. Also attaches `jw_order` to the invoice for the Edit dialog.
+  5. **Testing**: `testing_agent_v3_fork` iteration 121 — 100% pass (backend + frontend). No critical issues; pre-existing accessibility warning carried over from i120.
+
+
 - **2026-05-15 (Routing status pills + Material Req dialog + Quotation 0-byte PDF fix + 3 perf fixes — DONE & VERIFIED ✅):**
   1. **MO Routing status pills** (`/app/frontend/src/pages/ManufacturingPage.js`): Each routing name in the MO Routing column now ships with a small read-only status pill — `Pending` (gray #F3F4F6), `In Progress` (amber #FEF3C7), `Done` (green #DEF7EC), `Paused` (gray-700). Derived from `operations_status[].status`; falls back to "Pending" when no ops are recorded yet.
   2. **Material Requirement dialog + PDF** — NEW endpoint `GET /api/work-orders/{id}/material-requirements` returns the BOM-derived consolidated material need (`{item_id,item,name,quantity,uom,unit_cost,category}[]`) without any reservation side-effects. New frontend `Mat. Req` button on every FG/SG/Part row opens a dialog (mirrors consumption-list shape) with a `Download PDF` action that reuses the letterhead template.
