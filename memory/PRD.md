@@ -19,6 +19,24 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-05-15 (JW SC Short Close + full-page Add Customer/Supplier redirect — DONE & VERIFIED ✅):**
+  1. **JW SC Short Close (admin-only)** (`/app/backend/server.py` `POST /api/job-work/orders/{id}/short-close` + `/app/frontend/src/pages/JobWorkPage.js`): New admin-only endpoint to terminate a running JW SC mid-way. Behaviour:
+     - Sets SC `status='short_closed'` + timestamps (`short_closed_at`, `short_closed_by`).
+     - Walks every WO referenced by `reference_wo_ids` (or legacy `reference_wo_id`), finds operations with `outsource_sc_order_id == this_sc_id`, and reverts them to `pending` (clears `is_job_work`, `outsource_*`, `operator`, `actual_start`; strips the `OS: …` run row).
+     - Operations whose SC line has `received_quantity > 0` (GRN'd) are LEFT INTACT — user must reverse GRN first.
+     - Any draft PO linked to this SC is auto-cancelled.
+     - Returns 403 for non-admin; 400 if SC is already terminal (short_closed/completed/cancelled).
+     UI: red-outlined `Short Close` button visible to admins next to row actions on SCs with status `confirmed`/`sent`/`in_progress`. Confirm() prompt lists all consequences before submit.
+  2. **Quotation + Add Customer → full-page redirect** (`/app/frontend/src/pages/{CustomersPage.js,CRMPage.js}`): The inline `QuickAddPartyDialog` for Quotation customer picker was replaced with a navigation flow:
+     - `+` in New Quotation → `navigate('/customers?action=add&returnTo=quotation')`.
+     - `CustomersPage` reads `?action=add`, opens the full Add Customer dialog automatically (with GSTIN Fetch, salesperson assignment, all address fields).
+     - On Save → `navigate('/crm?tab=marketing&sub=quotations&newCustomerId=<id>')`.
+     - `QuotationsPanel` consumes `newCustomerId`, opens a New Quotation dialog with that customer pre-selected, strips the param via `replace:true`.
+     - Cancel/Close on the customers dialog (when launched with `?action=add&returnTo=quotation`) also navigates back without `newCustomerId`.
+  3. **PO + Add Supplier → full-page redirect** (`/app/frontend/src/pages/{SuppliersPage.js,PurchaseOrdersPage.js}`): Identical pattern for PO supplier picker — `?action=add&returnTo=po` → save → `/purchase-orders?newSupplierId=<id>` → PO dialog opens with supplier pre-selected.
+  4. **Testing**: `testing_agent_v3_fork` iteration 123 — 100% pass (backend + frontend). 5 features verified including admin-only gate, GRN protection, re-call protection, and full redirect round-trips.
+
+
 - **2026-05-15 (Mat Req new columns + JW SC restore-source-MO + QuickAddParty GSTIN — DONE & VERIFIED ✅):**
   1. **MO Mat Req columns** (`/app/backend/server.py` material-requirements endpoint + `/app/frontend/src/pages/ManufacturingPage.js`): Removed Unit Cost & Total Cost columns. Added Available Stock + Shortage. Backend pre-loads allocations across all open MOs (excluding the current one) and computes `available = max(0, current_stock − allocated_by_others)`, `shortage = max(0, required − available)`. Frontend table + PDF render Required/UOM/Available/Shortage; shortage > 0 displays in red (#9B1C1C), zero shortage as `-`.
   2. **JW SC edit restore source MO** (`/app/backend/server.py update_subcontract_order`): When a JW SC line's qty is reduced or the line is removed, the source MO operation now gets its OS state reverted — `is_job_work`, `outsource_status`, `outsource_sc_order_id`, `outsource_supplier_*`, `operator`, `actual_start` are cleared and `status` flipped back to `pending` (full removal) or the OS run's `quantity_planned` is decremented (partial reduction). The OS run row (`operator` starts with `OS: `) is stripped on full removal. Lines with `received_quantity > 0` (GRN'd) are protected — they are NEVER auto-reversed, the user must manually reverse the GRN first. `reference_wo_ids` on the SC itself is also pruned of orphaned WO ids.
