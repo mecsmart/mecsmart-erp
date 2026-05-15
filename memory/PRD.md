@@ -19,6 +19,16 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-05-15 (Op-level Short Close + Quotation DnD fix — DONE & VERIFIED ✅):**
+  1. **MO Op-level Short Close** (`/app/backend/server.py` new `POST /api/work-orders/{wo_id}/operations/{sequence}/short-close` + `/app/frontend/src/pages/ManufacturingPage.js` `handleShortCloseOperation`): For consolidated JW SCs covering multiple MOs, the SC-level short close (introduced in iteration 123) would terminate ALL linked operations — too coarse when only ONE op needs aborting. New op-level endpoint scopes the release to a single WO operation:
+     - Backend clears `is_job_work`/`outsource_*`/`operator`/`actual_start` on the target op, sets `status='pending'`, strips the OS run row.
+     - Trims the linked SC's `job_work_parts` to remove this `{wo_id, process_name}` pair; prunes `reference_wo_ids` accordingly. If the SC has no parts left, it's auto-marked `short_closed`.
+     - Admin-only (403 otherwise). 400 if the op is not in-progress OS, or if the corresponding SC line has `received_quantity > 0` (GRN must be reversed first).
+     - UI: red-outlined `Short Close` button appears inside the Job Card dialog next to the `JW: … — Receive via GRN` label for admins, only on in_progress OS ops.
+  2. **Quotation line reordering fix** (`/app/frontend/src/pages/CRMPage.js`): The `React.memo` on `QuotationLineRow` (added in iteration 120 for typing perf) excluded `rowProps` from its comparator. Since `useDraggableRows` returns a fresh `rowProps` object every render (with new drag handlers closing over the latest `dragIndex`/`dropTarget`), memo'd rows kept STALE handlers and drag failed silently. Removed `React.memo` — `SearchableItemSelect` already memoizes its filtered item list internally, so typing perf trade-off is negligible.
+  3. **Testing**: `testing_agent_v3_fork` iteration 124 — 100% pass (backend + frontend). DnD reorder confirmed by dragging row 2 to row 1 and observing description swap. Op-level short close verified on MO-000264 → SC line removed; SC remained healthy for other linked MOs.
+
+
 - **2026-05-15 (JW SC Short Close + full-page Add Customer/Supplier redirect — DONE & VERIFIED ✅):**
   1. **JW SC Short Close (admin-only)** (`/app/backend/server.py` `POST /api/job-work/orders/{id}/short-close` + `/app/frontend/src/pages/JobWorkPage.js`): New admin-only endpoint to terminate a running JW SC mid-way. Behaviour:
      - Sets SC `status='short_closed'` + timestamps (`short_closed_at`, `short_closed_by`).
