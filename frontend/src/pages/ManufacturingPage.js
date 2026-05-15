@@ -186,6 +186,26 @@ export default function ManufacturingPage() {
     fetchData({ preserveScroll: false });
   }, []);
 
+  // Admin-only short close of a single OS operation inside the Job Card.
+  // Useful when a multi-MO SC has just ONE in-progress operation that needs
+  // to be aborted without short-closing the entire SC (which would impact
+  // the other MOs sharing that SC).
+  const handleShortCloseOperation = async (op) => {
+    if (!jobCardWO?.id) return;
+    const opName = typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : (op.operation_name || '');
+    const msg = `Short close operation "${opName}" on ${jobCardWO.wo_number}?\n\nThis will:\n• Revert this operation to "pending" so it can be redone in-house or re-outsourced.\n• Remove the OS run row (operator starting with "OS: ").\n• Reduce the SC line's planned qty by ${op.allocated_qty || jobCardWO.quantity || 0}; if that's the entire line, the SC line is marked short_closed.\n\nIf any quantity for this op has been received via GRN, the operation will NOT be reverted — reverse the GRN first.`;
+    if (!window.confirm(msg)) return;
+    try {
+      const { data } = await api.post(`/api/work-orders/${jobCardWO.id}/operations/${op.sequence}/short-close`);
+      alert(`Operation "${opName}" short-closed.\nReleased: ${data?.released ? 'yes' : 'no'}\n${data?.sc_order_id ? `Updated SC: ${data.sc_order_number || data.sc_order_id}` : ''}`);
+      const fresh = await api.get(`/api/work-orders/${jobCardWO.id}`);
+      setJobCardWO(fresh.data);
+      fetchData();
+    } catch (e) {
+      alert(e.response?.data?.detail || 'Failed to short close operation');
+    }
+  };
+
   // Refresh duration display every 5s when Job Card is open and an op is running
   useEffect(() => {
     if (!isJobCardOpen) return;
@@ -2286,6 +2306,21 @@ export default function ManufacturingPage() {
                             <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium" data-testid={`outsourced-op-${op.sequence}`}>
                               {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'} — Receive via GRN
                             </span>
+                          )}
+                          {/* Admin-only Short Close at the OPERATION level — terminates a
+                              running OS operation mid-way and releases JUST THIS OP back to
+                              pending. Use this when the SC has multiple MOs and only one
+                              operation needs to be aborted (the SC-level Short Close
+                              terminates the whole SC for all linked MOs). */}
+                          {user?.role === 'admin' && op.status === 'in_progress' && op.is_job_work && (
+                            <button
+                              onClick={() => handleShortCloseOperation(op)}
+                              className="btn-secondary text-xs px-2 py-1 text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]"
+                              data-testid={`short-close-op-${op.sequence}`}
+                              title="Short Close this operation (admin) — releases just this op back to pending"
+                            >
+                              <XIcon className="w-3 h-3 inline mr-1" />Short Close
+                            </button>
                           )}
                           {op.status === 'completed' && (
                             <CheckCircle2 className="w-4 h-4 text-[#03543F]" />

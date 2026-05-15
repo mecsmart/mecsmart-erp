@@ -6229,6 +6229,106 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
     }
 
 
+@work_orders_router.post("/{wo_id}/operations/{sequence}/short-close")
+async def short_close_wo_operation(wo_id: str, sequence: int, request: Request):
+    """Admin-only: short-close a single in-progress OS operation on a WO.
+
+    Use when a consolidated JW SC covers multiple MOs and only ONE of those
+    operations needs to be aborted mid-way (e.g. another MO on the same SC
+    is still healthy and should continue). The SC-level short-close in
+    `subcontract_orders/{id}/short-close` terminates ALL linked operations,
+    which would unnecessarily impact the healthy ones.
+
+    Behaviour:
+      - The WO operation's `is_job_work` / `outsource_*` / `operator`
+        fields are cleared.
+      - Its status is reset to `pending` so the user can redo the work
+        in-house or re-outsource to a different vendor.
+      - The OS run row (`operator` startswith "OS: ") is removed.
+      - On the linked SC, the matching `job_work_parts` line is either
+        removed (if it was the only matching wo+process pair) or its qty
+        is reduced. If removing it leaves no parts on the SC, the SC's
+        status is flipped to `short_closed`.
+      - Operations whose SC line already has `received_quantity > 0`
+        cannot be short-closed — the user must reverse the GRN first.
+    """
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can short-close an operation")
+    wo = await db.work_orders.find_one({"id": wo_id})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    ops = wo.get("operations_status") or []
+    target = None
+    for op in ops:
+        if op.get("sequence") == sequence:
+            target = op
+            break
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Operation sequence {sequence} not found")
+    if not target.get("is_job_work") or target.get("status") != "in_progress":
+        raise HTTPException(status_code=400, detail="Operation must be an in-progress outsourced (OS) operation to short close")
+    sc_order_id = target.get("outsource_sc_order_id")
+    sc_order_number = target.get("outsource_sc_order_number")
+    op_name_val = target.get("operation_name") or ""
+    if isinstance(op_name_val, dict):
+        op_name_val = op_name_val.get("name", "")
+    op_name = (op_name_val or "").strip()
+    # GRN safety — check the SC line for received_quantity > 0
+    if sc_order_id:
+        sc = await db.subcontract_orders.find_one({"id": sc_order_id})
+        if sc:
+            for line in (sc.get("job_work_parts") or []):
+                if line.get("wo_id") == wo_id and (line.get("process_name") or "").strip() == op_name:
+                    if (line.get("received_quantity") or 0) > 0:
+                        raise HTTPException(status_code=400, detail="Cannot short-close: this operation has received quantity > 0. Reverse the GRN first.")
+                    break
+
+    # Clear OS fields on the WO operation
+    for f in (
+        "is_job_work", "job_work_supplier_id", "outsource_status",
+        "outsource_supplier_name", "outsource_charges",
+        "outsource_sc_order_id", "outsource_sc_order_number",
+        "actual_start", "operator",
+    ):
+        target.pop(f, None)
+    target["status"] = "pending"
+    runs = target.get("runs") or []
+    target["runs"] = [r for r in runs if not (r.get("operator") or "").startswith("OS: ")]
+    await db.work_orders.update_one({"id": wo_id}, {"$set": {"operations_status": ops}})
+
+    # Trim the SC's job_work_parts to remove this WO+process pair
+    sc_updated = False
+    if sc_order_id:
+        sc = await db.subcontract_orders.find_one({"id": sc_order_id})
+        if sc:
+            new_jwp = []
+            for line in (sc.get("job_work_parts") or []):
+                if line.get("wo_id") == wo_id and (line.get("process_name") or "").strip() == op_name:
+                    continue  # drop this line
+                new_jwp.append(line)
+            update_payload = {"job_work_parts": new_jwp, "updated_at": datetime.now(timezone.utc)}
+            # If no parts remain, mark the SC short_closed automatically.
+            if not new_jwp:
+                update_payload["status"] = "short_closed"
+                update_payload["short_closed_at"] = datetime.now(timezone.utc)
+                update_payload["short_closed_by"] = user["id"]
+            # Prune reference_wo_ids if this WO no longer appears.
+            remaining_wo_ids = {(p.get("wo_id") or "") for p in new_jwp if p.get("wo_id")}
+            if sc.get("reference_wo_ids"):
+                update_payload["reference_wo_ids"] = [w for w in sc["reference_wo_ids"] if w in remaining_wo_ids]
+            await db.subcontract_orders.update_one({"id": sc_order_id}, {"$set": update_payload})
+            sc_updated = True
+
+    return {
+        "ok": True,
+        "released": True,
+        "sc_order_id": sc_order_id,
+        "sc_order_number": sc_order_number,
+        "sc_updated": sc_updated,
+    }
+
+
 @work_orders_router.post("/{wo_id}/reserve")
 async def reserve_materials_for_wo(wo_id: str, request: Request):
     """Reserve materials for an MO by computing its full BOM requirement recursively.

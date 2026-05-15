@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 124 testing completed. All features verified: (1) Backend op-level short close endpoint POST /api/work-orders/{wo_id}/operations/{sequence}/short-close works correctly - admin-only (403 for non-admin), validates in-progress OS operation requirement (400 otherwise), clears OS fields and resets status to pending, updates SC job_work_parts. (2) Frontend Short Close button appears correctly in Job Card dialog for in-progress OS operations when logged in as admin - red-outlined button with data-testid='short-close-op-{seq}'. (3) Quotation line reordering (DnD) works correctly after memo removal - drag handles functional, rows reorder properly, typing in qty/rate fields works smoothly without freeze.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "All dialogs",
+        "issues": ["Console warning: Missing `Description` or `aria-describedby` for DialogContent - accessibility improvement needed (carried over from previous iterations)"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_124.py",
+    "/app/test_reports/pytest/pytest_iteration_124.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_124.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 124 verified: (1) Op-level short close endpoint POST /api/work-orders/{wo_id}/operations/{sequence}/short-close - admin-only, validates operation must be in-progress OS (is_job_work=true, status=in_progress), returns 400 if received_quantity > 0 (GRN safety), clears OS fields (is_job_work, outsource_*, operator), resets status to pending, removes OS run row, updates SC job_work_parts (removes the line), if SC has no parts left marks it short_closed. Response: {ok:true, released:true, sc_order_id, sc_order_number, sc_updated}. (2) Frontend Short Close button (data-testid='short-close-op-{seq}') appears in Job Card dialog for in-progress OS operations when user.role=admin. Button is red-outlined with X icon and 'Short Close' text. Clicking shows confirm dialog explaining consequences. (3) Quotation DnD fix verified - removed React.memo from QuotationLineRow that was breaking drag handlers. Drag handles (.drag-handle) work correctly, rows reorder properly when dragged, typing in qty/rate fields works smoothly without per-keystroke freeze.",
+  "features_tested": {
+    "op_level_short_close_backend": {
+      "status": "PASS",
+      "details": "POST /api/work-orders/{wo_id}/operations/{sequence}/short-close endpoint works correctly. Tested with MO-000265 seq 10 - operation reset from in_progress to pending, is_job_work cleared, outsource_sc_order_number cleared, SC job_work_parts updated. Admin-only (403 for non-admin), validates in-progress OS operation (400 for pending/non-OS ops), GRN safety check (400 if received_quantity > 0)."
+    },
+    "op_level_short_close_ui": {
+      "status": "PASS",
+      "details": "Short Close button (data-testid='short-close-op-10') visible in Job Card dialog for MO-000264 which has in-progress OS operation. Button is red-outlined with X icon and 'Short Close' text. Appears next to 'JW: JW-000168 — Receive via GRN' label. Only visible when: op.status==='in_progress' && op.is_job_work===true && user.role==='admin'."
+    },
+    "quotation_dnd_reordering": {
+      "status": "PASS",
+      "details": "Quotation line reordering works correctly after memo removal. Created quotation with 3 lines, dragged row 2 to row 1 position - first line description changed from 'Line 1 Description' to 'Line 2 Description'. Typing in qty/rate fields works smoothly without freeze (typed '12345' successfully)."
+    }
+  },
+  "mocked_apis_note": "No mocked APIs"
+}

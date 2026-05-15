@@ -913,12 +913,14 @@ function emptyQuotationLine() {
   return { item_id: '', description: '', hsn_code: '', quantity: 1, uom: 'Nos', rate: 0, discount_pct: 0, gst_rate: 18 };
 }
 
-// Memoized line row for the Quotation editor. Extracted so a keystroke on
-// one row no longer re-renders all rows (each row was previously paying the
-// full cost of a 1200-item SearchableItemSelect on every keystroke). The
-// comparator stays strict — re-render only when this row's data, items
-// reference, or callback refs change.
-const QuotationLineRow = React.memo(function QuotationLineRow({
+// Quotation line row. Previously memoized with a strict comparator to optimize
+// typing performance, but the comparator excluded `rowProps` (the
+// useDraggableRows handlers) which meant the row never received refreshed
+// drag handlers after a drag started — DnD reordering silently failed.
+// Reverted to a non-memoized component; SearchableItemSelect already
+// memoizes its internal item-filtering work, so per-row keystroke cost is
+// acceptable.
+const QuotationLineRow = function QuotationLineRow({
   line, idx, items, currency, formatCurrency, canRemove, updateLine, removeLine, onPickItem, rowProps,
 }) {
   const gross = (parseFloat(line.quantity) || 0) * (parseFloat(line.rate) || 0);
@@ -954,20 +956,7 @@ const QuotationLineRow = React.memo(function QuotationLineRow({
       </td>
     </tr>
   );
-}, (prev, next) => (
-  prev.line === next.line
-  && prev.idx === next.idx
-  && prev.items === next.items
-  && prev.currency === next.currency
-  && prev.canRemove === next.canRemove
-  && prev.formatCurrency === next.formatCurrency
-  && prev.updateLine === next.updateLine
-  && prev.removeLine === next.removeLine
-  && prev.onPickItem === next.onPickItem
-  // rowProps from useDraggableRows is created fresh per render; do NOT include
-  // it in the comparator or the memo never hits. The DnD handlers reference
-  // the latest `next` array via closure capture, so this is safe.
-));
+};
 
 function QuotationsPanel({ quotations, leads, customers, items, search, onRefresh, canEdit, prefillFromLead, onPrefillConsumed }) {
   const { user } = useAuth();
