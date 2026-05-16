@@ -19,6 +19,22 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-17 (GRN Draft Mode + Multi-GRN → Single PI + Typing Lag Fix — DONE & VERIFIED ✅):**
+  1. **GRN typing lag fixed** (`/app/frontend/src/pages/WarehousesPage.js`): The GRN verify-grid was re-rendering every line on each keystroke (same pattern as PI/Quotation in iteration 120). Extracted line into a `React.memo` `GRNLineRow` with a strict comparator; `updateGRNLine` now `useCallback` and uses functional `setGrnForm` so the parent state change doesn't bust the memo.
+  2. **GRN renamed label** (`/app/frontend/src/pages/WarehousesPage.js`): "Supplier Invoice / Doc Ref No." → "Supplier Invoice / DC Number" in the GRN dialog AND the list column header.
+  3. **GRN Draft Mode** (`/app/backend/server.py` + `WarehousesPage.js`):
+     - `GRNCreate.status` accepts `"draft"` | `"posted"` (default posted = legacy commit-now).
+     - `POST /api/grn` with `status='draft'` saves the GRN row **without** touching inventory, PO `received_quantity`, or SC.
+     - `PUT /api/grn/{id}` edits a draft (rejects posted).
+     - `POST /api/grn/{id}/approve` promotes draft → posted via a shared `_post_grn_to_inventory` helper that performs the inventory + PO + SC cascade. Posted GRNs are immutable.
+     - GRN dialog: dual buttons "Save as Draft" (no stock impact) + "Approve & Post" (commits stock). List shows a Status pill (`Draft` yellow / `Posted` green) and pencil/check icons on draft rows.
+  4. **Multi-GRN → Single Purchase Invoice** (`/app/backend/server.py` + `/app/frontend/src/pages/PurchaseInvoicePage.js`):
+     - `PurchaseInvoiceCreate.grn_ids: List[str]` field. Backend validates ALL selected GRNs belong to the same supplier and have `status in [posted, completed]`. Drafts are rejected with a clear 400 message.
+     - `GET /api/purchase-invoices/pending-grns` now excludes drafts AND GRNs referenced via `grn_ids` on any existing invoice (covers both legacy single-`grn_id` and new multi-id invoices).
+     - PI dialog: GRN selector switched to a checkbox list with selected chips. First pick locks the supplier; subsequent rows filtered to the same supplier. Lines merged by (item_id + process/material). Backward compatible with legacy `grn_id` single-select payloads.
+  5. **Testing**: `testing_agent_v3_fork` iteration 127 — 13/13 backend (100%) + frontend code review 100%. Drafts confirmed not to touch stock; approval cascade identical to direct post.
+
+
 - **2026-02-17 (JW-SO Partial OS Start + Vendor Edit + Qty-Reduce Restore — DONE & VERIFIED ✅):**
   1. **Partial OS Start button restored** (`/app/frontend/src/pages/ManufacturingPage.js` line ~2275): Removed `!op.is_job_work` from `canStartMore` so the Start button now appears for operations that were *partially* outsourced (e.g. 5 of 10 sent to a vendor). The remaining qty can now be started in-house OR re-outsourced to a different vendor. The Op dialog still defaults `is_outsource=true` when the op is already an OS — user unchecks for in-house.
   2. **Vendor swap during SC edit** (`/app/backend/server.py` `SubcontractOrderUpdate` + `update_subcontract_order` line ~10878 / `/app/frontend/src/components/SearchableSelect.jsx`): `SubcontractOrderUpdate` now accepts `supplier_id`. PUT `/api/job-work/orders/{id}` allows changing the vendor ONLY when `dc_created=false`; rejects with 400 once a DC has been sent (orphaning material at the original vendor is unsafe). On accept, the new supplier name cascades into every linked MO operation's `job_work_supplier_id`, `outsource_supplier_name`, `operator`, and existing `OS: …` run labels. `SearchableSelect` now exposes an inline edit mode — clicking the selected chip (or its pencil icon) reveals a search input pre-labelled with the current value so the user can pick a different option without first clearing.
