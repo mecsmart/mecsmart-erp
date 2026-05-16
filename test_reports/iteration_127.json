@@ -1,0 +1,94 @@
+{
+  "summary": "Iteration 127 testing completed for GRN Draft Mode + Multi-GRN Purchase Invoice features. Backend: 13/13 tests passed (100%). Frontend: UI elements verified via code review and Playwright automation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "All dialogs",
+        "issues": ["Console warning: Missing `Description` or `aria-describedby` for DialogContent - accessibility improvement needed (carried over from previous iterations)"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_127_grn_draft_multi_pi.py",
+    "/app/test_reports/pytest/pytest_iteration_127.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_127_grn_draft_multi_pi.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "100% (code review + UI verification)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Test suppliers, items, and POs created during test execution with TEST- prefix",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 127 verified GRN draft mode and multi-GRN purchase invoice features. All 12 test scenarios from the requirements passed: (1) POST /api/grn with status='draft' creates draft without stock/PO updates, (2) POST /api/grn with status='posted' updates stock and PO as before, (3) PUT /api/grn/{id} edits draft GRN successfully, (4) PUT /api/grn/{id} returns 400 for posted GRN, (5) POST /api/grn/{id}/approve promotes draft to posted with full inventory cascade, (6) GET /api/grn returns both draft and posted GRNs, (7) GET /api/purchase-invoices/pending-grns excludes drafts and already-invoiced GRNs, (8) POST /api/purchase-invoices with grn_ids from same supplier creates invoice with grn_ids array, (9) POST /api/purchase-invoices with grn_ids from different suppliers returns 400, (10) POST /api/purchase-invoices with draft GRN returns 400, (11) Legacy single-GRN flow still works, (12) Manual PI (no GRN) still works. Frontend code review confirmed: memoized GRNLineRow component, editingGrn state, Save as Draft/Approve & Post buttons, renamed label 'Supplier Invoice / DC Number', multi-GRN checkbox selection with same-supplier validation, grn_ids field in formData.",
+  "features_tested": {
+    "grn_draft_no_stock_update": {
+      "status": "PASS",
+      "details": "POST /api/grn with status='draft' creates GRN with status='draft', does NOT update item.current_stock, does NOT update PO.received_quantity"
+    },
+    "grn_posted_updates_stock": {
+      "status": "PASS",
+      "details": "POST /api/grn with status='posted' updates stock and PO received_quantity, PO status changes to 'partial' or 'received'"
+    },
+    "edit_draft_grn": {
+      "status": "PASS",
+      "details": "PUT /api/grn/{id} successfully edits draft GRN (supplier_invoice_no, lines, notes, warehouse_id)"
+    },
+    "edit_posted_grn_blocked": {
+      "status": "PASS",
+      "details": "PUT /api/grn/{id} returns 400 for posted GRN with message about draft/approved"
+    },
+    "approve_draft_grn": {
+      "status": "PASS",
+      "details": "POST /api/grn/{id}/approve promotes draft to posted, runs full inventory/PO cascade (stock incremented, PO line received_quantity incremented)"
+    },
+    "get_grn_returns_both": {
+      "status": "PASS",
+      "details": "GET /api/grn returns both draft and posted GRNs with correct status field"
+    },
+    "pending_grns_excludes_drafts": {
+      "status": "PASS",
+      "details": "GET /api/purchase-invoices/pending-grns only returns posted GRNs (status in [posted, completed]), excludes drafts and GRNs already referenced in invoices"
+    },
+    "multi_grn_same_supplier": {
+      "status": "PASS",
+      "details": "POST /api/purchase-invoices with grn_ids=[grnA, grnB] from same supplier creates invoice with grn_ids array stored and grn_id=first id for back-compat"
+    },
+    "multi_grn_different_suppliers_blocked": {
+      "status": "PASS",
+      "details": "POST /api/purchase-invoices with grn_ids from different suppliers returns 400 with 'All selected GRNs must belong to the same supplier'"
+    },
+    "invoice_with_draft_grn_blocked": {
+      "status": "PASS",
+      "details": "POST /api/purchase-invoices with grn_ids referencing draft GRN returns 400 with 'is not posted yet — approve it before raising an invoice'"
+    },
+    "legacy_single_grn_flow": {
+      "status": "PASS",
+      "details": "Legacy grn_id field still creates invoice and GRN is excluded from pending list"
+    },
+    "manual_pi_no_grn": {
+      "status": "PASS",
+      "details": "Manual PI (is_manual=true, no GRN) still works end-to-end"
+    },
+    "frontend_grn_dialog": {
+      "status": "PASS (code review)",
+      "details": "GRN dialog has memoized GRNLineRow, Save as Draft / Approve & Post buttons, renamed label 'Supplier Invoice / DC Number', editingGrn state for draft editing"
+    },
+    "frontend_multi_grn_pi": {
+      "status": "PASS (code review + UI)",
+      "details": "Purchase Invoice dialog has checkbox list for multi-GRN selection, same-supplier validation, grn_ids field, selected GRN chips with remove buttons"
+    }
+  },
+  "mocked_apis_note": "Appyflow GSTIN lookup remains mocked. No new mocks introduced."
+}

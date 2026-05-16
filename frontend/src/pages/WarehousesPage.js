@@ -29,6 +29,72 @@ import { PackingListsPanel } from './CRMPage';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { toast } from 'sonner';
 
+// Memoised GRN line row — prevents the heavy verify-grid from re-rendering
+// every line on each keystroke (the supplier invoice / qty / price inputs
+// previously had a noticeable typing lag because every change to the parent
+// `grnForm` state caused all N rows to recompute their `formatCurrency` calls
+// and re-bind their handlers).
+const GRNLineRow = React.memo(function GRNLineRow({ line, idx, isJW, formatCurrency, updateGRNLine, locked }) {
+  const qtyMatch = line.received_quantity === line.po_quantity;
+  const priceMatch = line.verified_price === line.po_price;
+  return (
+    <tr className="border-b border-[#E5E7EB]" data-testid={`grn-verify-row-${idx}`}>
+      <td className="p-2">
+        <span className="mono text-xs font-medium">{line.item_part_number}</span>
+        <p className="text-[#6B7280] text-xs">{line.item_name}</p>
+      </td>
+      <td className="p-2 mono text-xs">{line.hsn_code || '-'}</td>
+      <td className="p-2 text-right mono">{line.ordered_quantity != null ? line.ordered_quantity : line.po_quantity}</td>
+      <td className="p-2 text-right mono text-[#6B7280]">{line.already_received != null ? line.already_received : 0}</td>
+      <td className="p-2 text-right mono font-semibold text-[#723B13]">{line.po_quantity}</td>
+      <td className="p-2">
+        <input
+          type="number"
+          min="0"
+          max={line.po_quantity}
+          step="any"
+          value={line.received_quantity}
+          onChange={(e) => updateGRNLine(idx, 'received_quantity', parseFloat(e.target.value) || 0)}
+          disabled={locked}
+          className="input-field bg-white text-xs h-8 mono w-20 text-right"
+          data-testid={`grn-received-qty-${idx}`}
+        />
+      </td>
+      <td className="p-2 mono text-xs">{line.uom}</td>
+      <td className="p-2 text-right mono">{formatCurrency(line.po_price)}</td>
+      <td className="p-2">
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={line.verified_price}
+          onChange={(e) => updateGRNLine(idx, 'verified_price', parseFloat(e.target.value) || 0)}
+          disabled={locked}
+          className="input-field bg-white text-xs h-8 mono w-24 text-right"
+          data-testid={`grn-verified-price-${idx}`}
+        />
+      </td>
+      <td className="p-2 text-right mono text-xs font-semibold">{formatCurrency((line.received_quantity || 0) * (line.verified_price || 0))}</td>
+      <td className="p-2 text-center">
+        {qtyMatch && priceMatch ? (
+          <CheckCircle2 className="w-4 h-4 text-[#03543F] mx-auto" />
+        ) : (
+          <span className="text-xs text-[#B45309] font-medium">
+            {!qtyMatch && 'Qty'}{!qtyMatch && !priceMatch && '/'}{!priceMatch && 'Price'}
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}, (prev, next) => (
+  prev.line === next.line
+  && prev.idx === next.idx
+  && prev.isJW === next.isJW
+  && prev.locked === next.locked
+  && prev.formatCurrency === next.formatCurrency
+  && prev.updateGRNLine === next.updateGRNLine
+));
+
 export default function WarehousesPage() {
   const { user, hasPermission } = useAuth();
   const { formatCurrency, currencySymbol } = useCompanySettings();
@@ -316,15 +382,22 @@ export default function WarehousesPage() {
     setGrnDialogOpen(true);
   };
 
-  const updateGRNLine = (index, field, value) => {
-    const newLines = [...grnForm.lines];
-    newLines[index] = { ...newLines[index], [field]: value };
-    setGrnForm({ ...grnForm, lines: newLines });
-  };
+  const updateGRNLine = useCallback((index, field, value) => {
+    setGrnForm(f => {
+      const newLines = [...f.lines];
+      newLines[index] = { ...newLines[index], [field]: value };
+      return { ...f, lines: newLines };
+    });
+  }, []);
 
-  const handleGRNSubmit = async (e) => {
-    e.preventDefault();
-    if (!grnForm.supplier_invoice_no.trim()) { toast.error('Supplier Invoice No. is mandatory'); return; }
+  // GRN draft / edit mode — when set, the dialog is editing an existing
+  // draft GRN (status='draft'). On save we PUT instead of POST. Approve
+  // promotes it to posted (stock + PO update happens here).
+  const [editingGrn, setEditingGrn] = useState(null);
+
+  const handleGRNSubmit = async (e, action = 'post') => {
+    e?.preventDefault?.();
+    if (!grnForm.supplier_invoice_no.trim()) { toast.error('Supplier Invoice / DC Number is mandatory'); return; }
     if (!grnForm.supplier_invoice_date) { toast.error('Supplier Invoice Date is mandatory'); return; }
     const totalQty = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0), 0);
     const totalCost = grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0) * (l.verified_price || 0), 0);
@@ -337,6 +410,7 @@ export default function WarehousesPage() {
       supplier_invoice_date: grnForm.supplier_invoice_date ? new Date(grnForm.supplier_invoice_date).toISOString() : null,
       warehouse_id: grnForm.warehouse_id,
       notes: grnForm.notes,
+      status: action === 'draft' ? 'draft' : 'posted',
       lines: grnForm.lines.filter(l => (l.received_quantity || 0) > 0).map(l => ({
         item_id: l.item_id,
         received_quantity: l.received_quantity,
@@ -344,12 +418,42 @@ export default function WarehousesPage() {
       })),
     };
     if (payload.lines.length === 0) { toast.error('Enter received quantity on at least one line'); return; }
+
+    // Draft save: skip confirm modal (no stock impact). Edits of an existing
+    // draft also skip the confirm modal — they're just amending the form.
+    if (action === 'draft') {
+      try {
+        if (editingGrn) {
+          await api.put(`/api/grn/${editingGrn.id}`, {
+            supplier_invoice_no: payload.supplier_invoice_no,
+            supplier_invoice_date: payload.supplier_invoice_date,
+            warehouse_id: payload.warehouse_id,
+            notes: payload.notes,
+            lines: payload.lines,
+          });
+          toast.success('Draft GRN updated.');
+        } else {
+          await api.post('/api/grn', payload);
+          toast.success('Draft GRN saved. Stock will be updated on approval.');
+        }
+        setGrnDialogOpen(false);
+        setSelectedPO(null);
+        setEditingGrn(null);
+        fetchData();
+      } catch (error) {
+        toast.error(error.response?.data?.detail || 'Failed to save draft');
+      }
+      return;
+    }
+
+    // Posting path — still uses the confirm modal so the user reviews the
+    // stock-affecting consumption summary before commit.
     setConfirmGrnModal({
       open: true,
-      kind: 'po',
+      kind: editingGrn ? 'po-draft-approve' : 'po',
       payload,
       summary: {
-        title: 'Confirm Goods Receipt',
+        title: editingGrn ? 'Approve Draft GRN' : 'Confirm Goods Receipt',
         supplier: selectedPO?.supplier?.name || '-',
         reference: `PO: ${selectedPO?.po_number || '-'}`,
         invoice: grnForm.supplier_invoice_no,
@@ -370,6 +474,19 @@ export default function WarehousesPage() {
       if (kind === 'po') {
         await api.post('/api/grn', payload);
         toast.success('Goods receipt confirmed. Stock updated.');
+      } else if (kind === 'po-draft-approve') {
+        // First persist any edits to the draft, then approve.
+        if (editingGrn) {
+          await api.put(`/api/grn/${editingGrn.id}`, {
+            supplier_invoice_no: payload.supplier_invoice_no,
+            supplier_invoice_date: payload.supplier_invoice_date,
+            warehouse_id: payload.warehouse_id,
+            notes: payload.notes,
+            lines: payload.lines,
+          });
+          await api.post(`/api/grn/${editingGrn.id}/approve`);
+          toast.success('Draft GRN approved. Stock updated.');
+        }
       } else if (kind === 'jw') {
         await api.post('/api/job-work/receive-grn', payload);
         toast.success('JW receipt confirmed. Stock updated for processed items.');
@@ -378,9 +495,62 @@ export default function WarehousesPage() {
       setGrnDialogOpen(false);
       setSelectedPO(null);
       setSelectedJW(null);
+      setEditingGrn(null);
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to create GRN');
+    }
+  };
+
+  // Open the GRN dialog in edit mode for an existing draft.
+  const openEditDraftGRN = async (grn) => {
+    try {
+      const { data: po } = await api.get(`/api/purchase-orders/${grn.po_id}`);
+      setSelectedPO(po);
+      setEditingGrn(grn);
+      const pendingLines = (po.lines || []).map(line => {
+        const ordered = Number(line.quantity || 0);
+        const alreadyReceived = Number(line.received_quantity || 0);
+        // Note: backend draft does NOT update PO.received_quantity, so
+        // already_received reflects only previously approved GRNs.
+        const draftLine = (grn.lines || []).find(dl => dl.item_id === line.item_id);
+        const pending = Math.max(0, ordered - alreadyReceived);
+        return {
+          item_id: line.item_id,
+          item_name: line.item?.name || '',
+          item_part_number: line.item?.part_number || '',
+          ordered_quantity: ordered,
+          already_received: alreadyReceived,
+          po_quantity: pending > 0 ? pending : (draftLine?.received_quantity || 0),
+          received_quantity: draftLine?.received_quantity ?? pending,
+          po_price: line.unit_price,
+          verified_price: draftLine?.verified_price ?? line.unit_price,
+          uom: line.uom || 'pcs',
+          hsn_code: line.hsn_code || '',
+        };
+      }).filter(l => l.po_quantity > 0 || (grn.lines || []).some(dl => dl.item_id === l.item_id));
+      setGrnForm({
+        supplier_invoice_no: grn.supplier_invoice_no || '',
+        supplier_invoice_date: grn.supplier_invoice_date ? String(grn.supplier_invoice_date).split('T')[0] : '',
+        warehouse_id: grn.warehouse_id || '',
+        notes: grn.notes || '',
+        lines: pendingLines,
+      });
+      setGrnDialogOpen(true);
+    } catch (e) {
+      toast.error('Failed to load draft for edit');
+    }
+  };
+
+  // Approve a draft GRN directly from the list (no dialog re-open).
+  const approveDraftGRN = async (grn) => {
+    if (!window.confirm(`Approve GRN ${grn.grn_number}?\n\nStock will be added and the linked PO updated.`)) return;
+    try {
+      await api.post(`/api/grn/${grn.id}/approve`);
+      toast.success(`GRN ${grn.grn_number} approved. Stock updated.`);
+      fetchData();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to approve draft');
     }
   };
 
@@ -1074,11 +1244,12 @@ export default function WarehousesPage() {
             </div>
           )}
 
-          {/* Completed GRN List */}
+          {/* GRN List (drafts + posted) */}
           <div className="card-flat overflow-hidden">
             <div className="p-4 border-b border-[#E5E7EB]">
               <h3 className="text-sm font-semibold text-[#1D3557] flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4" /> Completed GRN
+                <CheckCircle2 className="w-4 h-4" /> GRN Records
+                <span className="text-[10px] font-normal text-[#6B7280] ml-2">Drafts are editable · Posted are locked</span>
               </h3>
             </div>
             {grnList.length === 0 ? (
@@ -1093,19 +1264,29 @@ export default function WarehousesPage() {
                   <thead>
                     <tr>
                       <th>GRN No.</th>
+                      <th>Status</th>
                       <th>PO / DC Number</th>
                       <th>Supplier</th>
-                      <th>Supplier Invoice</th>
+                      <th>Supplier Invoice / DC No.</th>
                       <th>Items Received</th>
                       <th className="text-right">Total Qty</th>
                       <th>Date</th>
-                      <th>Print</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {grnList.map(grn => (
-                      <tr key={grn.id} data-testid={`grn-row-${grn.id}`}>
+                    {grnList.map(grn => {
+                      const isDraft = (grn.status || 'posted') === 'draft';
+                      return (
+                      <tr key={grn.id} data-testid={`grn-row-${grn.id}`} className={isDraft ? 'bg-[#FDF6B2]/30' : ''}>
                         <td className="mono font-semibold text-[#03543F]">{grn.grn_number}</td>
+                        <td>
+                          {isDraft ? (
+                            <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded bg-[#FDF6B2] text-[#723B13]" data-testid={`grn-status-${grn.id}`}>Draft</span>
+                          ) : (
+                            <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded bg-[#DEF7EC] text-[#03543F]" data-testid={`grn-status-${grn.id}`}>Posted</span>
+                          )}
+                        </td>
                         <td className="mono">
                           {grn.po_number ? (
                             <div>
@@ -1148,12 +1329,25 @@ export default function WarehousesPage() {
                         <td className="text-right mono">{(grn.lines || []).reduce((s, l) => s + l.received_quantity, 0)}</td>
                         <td className="text-sm">{grn.created_at ? new Date(grn.created_at).toLocaleDateString() : '-'}</td>
                         <td>
-                          <button onClick={() => setPrintGRN(grn)} className="p-1 text-[#4B5563] hover:text-[#03543F]" title="Print GRN" data-testid={`print-grn-${grn.id}`}>
-                            <Printer className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            {isDraft && canEdit && grn.po_id && (
+                              <>
+                                <button onClick={() => openEditDraftGRN(grn)} className="p-1 text-[#1D3557] hover:bg-[#E1EFFE] rounded" title="Edit draft" data-testid={`edit-draft-grn-${grn.id}`}>
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => approveDraftGRN(grn)} className="p-1 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Approve & post (updates stock)" data-testid={`approve-draft-grn-${grn.id}`}>
+                                  <CheckCircle2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                            <button onClick={() => setPrintGRN(grn)} className="p-1 text-[#4B5563] hover:text-[#03543F]" title="Print GRN" data-testid={`print-grn-${grn.id}`}>
+                              <Printer className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1169,17 +1363,24 @@ export default function WarehousesPage() {
                 </DialogTitle>
               </DialogHeader>
               {(selectedPO || selectedJW) && (
-                <form onSubmit={(e) => { e.preventDefault(); selectedJW ? handleJWGRNSubmit() : handleGRNSubmit(e); }} className="space-y-4 mt-3" data-testid="grn-form">
+                <form onSubmit={(e) => { e.preventDefault(); selectedJW ? handleJWGRNSubmit() : handleGRNSubmit(e, 'post'); }} className="space-y-4 mt-3" data-testid="grn-form">
                   {/* Supplier info */}
                   <div className="bg-[#F3F4F6] rounded-sm p-3 text-sm">
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
                       <div>
                         <span className="text-[#6B7280]">Supplier: </span>
                         <span className="font-medium">{selectedPO ? `${selectedPO.supplier?.name} (${selectedPO.supplier?.code})` : `${selectedJW?.supplier?.name || '-'} (${selectedJW?.supplier?.code || '-'})`}</span>
                       </div>
-                      <div>
-                        <span className="text-[#6B7280]">{selectedPO ? 'PO Total: ' : 'Process Charges: '}</span>
-                        <span className="mono font-semibold">{formatCurrency(selectedPO ? (selectedPO.total_amount || 0) : (selectedJW?.processing_charges || 0))}</span>
+                      <div className="flex items-center gap-3">
+                        {editingGrn && (
+                          <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded bg-[#FDF6B2] text-[#723B13]" data-testid="grn-draft-badge">
+                            Editing draft · {editingGrn.grn_number}
+                          </span>
+                        )}
+                        <div>
+                          <span className="text-[#6B7280]">{selectedPO ? 'PO Total: ' : 'Process Charges: '}</span>
+                          <span className="mono font-semibold">{formatCurrency(selectedPO ? (selectedPO.total_amount || 0) : (selectedJW?.processing_charges || 0))}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1187,16 +1388,16 @@ export default function WarehousesPage() {
                   {/* Invoice Reference */}
                   <div className="grid grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier Invoice / Doc Ref No. *</label>
-                      <input type="text" value={grnForm.supplier_invoice_no} onChange={(e) => setGrnForm({ ...grnForm, supplier_invoice_no: e.target.value })} className="input-field" placeholder="e.g. INV-2025-0123" required data-testid="grn-invoice-no" />
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Supplier Invoice / DC Number *</label>
+                      <input type="text" value={grnForm.supplier_invoice_no} onChange={(e) => setGrnForm(f => ({ ...f, supplier_invoice_no: e.target.value }))} className="input-field" placeholder="e.g. INV-2025-0123 or DC-2025-0123" required data-testid="grn-invoice-no" />
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-[#111827] mb-1">Invoice Date</label>
-                      <input type="date" value={grnForm.supplier_invoice_date} onChange={(e) => setGrnForm({ ...grnForm, supplier_invoice_date: e.target.value })} className="input-field" data-testid="grn-invoice-date" />
+                      <label className="block text-sm font-semibold text-[#111827] mb-1">Invoice / DC Date</label>
+                      <input type="date" value={grnForm.supplier_invoice_date} onChange={(e) => setGrnForm(f => ({ ...f, supplier_invoice_date: e.target.value }))} className="input-field" data-testid="grn-invoice-date" />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-[#111827] mb-1">Receiving Warehouse</label>
-                      <Select value={grnForm.warehouse_id || undefined} onValueChange={(v) => setGrnForm({ ...grnForm, warehouse_id: v })}>
+                      <Select value={grnForm.warehouse_id || undefined} onValueChange={(v) => setGrnForm(f => ({ ...f, warehouse_id: v }))}>
                         <SelectTrigger data-testid="grn-warehouse-select"><SelectValue placeholder="Select warehouse" /></SelectTrigger>
                         <SelectContent>
                           {warehouses.filter(w => w.status === 'active').map(w => <SelectItem key={w.id} value={w.id}>{w.code} - {w.name}</SelectItem>)}
@@ -1226,40 +1427,17 @@ export default function WarehousesPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {grnForm.lines.map((line, i) => {
-                            const qtyMatch = line.received_quantity === line.po_quantity;
-                            const priceMatch = line.verified_price === line.po_price;
-                            return (
-                              <tr key={i} className="border-b border-[#E5E7EB]" data-testid={`grn-verify-row-${i}`}>
-                                <td className="p-2">
-                                  <span className="mono text-xs font-medium">{line.item_part_number}</span>
-                                  <p className="text-[#6B7280] text-xs">{line.item_name}</p>
-                                </td>
-                                <td className="p-2 mono text-xs">{line.hsn_code || '-'}</td>
-                                <td className="p-2 text-right mono">{line.ordered_quantity != null ? line.ordered_quantity : line.po_quantity}</td>
-                                <td className="p-2 text-right mono text-[#6B7280]">{line.already_received != null ? line.already_received : 0}</td>
-                                <td className="p-2 text-right mono font-semibold text-[#723B13]">{line.po_quantity}</td>
-                                <td className="p-2">
-                                  <input type="number" min="0" max={line.po_quantity} step="any" value={line.received_quantity} onChange={(e) => updateGRNLine(i, 'received_quantity', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono w-20 text-right" data-testid={`grn-received-qty-${i}`} />
-                                </td>
-                                <td className="p-2 mono text-xs">{line.uom}</td>
-                                <td className="p-2 text-right mono">{formatCurrency(line.po_price)}</td>
-                                <td className="p-2">
-                                  <input type="number" min="0" step="0.01" value={line.verified_price} onChange={(e) => updateGRNLine(i, 'verified_price', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono w-24 text-right" data-testid={`grn-verified-price-${i}`} />
-                                </td>
-                                <td className="p-2 text-right mono text-xs font-semibold">{formatCurrency((line.received_quantity || 0) * (line.verified_price || 0))}</td>
-                                <td className="p-2 text-center">
-                                  {qtyMatch && priceMatch ? (
-                                    <CheckCircle2 className="w-4 h-4 text-[#03543F] mx-auto" />
-                                  ) : (
-                                    <span className="text-xs text-[#B45309] font-medium">
-                                      {!qtyMatch && 'Qty'}{!qtyMatch && !priceMatch && '/'}{!priceMatch && 'Price'}
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
+                          {grnForm.lines.map((line, i) => (
+                            <GRNLineRow
+                              key={line.item_id || i}
+                              line={line}
+                              idx={i}
+                              isJW={!!selectedJW}
+                              formatCurrency={formatCurrency}
+                              updateGRNLine={updateGRNLine}
+                              locked={false}
+                            />
+                          ))}
                           <tr className="bg-[#F3F4F6] font-semibold">
                             <td className="p-2 text-right text-sm" colSpan={9}>Grand Total</td>
                             <td className="p-2 text-right mono text-sm">{formatCurrency(grnForm.lines.reduce((s, l) => s + (l.received_quantity || 0) * (l.verified_price || 0), 0))}</td>
@@ -1272,14 +1450,25 @@ export default function WarehousesPage() {
 
                   <div>
                     <label className="block text-sm font-semibold text-[#111827] mb-1">Notes</label>
-                    <textarea value={grnForm.notes} onChange={(e) => setGrnForm({ ...grnForm, notes: e.target.value })} className="input-field" rows={2} placeholder="GRN notes..." data-testid="grn-notes" />
+                    <textarea value={grnForm.notes} onChange={(e) => setGrnForm(f => ({ ...f, notes: e.target.value }))} className="input-field" rows={2} placeholder="GRN notes..." data-testid="grn-notes" />
                   </div>
 
-                  <div className="flex justify-end space-x-3 pt-4 border-t border-[#E5E7EB]">
-                    <button type="button" onClick={() => setGrnDialogOpen(false)} className="btn-secondary">Cancel</button>
-                    <button type="submit" className="btn-primary" data-testid="grn-submit-btn">
-                      Confirm GRN
-                    </button>
+                  <div className="flex justify-between items-center pt-4 border-t border-[#E5E7EB]">
+                    <p className="text-xs text-[#6B7280]">
+                      <strong>Save Draft</strong>: keeps the form editable, no stock movement yet.<br/>
+                      <strong>{editingGrn ? 'Approve' : 'Approve & Post'}</strong>: locks the GRN and adds material to stock.
+                    </p>
+                    <div className="flex justify-end space-x-3">
+                      <button type="button" onClick={() => { setGrnDialogOpen(false); setEditingGrn(null); }} className="btn-secondary">Cancel</button>
+                      {!selectedJW && (
+                        <button type="button" onClick={(e) => handleGRNSubmit(e, 'draft')} className="btn-secondary border-[#1D3557] text-[#1D3557]" data-testid="grn-save-draft-btn">
+                          {editingGrn ? 'Save Draft' : 'Save as Draft'}
+                        </button>
+                      )}
+                      <button type="submit" className="btn-primary" data-testid="grn-submit-btn">
+                        {editingGrn ? 'Approve' : 'Approve & Post'}
+                      </button>
+                    </div>
                   </div>
                 </form>
               )}

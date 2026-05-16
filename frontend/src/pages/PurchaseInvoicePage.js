@@ -84,7 +84,7 @@ export default function PurchaseInvoicePage() {
   const [grnSearchQuery, setGrnSearchQuery] = useState('');
   const [suppliers, setSuppliers] = useState([]);
   const [formData, setFormData] = useState({
-    supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '',
+    supplier_id: '', po_id: '', grn_id: '', grn_ids: [], invoice_no: '', invoice_date: '', due_date: '', notes: '',
     additional_charges: [],  // Freight / Packaging / Insurance — pre-filled from parent PO when GRN is selected
     lines: []
   });
@@ -114,68 +114,103 @@ export default function PurchaseInvoicePage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handleGRNSelect = async (grnId) => {
-    const grn = pendingGRNs.find(g => g.id === grnId);
-    if (!grn) return;
-    const isJW = !!(grn.is_jw || grn.jw_order_id || grn.sc_order_id);
-    const supplierId = grn.supplier_id || grn.supplier?.id || grn.jw_order?.supplier_id || '';
-    let lines = [];
-    if (isJW) {
-      // JW GRN: invoice is for processing charges (service). Each GRN line has process_charges.
-      lines = (grn.lines || []).map(l => {
-        const it = items.find(i => i.id === l.item_id);
-        return {
-          item_id: l.item_id,
-          quantity: l.received_quantity || 0,
-          unit_price: l.process_charges || 0,
-          discount: 0,
-          hsn_code: l.hsn_code || it?.hsn_code || '',
-          // Services usually GST 18%, but respect item gst_rate as default
-          gst_rate: it?.gst_rate || 18,
-          is_process_charge: true,
-          description: `Processing charges for ${it?.part_number || ''} (JW: ${grn.jw_order_number || ''})`
-        };
-      });
-    } else {
-      // PO GRN: material purchase
-      lines = (grn.lines || []).map(l => {
-        const it = items.find(i => i.id === l.item_id);
-        return {
-          item_id: l.item_id,
-          quantity: l.received_quantity || 0,
-          unit_price: l.verified_price || l.po_price || 0,
-          discount: 0,
-          hsn_code: l.hsn_code || it?.hsn_code || '',
-          gst_rate: it?.gst_rate || 18,
-          is_process_charge: false,
-          description: ''
-        };
-      });
+  // Convert a list of GRN ids → merged invoice payload (supplier, lines,
+  // invoice header). Shared between toggle (multi-select) and a future
+  // "add another GRN" code path. Lines from multiple GRNs are merged by
+  // (item_id + process-vs-material) — qty added, unit_price kept from the
+  // most recent entry, description preserved.
+  const buildInvoiceFromGRNs = async (grnIds) => {
+    const selected = grnIds.map(id => pendingGRNs.find(g => g.id === id)).filter(Boolean);
+    if (selected.length === 0) {
+      return { supplier_id: '', po_id: '', grn_id: '', grn_ids: [], invoice_no: '', invoice_date: '', additional_charges: [], lines: [] };
     }
-    // Pre-fill additional_charges from the parent PO. Freight / packaging /
-    // insurance booked at PO time should flow into the PI by default — user
-    // can still tweak before saving.
+    // Validate same supplier
+    const firstSupplier = selected[0].supplier_id || selected[0].supplier?.id || selected[0].jw_order?.supplier_id || '';
+    for (const g of selected) {
+      const sid = g.supplier_id || g.supplier?.id || g.jw_order?.supplier_id || '';
+      if (sid && sid !== firstSupplier) {
+        alert('All selected GRNs must belong to the same supplier.');
+        return null;
+      }
+    }
+
+    // Merge lines across GRNs
+    const merged = new Map();
+    let invoice_no = '';
+    let invoice_date = '';
+    let po_id = '';
     let preCharges = [];
-    if (!isJW && grn.po_id) {
-      try {
-        const { data: po } = await api.get(`/api/purchase-orders/${grn.po_id}`);
-        preCharges = (po?.additional_charges || []).map(c => ({
-          name: c.name || '',
-          amount: parseFloat(c.amount) || 0,
-          gst_rate: parseFloat(c.gst_rate) || 0,
-        }));
-      } catch (e) { /* PO may have been deleted; non-fatal */ }
+    for (const grn of selected) {
+      const isJW = !!(grn.is_jw || grn.jw_order_id || grn.sc_order_id);
+      if (!invoice_no && grn.supplier_invoice_no) invoice_no = grn.supplier_invoice_no;
+      if (!invoice_date && grn.supplier_invoice_date) invoice_date = grn.supplier_invoice_date.split('T')[0];
+      if (!po_id && grn.po_id) po_id = grn.po_id;
+      // Pull additional charges from the first PO-based GRN's parent PO (only once)
+      if (preCharges.length === 0 && !isJW && grn.po_id) {
+        try {
+          const { data: po } = await api.get(`/api/purchase-orders/${grn.po_id}`);
+          preCharges = (po?.additional_charges || []).map(c => ({
+            name: c.name || '',
+            amount: parseFloat(c.amount) || 0,
+            gst_rate: parseFloat(c.gst_rate) || 0,
+          }));
+        } catch (e) { /* non-fatal */ }
+      }
+      for (const l of (grn.lines || [])) {
+        const it = items.find(i => i.id === l.item_id);
+        const isProcessLine = isJW;
+        const unitPrice = isJW ? (l.process_charges || 0) : (l.verified_price || l.po_price || 0);
+        const key = `${l.item_id}::${isProcessLine ? 'p' : 'm'}`;
+        const existing = merged.get(key);
+        if (existing) {
+          existing.quantity += (l.received_quantity || 0);
+          // keep last seen unit_price (operator can adjust)
+          if (unitPrice) existing.unit_price = unitPrice;
+        } else {
+          merged.set(key, {
+            item_id: l.item_id,
+            quantity: l.received_quantity || 0,
+            unit_price: unitPrice,
+            discount: 0,
+            hsn_code: l.hsn_code || it?.hsn_code || '',
+            gst_rate: it?.gst_rate || 18,
+            is_process_charge: isProcessLine,
+            description: isProcessLine ? `Processing charges for ${it?.part_number || ''} (JW: ${grn.jw_order_number || ''})` : '',
+          });
+        }
+      }
     }
-    setFormData({
-      ...formData,
-      grn_id: grnId,
-      supplier_id: supplierId,
-      po_id: grn.po_id || '',
-      invoice_no: grn.supplier_invoice_no || '',
-      invoice_date: grn.supplier_invoice_date ? grn.supplier_invoice_date.split('T')[0] : '',
+    return {
+      supplier_id: firstSupplier,
+      po_id: po_id,
+      grn_id: grnIds[0] || '',
+      grn_ids: grnIds,
+      invoice_no,
+      invoice_date,
       additional_charges: preCharges,
-      lines
-    });
+      lines: Array.from(merged.values()),
+    };
+  };
+
+  // Toggle a GRN into / out of the selection. First GRN locks the supplier.
+  const handleGRNSelect = async (grnId) => {
+    const currentIds = formData.grn_ids || (formData.grn_id ? [formData.grn_id] : []);
+    const nextIds = currentIds.includes(grnId)
+      ? currentIds.filter(id => id !== grnId)
+      : [...currentIds, grnId];
+    const next = await buildInvoiceFromGRNs(nextIds);
+    if (!next) return; // supplier mismatch alert already shown
+    setFormData(fd => ({
+      ...fd,
+      grn_id: next.grn_id,
+      grn_ids: next.grn_ids,
+      supplier_id: next.supplier_id,
+      po_id: next.po_id,
+      invoice_no: next.invoice_no || fd.invoice_no,
+      invoice_date: next.invoice_date || fd.invoice_date,
+      additional_charges: next.additional_charges,
+      lines: next.lines,
+    }));
   };
 
   const addLine = useCallback(() => setFormData(fd => ({ ...fd, lines: [...fd.lines, { item_id: '', quantity: 0, unit_price: 0, discount: 0, hsn_code: '', gst_rate: 18, is_process_charge: false, description: '' }] })), []);
@@ -207,7 +242,8 @@ export default function PurchaseInvoicePage() {
 
   const handleSubmit = async () => {
     // In manual mode, skip GRN check. Still require supplier + invoice_no + at least one line.
-    if (!editingInvoice && !manualMode && !formData.grn_id) { alert('Please select a GRN (or switch to Manual entry mode)'); return; }
+    const hasAnyGrnSelection = !!(formData.grn_id || (formData.grn_ids || []).length);
+    if (!editingInvoice && !manualMode && !hasAnyGrnSelection) { alert('Please select at least one GRN (or switch to Manual entry mode)'); return; }
     if (!editingInvoice && manualMode && !formData.supplier_id) { alert('Please select a supplier'); return; }
     if (!formData.invoice_no) { alert('Please enter supplier invoice number'); return; }
     if (formData.lines.length === 0) { alert('Add at least one line item'); return; }
@@ -262,7 +298,7 @@ export default function PurchaseInvoicePage() {
     setDialogOpen(true);
   };
 
-  const resetForm = () => { setFormData({ supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', additional_charges: [], lines: [] }); setManualMode(false); setGrnSearchQuery(''); };
+  const resetForm = () => { setFormData({ supplier_id: '', po_id: '', grn_id: '', grn_ids: [], invoice_no: '', invoice_date: '', due_date: '', notes: '', additional_charges: [], lines: [] }); setManualMode(false); setGrnSearchQuery(''); };
 
   const handleApprove = async (id) => {
     if (!window.confirm('Approve this invoice?')) return;
@@ -470,7 +506,7 @@ export default function PurchaseInvoicePage() {
             {!editingInvoice && (
             <div className="flex items-center gap-3 bg-[#F3F4F6] border border-[#D1D5DB] rounded-sm p-2">
               <button type="button" onClick={() => { setManualMode(false); }} className={`flex-1 text-xs py-1.5 rounded-sm transition-colors ${!manualMode ? 'bg-white border border-[#1D3557] text-[#1D3557] font-semibold shadow-sm' : 'text-[#6B7280] hover:text-[#111827]'}`} data-testid="pi-mode-grn">From GRN (standard)</button>
-              <button type="button" onClick={() => { setManualMode(true); setFormData({ supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', lines: [] }); }} className={`flex-1 text-xs py-1.5 rounded-sm transition-colors ${manualMode ? 'bg-white border border-[#1D3557] text-[#1D3557] font-semibold shadow-sm' : 'text-[#6B7280] hover:text-[#111827]'}`} data-testid="pi-mode-manual">Manual Entry (no GRN)</button>
+              <button type="button" onClick={() => { setManualMode(true); setFormData({ supplier_id: '', po_id: '', grn_id: '', grn_ids: [], invoice_no: '', invoice_date: '', due_date: '', notes: '', additional_charges: [], lines: [] }); }} className={`flex-1 text-xs py-1.5 rounded-sm transition-colors ${manualMode ? 'bg-white border border-[#1D3557] text-[#1D3557] font-semibold shadow-sm' : 'text-[#6B7280] hover:text-[#111827]'}`} data-testid="pi-mode-manual">Manual Entry (no GRN)</button>
             </div>
             )}
 
@@ -518,64 +554,84 @@ export default function PurchaseInvoicePage() {
                 )}
               </div>
             ) : (
-              /* GRN Selection with search */
+              /* GRN Selection with search — multi-select (same supplier) */
               <div className="bg-[#F0F4F8] border border-[#D1D5DB] rounded-sm p-4">
-                <label className="block text-sm font-semibold text-[#111827] mb-2">Select GRN *</label>
+                <label className="block text-sm font-semibold text-[#111827] mb-2">Select GRN(s) * <span className="text-xs font-normal text-[#6B7280]">— pick multiple GRNs (same supplier) to consolidate into one invoice</span></label>
                 <div className="relative mb-2">
                   <Search className="w-4 h-4 text-[#9CA3AF] absolute left-3 top-1/2 -translate-y-1/2" />
                   <input type="text" placeholder="Search by GRN #, PO #, JW order # or supplier name..." value={grnSearchQuery} onChange={(e) => setGrnSearchQuery(e.target.value)} className="search-input" data-testid="grn-search-input" />
                 </div>
                 {(() => {
                   const q = grnSearchQuery.trim().toLowerCase();
+                  const selectedIdsLocal = formData.grn_ids?.length ? formData.grn_ids : (formData.grn_id ? [formData.grn_id] : []);
+                  const lockedSupplierId = selectedIdsLocal.length > 0 ? (formData.supplier_id || '') : '';
                   const filtered = pendingGRNs.filter(grn => {
+                    // Once one GRN is picked, only show same-supplier GRNs
+                    if (lockedSupplierId) {
+                      const sid = grn.supplier_id || grn.supplier?.id || grn.jw_order?.supplier_id || '';
+                      if (sid !== lockedSupplierId) return false;
+                    }
                     if (!q) return true;
                     const isJW = !!(grn.is_jw || grn.jw_order_id || grn.sc_order_id);
                     const ref = isJW ? (grn.jw_order_number || grn.jw_order?.order_number || '') : (grn.po?.po_number || grn.po_number || '');
                     return [grn.grn_number, ref, grn.supplier?.name].some(v => (v || '').toLowerCase().includes(q));
                   });
-                  const selected = pendingGRNs.find(g => g.id === formData.grn_id);
-                  if (selected) {
-                    const isJW = !!(selected.is_jw || selected.jw_order_id || selected.sc_order_id);
-                    const ref = isJW ? (selected.jw_order_number || selected.jw_order?.order_number || '-') : (selected.po?.po_number || selected.po_number || '-');
-                    return (
-                      <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-3 py-2" data-testid="grn-selected">
-                        <div className="text-xs">
-                          <span className="mono font-semibold">{selected.grn_number}</span>
-                          <span className="mx-2">—</span>
-                          <span className="text-[#6B7280]">{isJW ? 'JW' : 'PO'}: <span className="mono">{ref}</span></span>
-                          <span className="mx-2">·</span>
-                          <span>{selected.supplier?.name}</span>
-                          {selected.lines?.length > 0 && <span className="ml-2 text-[#6B7280]">({selected.lines.length} {isJW ? 'services' : 'items'})</span>}
-                        </div>
-                        <button type="button" className="text-xs text-[#9B1C1C] hover:underline" onClick={() => { setFormData({ supplier_id: '', po_id: '', grn_id: '', invoice_no: '', invoice_date: '', due_date: '', notes: '', lines: [] }); setGrnSearchQuery(''); }} data-testid="grn-clear">Clear</button>
-                      </div>
-                    );
-                  }
+                  const selectedGrns = selectedIdsLocal.map(id => pendingGRNs.find(g => g.id === id)).filter(Boolean);
                   return (
-                    <div className="border border-[#E5E7EB] rounded-sm max-h-56 overflow-auto bg-white" data-testid="grn-list">
-                      {filtered.length === 0 && (<div className="px-3 py-4 text-center text-xs text-[#6B7280]">{pendingGRNs.length === 0 ? 'No GRNs pending invoice. Create a GRN from Stores first.' : 'No matching GRNs.'}</div>)}
-                      {filtered.slice(0, 200).map(grn => {
-                        const isJW = !!(grn.is_jw || grn.jw_order_id || grn.sc_order_id);
-                        const ref = isJW ? (grn.jw_order_number || grn.jw_order?.order_number || '-') : (grn.po?.po_number || grn.po_number || '-');
-                        return (
-                          <button key={grn.id} type="button" onClick={() => handleGRNSelect(grn.id)} data-testid={`grn-option-${grn.id}`} className="w-full text-left px-3 py-2 text-xs border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]">
-                            <span className="mono font-semibold">{grn.grn_number}</span>
-                            <span className="mx-2 text-[#6B7280]">—</span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${isJW ? 'bg-[#FDF6B2] text-[#723B13]' : 'bg-[#E1EFFE] text-[#1E429F]'}`}>{isJW ? 'JW' : 'PO'}</span>
-                            <span className="ml-2 mono">{ref}</span>
-                            <span className="mx-2">·</span>
-                            <span>{grn.supplier?.name || 'Unknown'}</span>
-                            {grn.lines?.length > 0 && <span className="ml-2 text-[#6B7280]">({grn.lines.length} {isJW ? 'services' : 'items'})</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <>
+                      {/* Selected GRN chips */}
+                      {selectedGrns.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mb-2 p-2 bg-[#F0FDF4] border border-[#03543F] rounded-sm" data-testid="grn-selected-chips">
+                          {selectedGrns.map(g => {
+                            const isJW = !!(g.is_jw || g.jw_order_id || g.sc_order_id);
+                            const ref = isJW ? (g.jw_order_number || g.jw_order?.order_number || '-') : (g.po?.po_number || g.po_number || '-');
+                            return (
+                              <span key={g.id} className="inline-flex items-center gap-1 bg-white border border-[#03543F] text-xs px-2 py-0.5 rounded-sm" data-testid={`grn-chip-${g.id}`}>
+                                <span className="mono font-semibold">{g.grn_number}</span>
+                                <span className="text-[#6B7280]">({isJW ? 'JW' : 'PO'}: <span className="mono">{ref}</span>)</span>
+                                <button type="button" onClick={() => handleGRNSelect(g.id)} className="text-[#9B1C1C] hover:text-[#DC2626] ml-1" title="Remove from selection" data-testid={`grn-chip-remove-${g.id}`}>
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </span>
+                            );
+                          })}
+                          <button type="button" className="text-xs text-[#9B1C1C] hover:underline ml-2" onClick={() => { setFormData({ supplier_id: '', po_id: '', grn_id: '', grn_ids: [], invoice_no: '', invoice_date: '', due_date: '', notes: '', additional_charges: [], lines: [] }); setGrnSearchQuery(''); }} data-testid="grn-clear-all">Clear all</button>
+                        </div>
+                      )}
+                      {/* GRN list with checkboxes */}
+                      <div className="border border-[#E5E7EB] rounded-sm max-h-56 overflow-auto bg-white" data-testid="grn-list">
+                        {filtered.length === 0 && (<div className="px-3 py-4 text-center text-xs text-[#6B7280]">{pendingGRNs.length === 0 ? 'No GRNs pending invoice. Approve a draft GRN in Stores first.' : 'No matching GRNs.'}</div>)}
+                        {filtered.slice(0, 200).map(grn => {
+                          const isJW = !!(grn.is_jw || grn.jw_order_id || grn.sc_order_id);
+                          const ref = isJW ? (grn.jw_order_number || grn.jw_order?.order_number || '-') : (grn.po?.po_number || grn.po_number || '-');
+                          const checked = selectedIdsLocal.includes(grn.id);
+                          return (
+                            <label key={grn.id} className={`flex items-center gap-2 w-full px-3 py-2 text-xs border-b border-[#F3F4F6] last:border-0 cursor-pointer hover:bg-[#F9FAFB] ${checked ? 'bg-[#F0FDF4]' : ''}`} data-testid={`grn-option-${grn.id}`}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => handleGRNSelect(grn.id)}
+                                className="rounded border-[#D1D5DB]"
+                                data-testid={`grn-checkbox-${grn.id}`}
+                              />
+                              <span className="mono font-semibold">{grn.grn_number}</span>
+                              <span className="text-[#6B7280]">—</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${isJW ? 'bg-[#FDF6B2] text-[#723B13]' : 'bg-[#E1EFFE] text-[#1E429F]'}`}>{isJW ? 'JW' : 'PO'}</span>
+                              <span className="mono">{ref}</span>
+                              <span className="text-[#6B7280]">·</span>
+                              <span>{grn.supplier?.name || 'Unknown'}</span>
+                              {grn.lines?.length > 0 && <span className="text-[#6B7280] ml-auto">({grn.lines.length} {isJW ? 'services' : 'items'})</span>}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </>
                   );
                 })()}
               </div>
             )}
 
-            {(formData.grn_id || manualMode) && (
+            {(formData.grn_id || (formData.grn_ids || []).length > 0 || manualMode) && (
               <>
                 {/* GRN Type Banner (only in GRN mode) */}
                 {!manualMode && (() => {

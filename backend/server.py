@@ -613,6 +613,15 @@ class GRNCreate(BaseModel):
     lines: List[GRNLineVerify]
     warehouse_id: Optional[str] = ""
     notes: Optional[str] = ""
+    status: Optional[str] = "posted"  # "draft" => save without stock/PO updates; "posted" => commit immediately (legacy)
+
+class GRNUpdate(BaseModel):
+    """Patch payload for draft GRNs (posted GRNs are read-only)."""
+    supplier_invoice_no: Optional[str] = None
+    supplier_invoice_date: Optional[datetime] = None
+    lines: Optional[List[GRNLineVerify]] = None
+    warehouse_id: Optional[str] = None
+    notes: Optional[str] = None
 
 class ManualGRNLine(BaseModel):
     item_id: str
@@ -655,6 +664,7 @@ class PurchaseInvoiceCreate(BaseModel):
     supplier_id: str
     po_id: Optional[str] = ""
     grn_id: Optional[str] = ""
+    grn_ids: Optional[List[str]] = None  # Multi-GRN invoicing: select multiple GRNs from the same supplier
     invoice_no: str
     invoice_date: datetime
     due_date: Optional[datetime] = None
@@ -4989,7 +4999,12 @@ async def create_grn(grn_data: GRNCreate, request: Request):
     """Create GRN - verify material, price, update inventory.
     Supports partial receipts: cumulatively updates each PO line's
     received_quantity. PO status becomes 'partial' until every line is fully
-    received, then flips to 'received'."""
+    received, then flips to 'received'.
+
+    NEW: When `status='draft'`, the GRN is saved as a draft (editable) and
+    NO inventory/PO/SC updates happen until the user explicitly approves it
+    via POST /grn/{grn_id}/approve. This lets the user double-check the
+    received qty/price before stock is committed."""
     user = await get_current_user(request)
     _require_access(user, ["admin", "inventory_manager"], module="stores", action="create")
     po = await db.purchase_orders.find_one({"id": grn_data.po_id})
@@ -4997,17 +5012,89 @@ async def create_grn(grn_data: GRNCreate, request: Request):
         raise HTTPException(status_code=404, detail="Purchase order not found")
     if po.get("status") in ["received", "short_closed", "cancelled"]:
         raise HTTPException(status_code=400, detail=f"Cannot create GRN for a {po.get('status')} PO")
-    
+
     # Generate GRN number
     count = await db.grn.count_documents({})
     grn_number = f"GRN-{str(count + 1).zfill(6)}"
-    
+
+    save_as_draft = (grn_data.status or "posted").lower() == "draft"
+
+    if save_as_draft:
+        # Build raw GRN lines from incoming data without touching inventory/PO.
+        draft_lines = []
+        for grn_line in grn_data.lines:
+            if (grn_line.received_quantity or 0) <= 0:
+                continue
+            po_line = next((l for l in po.get("lines", []) if l.get("item_id") == grn_line.item_id), {})
+            draft_lines.append({
+                "item_id": grn_line.item_id,
+                "po_quantity": po_line.get("quantity", 0),
+                "received_quantity": grn_line.received_quantity,
+                "po_price": po_line.get("unit_price", 0),
+                "verified_price": grn_line.verified_price,
+                "uom": po_line.get("uom", "pcs"),
+                "hsn_code": po_line.get("hsn_code", ""),
+            })
+        if not draft_lines:
+            raise HTTPException(status_code=400, detail="No lines with received quantity > 0")
+        draft_doc = {
+            "id": str(uuid.uuid4()),
+            "grn_number": grn_number,
+            "po_id": grn_data.po_id,
+            "po_number": po.get("po_number", ""),
+            "supplier_id": po.get("supplier_id", ""),
+            "supplier_invoice_no": grn_data.supplier_invoice_no,
+            "supplier_invoice_date": grn_data.supplier_invoice_date,
+            "warehouse_id": grn_data.warehouse_id or po.get("delivery_warehouse_id", ""),
+            "lines": draft_lines,
+            "notes": grn_data.notes,
+            "status": "draft",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user["id"],
+        }
+        await db.grn.insert_one(draft_doc)
+        draft_doc.pop("_id", None)
+        return draft_doc
+
+    # Posted path — original commit-now behaviour. Delegated to helper so
+    # /approve can reuse exactly the same logic.
+    return await _post_grn_to_inventory(
+        user=user,
+        po=po,
+        grn_number=grn_number,
+        supplier_invoice_no=grn_data.supplier_invoice_no,
+        supplier_invoice_date=grn_data.supplier_invoice_date,
+        warehouse_id=grn_data.warehouse_id,
+        notes=grn_data.notes,
+        line_items=[(ln.item_id, float(ln.received_quantity or 0), float(ln.verified_price or 0)) for ln in grn_data.lines],
+    )
+
+
+async def _post_grn_to_inventory(
+    *,
+    user: dict,
+    po: dict,
+    grn_number: str,
+    supplier_invoice_no: str,
+    supplier_invoice_date,
+    warehouse_id: Optional[str],
+    notes: Optional[str],
+    line_items: List[Tuple[str, float, float]],
+    existing_grn_id: Optional[str] = None,
+):
+    """Shared posting logic — used by direct GRN creation AND by the
+    /grn/{id}/approve endpoint that promotes a draft to a committed GRN.
+
+    `line_items` is a list of (item_id, received_quantity, verified_price).
+    `existing_grn_id` — when re-using a draft GRN's UUID instead of inserting
+    a new doc; the helper updates the existing draft to status=posted.
+    """
     # Build a quick lookup of incoming receive qty per item
     incoming = {}
-    for ln in grn_data.lines:
-        if (ln.received_quantity or 0) > 0:
-            incoming[ln.item_id] = incoming.get(ln.item_id, 0) + float(ln.received_quantity)
-    
+    for item_id, recv_qty, _verified_price in line_items:
+        if recv_qty > 0:
+            incoming[item_id] = incoming.get(item_id, 0.0) + recv_qty
+
     # Prepare updated PO lines (cumulative received_quantity per line)
     updated_po_lines = []
     for po_line in po.get("lines", []):
@@ -5015,132 +5102,136 @@ async def create_grn(grn_data: GRNCreate, request: Request):
         ord_qty = float(po_line.get("quantity", 0) or 0)
         add = float(incoming.get(po_line.get("item_id"), 0))
         new_recv = prev_recv + add
-        # cap at ordered qty (over-receipt is recorded but stored qty is capped to keep MRP math clean)
         new_recv_capped = min(new_recv, ord_qty) if ord_qty > 0 else new_recv
         updated_po_lines.append({**po_line, "received_quantity": new_recv_capped})
-    
+
     # Process each line - update inventory with verified quantities
     grn_lines = []
-    for grn_line in grn_data.lines:
-        if (grn_line.received_quantity or 0) <= 0:
-            continue  # skip zero-qty lines (partial receipt: user left this line for next GRN)
-        item = await db.items.find_one({"id": grn_line.item_id})
+    for item_id, recv_qty, verified_price in line_items:
+        if recv_qty <= 0:
+            continue
+        item = await db.items.find_one({"id": item_id})
         if not item:
             continue
-        
+
         current_stock = item.get("current_stock", 0)
-        new_stock = current_stock + grn_line.received_quantity
-        
+        new_stock = current_stock + recv_qty
+
         # Find matching PO line for reference
-        po_line = next((l for l in po.get("lines", []) if l.get("item_id") == grn_line.item_id), {})
-        
+        po_line = next((l for l in po.get("lines", []) if l.get("item_id") == item_id), {})
+
         grn_lines.append({
-            "item_id": grn_line.item_id,
+            "item_id": item_id,
             "po_quantity": po_line.get("quantity", 0),
-            "received_quantity": grn_line.received_quantity,
+            "received_quantity": recv_qty,
             "po_price": po_line.get("unit_price", 0),
-            "verified_price": grn_line.verified_price,
+            "verified_price": verified_price,
             "uom": po_line.get("uom", "pcs"),
             "hsn_code": po_line.get("hsn_code", ""),
         })
-        
+
         # Create inventory transaction
         tx_doc = {
             "id": str(uuid.uuid4()),
-            "item_id": grn_line.item_id,
+            "item_id": item_id,
             "transaction_type": "receive",
-            "quantity": grn_line.received_quantity,
+            "quantity": recv_qty,
             "reference_type": "grn",
             "reference_id": grn_number,
             "previous_stock": current_stock,
             "new_stock": new_stock,
             "notes": f"GRN {grn_number} from PO {po.get('po_number')}",
             "created_at": datetime.now(timezone.utc),
-            "created_by": user["id"]
+            "created_by": user["id"],
         }
         await db.inventory_transactions.insert_one(tx_doc)
-        await db.items.update_one({"id": grn_line.item_id}, {"$set": {"current_stock": new_stock}})
-    
+        await db.items.update_one({"id": item_id}, {"$set": {"current_stock": new_stock}})
+
     if not grn_lines:
         raise HTTPException(status_code=400, detail="No lines with received quantity > 0")
-    
+
     grn_doc = {
-        "id": str(uuid.uuid4()),
+        "id": existing_grn_id or str(uuid.uuid4()),
         "grn_number": grn_number,
-        "po_id": grn_data.po_id,
+        "po_id": po.get("id"),
         "po_number": po.get("po_number", ""),
         "supplier_id": po.get("supplier_id", ""),
-        "supplier_invoice_no": grn_data.supplier_invoice_no,
-        "supplier_invoice_date": grn_data.supplier_invoice_date,
-        "warehouse_id": grn_data.warehouse_id or po.get("delivery_warehouse_id", ""),
+        "supplier_invoice_no": supplier_invoice_no,
+        "supplier_invoice_date": supplier_invoice_date,
+        "warehouse_id": warehouse_id or po.get("delivery_warehouse_id", ""),
         "lines": grn_lines,
-        "notes": grn_data.notes,
-        "status": "completed",
+        "notes": notes,
+        "status": "posted",
         "created_at": datetime.now(timezone.utc),
-        "created_by": user["id"]
+        "created_by": user["id"],
     }
-    await db.grn.insert_one(grn_doc)
-    grn_doc.pop("_id", None)
-    
+    if existing_grn_id:
+        # Promoting a draft → posted. Preserve original created_at if present.
+        existing = await db.grn.find_one({"id": existing_grn_id}, {"_id": 0})
+        if existing and existing.get("created_at"):
+            grn_doc["created_at"] = existing["created_at"]
+        grn_doc["approved_at"] = datetime.now(timezone.utc)
+        grn_doc["approved_by"] = user["id"]
+        await db.grn.update_one({"id": existing_grn_id}, {"$set": {k: v for k, v in grn_doc.items() if k != "id"}})
+    else:
+        await db.grn.insert_one(grn_doc)
+        grn_doc.pop("_id", None)
+
     # Decide new PO status: 'received' iff every line is fully received, else 'partial'
     fully_received = all(
         float(pl.get("received_quantity", 0) or 0) >= float(pl.get("quantity", 0) or 0)
         for pl in updated_po_lines
     ) and len(updated_po_lines) > 0
     new_status = "received" if fully_received else "partial"
-    
+
     grn_numbers_history = list(po.get("grn_numbers", []) or [])
     if grn_number not in grn_numbers_history:
         grn_numbers_history.append(grn_number)
-    
+
     po_update = {
         "status": new_status,
         "lines": updated_po_lines,
         "grn_numbers": grn_numbers_history,
-        "grn_number": grn_number,  # latest GRN number (kept for backward compat)
+        "grn_number": grn_number,
     }
     if fully_received:
         po_update["received_at"] = datetime.now(timezone.utc)
         po_update["received_by"] = user["id"]
-    
-    await db.purchase_orders.update_one({"id": grn_data.po_id}, {"$set": po_update})
-    
+
+    await db.purchase_orders.update_one({"id": po.get("id")}, {"$set": po_update})
+
     # SC linkage logic only fires when the PO is fully received.
     sc_order_ids = po.get("reference_sc_order_ids", []) if fully_received else []
     if not sc_order_ids and po.get("reference_sc_order_id") and fully_received:
         sc_order_ids = [po["reference_sc_order_id"]]
-    
+
     for sc_id in sc_order_ids:
         sc_order = await db.subcontract_orders.find_one({"id": sc_id})
         if not sc_order or sc_order.get("status") == "completed":
             continue
-        
-        # Update received quantities on job_work_parts
+
         for p in sc_order.get("job_work_parts", []):
             for gl in grn_lines:
                 if gl["item_id"] == p.get("item_id"):
                     p["received_quantity"] = p.get("received_quantity", 0) + gl["received_quantity"]
-        
-        # Mark SC as completed
+
         await db.subcontract_orders.update_one({"id": sc_id}, {"$set": {
             "status": "completed",
             "job_work_parts": sc_order.get("job_work_parts", []),
             "last_receipt_date": datetime.now(timezone.utc).isoformat(),
-            "completed_at": datetime.now(timezone.utc).isoformat()
+            "completed_at": datetime.now(timezone.utc).isoformat(),
         }})
-        
-        # Complete ALL linked MOs
+
         all_wo_ids = list(set(filter(None, [
             sc_order.get("reference_wo_id"),
             *(sc_order.get("reference_wo_ids", []))
         ])))
-        
+
         for ref_wo_id in all_wo_ids:
             ref_wo = await db.work_orders.find_one({"id": ref_wo_id})
             if not ref_wo or ref_wo.get("status") == "completed":
                 continue
-            
-            # Mark all ops as completed
+
             ops = ref_wo.get("operations_status", [])
             for op in ops:
                 if op.get("status") != "completed":
@@ -5148,17 +5239,97 @@ async def create_grn(grn_data: GRNCreate, request: Request):
                     op["actual_end"] = datetime.now(timezone.utc)
                     op["quantity_completed"] = ref_wo.get("quantity", 0)
                     op["quantity_accepted"] = ref_wo.get("quantity", 0)
-            
-            # NOTE: FG stock is already added at GRN line processing above (lines 2724-2755)
-            # Do NOT add FG stock again here to prevent double-counting
+
             mo_qty = ref_wo.get("quantity", 0)
-            
+
             await db.work_orders.update_one({"id": ref_wo_id}, {"$set": {
                 "operations_status": ops, "status": "completed",
-                "quantity_completed": mo_qty, "actual_end": datetime.now(timezone.utc)
+                "quantity_completed": mo_qty, "actual_end": datetime.now(timezone.utc),
             }})
-    
+
     return grn_doc
+
+
+@grn_router.put("/{grn_id}")
+async def update_draft_grn(grn_id: str, data: GRNUpdate, request: Request):
+    """Edit a draft GRN. Posted GRNs are immutable."""
+    user = await get_current_user(request)
+    _require_access(user, ["admin", "inventory_manager"], module="stores", action="edit")
+    grn = await db.grn.find_one({"id": grn_id})
+    if not grn:
+        raise HTTPException(status_code=404, detail="GRN not found")
+    if (grn.get("status") or "posted") != "draft":
+        raise HTTPException(status_code=400, detail="Only draft GRNs can be edited. This GRN has already been approved.")
+
+    update_data = {}
+    if data.supplier_invoice_no is not None:
+        update_data["supplier_invoice_no"] = data.supplier_invoice_no
+    if data.supplier_invoice_date is not None:
+        update_data["supplier_invoice_date"] = data.supplier_invoice_date
+    if data.warehouse_id is not None:
+        update_data["warehouse_id"] = data.warehouse_id
+    if data.notes is not None:
+        update_data["notes"] = data.notes
+    if data.lines is not None:
+        # Rebuild lines: pull po_quantity / po_price / uom / hsn from the PO
+        # so the user never has to send those (and can't tamper with them).
+        po = await db.purchase_orders.find_one({"id": grn.get("po_id")})
+        new_lines = []
+        for ln in data.lines:
+            if (ln.received_quantity or 0) <= 0:
+                continue
+            po_line = next((l for l in (po or {}).get("lines", []) if l.get("item_id") == ln.item_id), {})
+            new_lines.append({
+                "item_id": ln.item_id,
+                "po_quantity": po_line.get("quantity", 0),
+                "received_quantity": ln.received_quantity,
+                "po_price": po_line.get("unit_price", 0),
+                "verified_price": ln.verified_price,
+                "uom": po_line.get("uom", "pcs"),
+                "hsn_code": po_line.get("hsn_code", ""),
+            })
+        if not new_lines:
+            raise HTTPException(status_code=400, detail="Draft GRN must have at least one line with received qty > 0")
+        update_data["lines"] = new_lines
+
+    if update_data:
+        update_data["updated_at"] = datetime.now(timezone.utc)
+        update_data["updated_by"] = user["id"]
+        await db.grn.update_one({"id": grn_id}, {"$set": update_data})
+    return await db.grn.find_one({"id": grn_id}, {"_id": 0})
+
+
+@grn_router.post("/{grn_id}/approve")
+async def approve_draft_grn(grn_id: str, request: Request):
+    """Promote a draft GRN to posted — runs the full inventory + PO + SC
+    cascade that a direct-post GRN would have run."""
+    user = await get_current_user(request)
+    _require_access(user, ["admin", "inventory_manager"], module="stores", action="edit")
+    grn = await db.grn.find_one({"id": grn_id}, {"_id": 0})
+    if not grn:
+        raise HTTPException(status_code=404, detail="GRN not found")
+    if (grn.get("status") or "posted") != "draft":
+        raise HTTPException(status_code=400, detail="GRN is not in draft status")
+    po = await db.purchase_orders.find_one({"id": grn.get("po_id")})
+    if not po:
+        raise HTTPException(status_code=404, detail="Source PO no longer exists")
+    if po.get("status") in ("received", "short_closed", "cancelled"):
+        raise HTTPException(status_code=400, detail=f"Cannot approve GRN: source PO is {po.get('status')}")
+    line_items = [
+        (ln.get("item_id"), float(ln.get("received_quantity") or 0), float(ln.get("verified_price") or 0))
+        for ln in (grn.get("lines") or [])
+    ]
+    return await _post_grn_to_inventory(
+        user=user,
+        po=po,
+        grn_number=grn.get("grn_number"),
+        supplier_invoice_no=grn.get("supplier_invoice_no") or "",
+        supplier_invoice_date=grn.get("supplier_invoice_date"),
+        warehouse_id=grn.get("warehouse_id"),
+        notes=grn.get("notes") or "",
+        line_items=line_items,
+        existing_grn_id=grn_id,
+    )
 
 
 @grn_router.post("/manual", status_code=201)
@@ -10197,15 +10368,30 @@ async def get_purchase_invoices(request: Request, status: str = None):
 
 @purchase_invoices_router.get("/pending-grns")
 async def get_grns_pending_invoice(request: Request):
-    """Get GRNs (PO-based and JW-based) that don't have a purchase invoice yet"""
+    """Get GRNs (PO-based and JW-based) that don't have a purchase invoice yet.
+    Excludes draft GRNs (these have not been approved yet, so no invoice can
+    be raised against them). Treats both legacy `status='completed'` and new
+    `status='posted'` as valid posted states."""
     user = await get_current_user(request)
-    # Get all GRN IDs that already have invoices
+    # Get all GRN IDs that already have invoices (single grn_id OR multi grn_ids)
     invoiced_grn_ids = set()
-    async for inv in db.purchase_invoices.find({"grn_id": {"$exists": True, "$ne": ""}}, {"grn_id": 1}):
-        invoiced_grn_ids.add(inv.get("grn_id"))
-    
-    # Get all completed GRNs
-    grns = await db.grn.find({"status": "completed"}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    async for inv in db.purchase_invoices.find(
+        {"$or": [
+            {"grn_id": {"$exists": True, "$ne": ""}},
+            {"grn_ids": {"$exists": True, "$ne": []}},
+        ]},
+        {"grn_id": 1, "grn_ids": 1},
+    ):
+        if inv.get("grn_id"):
+            invoiced_grn_ids.add(inv["grn_id"])
+        for gid in (inv.get("grn_ids") or []):
+            invoiced_grn_ids.add(gid)
+
+    # Get all posted GRNs (legacy "completed" + new "posted"). Drafts excluded.
+    grns = await db.grn.find(
+        {"status": {"$in": ["completed", "posted"]}},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(1000)
     
     pending = []
     for grn in grns:
@@ -10251,11 +10437,36 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request)
     _require_access(user, ["admin", "production_manager"], module="purchase_invoices", action="create")
     count = await db.purchase_invoices.count_documents({})
     inv_number = f"PI-{str(count + 1).zfill(6)}"
-    
+
     supplier = await db.suppliers.find_one({"id": data.supplier_id})
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
-    
+
+    # ------------------------------------------------------------------
+    # Multi-GRN validation: when `grn_ids` carries multiple entries every
+    # referenced GRN MUST belong to the same supplier as the invoice. This
+    # prevents an operator from accidentally mixing two suppliers' GRNs
+    # into a single invoice (which would break tax breakdown + tally exports).
+    # We also normalise — if the caller supplied a single-element grn_ids
+    # list, we copy it into grn_id for backward compat with the legacy field.
+    # ------------------------------------------------------------------
+    grn_ids: List[str] = list(data.grn_ids or [])
+    if data.grn_id and data.grn_id not in grn_ids:
+        grn_ids.insert(0, data.grn_id)
+    if grn_ids:
+        for gid in grn_ids:
+            grn = await db.grn.find_one({"id": gid}, {"_id": 0, "supplier_id": 1, "po_id": 1, "status": 1})
+            if not grn:
+                raise HTTPException(status_code=404, detail=f"GRN {gid} not found")
+            if (grn.get("status") or "posted") not in ("posted", "completed"):
+                raise HTTPException(status_code=400, detail=f"GRN {gid} is not posted yet — approve it before raising an invoice.")
+            grn_supplier = grn.get("supplier_id")
+            if not grn_supplier and grn.get("po_id"):
+                po_doc = await db.purchase_orders.find_one({"id": grn["po_id"]}, {"_id": 0, "supplier_id": 1})
+                grn_supplier = (po_doc or {}).get("supplier_id")
+            if grn_supplier and grn_supplier != data.supplier_id:
+                raise HTTPException(status_code=400, detail="All selected GRNs must belong to the same supplier as the invoice.")
+
     company = await db.company_settings.find_one({"type": "company"}, {"_id": 0})
     is_inter_state = supplier.get("state_code", "") != (company or {}).get("state_code", "")
     
@@ -10333,7 +10544,8 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, request: Request)
         "invoice_number": inv_number,
         "supplier_id": data.supplier_id,
         "po_id": data.po_id or "",
-        "grn_id": data.grn_id or "",
+        "grn_id": (grn_ids[0] if grn_ids else (data.grn_id or "")),
+        "grn_ids": grn_ids,  # Multi-GRN linkage (always populated when GRN-based)
         "is_manual": bool(data.is_manual),
         "invoice_no": data.invoice_no,
         "invoice_date": data.invoice_date,
