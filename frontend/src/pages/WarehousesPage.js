@@ -1477,7 +1477,7 @@ export default function WarehousesPage() {
         </TabsContent>
 
         <TabsContent value="packing-lists" className="mt-4 space-y-4" data-testid="stores-packing-lists-tab">
-          {hasPermission('stores_packing_list', 'view') ? (
+          {(user?.role === 'admin' || user?.is_admin_group || hasPermission('stores_packing_list', 'view')) ? (
             <>
               <div className="card-flat p-3 mb-2">
                 <div className="relative w-72">
@@ -1487,7 +1487,7 @@ export default function WarehousesPage() {
               </div>
               <PackingListsPanel
                 search={plSearch}
-                canEdit={hasPermission('stores_packing_list', 'create') || hasPermission('stores_packing_list', 'edit') || hasPermission('stores_packing_list', 'delete')}
+                canEdit={user?.role === 'admin' || user?.is_admin_group || hasPermission('stores_packing_list', 'create') || hasPermission('stores_packing_list', 'edit') || hasPermission('stores_packing_list', 'delete')}
               />
             </>
           ) : (

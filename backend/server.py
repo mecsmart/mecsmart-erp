@@ -10852,6 +10852,156 @@ async def export_purchase_invoices_bulk_tally(request: Request, payload: dict = 
     )
 
 
+# ===== Tally Sales Voucher (Tax Invoice export) ============================
+# Mirrors the Purchase Invoice flow above. Sales vouchers debit the customer
+# ledger (positive) and credit Sales + output GST ledgers. Tally accepts the
+# same envelope format — only the VCHTYPE, ISDEEMEDPOSITIVE signs and ledger
+# names change.
+
+def _build_tally_sales_voucher_xml(invoice, customer, company, lines, is_inter_state):
+    """Build a single <TALLYMESSAGE> block for a SALES voucher (Tax Invoice)."""
+    inv_no = _xml_escape(invoice.get("invoice_no") or "")
+    inv_date = _tally_date(invoice.get("invoice_date"))
+    party_name = _xml_escape(customer.get("name") or invoice.get("customer_name") or "")
+    narration = _xml_escape(invoice.get("notes", "") or f"Sale against invoice {inv_no}")
+
+    subtotal = float(invoice.get("subtotal", 0) or 0)
+    total_cgst = float(invoice.get("cgst", 0) or 0)
+    total_sgst = float(invoice.get("sgst", 0) or 0)
+    total_igst = float(invoice.get("igst", 0) or 0)
+    grand_total = float(invoice.get("grand_total", 0) or 0)
+
+    # Inventory entries per line — for SALES, stock leaves the company so
+    # ISDEEMEDPOSITIVE=No (outflow) and AMOUNT is positive.
+    inv_entries = []
+    for ln in lines:
+        it = ln.get("item") or {}
+        name = _xml_escape(f"{it.get('part_number','')} - {it.get('name','')}".strip(" -"))
+        qty = float(ln.get("quantity", 0) or 0)
+        rate = float(ln.get("unit_price", 0) or 0)
+        amt = qty * rate
+        uom = _xml_escape(it.get("unit_of_measure", "Nos"))
+        inv_entries.append(f"""
+          <ALLINVENTORYENTRIES.LIST>
+            <STOCKITEMNAME>{name}</STOCKITEMNAME>
+            <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+            <RATE>{rate:.2f}/{uom}</RATE>
+            <AMOUNT>{amt:.2f}</AMOUNT>
+            <ACTUALQTY>{qty} {uom}</ACTUALQTY>
+            <BILLEDQTY>{qty} {uom}</BILLEDQTY>
+          </ALLINVENTORYENTRIES.LIST>""")
+    inventory_block = "".join(inv_entries)
+
+    # Ledger entries: Party (debit / +ve), Sales Account (credit / -ve), GST output (credit / -ve)
+    ledger_entries = [f"""
+        <LEDGERENTRIES.LIST>
+          <LEDGERNAME>{party_name}</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+          <AMOUNT>-{grand_total:.2f}</AMOUNT>
+        </LEDGERENTRIES.LIST>""",
+        f"""
+        <LEDGERENTRIES.LIST>
+          <LEDGERNAME>Sales Account</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+          <AMOUNT>{subtotal:.2f}</AMOUNT>
+        </LEDGERENTRIES.LIST>"""]
+    if is_inter_state:
+        if total_igst > 0:
+            ledger_entries.append(f"""
+        <LEDGERENTRIES.LIST>
+          <LEDGERNAME>IGST Output</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+          <AMOUNT>{total_igst:.2f}</AMOUNT>
+        </LEDGERENTRIES.LIST>""")
+    else:
+        if total_cgst > 0:
+            ledger_entries.append(f"""
+        <LEDGERENTRIES.LIST>
+          <LEDGERNAME>CGST Output</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+          <AMOUNT>{total_cgst:.2f}</AMOUNT>
+        </LEDGERENTRIES.LIST>""")
+        if total_sgst > 0:
+            ledger_entries.append(f"""
+        <LEDGERENTRIES.LIST>
+          <LEDGERNAME>SGST Output</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+          <AMOUNT>{total_sgst:.2f}</AMOUNT>
+        </LEDGERENTRIES.LIST>""")
+    ledger_block = "".join(ledger_entries)
+
+    return f"""
+    <TALLYMESSAGE xmlns:UDF="TallyUDF">
+      <VOUCHER VCHTYPE="Sales" ACTION="Create" OBJVIEW="Invoice Voucher View">
+        <DATE>{inv_date}</DATE>
+        <NARRATION>{narration}</NARRATION>
+        <VOUCHERTYPENAME>Sales</VOUCHERTYPENAME>
+        <VOUCHERNUMBER>{inv_no}</VOUCHERNUMBER>
+        <REFERENCE>{inv_no}</REFERENCE>
+        <PARTYLEDGERNAME>{party_name}</PARTYLEDGERNAME>
+        <BASICBUYERNAME>{party_name}</BASICBUYERNAME>
+        <ISINVOICE>Yes</ISINVOICE>
+        <EFFECTIVEDATE>{inv_date}</EFFECTIVEDATE>
+        {ledger_block}
+        {inventory_block}
+      </VOUCHER>
+    </TALLYMESSAGE>"""
+
+
+async def _hydrate_ti_lines_for_tally(invoice):
+    """Attach item docs to each line — Tally needs part_number/name/UOM."""
+    for ln in (invoice.get("lines") or []):
+        if ln.get("item_id") and "item" not in ln:
+            ln["item"] = await db.items.find_one({"id": ln.get("item_id")}, {"_id": 0}) or {}
+    return invoice
+
+
+@crm_router.get("/tax-invoices/{tid}/tally-xml")
+async def export_tax_invoice_to_tally(tid: str, request: Request):
+    """Single Tax Invoice → Tally Sales voucher XML download."""
+    await get_current_user(request)
+    invoice = await db.tax_invoices.find_one({"id": tid}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Tax invoice not found")
+    customer = await db.customers.find_one({"id": invoice.get("customer_id")}, {"_id": 0}) or {}
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
+    is_inter_state = bool(invoice.get("is_inter_state"))
+    await _hydrate_ti_lines_for_tally(invoice)
+    msg = _build_tally_sales_voucher_xml(invoice, customer, company, invoice.get("lines", []), is_inter_state)
+    xml = _wrap_tally_envelope(msg)
+    fname = f"tally_{invoice.get('invoice_no', tid)}.xml"
+    return Response(
+        content=xml,
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@crm_router.post("/tax-invoices/tally-xml-bulk")
+async def export_tax_invoices_bulk_tally(request: Request, payload: dict = Body(...)):
+    """Bulk Tax Invoices → single Tally XML. POST {"invoice_ids": [...]}"""
+    await get_current_user(request)
+    ids = payload.get("invoice_ids") or []
+    if not ids:
+        raise HTTPException(status_code=400, detail="invoice_ids required")
+    company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
+    messages = []
+    for tid in ids:
+        invoice = await db.tax_invoices.find_one({"id": tid}, {"_id": 0})
+        if not invoice:
+            continue
+        customer = await db.customers.find_one({"id": invoice.get("customer_id")}, {"_id": 0}) or {}
+        is_inter_state = bool(invoice.get("is_inter_state"))
+        await _hydrate_ti_lines_for_tally(invoice)
+        messages.append(_build_tally_sales_voucher_xml(invoice, customer, company, invoice.get("lines", []), is_inter_state))
+    xml = _wrap_tally_envelope("".join(messages))
+    return Response(
+        content=xml,
+        media_type="application/xml",
+        headers={"Content-Disposition": f'attachment; filename="tally_tax_invoices_bulk.xml"'},
+    )
+
+
 # ================== JOB WORK / SUBCONTRACTING ROUTES ==================
 
 @jobwork_router.get("/orders/{sc_id}/dc-lines")

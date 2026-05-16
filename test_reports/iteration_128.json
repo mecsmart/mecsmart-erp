@@ -1,0 +1,78 @@
+{
+  "summary": "Iteration 128 testing completed for Tax Invoice Tally XML Export + Admin Bypass for Packing Lists. Backend: 19/19 tests passed (100%). Frontend: All UI elements verified via Playwright automation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "All dialogs",
+        "issues": ["Console warning: Missing `Description` or `aria-describedby` for DialogContent - accessibility improvement needed (carried over from previous iterations)"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_128_tally_tax_invoice.py",
+    "/app/test_reports/pytest/pytest_iteration_128.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_128_tally_tax_invoice.py"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 tests passed)",
+    "frontend": "100% (UI verification via Playwright)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Used existing tax invoices and purchase invoices for testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 128 verified Tax Invoice Tally XML export (single + bulk) and admin bypass for Packing Lists tab. All features working correctly: (1) GET /api/crm/tax-invoices/{tid}/tally-xml returns 200 with application/xml, Content-Disposition attachment, VOUCHER VCHTYPE='Sales', invoice_no, customer as PARTYLEDGERNAME, Sales Account ledger, and GST Output ledgers (CGST/SGST or IGST based on is_inter_state), (2) GET /api/crm/tax-invoices/{invalid_id}/tally-xml returns 404, (3) POST /api/crm/tax-invoices/tally-xml-bulk with invoice_ids returns 200 XML with multiple VOUCHER entries, (4) POST /api/crm/tax-invoices/tally-xml-bulk with empty invoice_ids returns 400, (5) Frontend TaxInvoicesPanel has Tally XML bulk button, select-all checkbox, per-row checkboxes, per-row Download icons, and 11 columns (including checkbox), (6) Admin bypass for Packing Lists tab working - admin can view without stores_packing_list permission, (7) REGRESSION: PI Tally XML (single + bulk) still works, (8) REGRESSION: Tax Invoice CRUD and status changes still work, (9) REGRESSION: Packing Lists endpoint accessible, (10) REGRESSION: GRN list and pending-grns endpoints accessible.",
+  "features_tested": {
+    "tax_invoice_tally_xml_single": {
+      "status": "PASS",
+      "details": "GET /api/crm/tax-invoices/{tid}/tally-xml returns 200 with application/xml, Content-Disposition attachment, VOUCHER VCHTYPE='Sales', invoice_no, PARTYLEDGERNAME, Sales Account ledger, GST Output ledgers"
+    },
+    "tax_invoice_tally_xml_404": {
+      "status": "PASS",
+      "details": "GET /api/crm/tax-invoices/{invalid_id}/tally-xml returns 404"
+    },
+    "tax_invoice_tally_xml_bulk": {
+      "status": "PASS",
+      "details": "POST /api/crm/tax-invoices/tally-xml-bulk with invoice_ids returns 200 XML with multiple VOUCHER entries"
+    },
+    "tax_invoice_tally_xml_bulk_empty": {
+      "status": "PASS",
+      "details": "POST /api/crm/tax-invoices/tally-xml-bulk with empty invoice_ids returns 400"
+    },
+    "frontend_tally_xml_ui": {
+      "status": "PASS",
+      "details": "TaxInvoicesPanel has: Tally XML bulk button (data-testid='tally-bulk-export-ti-btn'), select-all checkbox (data-testid='tally-select-all-ti'), per-row checkboxes (data-testid='tally-select-ti-{id}'), per-row Download icons (data-testid='tally-ti-{id}'), 11 columns including checkbox"
+    },
+    "admin_bypass_packing_lists": {
+      "status": "PASS",
+      "details": "Admin can view Packing Lists tab without stores_packing_list permission - admin bypass working via user?.role === 'admin' || user?.is_admin_group check"
+    },
+    "regression_pi_tally_xml": {
+      "status": "PASS",
+      "details": "PI Tally XML single and bulk endpoints still work unchanged"
+    },
+    "regression_tax_invoice_crud": {
+      "status": "PASS",
+      "details": "Tax Invoice list, status change still work"
+    },
+    "regression_packing_lists": {
+      "status": "PASS",
+      "details": "GET /api/crm/packing-lists returns 200"
+    },
+    "regression_grn_multi_pi": {
+      "status": "PASS",
+      "details": "GET /api/grn and GET /api/purchase-invoices/pending-grns return 200"
+    }
+  },
+  "mocked_apis_note": "Appyflow GSTIN lookup remains mocked. No new mocks introduced."
+}

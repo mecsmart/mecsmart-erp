@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import {
   Plus, Edit2, Trash2, MessageSquare, UserCheck, AlertTriangle, Clock,
-  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload, GitBranch, Share2, Package2
+  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload, GitBranch, Share2, Package2, Download
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -2950,6 +2950,46 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
 
   const printInvoice = (t) => printInvoiceDoc(t, { kind: 'tax_invoice', title: 'TAX INVOICE', numberKey: 'invoice_no', company: companySettings, user });
 
+  // ============== Tally XML export ==============
+  // Mirrors the PI flow: single-invoice icon + bulk checkbox selection.
+  // Backend converts each Tax Invoice into a Tally Sales Voucher (customer
+  // ledger debit, Sales Account credit, GST output credit).
+  const [selectedIds, setSelectedIds] = useState([]);
+  const toggleSelected = (id) => setSelectedIds(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  const allChecked = filtered.length > 0 && filtered.every(t => selectedIds.includes(t.id));
+  const toggleSelectAll = () => setSelectedIds(allChecked ? [] : filtered.map(t => t.id));
+
+  const triggerDownload = (xml, filename) => {
+    const blob = new Blob([xml], { type: 'application/xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const downloadTallyXML = async (t) => {
+    try {
+      const res = await api.get(`/api/crm/tax-invoices/${t.id}/tally-xml`, { responseType: 'text' });
+      triggerDownload(typeof res.data === 'string' ? res.data : String(res.data || ''), `tally_${t.invoice_no || t.id}.xml`);
+    } catch (e) {
+      alert(e.response?.data?.detail || e.message || 'Failed to generate Tally XML');
+    }
+  };
+
+  const downloadTallyXMLBulk = async () => {
+    if (selectedIds.length === 0) return;
+    try {
+      const res = await api.post('/api/crm/tax-invoices/tally-xml-bulk', { invoice_ids: selectedIds }, { responseType: 'text' });
+      triggerDownload(typeof res.data === 'string' ? res.data : String(res.data || ''), `tally_tax_invoices_${new Date().toISOString().slice(0, 10)}_${selectedIds.length}.xml`);
+    } catch (e) {
+      alert(e.response?.data?.detail || e.message || 'Failed to generate bulk Tally XML');
+    }
+  };
+
   return (
     <div className="space-y-4" data-testid="tax-invoices-panel">
       <div className="flex gap-3 flex-wrap items-center justify-between">
@@ -2964,16 +3004,26 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
           </div>
         </div>
         {canEdit && (
-          <button onClick={() => openDialog(null)} className="btn-primary flex items-center gap-1 text-sm" data-testid="new-tax-invoice-btn">
-            <Plus className="w-4 h-4" /> New Tax Invoice
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={downloadTallyXMLBulk} disabled={selectedIds.length === 0} className="btn-secondary flex items-center gap-1 text-sm disabled:opacity-50" title={selectedIds.length === 0 ? 'Tick at least one invoice to enable bulk export' : `Download Tally XML for ${selectedIds.length} selected invoice(s)`} data-testid="tally-bulk-export-ti-btn">
+              <Download className="w-4 h-4" /> Tally XML ({selectedIds.length})
+            </button>
+            <button onClick={() => openDialog(null)} className="btn-primary flex items-center gap-1 text-sm" data-testid="new-tax-invoice-btn">
+              <Plus className="w-4 h-4" /> New Tax Invoice
+            </button>
+          </div>
         )}
       </div>
       <div className="card-flat overflow-hidden">
         <table className="w-full data-table" data-testid="tax-invoices-table">
-          <thead><tr><th>Invoice #</th><th>Customer</th><th>Source</th><th>Date</th><th>Place of Supply</th><th>Subtotal</th><th>GST</th><th>Grand Total</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr>
+            <th className="w-8 text-center">
+              <input type="checkbox" checked={allChecked} onChange={toggleSelectAll} data-testid="tally-select-all-ti" title="Select all (current filter)" />
+            </th>
+            <th>Invoice #</th><th>Customer</th><th>Source</th><th>Date</th><th>Place of Supply</th><th>Subtotal</th><th>GST</th><th>Grand Total</th><th>Status</th><th>Actions</th>
+          </tr></thead>
           <tbody>
-            {filtered.length === 0 && <tr><td colSpan={10} className="text-center py-6 text-sm text-[#6B7280]">No Tax Invoices yet. Click "New Tax Invoice" to create one.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={11} className="text-center py-6 text-sm text-[#6B7280]">No Tax Invoices yet. Click "New Tax Invoice" to create one.</td></tr>}
             {filtered.map(t => {
               const statusData = TAX_INVOICE_STATUSES.find(s => s.key === t.status);
               const srcChip = t.sales_order?.order_number
@@ -2985,6 +3035,9 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                     : <span className="text-[10px] text-[#9CA3AF]">Manual</span>;
               return (
                 <tr key={t.id} data-testid={`tax-invoice-row-${t.id}`}>
+                  <td className="text-center">
+                    <input type="checkbox" checked={selectedIds.includes(t.id)} onChange={() => toggleSelected(t.id)} data-testid={`tally-select-ti-${t.id}`} />
+                  </td>
                   <td className="mono font-medium">
                     {t.invoice_no}
                     {t.packing_list_no && (
@@ -3013,6 +3066,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                   <td>
                     <div className="flex gap-0.5">
                       <button onClick={() => printInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`tax-invoice-print-${t.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => downloadTallyXML(t)} className="p-1.5 text-[#1D3557] hover:bg-[#E1EFFE] rounded" title="Download Tally XML (Sales voucher for Tally import)" data-testid={`tally-ti-${t.id}`}><Download className="w-4 h-4" /></button>
                       <button onClick={() => setWaShare({ open: true, doc: t })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`tax-invoice-wa-${t.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && ['draft', 'issued'].includes(t.status) && (
                         <button onClick={() => openDialog(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`tax-invoice-edit-${t.id}`}><Edit2 className="w-4 h-4" /></button>
