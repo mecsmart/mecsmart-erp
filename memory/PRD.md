@@ -19,6 +19,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-17 (Packing-Lists admin gate + Tax-Invoice Tally XML — DONE & VERIFIED ✅):**
+  1. **Packing Lists admin bypass** (`/app/frontend/src/pages/WarehousesPage.js` `TabsContent value='packing-lists'`): Legacy admin users without `stores_packing_list` in their stored permission dict were seeing the "No permission" empty-state. Mirrored the sidebar's `canView` admin-bypass — both the view-gate and the `canEdit` prop now accept admin or `is_admin_group` regardless of granular perms.
+  2. **Tally XML export for Tax Invoices** (`/app/backend/server.py` + `/app/frontend/src/pages/CRMPage.js`):
+     - Backend: new `_build_tally_sales_voucher_xml` (Sales voucher: customer ledger debit, Sales Account credit, GST output credit; reuses `_wrap_tally_envelope` + `_xml_escape` + `_tally_date`). New endpoints `GET /api/crm/tax-invoices/{tid}/tally-xml` (single) + `POST /api/crm/tax-invoices/tally-xml-bulk` (bulk).
+     - Frontend: TaxInvoicesPanel got a per-row Download icon (next to Print/WhatsApp) and a "Tally XML (N)" bulk button next to "New Tax Invoice", driven by a select-all checkbox column + per-row checkboxes. Mirrors the existing PI Tally UX.
+  3. **Testing**: `testing_agent_v3_fork` iteration 128 — 19/19 backend (100%) + frontend 100%. PI Tally and Tax Invoice CRUD regressions green.
+
+
 - **2026-02-17 (GRN Draft Mode + Multi-GRN → Single PI + Typing Lag Fix — DONE & VERIFIED ✅):**
   1. **GRN typing lag fixed** (`/app/frontend/src/pages/WarehousesPage.js`): The GRN verify-grid was re-rendering every line on each keystroke (same pattern as PI/Quotation in iteration 120). Extracted line into a `React.memo` `GRNLineRow` with a strict comparator; `updateGRNLine` now `useCallback` and uses functional `setGrnForm` so the parent state change doesn't bust the memo.
   2. **GRN renamed label** (`/app/frontend/src/pages/WarehousesPage.js`): "Supplier Invoice / Doc Ref No." → "Supplier Invoice / DC Number" in the GRN dialog AND the list column header.
