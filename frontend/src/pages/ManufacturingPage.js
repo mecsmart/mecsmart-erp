@@ -2265,7 +2265,14 @@ export default function ManufacturingPage() {
                         return s + (r.quantity_planned || r.quantity_completed || 0);
                       }, 0);
                       const remainingToAllocate = Math.max(0, jobCardWO.quantity - allocatedQty);
-                      const canStartMore = canEdit && !op.is_job_work && remainingToAllocate > 0
+                      // Start button: visible when there's still unallocated qty AND prereqs done.
+                      // We INTENTIONALLY allow Start even when op.is_job_work=true so that:
+                      //   • Partial OS (e.g. 5 of 10 sent to vendor) — user can start the remaining 5
+                      //     in-house OR re-outsource to a different vendor.
+                      //   • Reduced SC qty (auto-restored) — freed-up qty must be startable again.
+                      // openOpDialog defaults `is_outsource=true` when op.is_job_work, but the user
+                      // can uncheck inside the dialog to do an in-house run for the remaining qty.
+                      const canStartMore = canEdit && remainingToAllocate > 0
                         && (op.status === 'pending' || op.status === 'stopped' || op.status === 'in_progress')
                         && prevDone;
 

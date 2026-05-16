@@ -704,6 +704,7 @@ class SubcontractOrderUpdate(BaseModel):
     lines: Optional[List[JobWorkLineItem]] = None
     job_work_parts: Optional[List[JobWorkPartItem]] = None
     dc_created: Optional[bool] = None
+    supplier_id: Optional[str] = None  # Allow changing vendor during edit (only when no DC sent yet)
 
 class DCCreate(BaseModel):
     subcontract_order_id: str
@@ -10898,6 +10899,42 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
         update_data["notes"] = data.notes
     if data.status is not None:
         update_data["status"] = data.status
+    # ------------------------------------------------------------------
+    # Allow vendor change ONLY while the SC has not yet shipped any
+    # material (no DC sent). Once a DC exists, switching supplier mid-
+    # flight would orphan the material at the original vendor. The
+    # supplier swap also propagates to all linked MO operations so the
+    # operation card shows the correct vendor name.
+    # ------------------------------------------------------------------
+    if data.supplier_id is not None and data.supplier_id != order.get("supplier_id"):
+        if order.get("dc_created"):
+            raise HTTPException(status_code=400, detail="Cannot change vendor — a Delivery Challan has already been sent for this SC. Short Close the SC and create a fresh one for the new vendor.")
+        new_supplier = await db.suppliers.find_one({"id": data.supplier_id}, {"_id": 0})
+        if not new_supplier:
+            raise HTTPException(status_code=404, detail="Selected supplier not found")
+        update_data["supplier_id"] = data.supplier_id
+        # Cascade vendor change to linked MO operations
+        new_name = new_supplier.get("name", "Outsourced")
+        ref_wo_ids = order.get("reference_wo_ids") or ([order.get("reference_wo_id")] if order.get("reference_wo_id") else [])
+        for _wid in ref_wo_ids:
+            if not _wid:
+                continue
+            _wo = await db.work_orders.find_one({"id": _wid})
+            if not _wo:
+                continue
+            _ops = _wo.get("operations_status") or []
+            _changed = False
+            for _op in _ops:
+                if _op.get("outsource_sc_order_id") == order_id:
+                    _op["job_work_supplier_id"] = data.supplier_id
+                    _op["outsource_supplier_name"] = new_name
+                    _op["operator"] = f"OS: {new_name}"
+                    _changed = True
+                    for _r in (_op.get("runs") or []):
+                        if (_r.get("operator") or "").startswith("OS: "):
+                            _r["operator"] = f"OS: {new_name}"
+            if _changed:
+                await db.work_orders.update_one({"id": _wid}, {"$set": {"operations_status": _ops}})
     if data.job_work_parts is not None:
         # Preserve existing per-line context (process_name, wo_id, etc.) by
         # matching incoming entries to the original job_work_parts. Matching
@@ -11028,13 +11065,41 @@ async def update_subcontract_order(order_id: str, data: SubcontractOrderUpdate, 
                         ):
                             op.pop(f, None)
                         op["status"] = "pending"
+                        op["outsourced_quantity"] = 0
                         runs = op.get("runs") or []
                         op["runs"] = [r for r in runs if not (r.get("operator") or "").startswith("OS: ")]
                     else:
+                        # Partial reduction: reduce the OS run's planned qty AND
+                        # the op's tracking counter so the freed-up qty becomes
+                        # available for an in-house Start or a new outsource.
+                        # If the OS run's planned qty drops to 0, remove it
+                        # entirely; if no OS runs remain afterward, also clear
+                        # the OS metadata + reset status so the op behaves like
+                        # a fresh pending one.
                         runs = op.get("runs") or []
+                        new_runs = []
+                        remaining_to_return = qty_returned
                         for r in runs:
-                            if (r.get("operator") or "").startswith("OS: "):
-                                r["quantity_planned"] = max(0, (r.get("quantity_planned") or 0) - qty_returned)
+                            if (r.get("operator") or "").startswith("OS: ") and remaining_to_return > 0:
+                                planned = r.get("quantity_planned") or 0
+                                if planned <= remaining_to_return:
+                                    remaining_to_return -= planned
+                                    # drop the run entirely
+                                    continue
+                                r["quantity_planned"] = max(0, planned - remaining_to_return)
+                                remaining_to_return = 0
+                            new_runs.append(r)
+                        op["runs"] = new_runs
+                        op["outsourced_quantity"] = max(0, (op.get("outsourced_quantity") or 0) - qty_returned)
+                        if not any((r.get("operator") or "").startswith("OS: ") for r in new_runs):
+                            for f in (
+                                "is_job_work", "job_work_supplier_id", "outsource_status",
+                                "outsource_supplier_name", "outsource_charges",
+                                "outsource_sc_order_id", "outsource_sc_order_number",
+                                "actual_start", "operator",
+                            ):
+                                op.pop(f, None)
+                            op["status"] = "pending"
                     updated = True
                     break
             if updated:
