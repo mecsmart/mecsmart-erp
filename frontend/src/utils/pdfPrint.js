@@ -112,26 +112,23 @@ async function fallbackToHtml2Pdf(iframeBody, opts) {
   const total = pdfObj.internal.getNumberOfPages();
   const pageW = pdfObj.internal.pageSize.getWidth();
   const pageH = pdfObj.internal.pageSize.getHeight();
+  // eslint-disable-next-line no-console
+  console.info('[pdfPrint] running-header path engaged', {
+    pages: total, hasLogo: !!hdr.logoDataUrl, addrLines: (hdr.addressLines || []).length, companyName: hdr.companyName,
+  });
 
-  // Pre-rasterize SVG logos to PNG (jsPDF.addImage refuses SVG). For data
-  // URLs that are already PNG/JPEG/WEBP we use them as-is. Doing this ONCE
-  // before the per-page loop is critical for perf on large invoices.
+  // Pre-rasterize the logo into a PNG data URL via an offscreen canvas.
+  // jsPDF.addImage is finicky about formats and refuses SVG outright, so we
+  // route EVERY logo (PNG/JPEG/WEBP/SVG) through the canvas to normalise it
+  // to PNG. This eliminates a whole class of "logo silently disappears"
+  // bugs the user reported. Doing this ONCE before the per-page loop is
+  // critical for perf on large invoices.
   let imgPayload = null;
-  if (hdr.logoDataUrl) {
+  if (hdr.logoDataUrl && typeof hdr.logoDataUrl === 'string' && hdr.logoDataUrl.startsWith('data:image/')) {
     try {
-      const m = /^data:image\/(png|jpe?g|webp|svg\+xml)[;,]/i.exec(hdr.logoDataUrl);
-      const rawFmt = m ? m[1].toLowerCase() : '';
-      if (rawFmt === 'svg+xml') {
-        // Rasterize SVG → PNG via an offscreen canvas so jsPDF can embed it.
-        try {
-          const png = await svgDataUrlToPngDataUrl(hdr.logoDataUrl, 256, 96);
-          if (png) imgPayload = { dataUrl: png, fmt: 'PNG' };
-        } catch (svgErr) {
-          console.warn('[pdfPrint] SVG → PNG rasterize failed, dropping logo image:', svgErr?.message || svgErr);
-        }
-      } else if (rawFmt) {
-        imgPayload = { dataUrl: hdr.logoDataUrl, fmt: rawFmt.startsWith('jp') ? 'JPEG' : rawFmt.toUpperCase() };
-      }
+      const png = await rasterizeImageToPng(hdr.logoDataUrl, 256, 96);
+      if (png) imgPayload = { dataUrl: png, fmt: 'PNG' };
+      else console.warn('[pdfPrint] running-header logo rasterize returned null — using text-only header');
     } catch (e) {
       console.warn('[pdfPrint] running-header logo preprocessing skipped:', e?.message || e);
     }
@@ -215,10 +212,13 @@ async function fallbackToHtml2Pdf(iframeBody, opts) {
   pdfObj.save(merged.filename || 'document.pdf');
 }
 
-// Rasterize an SVG data URL into a PNG data URL via an offscreen <canvas>.
-// jsPDF.addImage does not accept SVG, so we round-trip it through an
-// Image + canvas. Returns null if the browser can't decode the SVG.
-async function svgDataUrlToPngDataUrl(dataUrl, targetW = 256, targetH = 96) {
+// Rasterize ANY image data URL (PNG/JPEG/WEBP/SVG) into a normalised PNG
+// data URL via an offscreen <canvas>. jsPDF.addImage is finicky about
+// formats (rejects SVG outright, and we've seen failures on certain
+// PNG/JPEG combos in the wild), so we route every logo through this
+// helper to guarantee a clean, embeddable PNG. Returns null if the
+// browser can't decode the image.
+async function rasterizeImageToPng(dataUrl, targetW = 256, targetH = 96) {
   return new Promise((resolve) => {
     try {
       const img = new Image();
@@ -230,7 +230,9 @@ async function svgDataUrlToPngDataUrl(dataUrl, targetW = 256, targetH = 96) {
           canvas.height = targetH;
           const ctx = canvas.getContext('2d');
           // Preserve aspect ratio: fit inside the target box with letterboxing.
-          const ar = img.width / img.height || 1;
+          const iw = img.width || img.naturalWidth || targetW;
+          const ih = img.height || img.naturalHeight || targetH;
+          const ar = iw / ih || 1;
           const boxAr = targetW / targetH;
           let drawW, drawH, dx, dy;
           if (ar > boxAr) { drawW = targetW; drawH = targetW / ar; dx = 0; dy = (targetH - drawH) / 2; }
@@ -239,15 +241,25 @@ async function svgDataUrlToPngDataUrl(dataUrl, targetW = 256, targetH = 96) {
           ctx.drawImage(img, dx, dy, drawW, drawH);
           resolve(canvas.toDataURL('image/png'));
         } catch (e) {
+          console.warn('[pdfPrint] canvas rasterize failed:', e?.message || e);
           resolve(null);
         }
       };
-      img.onerror = () => resolve(null);
+      img.onerror = (err) => {
+        console.warn('[pdfPrint] image load failed for rasterize:', err?.message || err);
+        resolve(null);
+      };
       img.src = dataUrl;
-    } catch {
+    } catch (e) {
+      console.warn('[pdfPrint] rasterizeImageToPng exception:', e?.message || e);
       resolve(null);
     }
   });
+}
+
+// Legacy alias — some callers may still reference this; keep as thin proxy.
+async function svgDataUrlToPngDataUrl(dataUrl, targetW = 256, targetH = 96) {
+  return rasterizeImageToPng(dataUrl, targetW, targetH);
 }
 
 /**

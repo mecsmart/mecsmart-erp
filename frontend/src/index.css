@@ -114,22 +114,26 @@ code, .mono {
    scrolling and without truncated cell values.
    Apply by giving the <table> the class `.line-items-grid`.
    ======================================================================== */
-/* MO Family — sticky table COLUMN HEADERS (the "FG header" the user
-   refers to: MO / Level · Item · Routing · Qty · Progress · Status ·
-   Actions). The toolbar at the page top uses `sticky top-0 z-30`
-   (~58-66px tall), so we pin the thead just below it. Per user
-   request, the thead must stay frozen below the page's filter/search
-   bar while scrolling through long MO lists.
+/* MO Family — sticky FG summary band + table COLUMN HEADERS. Per
+   user request, BOTH the parent FG-MO summary row (chevron · MO# ·
+   Item · FG badge · totals · per-FG search) AND the column headers
+   below it (MO/LEVEL · ITEM · ROUTING · QTY · PROGRESS · STATUS ·
+   ACTIONS) must freeze just BELOW the page toolbar while scrolling
+   through a long children tree. The toolbar uses `sticky top-0 z-30`
+   (~58px tall), so we pin:
+     • summary  → top: 58px   z-index: 12
+     • thead th → top: 102px  z-index: 11  (58 + ~44px summary height)
    IMPORTANT 1: `position: sticky` is applied to the <th> cells, NOT
    the <thead>, because `.data-table th` already has `position: relative`
    which would otherwise override the thead-level sticky and break it.
    IMPORTANT 2: Do NOT add `overflow: hidden/auto/scroll` on ANY parent
    container in the DOM tree (we removed overflow-hidden from <details>
-   for this reason). CSS spec forces sticky positioning to fail inside
-   any ancestor that establishes a scroll/clipping context. */
+   AND from the .card-flat wrapper for this reason). CSS spec forces
+   sticky positioning to fail inside any ancestor that establishes a
+   scroll/clipping context. */
 .mo-family-table thead.sticky-mo-head th {
   position: sticky;
-  top: 58px;
+  top: 102px;
   z-index: 11;
   background: #F3F4F6;
   box-shadow: 0 1px 0 0 #D1D5DB;
@@ -142,8 +146,19 @@ code, .mono {
   overflow: visible;
 }
 
-/* The MO list card MUST NOT clip its children — sticky thead inside
-   the nested <details> needs to be visible above the page toolbar
+/* Each FG-MO group's <summary> sticks at top:58px just under the page
+   toolbar. When the user scrolls into a different FG group, that
+   group's summary slides up and replaces the previous one — natural
+   stacking behaviour of multiple sticky siblings at the same offset. */
+.fg-mo-details > summary.fg-mo-summary {
+  position: sticky;
+  top: 58px;
+  z-index: 12;
+  background: #F3F4F6;
+}
+
+/* The MO list card MUST NOT clip its children — sticky thead + summary
+   inside the nested <details> need to be visible above the page toolbar
    while scrolling. card-flat normally ships overflow-hidden, so we
    override it here for this specific surface. */
 .mo-list-card {

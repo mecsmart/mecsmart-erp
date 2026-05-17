@@ -910,11 +910,18 @@ export default function ManufacturingPage() {
       </tr></thead>
       <tbody>${materials.map(m => {
         const short = m.shortage || 0;
+        // Use UOM master decimal_places (set by backend) so "3.36" not "3.3600000000000003".
+        const dp = Number.isFinite(m.uom_decimal_places) ? m.uom_decimal_places : 2;
+        const fmt = (v) => {
+          const n = Number(v || 0);
+          if (!Number.isFinite(n)) return '0';
+          return n.toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+        };
         return `<tr>
         <td class="mono">${m.item || ''}</td><td>${m.name || ''}</td>
-        <td class="text-right mono">${m.quantity}</td><td>${m.uom || 'pcs'}</td>
-        <td class="text-right mono">${m.available_stock || 0}</td>
-        <td class="text-right mono ${short > 0 ? 'short' : 'ok'}">${short > 0 ? short : '-'}</td>
+        <td class="text-right mono">${fmt(m.quantity)}</td><td>${m.uom || 'pcs'}</td>
+        <td class="text-right mono">${fmt(m.available_stock || 0)}</td>
+        <td class="text-right mono ${short > 0 ? 'short' : 'ok'}">${short > 0 ? fmt(short) : '-'}</td>
       </tr>`;}).join('')}
       <tr class="total-row"><td colspan="5" class="text-right">Total Shortage</td><td class="text-right mono ${totalShortage > 0 ? 'short' : 'ok'}">${totalShortage > 0 ? fmtAmt(totalShortage) : '-'}</td></tr>
       </tbody>
@@ -2344,6 +2351,17 @@ export default function ManufacturingPage() {
                       // un-outsourced qty is in-house startable), but the
                       // SC/vendor + outsourced_quantity must remain visible.
                       const hasLiveOS = op.is_job_work && op.outsource_sc_order_id && op.status !== 'completed';
+                      // Backend stores `outsourced_quantity` (with -d). Some
+                      // legacy/in-flight ops carry the form-input field name
+                      // `outsource_quantity` (without -d). Read both so the
+                      // "Outsourced qty: x/y" hint always renders when there
+                      // IS a live outsource allocation.
+                      const osQty = Number(op.outsourced_quantity || op.outsource_quantity || 0);
+                      // Quantity still bookable in-house = total MO qty minus
+                      // whatever the vendor has been allocated. Used to label
+                      // the Start button as `Start (n rem)` even when the op
+                      // is still in `pending` status (partial-OS scenario).
+                      const inHouseRemaining = Math.max(0, jobCardWO.quantity - osQty);
 
                       const wcCell = op.work_center_id ? (wc?.name || op.work_center_name || '-') : (
                         op.status === 'pending' || op.status === 'stopped' ? (
@@ -2409,9 +2427,9 @@ export default function ManufacturingPage() {
                             <User className="w-3 h-3 text-[#6B7280]" />
                             <span className="font-medium">OS: {op.outsource_supplier_name || 'Vendor'}</span>
                           </div>
-                          {(op.outsourced_quantity || 0) > 0 && (
+                          {(osQty > 0) && (
                             <span className="text-[10px] text-[#7F1D1D] font-semibold" data-testid={`outsourced-qty-${op.sequence}`}>
-                              Outsourced qty: <span className="mono">{op.outsourced_quantity}</span>{' / '}<span className="mono">{jobCardWO.quantity}</span>
+                              Outsourced qty: <span className="mono">{osQty}</span>{' / '}<span className="mono">{jobCardWO.quantity}</span>
                             </span>
                           )}
                         </div>
@@ -2429,7 +2447,18 @@ export default function ManufacturingPage() {
                           {canStartMore && (
                             <button onClick={() => openOpDialog('start', op.sequence)} className="btn-primary text-xs px-2 py-1" data-testid={`start-op-${op.sequence}`}>
                               <Play className="w-3 h-3 inline mr-1" />
-                              {op.status === 'stopped' && runs.length === 0 ? 'Resume' : op.status === 'stopped' ? `Start (${remainingToAllocate} rem)` : op.status === 'in_progress' ? `Start (${remainingToAllocate} rem)` : 'Start'}
+                              {(() => {
+                                // Label rules:
+                                //   • stopped + no runs yet → 'Resume'
+                                //   • stopped / in_progress → 'Start (n rem)' using remainingToAllocate
+                                //   • pending with PARTIAL OS (osQty > 0 and < total)
+                                //     → 'Start (m rem)' where m = total - osQty (in-house bookable)
+                                //   • pending plain → 'Start'
+                                if (op.status === 'stopped' && runs.length === 0) return 'Resume';
+                                if (op.status === 'stopped' || op.status === 'in_progress') return `Start (${remainingToAllocate} rem)`;
+                                if (hasLiveOS && osQty > 0 && osQty < jobCardWO.quantity) return `Start (${inHouseRemaining} rem)`;
+                                return 'Start';
+                              })()}
                             </button>
                           )}
                           {op.status === 'completed' && (
@@ -3021,14 +3050,23 @@ export default function ManufacturingPage() {
                     <tbody>
                       {matReqDialog.materials.map((m, i) => {
                         const shortage = m.shortage || 0;
+                        // Use UOM master's decimal_places (sent by backend) so the
+                        // Required column shows e.g. "3.36" for kgs (2 dp) instead
+                        // of the raw IEEE-754 "3.3600000000000003".
+                        const dp = Number.isFinite(m.uom_decimal_places) ? m.uom_decimal_places : 2;
+                        const fmt = (v) => {
+                          const n = Number(v || 0);
+                          if (!Number.isFinite(n)) return '0';
+                          return n.toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+                        };
                         return (
                           <tr key={i} className={i % 2 ? 'bg-[#F9FAFB]' : ''}>
                             <td className="px-2 py-1 font-mono">{m.item || ''}</td>
                             <td className="px-2 py-1">{m.name || ''}</td>
-                            <td className="px-2 py-1 text-right font-mono">{m.quantity}</td>
+                            <td className="px-2 py-1 text-right font-mono">{fmt(m.quantity)}</td>
                             <td className="px-2 py-1">{m.uom || 'pcs'}</td>
-                            <td className="px-2 py-1 text-right font-mono">{(m.available_stock || 0)}</td>
-                            <td className={`px-2 py-1 text-right font-mono ${shortage > 0 ? 'text-[#9B1C1C] font-semibold' : 'text-[#03543F]'}`}>{shortage > 0 ? shortage : '-'}</td>
+                            <td className="px-2 py-1 text-right font-mono">{fmt(m.available_stock || 0)}</td>
+                            <td className={`px-2 py-1 text-right font-mono ${shortage > 0 ? 'text-[#9B1C1C] font-semibold' : 'text-[#03543F]'}`}>{shortage > 0 ? fmt(shortage) : '-'}</td>
                           </tr>
                         );
                       })}

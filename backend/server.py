@@ -6344,6 +6344,18 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
     # row per non-alternate component. No recursion into child BOMs.
     bom = await db.boms.find_one({"parent_item_id": fg_item_id, "status": "active"}, {"_id": 0})
     collected = []
+    # Pre-load UOM master so we can attach `decimal_places` to each row.
+    # Frontend uses this to round/format the `Required` column per the UOM
+    # master setting (e.g., kgs = 2 dp, pcs = 0 dp). Falls back to 2 dp.
+    uoms_list = await db.uoms.find({}, {"_id": 0}).to_list(500)
+    uom_decimal_map = {}
+    for u in uoms_list:
+        code = (u.get("code") or "").strip()
+        if code:
+            try:
+                uom_decimal_map[code.lower()] = int(u.get("decimal_places") if u.get("decimal_places") is not None else 2)
+            except (ValueError, TypeError):
+                uom_decimal_map[code.lower()] = 2
     if bom:
         # Pre-compute allocations across all open MOs so we can show
         # planners the FREE stock (current_stock − allocated_by_others).
@@ -6372,13 +6384,15 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
             allocated = float(allocated_by_others.get(cid, 0))
             available = max(0.0, on_hand - allocated)
             shortage = max(0.0, comp_qty - available)
+            uom_code = (citem.get("unit_of_measure") or citem.get("uom") or "pcs")
             collected.append({
                 "item_id": cid,
                 "item": citem.get("part_number", ""),
                 "name": citem.get("name", ""),
                 "category": citem.get("category", ""),
                 "quantity": comp_qty,
-                "uom": citem.get("unit_of_measure") or citem.get("uom") or "pcs",
+                "uom": uom_code,
+                "uom_decimal_places": uom_decimal_map.get((uom_code or "").strip().lower(), 2),
                 "unit_cost": float(citem.get("purchase_price") or 0),
                 "available_stock": available,
                 "shortage": shortage,
