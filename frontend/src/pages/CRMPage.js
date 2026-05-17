@@ -2801,6 +2801,21 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   const applyCustomer = (cid) => {
     const c = customers.find(x => x.id === cid);
     if (c) {
+      // Build a complete address block: street + city/state/pin + GSTIN.
+      // Bill-To and Ship-To start identical; user can edit Ship-To if the
+      // delivery location differs from the billing address.
+      const parts = [
+        c.address,
+        [c.city, c.state, c.pin_code].filter(Boolean).join(', '),
+        c.state_code ? `State Code: ${c.state_code}` : '',
+        c.gstin ? `GSTIN: ${c.gstin}` : '',
+      ].filter(Boolean);
+      const fullAddr = parts.join('\n');
+      // Place of supply uses the format "<state_code> - <state>" so the
+      // printed invoice can show both (matches GST norms).
+      const pos = c.state_code
+        ? (c.state ? `${c.state_code} - ${c.state}` : c.state_code)
+        : (c.state || '');
       setForm(prev => ({
         ...prev,
         customer_id: cid,
@@ -2808,9 +2823,9 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
         contact_person: c.contact_person || '',
         email: c.email || '',
         phone: c.phone || '',
-        billing_address: c.address || '',
-        shipping_address: c.address || '',
-        place_of_supply: c.state_code || '',
+        billing_address: fullAddr,
+        shipping_address: fullAddr,
+        place_of_supply: pos,
       }));
     }
   };
@@ -3146,8 +3161,8 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
               </div>
             )}
 
-            {/* Common fields */}
-            <div className="grid grid-cols-6 gap-3">
+            {/* Common fields — top row (no Place of Supply here) */}
+            <div className="grid grid-cols-5 gap-3">
               <div>
                 <label className="text-xs text-[#4B5563]">Invoice Date</label>
                 <input type="date" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" value={form.invoice_date} onChange={e => setForm({ ...form, invoice_date: e.target.value })} data-testid="ti-invoice-date" />
@@ -3155,10 +3170,6 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
               <div>
                 <label className="text-xs text-[#4B5563]">Due Date</label>
                 <input type="date" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} data-testid="ti-due-date" />
-              </div>
-              <div>
-                <label className="text-xs text-[#4B5563]">Place of Supply</label>
-                <input type="text" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm mono uppercase" maxLength={2} placeholder="27" value={form.place_of_supply} onChange={e => setForm({ ...form, place_of_supply: e.target.value.toUpperCase() })} data-testid="ti-pos" />
               </div>
               <div>
                 <label className="text-xs text-[#4B5563]">Customer PO Ref <span className="text-[#9CA3AF]">(optional)</span></label>
@@ -3188,12 +3199,22 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
             {/* Address */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-[#4B5563]">Billing Address</label>
-                <textarea className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs" rows={2} value={form.billing_address} onChange={e => setForm({ ...form, billing_address: e.target.value })} data-testid="ti-billing-addr" />
+                <label className="text-xs text-[#4B5563]">Billing Address <span className="text-[10px] text-[#9CA3AF]">(includes state, pin & GSTIN)</span></label>
+                <textarea className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs mono" rows={4} value={form.billing_address} onChange={e => setForm({ ...form, billing_address: e.target.value })} data-testid="ti-billing-addr" />
               </div>
               <div>
-                <label className="text-xs text-[#4B5563]">Shipping Address</label>
-                <textarea className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs" rows={2} value={form.shipping_address} onChange={e => setForm({ ...form, shipping_address: e.target.value })} data-testid="ti-shipping-addr" />
+                <label className="text-xs text-[#4B5563]">Shipping Address <span className="text-[10px] text-[#9CA3AF]">(edit only if different from billing)</span></label>
+                <textarea className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-xs mono" rows={4} value={form.shipping_address} onChange={e => setForm({ ...form, shipping_address: e.target.value })} data-testid="ti-shipping-addr" />
+              </div>
+            </div>
+
+            {/* Place of Supply — sits below the address blocks since it
+                follows from the buyer's state. Carries both code and name
+                (e.g. "27 - Maharashtra") to satisfy GST display norms. */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-[#4B5563]">Place of Supply <span className="text-[10px] text-[#9CA3AF]">(GST state — auto-filled from customer)</span></label>
+                <input type="text" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" placeholder="e.g. 27 - Maharashtra" value={form.place_of_supply} onChange={e => setForm({ ...form, place_of_supply: e.target.value })} data-testid="ti-pos" />
               </div>
             </div>
 
@@ -3207,14 +3228,14 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                 <table className="line-items-grid" data-testid="ti-lines-table">
                   <thead><tr>
                     <th className="row-num">#</th>
-                    <th style={{ minWidth: '260px' }}>Item &amp; Description</th>
-                    <th style={{ width: '150px', minWidth: '150px' }}>HSN</th>
+                    <th style={{ minWidth: '340px' }}>Item &amp; Description</th>
+                    <th style={{ width: '90px', minWidth: '90px' }}>HSN</th>
                     <th style={{ width: '70px', textAlign: 'right' }}>Qty</th>
                     <th style={{ width: '60px' }}>UOM</th>
-                    <th style={{ width: '100px', textAlign: 'right' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
+                    <th style={{ width: '140px', minWidth: '140px', textAlign: 'right' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
                     <th style={{ width: '60px', textAlign: 'right' }}>Disc%</th>
                     <th style={{ width: '60px', textAlign: 'right' }}>GST%</th>
-                    <th style={{ width: '120px', textAlign: 'right' }}>Amount</th>
+                    <th style={{ width: '140px', minWidth: '140px', textAlign: 'right' }}>Amount</th>
                     <th className="remove-cell"></th>
                   </tr></thead>
                   <tbody>
@@ -3292,7 +3313,25 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                           <td><input type="text" className="grid-input mono" value={l.hsn_code} onChange={e => updateLine(i, { hsn_code: e.target.value })} /></td>
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.quantity} onChange={e => updateLine(i, { quantity: e.target.value })} data-testid={`ti-line-qty-${i}`} /></td>
                           <td><input type="text" className="grid-input" value={l.uom} onChange={e => updateLine(i, { uom: e.target.value })} /></td>
-                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.rate} onChange={e => updateLine(i, { rate: e.target.value })} data-testid={`ti-line-rate-${i}`} /></td>
+                          {/* Rate — accepts commas; stripped on store so totals math stays numeric.
+                              Indian grouping (1,17,300) is applied on blur via Intl.NumberFormat. */}
+                          <td><input
+                            type="text"
+                            inputMode="decimal"
+                            className="grid-input mono num"
+                            value={l._rateFormatted ?? (l.rate === '' || l.rate === undefined || l.rate === null ? '' : Number(l.rate).toLocaleString('en-IN', { maximumFractionDigits: 2 }))}
+                            onChange={e => {
+                              const raw = e.target.value.replace(/,/g, '');
+                              if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
+                                updateLine(i, { rate: raw, _rateFormatted: e.target.value });
+                              }
+                            }}
+                            onBlur={() => {
+                              const v = parseFloat(l.rate);
+                              updateLine(i, { rate: isNaN(v) ? '' : v, _rateFormatted: undefined });
+                            }}
+                            data-testid={`ti-line-rate-${i}`}
+                          /></td>
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.discount_pct} onChange={e => updateLine(i, { discount_pct: e.target.value })} data-testid={`ti-line-disc-${i}`} /></td>
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.gst_rate} onChange={e => updateLine(i, { gst_rate: e.target.value })} data-testid={`ti-line-gst-${i}`} /></td>
                           <td className="static-cell amount">{formatCurrency(amount, form.currency)}</td>
@@ -4235,28 +4274,18 @@ function printInvoiceDoc(doc, opts) {
   .copy-ticks .tk .box{width:10px;height:10px;border:1.2px solid #2D3E50;display:inline-block;border-radius:1px}
   ` : ''}
   @media print {
-    @page {size:A4;margin:8mm 8mm 10mm 8mm}
+    @page {
+      size:A4;
+      margin:8mm 8mm 14mm 8mm;
+      @bottom-right {
+        content: "Page " counter(page) " of " counter(pages);
+        font-family:'Helvetica Neue',Arial,sans-serif;
+        font-size:9px;
+        color:#64748b;
+        padding-right:4mm;
+      }
+    }
     body{padding:0}
-  }
-  /* Repeating header / footer on every printed page (Tax Invoice).
-     Uses the canonical thead/tfoot pattern — Chrome / Edge / Safari all
-     repeat <thead> on every printed page when the parent table breaks
-     across pages. The compact running header replaces the previously
-     used position:fixed approach which overlapped page-1 content. */
-  table.doc-wrap{width:100%;border-collapse:collapse}
-  table.doc-wrap > thead, table.doc-wrap > tfoot{display:none}
-  table.doc-wrap > tbody > tr > td{padding:0}
-  @media print {
-    table.doc-wrap > thead{display:table-header-group}
-    table.doc-wrap > tfoot{display:table-footer-group}
-    .repeat-head{display:flex;align-items:center;gap:10px;
-      padding:4px 4mm;border-bottom:1.5px solid ${accentColor};
-      font-size:10px;color:#0f172a;background:#fff;}
-    .repeat-head .rh-name{font-size:11px;font-weight:800;color:${accentColor}}
-    .repeat-head .rh-meta{font-size:8.5px;color:#475569;line-height:1.3}
-    .repeat-head img.rh-logo{max-height:9mm;max-width:24mm;object-fit:contain}
-    .repeat-foot{padding:3px 4mm;border-top:1px solid #e2e8f0;
-      font-size:8px;color:#64748b;text-align:center;background:#fff;}
   }
 </style></head><body>
 ${(isQuotation && opts.includeCover) ? `
@@ -4281,28 +4310,6 @@ ${(isQuotation && opts.includeCover) ? `
   </div>
 </div>
 ` : ''}
-<table class="doc-wrap">
-<thead><tr><td>
-<!-- Running header — printed on EVERY page (via thead repeat) -->
-<div class="repeat-head">
-  ${cfg.logo_data ? `<img src="${esc(cfg.logo_data)}" class="rh-logo" alt="logo"/>` : ''}
-  <div style="flex:1">
-    <div class="rh-name">${esc(cfg.name)}</div>
-    <div class="rh-meta">
-      ${[cfg.address_line1, cfg.address_line2].filter(Boolean).map(esc).join(' · ')}
-      ${cfg.gstin ? ` · GSTIN: <strong>${esc(cfg.gstin)}</strong>` : ''}
-    </div>
-  </div>
-  <div style="text-align:right">
-    <div style="font-size:10px;font-weight:700;color:${accentColor}">${esc(opts.title)}</div>
-    <div style="font-size:9px;color:#475569" class="mono">${esc(docNo)}</div>
-  </div>
-</div>
-</td></tr></thead>
-<tfoot><tr><td>
-<div class="repeat-foot">${esc(cfg.name)} · ${esc(opts.title)} ${esc(docNo)} · Generated ${new Date().toLocaleDateString('en-IN')}</div>
-</td></tr></tfoot>
-<tbody><tr><td>
 <div class="page">
   <!-- Header -->
   <div class="header">
@@ -4463,8 +4470,6 @@ ${(isQuotation && opts.includeCover) ? `
 
   <div class="footer-note">This is a computer-generated document.${isTaxInvoice ? ' Subject to Jurisdiction as per Place of Supply.' : ''}</div>
 </div>
-</td></tr></tbody>
-</table>
 
 </body></html>`;
   // Document number / filename — `docNo` was already computed earlier from

@@ -19,6 +19,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-17 (TI form/print polish — 4 follow-ups — DONE & VERIFIED ✅):**
+  1. **Customer auto-fill → full address** (`/app/frontend/src/pages/CRMPage.js` `applyCustomer`): Bill-To and Ship-To now seed with a complete multi-line block — street + city/state/pin + State Code + GSTIN. Place of Supply auto-fills as "`<state_code> - <state>`" (e.g. "27 - Maharashtra") matching GST display norms.
+  2. **Place of Supply moved below addresses**: dialog top row collapsed to 5 columns (Invoice Date, Due Date, Customer PO Ref, Ship From Store, Currency); POS sits below the Bill-To / Ship-To textareas.
+  3. **Item search column widened** (minWidth 260→340px). HSN narrowed 150→90px (-40%). Rate widened 100→140px and switched to a comma-formatted text input (Indian grouping `1,17,300`) that stores raw numeric values on blur.
+  4. **Print output cleanup** (`printInvoiceDoc`): removed the `<table class='doc-wrap'>` running thead/tfoot wrapper (was overlapping page 1) AND the bottom company-info running footer. Added "Page X of Y" via CSS `@page { @bottom-right { content: counter(page) " of " counter(pages); } }` — honored by Chrome's native print dialog (the default pdfPrint.js path). The html2pdf raster fallback won't render the counter (documented limitation).
+  - **Testing**: `testing_agent_v3_fork` iteration 131 — 18/18 backend (100%) + frontend code review + regression iteration 130 all green.
+
+
 - **2026-02-17 (Follow-up TI fixes — page header overlap, HSN width, PL dup self-heal, Tally seller block, Ship-From + stock consumption — DONE & VERIFIED ✅):**
   1. **Print header overlap fixed** — replaced `position:fixed` running header with the canonical `<table class='doc-wrap'>` thead/tfoot pattern. Browsers now natively repeat the small running header on every printed page without overlapping the in-flow content.
   2. **HSN column widened** to 150px with `minWidth:150px` across all line-items grids (Quotation, Proforma, Tax Invoice) so 7-8 digit codes render fully.
