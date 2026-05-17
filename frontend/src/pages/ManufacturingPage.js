@@ -2362,19 +2362,30 @@ export default function ManufacturingPage() {
                               {op.status === 'stopped' && runs.length === 0 ? 'Resume' : op.status === 'stopped' ? `Start (${remainingToAllocate} rem)` : op.status === 'in_progress' ? `Start (${remainingToAllocate} rem)` : 'Start'}
                             </button>
                           )}
-                          {op.status === 'in_progress' && op.is_job_work && (
+                          {/* JW vendor chip — shown whenever this op has an
+                              active OS allocation (regardless of status).
+                              For PARTIAL OS, status stays 'pending' (the
+                              un-outsourced qty is startable in-house), but
+                              the vendor chip + outsourced-qty hint should
+                              still be visible so the operator knows where
+                              the material went. */}
+                          {op.is_job_work && op.outsource_sc_order_id && op.status !== 'completed' && (
                             <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium" data-testid={`outsourced-op-${op.sequence}`}>
-                              {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'} — Receive via GRN
+                              {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'}
+                              {op.outsource_supplier_name ? ` → ${op.outsource_supplier_name}` : ''} — Receive via GRN
                             </span>
                           )}
-                          {/* Outsourced-qty hint — shown for ANY OS op that has an
-                              outsourced quantity (including partial OS where the op is
-                              still status='pending' because the un-outsourced portion is
-                              startable in-house). Maroon for emphasis. */}
+                          {/* Outsourced-qty hint — sits BELOW the vendor chip
+                              (block + w-full forces it onto a new flex line)
+                              so the layout reads vertically:
+                                [JW: 000009 → CREATIVE FINISHERS — Receive via GRN]
+                                Outsourced qty: 6 / 12
+                              The Start button stays in its original FIRST
+                              position above so operators can immediately start
+                              the remaining qty. */}
                           {op.is_job_work && (op.outsourced_quantity || 0) > 0 && op.status !== 'completed' && (
-                            <span className="block w-full text-[10px] text-[#7F1D1D] font-semibold mt-1" data-testid={`outsourced-qty-${op.sequence}`}>
+                            <span className="block w-full text-[10px] text-[#7F1D1D] font-semibold mt-0.5" data-testid={`outsourced-qty-${op.sequence}`}>
                               Outsourced qty: <span className="mono">{op.outsourced_quantity}</span>{' / '}<span className="mono">{jobCardWO.quantity}</span>
-                              {op.outsource_supplier_name ? <span className="ml-1 text-[#92400E] font-normal">→ {op.outsource_supplier_name}</span> : null}
                             </span>
                           )}
                           {op.short_closed && (
