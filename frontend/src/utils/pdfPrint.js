@@ -93,7 +93,70 @@ function injectPrintCss(html) {
 
 async function fallbackToHtml2Pdf(iframeBody, opts) {
   const merged = { ...DEFAULT_HTML2PDF_OPTS, ...opts };
-  await html2pdf().set(merged).from(iframeBody).save();
+  // ----- Running header support (page 2+ only) -----------------------------
+  // When opts.runningHeader is provided we post-process the generated PDF
+  // and draw a small header (logo + name + address + GSTIN + invoice no)
+  // on every page from page 2 onwards. CSS `@page` margin boxes only
+  // accept strings + counters (no images), so the only way to put a
+  // logo on each printed page is to render the PDF and overlay the
+  // header via jsPDF directly. This means the call must go through the
+  // html2pdf raster pipeline (not the native print dialog).
+  const hdr = opts.runningHeader;
+  if (!hdr) {
+    await html2pdf().set(merged).from(iframeBody).save();
+    return;
+  }
+  // Build the PDF instance, then iterate pages.
+  const worker = html2pdf().set(merged).from(iframeBody).toPdf();
+  const pdfObj = await worker.get('pdf');
+  const total = pdfObj.internal.getNumberOfPages();
+  const pageW = pdfObj.internal.pageSize.getWidth();
+  const pageH = pdfObj.internal.pageSize.getHeight();
+  for (let p = 1; p <= total; p++) {
+    pdfObj.setPage(p);
+    // Page numbers on every page (bottom right).
+    pdfObj.setFont('helvetica', 'normal');
+    pdfObj.setFontSize(8);
+    pdfObj.setTextColor(100);
+    pdfObj.text(`Page ${p} of ${total}`, pageW - 24, pageH - 14, { align: 'right' });
+    if (p === 1) continue;  // page 1 keeps its in-flow brand block
+    // Running header — logo + company name + address + GSTIN on the
+    // left; doc title + number on the right; thin accent divider below.
+    const top = 16;
+    if (hdr.logoDataUrl) {
+      try {
+        pdfObj.addImage(hdr.logoDataUrl, 'PNG', 22, 10, 56, 22, undefined, 'FAST');
+      } catch (e) { /* image may not be a supported type — silently skip */ }
+    }
+    const textX = hdr.logoDataUrl ? 86 : 22;
+    pdfObj.setFont('helvetica', 'bold');
+    pdfObj.setFontSize(11);
+    pdfObj.setTextColor(45, 62, 80);
+    pdfObj.text(hdr.companyName || '', textX, top + 4);
+    pdfObj.setFont('helvetica', 'normal');
+    pdfObj.setFontSize(8);
+    pdfObj.setTextColor(85);
+    if (hdr.addressLine) pdfObj.text(hdr.addressLine, textX, top + 12, { maxWidth: pageW - textX - 130 });
+    if (hdr.gstin) {
+      pdfObj.setFont('helvetica', 'bold');
+      pdfObj.setTextColor(45, 62, 80);
+      pdfObj.text(`GSTIN: ${hdr.gstin}`, textX, top + 20);
+    }
+    // Right side: doc title + number
+    pdfObj.setFont('helvetica', 'bold');
+    pdfObj.setFontSize(10);
+    pdfObj.setTextColor(45, 62, 80);
+    pdfObj.text(hdr.docTitle || '', pageW - 22, top + 4, { align: 'right' });
+    pdfObj.setFont('courier', 'normal');
+    pdfObj.setFontSize(9);
+    pdfObj.setTextColor(85);
+    pdfObj.text(hdr.docNo || '', pageW - 22, top + 12, { align: 'right' });
+    // Divider line
+    pdfObj.setDrawColor(45, 62, 80);
+    pdfObj.setLineWidth(0.5);
+    pdfObj.line(22, top + 26, pageW - 22, top + 26);
+  }
+  pdfObj.save(merged.filename || 'document.pdf');
 }
 
 /**
@@ -188,8 +251,11 @@ export async function downloadHtmlAsPdf(html, filename, options = {}) {
       try { await doc.fonts.ready; } catch { /* noop */ }
     }
 
-    // ---- Path A: native print dialog (default) ------------------------------
-    if (!options.forceDownload) {
+    // ---- Path A: native print dialog (default — skipped when a
+    //              runningHeader is requested because the @page margin
+    //              boxes can't carry images; html2pdf+jsPDF post-processing
+    //              is the only reliable way to draw a logo on each page) --
+    if (!options.forceDownload && !options.runningHeader) {
       try {
         // FILENAME PREFILL: Most browsers use the PARENT document's title
         // (not the iframe's title) as the default "Save as PDF" filename
@@ -220,8 +286,14 @@ export async function downloadHtmlAsPdf(html, filename, options = {}) {
       }
     }
 
-    // ---- Path B: html2pdf.js fallback (raster but always works) ------------
-    await fallbackToHtml2Pdf(doc.body, { ...(options.html2pdf || {}), filename: cleanFilename });
+    // ---- Path B: html2pdf.js raster pipeline ------------
+    //  - Used when forceDownload=true OR a runningHeader config is supplied
+    //    (so we can post-process pages with jsPDF.addImage to draw the logo).
+    await fallbackToHtml2Pdf(doc.body, {
+      ...(options.html2pdf || {}),
+      filename: cleanFilename,
+      runningHeader: options.runningHeader,
+    });
     toast.success(`Downloaded ${cleanFilename}`);
   } catch (e) {
     console.error('[pdfPrint] failed:', e);

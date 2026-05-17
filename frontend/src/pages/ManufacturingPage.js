@@ -1890,7 +1890,7 @@ export default function ManufacturingPage() {
                     })();
                     return (
                       <details key={parentMO.id} className="border rounded-sm overflow-hidden">
-                        <summary className="flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none flex-wrap" style={{borderLeft: `4px solid ${catColor}`}}>
+                        <summary className="fg-mo-summary flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none flex-wrap" style={{borderLeft: `4px solid ${catColor}`}}>
                           <ChevronRight className="w-4 h-4 text-[#4B5563]" />
                           <span className="mono font-bold text-sm" style={{color: catColor}}>{parentMO.wo_number}</span>
                           {parentMO.production_order?.order_number && <span className="text-[10px] bg-[#E1EFFE] text-[#1E429F] px-1.5 py-0.5 rounded font-medium mono" data-testid={`so-ref-${parentMO.id}`}>SO: {parentMO.production_order.order_number}</span>}
@@ -1973,7 +1973,7 @@ export default function ManufacturingPage() {
                             </select>
                           </div>
                         </summary>
-                        <div className="mo-family-table-wrap">
+                        <div className="fg-mo-table-host">
                           <table className="w-full data-table mo-family-table">
                             <thead className="sticky-mo-head">
                               <tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr>
@@ -2341,12 +2341,16 @@ export default function ManufacturingPage() {
                           {op.status === 'in_progress' && op.is_job_work && (
                             <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium" data-testid={`outsourced-op-${op.sequence}`}>
                               {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'} — Receive via GRN
-                              {(op.outsourced_quantity || 0) > 0 && (
-                                <span className="block text-[9px] text-[#7F1D1D] font-semibold mt-0.5" data-testid={`outsourced-qty-${op.sequence}`}>
-                                  Outsourced qty: <span className="mono">{op.outsourced_quantity}</span>{' '}
-                                  / {jobCardWO.quantity}
-                                </span>
-                              )}
+                            </span>
+                          )}
+                          {/* Outsourced-qty hint — shown for ANY OS op that has an
+                              outsourced quantity (including partial OS where the op is
+                              still status='pending' because the un-outsourced portion is
+                              startable in-house). Maroon for emphasis. */}
+                          {op.is_job_work && (op.outsourced_quantity || 0) > 0 && op.status !== 'completed' && (
+                            <span className="block w-full text-[10px] text-[#7F1D1D] font-semibold mt-1" data-testid={`outsourced-qty-${op.sequence}`}>
+                              Outsourced qty: <span className="mono">{op.outsourced_quantity}</span>{' / '}<span className="mono">{jobCardWO.quantity}</span>
+                              {op.outsource_supplier_name ? <span className="ml-1 text-[#92400E] font-normal">→ {op.outsource_supplier_name}</span> : null}
                             </span>
                           )}
                           {op.short_closed && (

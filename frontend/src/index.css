@@ -114,28 +114,20 @@ code, .mono {
    scrolling and without truncated cell values.
    Apply by giving the <table> the class `.line-items-grid`.
    ======================================================================== */
-/* MO Family table — sticky thead so the column headers stay visible
-   when scrolling a long FG-MO + child-MO tree. The wrapper has its own
-   max-height + overflow so `position: sticky` on the thead sticks to
-   the top of this scroll container. Previously the table was wrapped in
-   a `overflow-x-auto` div which CSS implicitly upgrades to `overflow-y:
-   auto` too — that broke sticky because the wrapper had no max-height
-   and the body scroll was the actual scroller. Giving the wrapper an
-   explicit max-height fixes the scrolling context. */
-.mo-family-table-wrap {
-  max-height: calc(100vh - 260px);
-  min-height: 200px;
-  overflow: auto;
-  border: 1px solid #E5E7EB;
-  border-radius: 4px;
-}
-.mo-family-table thead.sticky-mo-head {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: #F3F4F6;
-}
+/* MO Family — sticky table COLUMN HEADERS (the "FG header" the user
+   refers to: MO / Level · Item · Routing · Qty · Progress · Status ·
+   Actions). The toolbar at the page top uses `sticky top-0 z-30`
+   (~66px tall), so we pin the thead just below it.
+   IMPORTANT 1: `position: sticky` is applied to the <th> cells, NOT
+   the <thead>, because `.data-table th` already has `position: relative`
+   which would otherwise override the thead-level sticky and break it.
+   IMPORTANT 2: Do NOT add `overflow-x: auto` on the table wrapper —
+   CSS spec forces `overflow-y` to `auto` whenever `overflow-x: auto`,
+   creating a scroll context that breaks body-relative sticky. */
 .mo-family-table thead.sticky-mo-head th {
+  position: sticky;
+  top: 66px;
+  z-index: 11;
   background: #F3F4F6;
   box-shadow: 0 1px 0 0 #D1D5DB;
 }

@@ -4578,7 +4578,21 @@ ${(isQuotation && opts.includeCover) ? `
     win.document.close();
     try { win.document.title = filename.replace('.pdf', ''); } catch (_e) { /* cross-origin no-op */ }
   } else {
-    downloadHtmlAsPdf(html, filename);
+    // Build a running-header config for the html2pdf path. This carries
+    // the logo (as data URL — already loaded into cfg.logo_data), company
+    // name, single-line address summary, GSTIN, doc title and number.
+    // pdfPrint.js draws this on every page 2+ via jsPDF.addImage so a
+    // proper logo + address appears as a running header in the PDF.
+    const addrSummary = [cfg.address_line1, cfg.address_line2].filter(Boolean).join(', ');
+    const runningHeader = isTaxInvoice ? {
+      logoDataUrl: cfg.logo_data || '',
+      companyName: cfg.name || '',
+      addressLine: addrSummary,
+      gstin: cfg.gstin || '',
+      docTitle: opts.title || '',
+      docNo: docNo || '',
+    } : null;
+    downloadHtmlAsPdf(html, filename, runningHeader ? { runningHeader } : {});
   }
 }
 

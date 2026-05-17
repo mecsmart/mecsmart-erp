@@ -19,6 +19,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-17 (Print logo header via jsPDF + outsourced-qty for all OS states + sticky thead actually working — DONE ✅):**
+  1. **PDF running header with logo+name+address+GSTIN on page 2+** (`/app/frontend/src/utils/pdfPrint.js`): CSS `@page` margin boxes only accept strings/counters — they cannot render images. Switched Tax Invoice PDF generation to the html2pdf raster pipeline and use `jsPDF.toPdf().get('pdf')` post-processing to draw the company logo (via `addImage`) + name + address + GSTIN + invoice title + number on every page from page 2 onwards, plus "Page X of Y" on all pages. `printInvoiceDoc` now passes a `runningHeader` config (`logoDataUrl`, `companyName`, `addressLine`, `gstin`, `docTitle`, `docNo`) when printing tax invoices.
+  2. **Outsourced-qty hint visible for ALL OS states** (`/app/frontend/src/pages/ManufacturingPage.js`): The hint was nested inside the `in_progress`-only chip. Lifted out to a standalone block — shown whenever `op.is_job_work && op.outsourced_quantity > 0 && op.status !== 'completed'`. Includes vendor name suffix when present.
+  3. **Sticky MO header — root-cause fix**: The thead was sticky-styled but `.data-table th { position: relative; }` was overriding it. Applied `position: sticky; top: 66px` to the `th` cells DIRECTLY instead of the thead element. Removed the inner-scroll wrapper (single-page-scroll restored) — table breathes naturally on the body scroll.
+  - **Smoke test**: Screenshot confirmed sticky thead pinned right below the "Manufacturing Orders" toolbar at top while body scrolls through 671 MOs.
+
+
 - **2026-02-17 (Sticky MO header — actually working fix — DONE ✅):**
   - The previous attempt added `position: sticky` to the thead but the parent `<div className="overflow-x-auto">` had no explicit height. CSS implicitly upgrades `overflow-y: visible` → `auto` whenever `overflow-x: auto`, so the wrapper became a scroll context but the body scroll was still the actual scroller — sticky had no anchor.
   - **Fix**: Replaced `overflow-x-auto` with a new `.mo-family-table-wrap` class that sets `max-height: calc(100vh - 260px)` + `overflow: auto`. The wrapper now scrolls vertically inside the page, and the sticky thead correctly pins to the top of THAT scroll container.
