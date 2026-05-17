@@ -4279,40 +4279,38 @@ function printInvoiceDoc(doc, opts) {
   .copy-ticks .tk{display:flex;align-items:center;gap:4px}
   .copy-ticks .tk .box{width:10px;height:10px;border:1.2px solid #2D3E50;display:inline-block;border-radius:1px}
   ` : ''}
-  /* ----- Page 2+ running header with LOGO -----------------------------
-     CSS GCPM position-running removes the element from normal flow
-     and places it inside the named at-page margin box. This is the ONLY
-     pure-CSS technique that supports IMAGES + arbitrary HTML in the
-     repeating header (text-only top-left content: ... cannot render the
-     company logo). Chrome print pipeline supports both position-running
-     and content: element() since v96. at-page :first overrides @top-center
-     to content: none so the running header is suppressed on page 1
-     (which already has the full in-flow brand block — no duplication). */
-  .repeat-head { display: none; }
-  @media print {
-    .repeat-head {
-      position: running(invoiceRunningHeader);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 4px 4mm;
-      border-bottom: 1.5px solid ${accentColor};
-      font-size: 10px;
-      color: #0f172a;
-      background: #fff;
-    }
-    .repeat-head img.rh-logo { max-height: 14mm; max-width: 50mm; object-fit: contain; }
-    .repeat-head .rh-name { font-size: 12px; font-weight: 800; color: ${accentColor}; line-height: 1.2; }
-    .repeat-head .rh-meta { font-size: 8.5px; color: #475569; line-height: 1.3; margin-top: 1px; }
-    .repeat-head .rh-right .rh-title { font-size: 11px; font-weight: 700; color: ${accentColor}; }
-    .repeat-head .rh-right .rh-docno { font-size: 9px; color: #475569; font-family: 'Courier New', monospace; }
-  }
+  /* ----- Page 2+ running header (text-only) ---------------------------
+     CSS at-page margin boxes accept only string + counter content (not
+     images). We use top-left + top-right slots so page 2+ carries the
+     company name + GSTIN on the left and the invoice title + number on
+     the right. The inline .repeat-head element below is HIDDEN in print
+     (display:none) so it never leaks onto page 1 even if the renderer
+     ignores position:running. Bottom-right shows Page X of Y.
+     NOTE: The PDF download path (html2pdf raster) does NOT support these
+     margin-box rules. The page-2+ header therefore renders correctly
+     only when the user goes through Browser → Print → Save as PDF
+     (native dialog). The in-app Download/Preview button uses html2pdf
+     and produces a single-shot raster — page 2+ then has no running
+     header, but at least page 1 stays clean (no duplicate). */
+  .repeat-head { display: none !important; }
   @media print {
     @page {
       size: A4;
-      margin: 22mm 8mm 14mm 8mm;
-      @top-center {
-        content: element(invoiceRunningHeader);
+      margin: 16mm 8mm 14mm 8mm;
+      @top-left {
+        content: "${runHeadLeft}";
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        font-size: 9.5px;
+        font-weight: 700;
+        color: ${accentColor};
+        padding-left: 4mm;
+      }
+      @top-right {
+        content: "${runHeadRight}";
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        font-size: 9.5px;
+        color: #475569;
+        padding-right: 4mm;
       }
       @bottom-right {
         content: "Page " counter(page) " of " counter(pages);
@@ -4322,12 +4320,13 @@ function printInvoiceDoc(doc, opts) {
         padding-right: 4mm;
       }
     }
-    /* Page 1: suppress the running header (the full in-flow brand block
-       already lives in the document body) and reduce the top margin so
-       no extra whitespace appears above it. */
+    /* Page 1: suppress @top-* slots so the in-flow brand block doesn't
+       compete with a duplicate running header. Page numbers stay on
+       page 1 (via @bottom-right above which @page :first doesn't reset). */
     @page :first {
       margin-top: 8mm;
-      @top-center { content: none; }
+      @top-left { content: none; }
+      @top-right { content: none; }
     }
     body { padding: 0; }
   }

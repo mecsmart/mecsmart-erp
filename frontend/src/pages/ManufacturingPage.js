@@ -1973,7 +1973,7 @@ export default function ManufacturingPage() {
                             </select>
                           </div>
                         </summary>
-                        <div className="overflow-x-auto">
+                        <div className="mo-family-table-wrap">
                           <table className="w-full data-table mo-family-table">
                             <thead className="sticky-mo-head">
                               <tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr>
@@ -2342,7 +2342,7 @@ export default function ManufacturingPage() {
                             <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium" data-testid={`outsourced-op-${op.sequence}`}>
                               {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'} — Receive via GRN
                               {(op.outsourced_quantity || 0) > 0 && (
-                                <span className="block text-[9px] text-[#92400E] font-normal mt-0.5" data-testid={`outsourced-qty-${op.sequence}`}>
+                                <span className="block text-[9px] text-[#7F1D1D] font-semibold mt-0.5" data-testid={`outsourced-qty-${op.sequence}`}>
                                   Outsourced qty: <span className="mono">{op.outsourced_quantity}</span>{' '}
                                   / {jobCardWO.quantity}
                                 </span>
@@ -2354,20 +2354,19 @@ export default function ManufacturingPage() {
                               <XIcon className="w-3 h-3 inline mr-0.5" />Short Closed{op.short_close_reason ? ` — ${op.short_close_reason}` : ''}
                             </span>
                           )}
-                          {/* REVOKE — admin-only. Reverts a running OS operation back to
-                              "pending" so it can be re-outsourced or done in-house.
-                              Previously this button was labelled "Short Close" but the
-                              user clarified the action is actually a revoke (the SC line
-                              survives in restored state, ready for a fresh DC).
-                              For TRUE short-close (terminate without GRN) use the
-                              "Short Close (no GRN)" button below. */}
-                          {user?.role === 'admin' && op.status === 'in_progress' && op.is_job_work && (
+                          {/* Revoke / Short Close (no GRN) buttons —
+                              Shown whenever this op has an active OS allocation
+                              (is_job_work + outsource_sc_order_id) regardless of
+                              op.status. Partial-OS leaves status='pending' but
+                              the SC line is live, so both revoke and short-close
+                              must still be available. */}
+                          {user?.role === 'admin' && op.is_job_work && op.outsource_sc_order_id && op.status !== 'completed' && (
                             <>
                               <button
                                 onClick={() => handleShortCloseOperation(op)}
                                 className="btn-secondary text-xs px-2 py-1 text-[#92400E] border-[#92400E] hover:bg-[#FEF3C7]"
                                 data-testid={`revoke-op-${op.sequence}`}
-                                title="Revoke — release this op back to pending (SC line is restored)"
+                                title="Revoke — release this op back to pending (SC line is restored, vendor allocation cleared)"
                               >
                                 <RefreshCw className="w-3 h-3 inline mr-1" />Revoke
                               </button>
@@ -2375,7 +2374,7 @@ export default function ManufacturingPage() {
                                 onClick={() => handleShortCloseNoGRN(op)}
                                 className="btn-secondary text-xs px-2 py-1 text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]"
                                 data-testid={`short-close-nogrn-op-${op.sequence}`}
-                                title="Short Close (no GRN) — mark this OS op as completed without receiving material. The next process becomes available immediately."
+                                title="Short Close (no GRN) — mark this OS op as completed without receiving material. Next process becomes available immediately."
                               >
                                 <XIcon className="w-3 h-3 inline mr-1" />Short Close
                               </button>

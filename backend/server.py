@@ -6443,8 +6443,10 @@ async def short_close_wo_operation(wo_id: str, sequence: int, request: Request):
             break
     if not target:
         raise HTTPException(status_code=404, detail=f"Operation sequence {sequence} not found")
-    if not target.get("is_job_work") or target.get("status") != "in_progress":
-        raise HTTPException(status_code=400, detail="Operation must be an in-progress outsourced (OS) operation to short close")
+    if not target.get("is_job_work") or not target.get("outsource_sc_order_id"):
+        raise HTTPException(status_code=400, detail="Operation must be an outsourced (OS) operation to short close")
+    if target.get("status") == "completed":
+        raise HTTPException(status_code=400, detail="Operation is already completed — cannot short close")
     sc_order_id = target.get("outsource_sc_order_id")
     sc_order_number = target.get("outsource_sc_order_number")
     op_name_val = target.get("operation_name") or ""
@@ -6470,6 +6472,7 @@ async def short_close_wo_operation(wo_id: str, sequence: int, request: Request):
     ):
         target.pop(f, None)
     target["status"] = "pending"
+    target["outsourced_quantity"] = 0
     runs = target.get("runs") or []
     target["runs"] = [r for r in runs if not (r.get("operator") or "").startswith("OS: ")]
     await db.work_orders.update_one({"id": wo_id}, {"$set": {"operations_status": ops}})
@@ -6541,8 +6544,10 @@ async def short_close_wo_operation_no_grn(wo_id: str, sequence: int, payload: Sh
             break
     if not target:
         raise HTTPException(status_code=404, detail=f"Operation sequence {sequence} not found")
-    if not target.get("is_job_work") or target.get("status") != "in_progress":
-        raise HTTPException(status_code=400, detail="Operation must be an in-progress outsourced (OS) operation")
+    if not target.get("is_job_work") or not target.get("outsource_sc_order_id"):
+        raise HTTPException(status_code=400, detail="Operation must be an outsourced (OS) operation")
+    if target.get("status") == "completed":
+        raise HTTPException(status_code=400, detail="Operation is already completed")
     sc_order_id = target.get("outsource_sc_order_id")
     sc_order_number = target.get("outsource_sc_order_number")
     op_name_val = target.get("operation_name") or ""

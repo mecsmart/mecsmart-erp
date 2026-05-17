@@ -115,11 +115,20 @@ code, .mono {
    Apply by giving the <table> the class `.line-items-grid`.
    ======================================================================== */
 /* MO Family table — sticky thead so the column headers stay visible
-   when scrolling a long FG-MO + child-MO tree. The parent <details>
-   wraps the table, and the page-level scroll container is the body,
-   so `position: sticky` on the thead pins it relative to the viewport
-   as the user scrolls through the table. `z-index` keeps it above the
-   table rows + chevron rotations. */
+   when scrolling a long FG-MO + child-MO tree. The wrapper has its own
+   max-height + overflow so `position: sticky` on the thead sticks to
+   the top of this scroll container. Previously the table was wrapped in
+   a `overflow-x-auto` div which CSS implicitly upgrades to `overflow-y:
+   auto` too — that broke sticky because the wrapper had no max-height
+   and the body scroll was the actual scroller. Giving the wrapper an
+   explicit max-height fixes the scrolling context. */
+.mo-family-table-wrap {
+  max-height: calc(100vh - 260px);
+  min-height: 200px;
+  overflow: auto;
+  border: 1px solid #E5E7EB;
+  border-radius: 4px;
+}
 .mo-family-table thead.sticky-mo-head {
   position: sticky;
   top: 0;

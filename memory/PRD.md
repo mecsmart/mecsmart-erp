@@ -19,6 +19,11 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-17 (Sticky MO header — actually working fix — DONE ✅):**
+  - The previous attempt added `position: sticky` to the thead but the parent `<div className="overflow-x-auto">` had no explicit height. CSS implicitly upgrades `overflow-y: visible` → `auto` whenever `overflow-x: auto`, so the wrapper became a scroll context but the body scroll was still the actual scroller — sticky had no anchor.
+  - **Fix**: Replaced `overflow-x-auto` with a new `.mo-family-table-wrap` class that sets `max-height: calc(100vh - 260px)` + `overflow: auto`. The wrapper now scrolls vertically inside the page, and the sticky thead correctly pins to the top of THAT scroll container.
+
+
 - **2026-02-17 (Page-2+ logo header + JW-OS Revoke/Short-Close split + outsourced-qty hint + sticky MO header — DONE & VERIFIED ✅):**
   1. **Page-2+ running header now carries logo + name + address + GSTIN + invoice#** — switched from CSS `@page` margin-box strings to CSS GCPM `position: running()` + `content: element(invoiceRunningHeader)`. Chrome's print pipeline supports `element()` since v96 so the running header now displays arbitrary HTML (including images). `@page :first { @top-center { content: none; } }` suppresses it on page 1.
   2. **Renamed existing JW-OS "Short Close" → "Revoke"** in MO Job Card (the action reverts the op to pending so it can be re-outsourced — that's a revoke, not a short close). Uses RefreshCw icon, amber styling.
