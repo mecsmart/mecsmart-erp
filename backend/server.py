@@ -5705,7 +5705,46 @@ async def get_work_orders(request: Request, status: Optional[str] = None, produc
         if resolved_item_id:
             wo["item"] = items_map.get(resolved_item_id)
         wo["production_order"] = pos_map.get(wo.get("production_order_id"))
-    
+
+    # Backfill `outsourced_quantity` for legacy OS ops where the field was
+    # never persisted at SC-creation time (e.g., SCs created via older code
+    # paths or admin tooling). Without this, the Job Card UI fails to show
+    # the "Outsourced qty: x/y" hint below the vendor name. We do ONE batch
+    # lookup of all referenced SC orders, then fill in qty from the matching
+    # job_work_part. This keeps the response shape backwards-compatible while
+    # guaranteeing the field is populated for the frontend.
+    needs_sc_lookup = []
+    for wo in work_orders:
+        for op in (wo.get("operations_status") or []):
+            if (op.get("is_job_work") and op.get("outsource_sc_order_id")
+                    and not op.get("outsourced_quantity")):
+                needs_sc_lookup.append((wo.get("id"), wo.get("item_id"), op))
+    if needs_sc_lookup:
+        sc_ids = list({op["outsource_sc_order_id"] for _wo_id, _item_id, op in needs_sc_lookup})
+        sc_map = {}
+        async for sc in db.subcontract_orders.find({"id": {"$in": sc_ids}}, {"_id": 0, "id": 1, "job_work_parts": 1, "reference_wo_ids": 1, "reference_operation_seqs": 1}):
+            sc_map[sc["id"]] = sc
+        for _wo_id, item_id, op in needs_sc_lookup:
+            sc = sc_map.get(op.get("outsource_sc_order_id"))
+            if not sc:
+                continue
+            # Find the matching job_work_part — prefer (item_id + process_name + wo_id)
+            # for surgical matches; fall back to (item_id + process_name) which
+            # is also unique within a single SC.
+            op_name = op.get("operation_name", "") or ""
+            matched_qty = 0.0
+            for jp in (sc.get("job_work_parts") or []):
+                if jp.get("item_id") != item_id:
+                    continue
+                if (jp.get("process_name") or "") != op_name:
+                    continue
+                # If a wo_id was attached to the JWP, require it to match.
+                if jp.get("wo_id") and jp.get("wo_id") != _wo_id:
+                    continue
+                matched_qty += float(jp.get("quantity") or 0)
+            if matched_qty > 0:
+                op["outsourced_quantity"] = matched_qty
+
     return work_orders
 
 @work_orders_router.get("/{wo_id}")

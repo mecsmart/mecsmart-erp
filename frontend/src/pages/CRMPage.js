@@ -4584,22 +4584,32 @@ ${(isQuotation && opts.includeCover) ? `
     // pdfPrint.js draws this on every page 2+ via jsPDF.addImage so a
     // proper logo + full address appears as a running header in the PDF.
     // We pass BOTH `addressLine` (legacy single-line) and `addressLines`
-    // (array, preferred — preserves line breaks like the in-flow letterhead).
-    const addrLines = [
-      cfg.address_line1,
-      cfg.address_line2,
-      [cfg.phone && `Phone: ${cfg.phone}`, cfg.email && `Email: ${cfg.email}`].filter(Boolean).join(' · '),
-    ].filter(Boolean);
+    // (array, preferred — preserves line breaks like the in-flow letterhead),
+    // PLUS individual fields (`addr1`, `addr2`, `phoneEmail`) so pdfPrint
+    // can fall back to drawing them line-by-line even if the array gets
+    // mangled by minifier/cache.
+    const phoneEmail = [cfg.phone && `Phone: ${cfg.phone}`, cfg.email && `Email: ${cfg.email}`].filter(Boolean).join(' · ');
+    const addrLines = [cfg.address_line1, cfg.address_line2, phoneEmail].filter(Boolean);
     const addrSummary = addrLines.join(', ');
     const runningHeader = isTaxInvoice ? {
       logoDataUrl: cfg.logo_data || '',
       companyName: cfg.name || '',
       addressLine: addrSummary,
       addressLines: addrLines,
+      addr1: cfg.address_line1 || '',
+      addr2: cfg.address_line2 || '',
+      phoneEmail,
       gstin: cfg.gstin || '',
       docTitle: opts.title || '',
       docNo: docNo || '',
     } : null;
+    // eslint-disable-next-line no-console
+    console.info('[printInvoiceDoc] runningHeader →', isTaxInvoice ? {
+      hasLogo: !!runningHeader.logoDataUrl,
+      logoFmt: (runningHeader.logoDataUrl || '').slice(0, 30),
+      addrLinesCount: addrLines.length,
+      addrLines, gstin: runningHeader.gstin, companyName: runningHeader.companyName,
+    } : 'not a tax invoice');
     downloadHtmlAsPdf(html, filename, runningHeader ? { runningHeader } : {});
   }
 }

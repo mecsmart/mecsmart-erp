@@ -154,6 +154,7 @@ async function fallbackToHtml2Pdf(iframeBody, opts) {
         pdfObj.addImage(imgPayload.dataUrl, imgPayload.fmt, 22, top, 56, 40, undefined, 'FAST');
         logoBottom = top + 40;
       } catch (e) {
+        // eslint-disable-next-line no-console
         console.warn('[pdfPrint] running-header logo addImage failed:', e?.message || e);
       }
     }
@@ -163,26 +164,39 @@ async function fallbackToHtml2Pdf(iframeBody, opts) {
     pdfObj.setFontSize(12);
     pdfObj.setTextColor(45, 62, 80);
     pdfObj.text(hdr.companyName || '', textX, top + 8);
-    // ---- Address (multi-line wrap) ------------------------------------
+    // ---- Address (multi-line) -----------------------------------------
+    //
+    // Strategy (defensive — many callers / older browser bundles may pass
+    // different shapes of address data, so we accept ALL of them):
+    //   1. hdr.addressLines (Array<string>) — preferred
+    //   2. Individual fields hdr.addr1 / hdr.addr2 / hdr.phoneEmail — fallback
+    //   3. hdr.addressLine (single string) — legacy fallback, will be wrapped
     pdfObj.setFont('helvetica', 'normal');
     pdfObj.setFontSize(8);
     pdfObj.setTextColor(85);
-    // Build address lines: prefer pre-split array on hdr.addressLines, else
-    // split the single-line addressLine into wrapped lines by width.
     const addrMaxW = pageW - textX - 140;
     let addrLines = [];
     if (Array.isArray(hdr.addressLines) && hdr.addressLines.length) {
-      // Wrap each provided line independently so long lines still flow.
       hdr.addressLines.forEach(line => {
         if (!line) return;
         const wrapped = pdfObj.splitTextToSize(String(line), addrMaxW);
         wrapped.forEach(w => addrLines.push(w));
       });
-    } else if (hdr.addressLine) {
+    }
+    // Fallback: individual fields if array path produced nothing.
+    if (addrLines.length === 0) {
+      [hdr.addr1, hdr.addr2, hdr.phoneEmail].forEach(line => {
+        if (!line) return;
+        const wrapped = pdfObj.splitTextToSize(String(line), addrMaxW);
+        wrapped.forEach(w => addrLines.push(w));
+      });
+    }
+    // Final legacy fallback: single-line summary.
+    if (addrLines.length === 0 && hdr.addressLine) {
       addrLines = pdfObj.splitTextToSize(String(hdr.addressLine), addrMaxW);
     }
     let yCursor = top + 16;
-    addrLines.slice(0, 3).forEach(line => {
+    addrLines.slice(0, 4).forEach(line => {
       pdfObj.text(line, textX, yCursor);
       yCursor += 9;
     });
