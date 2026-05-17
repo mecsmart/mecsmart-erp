@@ -19,6 +19,10 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-17 (Round 5 — JW-OS maroon hint in runs branch + Tax Invoice band hidden on page 1 — DONE ✅):**
+  1. **JW-OS Outsourced qty in runs branch** — Previously the maroon "Outsourced qty: X/Y" only rendered in the `runs.length === 0` branch via `operatorCell`. When an OS op had a run (auto-created during SC setup), the runs.map() branch rendered just `r.operator` with no maroon hint. Fixed by wrapping the operator cell in `<div className="flex flex-col gap-0.5">` and conditionally appending the maroon hint when `isFirst && hasLiveOS && osQty > 0 && r.operator.startsWith('OS: ')`. Verified via testing agent on MO-000264.
+  2. **Tax Invoice running band hidden on page 1** — User wanted the running band only on pages 2+, not duplicating page-1 content. Implemented via CSS negative-margin overlay: added `<div class="page-one-cover">` wrapper around the in-flow `<div class="page">` with `margin-top: -22mm`, `background: #fff`, `z-index: 5`. The .running-band has `height: 22mm`. On page 1, the .page-one-cover slides up by 22mm with a solid white background, visually masking the <thead> band. On page 2+, only spillover content renders (no .page-one-cover at the top of that page), so the <thead> band shows normally. Verified via CSS inspection.
+
 - **2026-02-17 (Round 4 — JW-OS outsourced qty backfill ×5-pass + Revoke DELETES SC + Short Close ZEROS charges + Tax Invoice repeating `<thead>` band — DONE ✅):**
   1. **Outsourced qty backfill** — Backend `GET /api/work-orders` now does FIVE fallback passes (item+process incl. `process_names[]`, jwp.wo_id match, reference_wo_ids|reference_wo_id, empty-SC → wo.qty, mismatched-SC → wo.qty). 100% coverage: 68/68 OS ops return positive `outsourced_quantity`.
   2. **Revoke now DELETES the SC entirely** — When revoke removes the LAST line + no other refs + no DC sent + no GRN received, the SC is hard-deleted. Response includes `sc_deleted: true`.
