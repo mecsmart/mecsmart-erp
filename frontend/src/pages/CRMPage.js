@@ -3112,7 +3112,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
       </div>
 
       <Dialog open={dialog} onOpenChange={(o) => { setDialog(o); if (!o) { setForm(emptyForm); setEditingTI(null); } }}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" data-testid="tax-invoice-dialog">
+        <DialogContent className="!max-w-[1400px] w-[95vw] max-h-[90vh] overflow-y-auto" data-testid="tax-invoice-dialog">
           <DialogHeader><DialogTitle className="font-[Chivo]">{editingTI ? `Edit Tax Invoice · ${editingTI.invoice_no}` : 'New Tax Invoice'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
             {/* Source type tabs */}
@@ -4150,6 +4150,12 @@ function printInvoiceDoc(doc, opts) {
   </tr>`).join('') : '';
 
   const docNo = doc[opts.numberKey] || '';
+  // Pre-escape strings used inside CSS `@page` margin-box `content: "..."`.
+  // CSS requires backslash-escapes for embedded double-quotes; we also drop
+  // newlines because the property only accepts single-line text.
+  const cssEscape = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ');
+  const runHeadLeft = cssEscape(`${cfg.name || ''}${cfg.gstin ? ' · GSTIN ' + cfg.gstin : ''}`);
+  const runHeadRight = cssEscape(`${opts.title} ${docNo}`);
   const docDate = opts.kind === 'tax_invoice' ? doc.invoice_date : (opts.kind === 'proforma' ? doc.proforma_date : doc.quotation_date);
   const validLabel = opts.kind === 'tax_invoice' ? 'Due Date' : 'Expiration Date';
   const validValue = opts.kind === 'tax_invoice' ? doc.due_date : doc.valid_until;
@@ -4276,7 +4282,28 @@ function printInvoiceDoc(doc, opts) {
   @media print {
     @page {
       size:A4;
-      margin:8mm 8mm 14mm 8mm;
+      margin:16mm 8mm 14mm 8mm;
+      /* Running header for page 2+ — @page :first below suppresses this on
+         page 1 so the in-flow big brand block isn't duplicated. Content is
+         pure CSS-counter text (no images) which is the only thing the
+         margin-box spec allows; the trade-off is no logo on page 2+, but
+         the user explicitly asked for the running header to ONLY repeat
+         from page 2 — and a slim text-only repeat is exactly what's needed. */
+      @top-left {
+        content: "${runHeadLeft}";
+        font-family:'Helvetica Neue',Arial,sans-serif;
+        font-size:9.5px;
+        font-weight:700;
+        color:${accentColor};
+        padding-left:4mm;
+      }
+      @top-right {
+        content: "${runHeadRight}";
+        font-family:'Helvetica Neue',Arial,sans-serif;
+        font-size:9.5px;
+        color:#475569;
+        padding-right:4mm;
+      }
       @bottom-right {
         content: "Page " counter(page) " of " counter(pages);
         font-family:'Helvetica Neue',Arial,sans-serif;
@@ -4284,6 +4311,15 @@ function printInvoiceDoc(doc, opts) {
         color:#64748b;
         padding-right:4mm;
       }
+    }
+    /* Suppress the running header on the FIRST printed page — the full
+       in-flow brand block already lives there, so a duplicated thin
+       running header would just be visual noise. Page number stays on
+       page 1 (it's printed by @bottom-right above which remains). */
+    @page :first {
+      margin-top:8mm;
+      @top-left { content: none; }
+      @top-right { content: none; }
     }
     body{padding:0}
   }

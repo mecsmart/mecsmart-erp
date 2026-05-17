@@ -19,6 +19,11 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-17 (Page-2+ running header + Wider TI dialog — DONE ✅):**
+  1. **Running header on page 2+ only**: Used CSS `@page` margin boxes — `@top-left` = company name + GSTIN, `@top-right` = invoice title + number, `@bottom-right` = "Page X of Y". `@page :first` overrides both `@top-*` slots to `content: none` so page 1 keeps only the in-flow big brand block (no duplicate). Trade-off: no logo image in the page 2+ margin (CSS spec restricts margin-box content to strings + counters only), but the slim text-only repeat is exactly what the user requested.
+  2. **TI dialog widened**: `<DialogContent>` `max-w-5xl` → `!max-w-[1400px] w-[95vw]` so the customer block, billing/shipping address textareas and the wider line-items table all fit comfortably without horizontal scroll.
+
+
 - **2026-02-17 (TI form/print polish — 4 follow-ups — DONE & VERIFIED ✅):**
   1. **Customer auto-fill → full address** (`/app/frontend/src/pages/CRMPage.js` `applyCustomer`): Bill-To and Ship-To now seed with a complete multi-line block — street + city/state/pin + State Code + GSTIN. Place of Supply auto-fills as "`<state_code> - <state>`" (e.g. "27 - Maharashtra") matching GST display norms.
   2. **Place of Supply moved below addresses**: dialog top row collapsed to 5 columns (Invoice Date, Due Date, Customer PO Ref, Ship From Store, Currency); POS sits below the Bill-To / Ship-To textareas.
