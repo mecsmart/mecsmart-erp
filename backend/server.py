@@ -5722,7 +5722,7 @@ async def get_work_orders(request: Request, status: Optional[str] = None, produc
     if needs_sc_lookup:
         sc_ids = list({op["outsource_sc_order_id"] for _wo_id, _item_id, op in needs_sc_lookup})
         sc_map = {}
-        async for sc in db.subcontract_orders.find({"id": {"$in": sc_ids}}, {"_id": 0, "id": 1, "job_work_parts": 1, "reference_wo_ids": 1, "reference_operation_seqs": 1, "lines": 1}):
+        async for sc in db.subcontract_orders.find({"id": {"$in": sc_ids}}, {"_id": 0, "id": 1, "job_work_parts": 1, "reference_wo_ids": 1, "reference_wo_id": 1, "reference_operation_seqs": 1, "lines": 1}):
             sc_map[sc["id"]] = sc
         # Build a quick wo_id → wo.quantity lookup so we can fall back to
         # "entire WO outsourced" when no job_work_parts match.
@@ -5730,14 +5730,27 @@ async def get_work_orders(request: Request, status: Optional[str] = None, produc
         for _wo_id, item_id, op in needs_sc_lookup:
             sc = sc_map.get(op.get("outsource_sc_order_id"))
             if not sc:
+                # Dangling reference — SC was deleted but the WO op still
+                # carries `outsource_sc_order_id`. Fall back to wo.quantity
+                # so the Job Card UI still shows the OS hint instead of
+                # hiding the maroon "Outsourced qty: x/y" line entirely.
+                fallback_qty = wo_qty_lookup.get(_wo_id, 0.0)
+                if fallback_qty > 0:
+                    op["outsourced_quantity"] = fallback_qty
                 continue
             op_name = op.get("operation_name", "") or ""
             matched_qty = 0.0
             # Pass 1: surgical match on item + process + (optional) wo_id.
+            # Some legacy SCs use `process_names` (plural list) instead of
+            # `process_name` (singular string), so we accept both shapes.
             for jp in (sc.get("job_work_parts") or []):
                 if jp.get("item_id") != item_id:
                     continue
-                if (jp.get("process_name") or "") != op_name:
+                jp_processes = []
+                if jp.get("process_name"):
+                    jp_processes.append((jp.get("process_name") or "").strip())
+                jp_processes.extend([(p or "").strip() for p in (jp.get("process_names") or [])])
+                if jp_processes and op_name not in jp_processes:
                     continue
                 if jp.get("wo_id") and jp.get("wo_id") != _wo_id:
                     continue
@@ -5750,10 +5763,28 @@ async def get_work_orders(request: Request, status: Optional[str] = None, produc
                         matched_qty += float(jp.get("quantity") or 0)
             # Pass 3: SC's reference_wo_ids includes this WO and the SC has
             # exactly one reference — assume the entire WO qty was outsourced.
+            # Also handles the legacy `reference_wo_id` (singular) field used
+            # by older SCs that pre-date the multi-WO consolidation feature.
             if matched_qty == 0:
-                ref_wos = sc.get("reference_wo_ids") or []
+                ref_wos = list(sc.get("reference_wo_ids") or [])
+                if sc.get("reference_wo_id"):
+                    ref_wos.append(sc.get("reference_wo_id"))
                 if _wo_id in ref_wos:
                     matched_qty = wo_qty_lookup.get(_wo_id, 0.0)
+            # Pass 4 (last resort): SC is completely orphaned (no jwp, no
+            # refs) but the WO operation still has is_job_work=True with
+            # this SC linked. Fall back to wo.quantity so the Job Card UI
+            # at least shows the OS hint. Better than silently hiding.
+            if matched_qty == 0 and not (sc.get("job_work_parts") or []) \
+                    and not (sc.get("reference_wo_ids") or []) \
+                    and not sc.get("reference_wo_id"):
+                matched_qty = wo_qty_lookup.get(_wo_id, 0.0)
+            # Pass 5: SC exists with jwp but none match THIS wo_id (data
+            # drift — SC was originally for a different WO but the current
+            # op still points to it). Use wo.quantity as a sane fallback so
+            # the operator at least sees an OS hint instead of nothing.
+            if matched_qty == 0:
+                matched_qty = wo_qty_lookup.get(_wo_id, 0.0)
             if matched_qty > 0:
                 op["outsourced_quantity"] = matched_qty
 

@@ -19,7 +19,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
-- **2026-02-17 (Round 3 — Backend backfills `outsourced_quantity` for legacy OS ops + PDF runningHeader defensive fallback + DevTools logging — DONE ✅):**
+- **2026-02-17 (Round 4 — JW-OS outsourced qty backfill ×5-pass + Revoke DELETES SC + Short Close ZEROS charges + Tax Invoice repeating `<thead>` band — DONE ✅):**
+  1. **Outsourced qty backfill** — Backend `GET /api/work-orders` now does FIVE fallback passes (item+process incl. `process_names[]`, jwp.wo_id match, reference_wo_ids|reference_wo_id, empty-SC → wo.qty, mismatched-SC → wo.qty). 100% coverage: 68/68 OS ops return positive `outsourced_quantity`.
+  2. **Revoke now DELETES the SC entirely** — When revoke removes the LAST line + no other refs + no DC sent + no GRN received, the SC is hard-deleted. Response includes `sc_deleted: true`.
+  3. **Short Close NO GRN now ZEROS charges** — Short-closed jwp lines get `charges=0`; SC's `processing_charges` recomputed from remaining non-zero lines.
+  4. **Tax Invoice repeating header** — Wrapped page HTML in `<table class="print-doc"><thead><tr><td><div class="running-band">…</div></td></tr></thead><tbody>…</tbody></table>`. The thead repeats natively on every printed page in both browser print AND html2pdf paths — logo + company name + address + GSTIN + doc title + number show on EVERY page.
+
+- **2026-02-17 (Round 3 — superseded by Round 4 — original surgical backfill + jsPDF logo overlay):**
   1. **Backend backfill** — `GET /api/work-orders` now batch-looks-up each OS op's referenced `subcontract_order` and, when the op's persisted `outsourced_quantity` is missing/0, recomputes it from the matching `job_work_parts` line (filtering by item_id + process_name + optional wo_id). Verified — MO-000194 op #10 now returns `outsourced_quantity=10.0` instead of `None`. The Job Card UI now ALWAYS shows the maroon "Outsourced qty: x/y" below the vendor name for live OS allocations.
   2. **PDF runningHeader — defensive multi-shape input** — `/app/frontend/src/pages/CRMPage.js` now passes `addressLines` (array), `addr1`/`addr2`/`phoneEmail` (individual strings), AND `addressLine` (legacy single-string) to `pdfPrint.js`. The pdf renderer tries each shape in turn (array → individuals → legacy) so any one of them missing won't kill the address output. Also added `console.info` log at print time so DevTools shows exactly what the runningHeader looks like.
 
