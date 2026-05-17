@@ -1,0 +1,55 @@
+{
+  "summary": "Tested 3 P0 UX bugs on Manufacturing Orders page and Tax Invoice PDF. ISSUE 1 (Sticky FG Header) is NOT FIXED - the sticky header works within the <details> element but scrolls away when the details element scrolls out of view. ISSUE 2 (JW-OS Job Card layout) is WORKING CORRECTLY - Status/Operator/Action columns are properly separated. ISSUE 3 (Tax Invoice PDF) could not be fully verified due to missing company logo_data in DB, but code implementation looks correct.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ManufacturingPage - Sticky FG Header",
+        "issue": "Sticky header scrolls away when the <details> element scrolls out of view. CSS sticky positioning is correctly applied (position: sticky; top: 58px) but it only works WITHIN the containing <details> element. When the details element scrolls past the viewport, the sticky header goes with it. User expects header to remain frozen at viewport top regardless of scroll position.",
+        "selector": "thead.sticky-mo-head th",
+        "priority": "HIGH",
+        "root_cause": "CSS sticky positioning is relative to the nearest scrolling ancestor. The sticky header is inside a <details> element, so it sticks within that element but scrolls away when the details element itself scrolls out of view. This is expected CSS behavior, not a bug in the implementation.",
+        "suggested_fix": "To achieve the user's expected behavior (header frozen at viewport top while scrolling through entire page), consider: 1) Moving the header outside the <details> element, 2) Using JavaScript to clone and position the header fixed at top when scrolling, or 3) Restructuring the layout to avoid nesting the sticky header inside <details>"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_133.json"
+  ],
+  "action_items": [
+    "ISSUE 1 - Sticky FG Header: The current CSS sticky implementation works correctly within the <details> element, but the user expects the header to remain frozen at the viewport top even when scrolling through the entire page. This requires a different implementation approach - either moving the header outside <details>, using JavaScript for fixed positioning, or restructuring the layout.",
+    "ISSUE 2 - JW-OS Job Card layout: VERIFIED WORKING - Status column contains status badge + JW chip + Revoke/Short Close buttons. Operator column contains OS: <vendor> with user icon. Action column is empty when operation is already in_progress (expected). The 'Outsourced qty' text only appears when outsourced_quantity > 0 (currently None in test data).",
+    "ISSUE 3 - Tax Invoice PDF: Code implementation looks correct with runningHeader containing logoDataUrl, companyName, addressLines array, and gstin. Could not fully verify PDF output because company_settings.logo_data is None in DB. Recommend setting company logo via Settings → Company to fully test."
+  ],
+  "critical_code_review_comments": [
+    "The sticky header CSS is correctly implemented but the DOM structure (header inside <details>) prevents it from achieving the user's expected behavior of staying frozen at viewport top during full-page scroll.",
+    "Console warning: 'In HTML, <span> cannot be a child of <option>' - This is a React hydration warning in the work center select dropdown (ManufacturingPage.js line 2356). Should use plain text instead of <span> inside <option> elements."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A - frontend only testing",
+    "frontend": "66% (2/3 issues verified working)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "ISSUE 1 (Sticky FG Header) requires architectural change - the sticky header is inside a <details> element which limits CSS sticky behavior to within that element. ISSUE 2 (JW-OS Job Card) is working correctly - tested with MO-000181 which has an in_progress outsourced operation. ISSUE 3 (Tax Invoice PDF) code looks correct but company_settings.logo_data is None so logo won't appear on page 2+. Test data for outsourced operations: MO-000181, MO-000182, MO-000183 have is_job_work=True and outsource_sc_order_id set.",
+  "rca_of_the_issue": {
+    "issue_1_sticky_header": {
+      "root_cause": "CSS sticky positioning is relative to the nearest scrolling ancestor or containing block. The sticky header (<thead class='sticky-mo-head'>) is nested inside a <details class='fg-mo-details'> element. When the user scrolls the page, the <details> element scrolls out of view, and the sticky header goes with it because it's constrained to stick within its containing block.",
+      "reproduction_steps": [
+        "1. Navigate to Manufacturing → Manufacturing Orders",
+        "2. Expand any FG-MO group by clicking its chevron",
+        "3. Scroll down 200-400px",
+        "4. Observe that the column header row (MO/LEVEL, ITEM, ROUTING, etc.) scrolls away with the content instead of staying frozen at the top"
+      ],
+      "mitigation": "The CSS implementation is correct per CSS spec. To achieve the user's expected behavior, the architecture needs to change: either move the header outside the <details> element, use JavaScript to create a fixed-position clone of the header when scrolling, or restructure the layout to avoid nesting sticky elements inside collapsible containers."
+    }
+  }
+}

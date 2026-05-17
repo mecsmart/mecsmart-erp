@@ -95,8 +95,8 @@ async function fallbackToHtml2Pdf(iframeBody, opts) {
   const merged = { ...DEFAULT_HTML2PDF_OPTS, ...opts };
   // ----- Running header support (every page) ------------------------------
   // When opts.runningHeader is provided we post-process the generated PDF
-  // and draw a small header (logo + name + address + GSTIN + invoice no)
-  // on every page. CSS @page margin boxes only accept strings + counters
+  // and draw a header (logo + name + multi-line address + GSTIN + invoice no)
+  // on every page > 1. CSS @page margin boxes only accept strings + counters
   // (no images), so the only way to put a logo on each printed page is to
   // render the PDF and overlay the header via jsPDF directly.
   const hdr = opts.runningHeader;
@@ -105,13 +105,38 @@ async function fallbackToHtml2Pdf(iframeBody, opts) {
     return;
   }
   // Reserve top margin so the overlay doesn't crash into body content.
-  // 38pt ≈ 13.5mm — enough room for a 24pt logo + accent divider line.
-  merged.margin = [38, 12, 18, 12];
+  // 64pt ≈ 22.5mm — enough room for a 36pt logo block + multi-line address.
+  merged.margin = [64, 14, 18, 14];
   const worker = html2pdf().set(merged).from(iframeBody).toPdf();
   const pdfObj = await worker.get('pdf');
   const total = pdfObj.internal.getNumberOfPages();
   const pageW = pdfObj.internal.pageSize.getWidth();
   const pageH = pdfObj.internal.pageSize.getHeight();
+
+  // Pre-rasterize SVG logos to PNG (jsPDF.addImage refuses SVG). For data
+  // URLs that are already PNG/JPEG/WEBP we use them as-is. Doing this ONCE
+  // before the per-page loop is critical for perf on large invoices.
+  let imgPayload = null;
+  if (hdr.logoDataUrl) {
+    try {
+      const m = /^data:image\/(png|jpe?g|webp|svg\+xml)[;,]/i.exec(hdr.logoDataUrl);
+      const rawFmt = m ? m[1].toLowerCase() : '';
+      if (rawFmt === 'svg+xml') {
+        // Rasterize SVG → PNG via an offscreen canvas so jsPDF can embed it.
+        try {
+          const png = await svgDataUrlToPngDataUrl(hdr.logoDataUrl, 256, 96);
+          if (png) imgPayload = { dataUrl: png, fmt: 'PNG' };
+        } catch (svgErr) {
+          console.warn('[pdfPrint] SVG → PNG rasterize failed, dropping logo image:', svgErr?.message || svgErr);
+        }
+      } else if (rawFmt) {
+        imgPayload = { dataUrl: hdr.logoDataUrl, fmt: rawFmt.startsWith('jp') ? 'JPEG' : rawFmt.toUpperCase() };
+      }
+    } catch (e) {
+      console.warn('[pdfPrint] running-header logo preprocessing skipped:', e?.message || e);
+    }
+  }
+
   for (let p = 1; p <= total; p++) {
     pdfObj.setPage(p);
     // Page numbers on every page (bottom right).
@@ -122,51 +147,107 @@ async function fallbackToHtml2Pdf(iframeBody, opts) {
     // Skip overlay on page 1 — the in-flow brand block already lives
     // there. Overlay only appears from page 2 onwards.
     if (p === 1) continue;
-    const top = 16;
-    if (hdr.logoDataUrl) {
+    const top = 14;
+    // ---- Logo ----------------------------------------------------------
+    let logoBottom = top;
+    if (imgPayload) {
       try {
-        // Detect format from the data URL prefix so jsPDF.addImage accepts it.
-        // jsPDF supports PNG / JPEG / WEBP — not SVG. For SVG logos we
-        // skip the image and just enlarge the company-name text.
-        const m = /^data:image\/(png|jpe?g|webp|svg\+xml)[;,]/i.exec(hdr.logoDataUrl);
-        const fmt = m ? (m[1].toLowerCase().startsWith('jp') ? 'JPEG' : m[1].toUpperCase()) : 'PNG';
-        if (fmt !== 'SVG+XML') {
-          pdfObj.addImage(hdr.logoDataUrl, fmt, 22, 8, 60, 24, undefined, 'FAST');
-        }
+        // 56×40pt logo box — large enough to be recognisable, small enough
+        // to leave room for company name + multi-line address to its right.
+        pdfObj.addImage(imgPayload.dataUrl, imgPayload.fmt, 22, top, 56, 40, undefined, 'FAST');
+        logoBottom = top + 40;
       } catch (e) {
-        // image may not be a supported type — silently skip and rely on text-only header
-        console.warn('[pdfPrint] running-header logo skipped:', e?.message || e);
+        console.warn('[pdfPrint] running-header logo addImage failed:', e?.message || e);
       }
     }
-    const textX = hdr.logoDataUrl ? 86 : 22;
+    const textX = imgPayload ? 88 : 22;
+    // ---- Company name --------------------------------------------------
     pdfObj.setFont('helvetica', 'bold');
-    pdfObj.setFontSize(11);
+    pdfObj.setFontSize(12);
     pdfObj.setTextColor(45, 62, 80);
-    pdfObj.text(hdr.companyName || '', textX, top + 4);
+    pdfObj.text(hdr.companyName || '', textX, top + 8);
+    // ---- Address (multi-line wrap) ------------------------------------
     pdfObj.setFont('helvetica', 'normal');
     pdfObj.setFontSize(8);
     pdfObj.setTextColor(85);
-    if (hdr.addressLine) pdfObj.text(hdr.addressLine, textX, top + 12, { maxWidth: pageW - textX - 130 });
+    // Build address lines: prefer pre-split array on hdr.addressLines, else
+    // split the single-line addressLine into wrapped lines by width.
+    const addrMaxW = pageW - textX - 140;
+    let addrLines = [];
+    if (Array.isArray(hdr.addressLines) && hdr.addressLines.length) {
+      // Wrap each provided line independently so long lines still flow.
+      hdr.addressLines.forEach(line => {
+        if (!line) return;
+        const wrapped = pdfObj.splitTextToSize(String(line), addrMaxW);
+        wrapped.forEach(w => addrLines.push(w));
+      });
+    } else if (hdr.addressLine) {
+      addrLines = pdfObj.splitTextToSize(String(hdr.addressLine), addrMaxW);
+    }
+    let yCursor = top + 16;
+    addrLines.slice(0, 3).forEach(line => {
+      pdfObj.text(line, textX, yCursor);
+      yCursor += 9;
+    });
+    // ---- GSTIN ---------------------------------------------------------
     if (hdr.gstin) {
       pdfObj.setFont('helvetica', 'bold');
+      pdfObj.setFontSize(8);
       pdfObj.setTextColor(45, 62, 80);
-      pdfObj.text(`GSTIN: ${hdr.gstin}`, textX, top + 20);
+      pdfObj.text(`GSTIN: ${hdr.gstin}`, textX, yCursor);
+      yCursor += 9;
     }
     // Right side: doc title + number
     pdfObj.setFont('helvetica', 'bold');
     pdfObj.setFontSize(10);
     pdfObj.setTextColor(45, 62, 80);
-    pdfObj.text(hdr.docTitle || '', pageW - 22, top + 4, { align: 'right' });
+    pdfObj.text(hdr.docTitle || '', pageW - 22, top + 8, { align: 'right' });
     pdfObj.setFont('courier', 'normal');
     pdfObj.setFontSize(9);
     pdfObj.setTextColor(85);
-    pdfObj.text(hdr.docNo || '', pageW - 22, top + 12, { align: 'right' });
-    // Divider line
+    pdfObj.text(hdr.docNo || '', pageW - 22, top + 18, { align: 'right' });
+    // ---- Divider line --------------------------------------------------
+    const dividerY = Math.max(logoBottom, yCursor) + 4;
     pdfObj.setDrawColor(45, 62, 80);
     pdfObj.setLineWidth(0.5);
-    pdfObj.line(22, top + 26, pageW - 22, top + 26);
+    pdfObj.line(22, dividerY, pageW - 22, dividerY);
   }
   pdfObj.save(merged.filename || 'document.pdf');
+}
+
+// Rasterize an SVG data URL into a PNG data URL via an offscreen <canvas>.
+// jsPDF.addImage does not accept SVG, so we round-trip it through an
+// Image + canvas. Returns null if the browser can't decode the SVG.
+async function svgDataUrlToPngDataUrl(dataUrl, targetW = 256, targetH = 96) {
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext('2d');
+          // Preserve aspect ratio: fit inside the target box with letterboxing.
+          const ar = img.width / img.height || 1;
+          const boxAr = targetW / targetH;
+          let drawW, drawH, dx, dy;
+          if (ar > boxAr) { drawW = targetW; drawH = targetW / ar; dx = 0; dy = (targetH - drawH) / 2; }
+          else { drawH = targetH; drawW = targetH * ar; dy = 0; dx = (targetW - drawW) / 2; }
+          ctx.clearRect(0, 0, targetW, targetH);
+          ctx.drawImage(img, dx, dy, drawW, drawH);
+          resolve(canvas.toDataURL('image/png'));
+        } catch (e) {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    } catch {
+      resolve(null);
+    }
+  });
 }
 
 /**

@@ -1561,7 +1561,7 @@ export default function ManufacturingPage() {
               </Dialog>
             )}
 
-          <div className="card-flat overflow-hidden">
+          <div className="card-flat mo-list-card">
             {loading ? (
               <div className="flex items-center justify-center h-48">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1D3557]"></div>
@@ -1889,7 +1889,7 @@ export default function ManufacturingPage() {
                       return mask;
                     })();
                     return (
-                      <details key={parentMO.id} className="border rounded-sm overflow-hidden">
+                      <details key={parentMO.id} className="border rounded-sm fg-mo-details">
                         <summary className="fg-mo-summary flex items-center gap-2 px-4 py-2.5 cursor-pointer bg-[#F3F4F6] hover:bg-[#E5E7EB] select-none flex-wrap" style={{borderLeft: `4px solid ${catColor}`}}>
                           <ChevronRight className="w-4 h-4 text-[#4B5563]" />
                           <span className="mono font-bold text-sm" style={{color: catColor}}>{parentMO.wo_number}</span>
@@ -2339,6 +2339,12 @@ export default function ManufacturingPage() {
                         }`}>{op.status?.replace('_', ' ')}</span>
                       );
 
+                      // Whether this op currently has a live outsource allocation.
+                      // For partial OS, op.status may still be 'pending' (the
+                      // un-outsourced qty is in-house startable), but the
+                      // SC/vendor + outsourced_quantity must remain visible.
+                      const hasLiveOS = op.is_job_work && op.outsource_sc_order_id && op.status !== 'completed';
+
                       const wcCell = op.work_center_id ? (wc?.name || op.work_center_name || '-') : (
                         op.status === 'pending' || op.status === 'stopped' ? (
                           <select value={op._selected_wc || ''} onChange={(e) => {
@@ -2352,8 +2358,72 @@ export default function ManufacturingPage() {
                         ) : '-'
                       );
 
-                      // Shared action cell (spans all runs) — holds only Start button for remaining qty
-                      // and completion indicator. Per-run Stop/Complete live in each run's own Action cell.
+                      // STATUS column cell: status badge + (for OS) JW chip
+                      // + Revoke/Short Close admin buttons. This block lives
+                      // ENTIRELY in the Status <td> per the user's spec
+                      // screenshot, so it does NOT bleed into Operator or
+                      // Action columns.
+                      const statusCell = (
+                        <div className="flex flex-col items-center gap-1.5">
+                          {statusBadge}
+                          {hasLiveOS && (
+                            <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium text-center" data-testid={`outsourced-op-${op.sequence}`}>
+                              {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'} — Receive via GRN
+                            </span>
+                          )}
+                          {user?.role === 'admin' && hasLiveOS && (
+                            <div className="flex items-center justify-center gap-1 flex-wrap">
+                              <button
+                                onClick={() => handleShortCloseOperation(op)}
+                                className="btn-secondary text-[10px] px-1.5 py-0.5 text-[#92400E] border-[#92400E] hover:bg-[#FEF3C7]"
+                                data-testid={`revoke-op-${op.sequence}`}
+                                title="Revoke — release this op back to pending (SC line is restored, vendor allocation cleared)"
+                              >
+                                <RefreshCw className="w-3 h-3 inline mr-0.5" />Revoke
+                              </button>
+                              <button
+                                onClick={() => handleShortCloseNoGRN(op)}
+                                className="btn-secondary text-[10px] px-1.5 py-0.5 text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]"
+                                data-testid={`short-close-nogrn-op-${op.sequence}`}
+                                title="Short Close (no GRN) — mark this OS op as completed without receiving material. Next process becomes available immediately."
+                              >
+                                <XIcon className="w-3 h-3 inline mr-0.5" />Short Close
+                              </button>
+                            </div>
+                          )}
+                          {op.short_closed && (
+                            <span className="text-[10px] text-[#9B1C1C] bg-[#FDE8E8] px-2 py-1 rounded font-medium" data-testid={`short-closed-op-${op.sequence}`}>
+                              <XIcon className="w-3 h-3 inline mr-0.5" />Short Closed{op.short_close_reason ? ` — ${op.short_close_reason}` : ''}
+                            </span>
+                          )}
+                        </div>
+                      );
+
+                      // OPERATOR column cell (for the no-runs row): for OS
+                      // ops it must show "OS: <VENDOR>" on top and
+                      // "Outsourced qty: x / y" in maroon BELOW the vendor
+                      // name. For non-OS pending ops, fall back to op.operator.
+                      const operatorCell = hasLiveOS ? (
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1 text-xs" data-testid={`os-vendor-${op.sequence}`}>
+                            <User className="w-3 h-3 text-[#6B7280]" />
+                            <span className="font-medium">OS: {op.outsource_supplier_name || 'Vendor'}</span>
+                          </div>
+                          {(op.outsourced_quantity || 0) > 0 && (
+                            <span className="text-[10px] text-[#7F1D1D] font-semibold" data-testid={`outsourced-qty-${op.sequence}`}>
+                              Outsourced qty: <span className="mono">{op.outsourced_quantity}</span>{' / '}<span className="mono">{jobCardWO.quantity}</span>
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-sm">{op.operator || '-'}</span>
+                      );
+
+                      // ACTION column cell: ONLY the Start (n rem) button
+                      // (or completion checkmark). Revoke / Short Close moved
+                      // to the Status cell. This matches the user's spec
+                      // screenshot where the only thing under "ACTION" is
+                      // the dark Start (6 rem) button.
                       const actionCell = (
                         <div className="flex items-center justify-center gap-1 flex-wrap">
                           {canStartMore && (
@@ -2361,63 +2431,6 @@ export default function ManufacturingPage() {
                               <Play className="w-3 h-3 inline mr-1" />
                               {op.status === 'stopped' && runs.length === 0 ? 'Resume' : op.status === 'stopped' ? `Start (${remainingToAllocate} rem)` : op.status === 'in_progress' ? `Start (${remainingToAllocate} rem)` : 'Start'}
                             </button>
-                          )}
-                          {/* JW vendor chip — shown whenever this op has an
-                              active OS allocation (regardless of status).
-                              For PARTIAL OS, status stays 'pending' (the
-                              un-outsourced qty is startable in-house), but
-                              the vendor chip + outsourced-qty hint should
-                              still be visible so the operator knows where
-                              the material went. */}
-                          {op.is_job_work && op.outsource_sc_order_id && op.status !== 'completed' && (
-                            <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium" data-testid={`outsourced-op-${op.sequence}`}>
-                              {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'}
-                              {op.outsource_supplier_name ? ` → ${op.outsource_supplier_name}` : ''} — Receive via GRN
-                            </span>
-                          )}
-                          {/* Outsourced-qty hint — sits BELOW the vendor chip
-                              (block + w-full forces it onto a new flex line)
-                              so the layout reads vertically:
-                                [JW: 000009 → CREATIVE FINISHERS — Receive via GRN]
-                                Outsourced qty: 6 / 12
-                              The Start button stays in its original FIRST
-                              position above so operators can immediately start
-                              the remaining qty. */}
-                          {op.is_job_work && (op.outsourced_quantity || 0) > 0 && op.status !== 'completed' && (
-                            <span className="block w-full text-[10px] text-[#7F1D1D] font-semibold mt-0.5" data-testid={`outsourced-qty-${op.sequence}`}>
-                              Outsourced qty: <span className="mono">{op.outsourced_quantity}</span>{' / '}<span className="mono">{jobCardWO.quantity}</span>
-                            </span>
-                          )}
-                          {op.short_closed && (
-                            <span className="text-[10px] text-[#9B1C1C] bg-[#FDE8E8] px-2 py-1 rounded font-medium" data-testid={`short-closed-op-${op.sequence}`}>
-                              <XIcon className="w-3 h-3 inline mr-0.5" />Short Closed{op.short_close_reason ? ` — ${op.short_close_reason}` : ''}
-                            </span>
-                          )}
-                          {/* Revoke / Short Close (no GRN) buttons —
-                              Shown whenever this op has an active OS allocation
-                              (is_job_work + outsource_sc_order_id) regardless of
-                              op.status. Partial-OS leaves status='pending' but
-                              the SC line is live, so both revoke and short-close
-                              must still be available. */}
-                          {user?.role === 'admin' && op.is_job_work && op.outsource_sc_order_id && op.status !== 'completed' && (
-                            <>
-                              <button
-                                onClick={() => handleShortCloseOperation(op)}
-                                className="btn-secondary text-xs px-2 py-1 text-[#92400E] border-[#92400E] hover:bg-[#FEF3C7]"
-                                data-testid={`revoke-op-${op.sequence}`}
-                                title="Revoke — release this op back to pending (SC line is restored, vendor allocation cleared)"
-                              >
-                                <RefreshCw className="w-3 h-3 inline mr-1" />Revoke
-                              </button>
-                              <button
-                                onClick={() => handleShortCloseNoGRN(op)}
-                                className="btn-secondary text-xs px-2 py-1 text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]"
-                                data-testid={`short-close-nogrn-op-${op.sequence}`}
-                                title="Short Close (no GRN) — mark this OS op as completed without receiving material. Next process becomes available immediately."
-                              >
-                                <XIcon className="w-3 h-3 inline mr-1" />Short Close
-                              </button>
-                            </>
                           )}
                           {op.status === 'completed' && (
                             <CheckCircle2 className="w-4 h-4 text-[#03543F]" />
@@ -2485,13 +2498,13 @@ export default function ManufacturingPage() {
                             <td className="py-3 px-3 mono font-medium">{op.sequence}</td>
                             <td className="py-3 px-3 font-medium">{typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : op.operation_name}</td>
                             <td className="py-3 px-3 text-sm text-[#4B5563]">{wcCell}</td>
-                            <td className="py-3 px-3 text-center">{statusBadge}</td>
-                            <td className="py-3 px-3 text-sm">{op.operator || '-'}</td>
+                            <td className="py-3 px-3 text-center align-top">{statusCell}</td>
+                            <td className="py-3 px-3 align-top">{operatorCell}</td>
                             <td className="py-3 px-3 text-right mono text-sm"><span className="font-medium">{totalDone}</span><span className="text-[#6B7280]">/{jobCardWO.quantity}</span></td>
                             <td className="py-3 px-3 text-right text-xs"><span className="text-[#9CA3AF]">-</span></td>
                             <td className="py-3 px-3 text-right mono text-xs" data-testid={`op-duration-${op.sequence}`}><span className="text-[#9CA3AF]">-</span></td>
                             <td className="py-3 px-3 text-right mono text-xs font-medium" data-testid={`op-cost-${op.sequence}`}><span className="text-[#9CA3AF]">-</span></td>
-                            <td className="py-3 px-3 text-center">{actionCell}</td>
+                            <td className="py-3 px-3 text-center align-top">{actionCell}</td>
                           </tr>
                         );
                       }
@@ -2504,12 +2517,7 @@ export default function ManufacturingPage() {
                             {isFirst && <td rowSpan={runs.length} className="py-3 px-3 mono font-medium align-top">{op.sequence}</td>}
                             {isFirst && <td rowSpan={runs.length} className="py-3 px-3 font-medium align-top">{typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : op.operation_name}</td>}
                             {isFirst && <td rowSpan={runs.length} className="py-3 px-3 text-sm text-[#4B5563] align-top">{wcCell}</td>}
-                            {isFirst && <td rowSpan={runs.length} className="py-3 px-3 align-top">
-                              <div className="flex flex-col items-center gap-1.5">
-                                {statusBadge}
-                                {actionCell}
-                              </div>
-                            </td>}
+                            {isFirst && <td rowSpan={runs.length} className="py-3 px-3 align-top">{statusCell}</td>}
                             <td className="py-3 px-3 text-sm" data-testid={`op-operator-${op.sequence}-${ri}`}>
                               <div className="flex items-center gap-1 text-xs">
                                 <User className="w-3 h-3 text-[#6B7280]" />
@@ -2534,7 +2542,12 @@ export default function ManufacturingPage() {
                             ) : null}
                             <td className="py-3 px-3 text-right mono text-xs" data-testid={`op-duration-${op.sequence}-${ri}`}>{durNode}</td>
                             <td className="py-3 px-3 text-right mono text-xs font-medium" data-testid={`op-cost-${op.sequence}-${ri}`}>{costNode}</td>
-                            <td className="py-3 px-3 text-center">{renderRunActionCell(r)}</td>
+                            <td className="py-3 px-3 text-center align-top">
+                              {isFirst && canStartMore && (
+                                <div className="mb-1.5 flex justify-center">{actionCell}</div>
+                              )}
+                              {renderRunActionCell(r)}
+                            </td>
                           </tr>
                         );
                       });

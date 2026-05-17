@@ -4580,14 +4580,22 @@ ${(isQuotation && opts.includeCover) ? `
   } else {
     // Build a running-header config for the html2pdf path. This carries
     // the logo (as data URL — already loaded into cfg.logo_data), company
-    // name, single-line address summary, GSTIN, doc title and number.
+    // name, multi-line address, GSTIN, doc title and number.
     // pdfPrint.js draws this on every page 2+ via jsPDF.addImage so a
-    // proper logo + address appears as a running header in the PDF.
-    const addrSummary = [cfg.address_line1, cfg.address_line2].filter(Boolean).join(', ');
+    // proper logo + full address appears as a running header in the PDF.
+    // We pass BOTH `addressLine` (legacy single-line) and `addressLines`
+    // (array, preferred — preserves line breaks like the in-flow letterhead).
+    const addrLines = [
+      cfg.address_line1,
+      cfg.address_line2,
+      [cfg.phone && `Phone: ${cfg.phone}`, cfg.email && `Email: ${cfg.email}`].filter(Boolean).join(' · '),
+    ].filter(Boolean);
+    const addrSummary = addrLines.join(', ');
     const runningHeader = isTaxInvoice ? {
       logoDataUrl: cfg.logo_data || '',
       companyName: cfg.name || '',
       addressLine: addrSummary,
+      addressLines: addrLines,
       gstin: cfg.gstin || '',
       docTitle: opts.title || '',
       docNo: docNo || '',
