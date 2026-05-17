@@ -93,20 +93,20 @@ function injectPrintCss(html) {
 
 async function fallbackToHtml2Pdf(iframeBody, opts) {
   const merged = { ...DEFAULT_HTML2PDF_OPTS, ...opts };
-  // ----- Running header support (page 2+ only) -----------------------------
+  // ----- Running header support (every page) ------------------------------
   // When opts.runningHeader is provided we post-process the generated PDF
   // and draw a small header (logo + name + address + GSTIN + invoice no)
-  // on every page from page 2 onwards. CSS `@page` margin boxes only
-  // accept strings + counters (no images), so the only way to put a
-  // logo on each printed page is to render the PDF and overlay the
-  // header via jsPDF directly. This means the call must go through the
-  // html2pdf raster pipeline (not the native print dialog).
+  // on every page. CSS @page margin boxes only accept strings + counters
+  // (no images), so the only way to put a logo on each printed page is to
+  // render the PDF and overlay the header via jsPDF directly.
   const hdr = opts.runningHeader;
   if (!hdr) {
     await html2pdf().set(merged).from(iframeBody).save();
     return;
   }
-  // Build the PDF instance, then iterate pages.
+  // Reserve top margin so the overlay doesn't crash into body content.
+  // 38pt ≈ 13.5mm — enough room for a 24pt logo + accent divider line.
+  merged.margin = [38, 12, 18, 12];
   const worker = html2pdf().set(merged).from(iframeBody).toPdf();
   const pdfObj = await worker.get('pdf');
   const total = pdfObj.internal.getNumberOfPages();
@@ -119,14 +119,24 @@ async function fallbackToHtml2Pdf(iframeBody, opts) {
     pdfObj.setFontSize(8);
     pdfObj.setTextColor(100);
     pdfObj.text(`Page ${p} of ${total}`, pageW - 24, pageH - 14, { align: 'right' });
-    if (p === 1) continue;  // page 1 keeps its in-flow brand block
-    // Running header — logo + company name + address + GSTIN on the
-    // left; doc title + number on the right; thin accent divider below.
+    // Skip overlay on page 1 — the in-flow brand block already lives
+    // there. Overlay only appears from page 2 onwards.
+    if (p === 1) continue;
     const top = 16;
     if (hdr.logoDataUrl) {
       try {
-        pdfObj.addImage(hdr.logoDataUrl, 'PNG', 22, 10, 56, 22, undefined, 'FAST');
-      } catch (e) { /* image may not be a supported type — silently skip */ }
+        // Detect format from the data URL prefix so jsPDF.addImage accepts it.
+        // jsPDF supports PNG / JPEG / WEBP — not SVG. For SVG logos we
+        // skip the image and just enlarge the company-name text.
+        const m = /^data:image\/(png|jpe?g|webp|svg\+xml)[;,]/i.exec(hdr.logoDataUrl);
+        const fmt = m ? (m[1].toLowerCase().startsWith('jp') ? 'JPEG' : m[1].toUpperCase()) : 'PNG';
+        if (fmt !== 'SVG+XML') {
+          pdfObj.addImage(hdr.logoDataUrl, fmt, 22, 8, 60, 24, undefined, 'FAST');
+        }
+      } catch (e) {
+        // image may not be a supported type — silently skip and rely on text-only header
+        console.warn('[pdfPrint] running-header logo skipped:', e?.message || e);
+      }
     }
     const textX = hdr.logoDataUrl ? 86 : 22;
     pdfObj.setFont('helvetica', 'bold');

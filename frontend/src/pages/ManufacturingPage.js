@@ -1940,7 +1940,31 @@ export default function ManufacturingPage() {
                               )}
                             </div>
                           )}
-                          <span className="text-xs text-[#6B7280]">{1 + children.length} MO(s)</span>
+                          <span className="text-xs text-[#6B7280]" data-testid={`fg-totals-${parentMO.id}`}>
+                            {(() => {
+                              // Inline totals on the parent FG-MO header —
+                              // shows total MOs in the family + how many are
+                              // completed. Lets the user see family progress
+                              // at a glance without expanding the panel.
+                              const allMos = [parentMO, ...children];
+                              const total = allMos.length;
+                              const done = allMos.filter(m => m.status === 'completed').length;
+                              const inProg = allMos.filter(m => m.status === 'in_progress').length;
+                              const totalQty = allMos.reduce((s, m) => s + (m.quantity || 0), 0);
+                              const completedQty = allMos.reduce((s, m) => s + (m.quantity_completed || 0), 0);
+                              return (
+                                <>
+                                  <span className="font-semibold text-[#1D3557]">{total}</span> MO(s)
+                                  {' · '}
+                                  <span className="font-semibold text-[#03543F]">{done}</span> done
+                                  {inProg > 0 && <>{' · '}<span className="font-semibold text-[#1E429F]">{inProg}</span> in prog</>}
+                                  {' · Qty '}
+                                  <span className="mono font-semibold text-[#03543F]">{completedQty}</span>
+                                  <span className="mono text-[#6B7280]">/{totalQty}</span>
+                                </>
+                              );
+                            })()}
+                          </span>
                           {/* Per-FG search + status filter (SG / Parts under
                               THIS FG only). Placed on the right side of the FG
                               header. */}
