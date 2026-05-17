@@ -19,6 +19,17 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-17 (Seven Tax Invoice fixes — DONE & VERIFIED ✅):**
+  1. **Item description auto-fill** (`/app/frontend/src/pages/CRMPage.js` `applyItemToLine`): line description now seeds from `item.description` first, falls back to `item.name`. No more empty description fields on freshly-picked items.
+  2. **Stock badge in item search** (`/app/frontend/src/components/SearchableItemSelect.jsx`): every dropdown option now renders a color-coded stock badge — green (in-stock), amber (≤ reorder_level), red (≤0) — with the UOM appended.
+  3. **Preview before print** (`/app/frontend/src/pages/CRMPage.js` `printInvoiceDoc(opts.preview=true)`): new Eye icon next to the Print icon opens the rendered invoice in a new tab with a floating "Print / Save as PDF" + "Close" action bar (hidden by `@media print`).
+  4. **Wider HSN column** in the TI dialog (90→120px) and the printed table (`min-width:70px`).
+  5. **Tally Sales-Voucher XML enriched** (`/app/backend/server.py` `_build_tally_sales_voucher_xml`): added `BUYERADDRESS.LIST` + `BASICBUYERADDRESS.LIST`, `PARTYGSTIN`, `STATENAME`, `PLACEOFSUPPLY`, per-line `DESCRIPTION` + `DISCOUNT`, and a "Discount Allowed" ledger when any line carries a discount.
+  6. **Repeating company header on every printed page** — `position:fixed` running header + footer inside `@media print`, with `@page` top/bottom margins reserved so content isn't overlapped. Visible only when printing.
+  7. **Block duplicate Packing Lists per Tax Invoice** — frontend disables the Generate button when `existingPL` is set + dimmed icon; backend `POST /api/crm/packing-lists` returns 400 "Packing List X already exists" when `ti.packing_list_id` or `ti.packing_list_no` is set.
+  - **Testing**: `testing_agent_v3_fork` iteration 129 — 21/21 backend (100%) + frontend 100%. One self-fix by the testing agent: a tuple-`.split` bug in the enriched Tally XML address-loop (trailing comma in the parenthesized expression created a tuple); fixed by binding the address string to a local var first.
+
+
 - **2026-02-17 (Packing-Lists admin gate + Tax-Invoice Tally XML — DONE & VERIFIED ✅):**
   1. **Packing Lists admin bypass** (`/app/frontend/src/pages/WarehousesPage.js` `TabsContent value='packing-lists'`): Legacy admin users without `stores_packing_list` in their stored permission dict were seeing the "No permission" empty-state. Mirrored the sidebar's `canView` admin-bypass — both the view-gate and the `canEdit` prop now accept admin or `is_admin_group` regardless of granular perms.
   2. **Tally XML export for Tax Invoices** (`/app/backend/server.py` + `/app/frontend/src/pages/CRMPage.js`):
