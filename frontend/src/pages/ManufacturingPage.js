@@ -2548,9 +2548,22 @@ export default function ManufacturingPage() {
                             {isFirst && <td rowSpan={runs.length} className="py-3 px-3 text-sm text-[#4B5563] align-top">{wcCell}</td>}
                             {isFirst && <td rowSpan={runs.length} className="py-3 px-3 align-top">{statusCell}</td>}
                             <td className="py-3 px-3 text-sm" data-testid={`op-operator-${op.sequence}-${ri}`}>
-                              <div className="flex items-center gap-1 text-xs">
-                                <User className="w-3 h-3 text-[#6B7280]" />
-                                <span className="font-medium">{r.operator || '-'}</span>
+                              <div className="flex flex-col gap-0.5">
+                                <div className="flex items-center gap-1 text-xs">
+                                  <User className="w-3 h-3 text-[#6B7280]" />
+                                  <span className="font-medium">{r.operator || '-'}</span>
+                                </div>
+                                {/* Show the maroon "Outsourced qty: x/y" line
+                                    on the FIRST OS run (so it sits directly
+                                    below the "OS: VENDOR" operator name in
+                                    the same Operator column cell). Mirrors
+                                    the no-runs branch which renders the same
+                                    hint via operatorCell. */}
+                                {isFirst && hasLiveOS && osQty > 0 && (r.operator || '').startsWith('OS: ') && (
+                                  <span className="text-[10px] text-[#7F1D1D] font-semibold" data-testid={`outsourced-qty-${op.sequence}`}>
+                                    Outsourced qty: <span className="mono">{osQty}</span>{' / '}<span className="mono">{jobCardWO.quantity}</span>
+                                  </span>
+                                )}
                               </div>
                             </td>
                             <td className="py-3 px-3 text-right mono text-sm" data-testid={`op-qty-${op.sequence}-${ri}`}>

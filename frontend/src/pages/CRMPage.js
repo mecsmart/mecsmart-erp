@@ -4283,13 +4283,16 @@ function printInvoiceDoc(doc, opts) {
      We wrap the entire page content in a <table> whose <thead> contains
      a compact "running band" with logo + company name + address + GSTIN
      + invoice title + number. Browsers natively repeat the <thead> on
-     every page when the table spans multiple printed pages, so the logo
-     and full address appear on every page in BOTH paths:
-       • Native browser Print → Save as PDF (preview flow)
-       • html2pdf raster (direct print/download flow)
-     The compact band is shown on EVERY page including page 1; on page 1
-     it appears as a small letterhead strip just above the in-flow full
-     brand block, which is normal corporate letterhead behaviour. */
+     every page when the table spans multiple printed pages.
+     IMPORTANT: We want the band visible ONLY on page 2+. CSS cannot
+     conditionally hide a <thead> on its first occurrence, so we use a
+     negative-margin trick: the first child of <tbody> (the existing
+     full-size page-1 brand block) is pulled UP by the exact height of
+     the running band with a solid white background, covering the band
+     on page 1. On subsequent pages, the page-1 brand block has already
+     been rendered (it's NOT repeated), so the spillover content flows
+     normally below the repeated thead — making the band visible on
+     pages 2+. */
   .repeat-head { display: none !important; }
   .print-doc { width: 100%; border-collapse: collapse; }
   .print-doc > thead { display: table-header-group; }
@@ -4298,6 +4301,7 @@ function printInvoiceDoc(doc, opts) {
   .running-band {
     display: flex; align-items: center; gap: 12px;
     padding: 6px 10px 6px 10px;
+    height: 22mm; box-sizing: border-box;
     border-bottom: 1.5px solid ${accentColor};
     background: #fff;
     font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -4313,6 +4317,15 @@ function printInvoiceDoc(doc, opts) {
   .running-band .rb-right { text-align: right; flex-shrink: 0; }
   .running-band .rb-title { font-size: 11px; font-weight: 800; color: ${accentColor}; letter-spacing: 0.3px; text-transform: uppercase; }
   .running-band .rb-docno { font-size: 10px; color: #0f172a; font-weight: 700; margin-top: 1px; }
+  /* The page-1 cover: pulls the first tbody child UP by the running
+     band's height with a solid white background to mask the band on
+     page 1 only. */
+  .page-one-cover {
+    margin-top: -22mm;
+    background: #fff;
+    position: relative;
+    z-index: 5;
+  }
   @media print {
     @page {
       size: A4;
@@ -4327,6 +4340,7 @@ function printInvoiceDoc(doc, opts) {
     }
     body { padding: 0; }
     .print-doc > thead { display: table-header-group; }
+    .page-one-cover { margin-top: -22mm; background: #fff; position: relative; z-index: 5; }
   }
 </style></head><body>
 <!-- Cross-browser repeating header: <thead> repeats on every page in
@@ -4388,6 +4402,7 @@ ${(isQuotation && opts.includeCover) ? `
   </div>
 </div>
 ` : ''}
+<div class="page-one-cover">
 <div class="page">
   <!-- Header -->
   <div class="header">
@@ -4547,6 +4562,7 @@ ${(isQuotation && opts.includeCover) ? `
   </div>
 
   <div class="footer-note">This is a computer-generated document.${isTaxInvoice ? ' Subject to Jurisdiction as per Place of Supply.' : ''}</div>
+</div>
 </div>
 </td></tr>
 </tbody>

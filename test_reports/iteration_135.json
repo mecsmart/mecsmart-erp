@@ -1,0 +1,67 @@
+{
+  "summary": "Iteration 135 - Round 5 Testing Complete. All 3 issues verified working: ISSUE 1 (JW-OS Job Card maroon 'Outsourced qty' in runs branch) - VERIFIED with MO-000264, maroon text (#7F1D1D) correctly appears below 'OS: <vendor>' in Operator column. ISSUE 2 (Tax Invoice running band only on page 2+) - VERIFIED via CSS inspection: page-one-cover has margin-top:-22mm with white bg and z-index:5 to mask the running-band on page 1. ISSUE 3 (Smoke tests) - All passed: 100% OS ops have outsourced_quantity > 0, short-close and short-close-no-grn endpoints exist and respond correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_135_round5.py",
+    "/app/test_reports/pytest/pytest_iteration_135.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ManufacturingPage.js lines 2562-2565: Correctly implements maroon 'Outsourced qty: x/y' in runs.map() branch with condition: isFirst && hasLiveOS && osQty > 0 && r.operator.startsWith('OS: ')",
+    "CRMPage.js lines 4323-4343: Correctly implements page-one-cover with margin-top:-22mm, white background, z-index:5 to mask running-band on page 1 only"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_135_round5.py"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 tests passed)",
+    "frontend": "100% (2/2 issues verified working)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Round 5 fixes are all verified working. ISSUE 1: MO-000264 was used to test the maroon 'Outsourced qty' hint in the runs.map() branch - it correctly shows 'Outsourced qty: 10 / 10' in maroon (#7F1D1D) below 'OS: Test SC Number Supplier'. ISSUE 2: Tax Invoice preview shows correct CSS structure with page-one-cover (margin-top:-83px/-22mm, white bg, z-index:5) masking the running-band (height:83px/22mm) on page 1. ISSUE 3: All smoke tests pass - 100% OS ops have outsourced_quantity > 0, both short-close endpoints exist.",
+  "verification_details": {
+    "issue_1_jw_os_job_card": {
+      "status": "VERIFIED WORKING",
+      "test_wo": "MO-000264",
+      "test_op_seq": 10,
+      "operator_shown": "OS: Test SC Number Supplier",
+      "outsourced_qty_text": "Outsourced qty: 10 / 10",
+      "color_verified": "rgb(127, 29, 29) = #7F1D1D (maroon)",
+      "data_testid": "outsourced-qty-10"
+    },
+    "issue_2_tax_invoice_running_band": {
+      "status": "VERIFIED WORKING",
+      "page_one_cover_css": {
+        "margin_top": "-83.1496px (-22mm)",
+        "background": "rgb(255, 255, 255) (white)",
+        "z_index": "5"
+      },
+      "running_band_css": {
+        "height": "83.1406px (22mm)"
+      },
+      "table_structure": {
+        "has_print_doc": true,
+        "has_thead": true,
+        "has_running_band": true,
+        "has_page_one_cover": true
+      }
+    },
+    "issue_3_smoke_tests": {
+      "status": "ALL PASSED",
+      "3a_outsourced_qty_backfill": "100% (68/68 OS ops have outsourced_quantity > 0)",
+      "3b_short_close_revoke": "Endpoint exists and responds correctly",
+      "3c_short_close_no_grn": "Endpoint exists and responds correctly"
+    }
+  }
+}
