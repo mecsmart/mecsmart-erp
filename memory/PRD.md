@@ -19,6 +19,15 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-17 (Follow-up TI fixes — page header overlap, HSN width, PL dup self-heal, Tally seller block, Ship-From + stock consumption — DONE & VERIFIED ✅):**
+  1. **Print header overlap fixed** — replaced `position:fixed` running header with the canonical `<table class='doc-wrap'>` thead/tfoot pattern. Browsers now natively repeat the small running header on every printed page without overlapping the in-flow content.
+  2. **HSN column widened** to 150px with `minWidth:150px` across all line-items grids (Quotation, Proforma, Tax Invoice) so 7-8 digit codes render fully.
+  3. **Packing List duplicate guard self-heals** — backend now checks the `packing_lists` collection by `tax_invoice_id` first (authoritative source) and repairs the TI back-link when missing so legacy TIs are correctly blocked.
+  4. **Tally XML — seller block added** — `_build_tally_sales_voucher_xml` now emits `BASICCOMPANYNAME`, `BASICCOMPANYFORMALNAME`, `BASICCOMPANYADDRESS.LIST` + `COMPANYADDRESS.LIST` (each line wrapped in `<ADDRESS>`), `COMPANYGSTIN`, `COMPANYSTATENAME`. `_wrap_tally_envelope(company=…)` embeds the seller's company name in `<SVCURRENTCOMPANY>` so the import targets the right Tally file.
+  5. **Ship-From Store + actual stock reduction** — new `ship_from_warehouse_id` field on `TaxInvoiceCreate/Update`. New idempotent helpers `_consume_tax_invoice_stock` + `_restore_tax_invoice_stock` create proper `inventory_transactions` rows (transaction_type `dispatch` / `dispatch_reversal`) with warehouse linkage, decrement/restore `current_stock`, and gate on a `stock_consumed` flag so flips never double-deduct. Wired in `create_tax_invoice` (on non-draft create) and `update_tax_invoice` (on draft→issued/paid consume, issued→cancelled restore). Frontend: new **Ship From Store** dropdown in the TI dialog (data-testid `ti-ship-from-warehouse`).
+  6. **Testing**: `testing_agent_v3_fork` iteration 130 — 12/12 backend (100%) + frontend 100%. One LOW note (stale response on POST create) fixed by re-fetching the TI doc post-consume before enrichment.
+
+
 - **2026-02-17 (Seven Tax Invoice fixes — DONE & VERIFIED ✅):**
   1. **Item description auto-fill** (`/app/frontend/src/pages/CRMPage.js` `applyItemToLine`): line description now seeds from `item.description` first, falls back to `item.name`. No more empty description fields on freshly-picked items.
   2. **Stock badge in item search** (`/app/frontend/src/components/SearchableItemSelect.jsx`): every dropdown option now renders a color-coded stock badge — green (in-stock), amber (≤ reorder_level), red (≤0) — with the UOM appended.

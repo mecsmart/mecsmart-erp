@@ -14441,7 +14441,10 @@ async def create_tax_invoice(data: TaxInvoiceCreate, request: Request):
     inv_status = (doc.get("status") or "issued").lower()
     if inv_status not in ("draft", "cancelled"):
         await _consume_tax_invoice_stock(doc, user["id"])
-    return await _enrich_tax_invoice(doc)
+    # Re-fetch so the response reflects stock_consumed and any other server-
+    # side mutations the helper may have done (audit timestamps).
+    fresh_doc = await db.tax_invoices.find_one({"id": doc["id"]})
+    return await _enrich_tax_invoice(fresh_doc or doc)
 
 @crm_router.put("/tax-invoices/{tid}")
 async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request):
