@@ -1,0 +1,93 @@
+{
+  "summary": "Iteration 129 - Seven Tax Invoice Fixes: All backend tests pass (21/21). Frontend UI elements verified. Fixed critical bug in Tally XML generation (tuple.split error).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_129_tax_invoice_fixes.py",
+    "/app/test_reports/pytest/pytest_iteration_129.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "FIXED: server.py line 10880 - Tally XML _build_tally_sales_voucher_xml had a bug where `(invoice.get('billing_address') or customer.get('address') or '',).split('\\n')` was calling .split() on a tuple instead of a string. Fixed by extracting the address to a variable first."
+  ],
+  "updated_files": [
+    "/app/backend/server.py",
+    "/app/backend/tests/test_iteration_129_tax_invoice_fixes.py"
+  ],
+  "success_rate": {
+    "backend": "100% (21/21 passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "seed_data_creation": "Created test Tax Invoices for packing list duplicate guard and Tally XML enrichment tests",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 129 tests all pass. Backend Tally XML bug was fixed (tuple.split error). All 7 Tax Invoice fixes verified: (1) Item description auto-fill from item master, (2) Stock badge in item dropdown with color-coded availability, (3) Preview Eye icon opens new window, (4) HSN column 120px width, (5) Tally XML enriched with BUYERADDRESS.LIST, PARTYGSTIN, PLACEOFSUPPLY, per-line DESCRIPTION/DISCOUNT, Discount Allowed ledger, (6) Print running header CSS, (7) Packing List duplicate guard returns 400.",
+  "features_verified": {
+    "packing_list_duplicate_guard": {
+      "status": "PASS",
+      "details": "POST /api/crm/packing-lists returns 400 with 'already exists' message when TI already has a PL. Delete clears backlink, allowing re-creation."
+    },
+    "tally_xml_enrichment": {
+      "status": "PASS",
+      "details": "BUYERADDRESS.LIST, BASICBUYERADDRESS.LIST, PARTYGSTIN, PLACEOFSUPPLY, per-line DESCRIPTION, per-line DISCOUNT, 'Discount Allowed' ledger entry all present in XML"
+    },
+    "tally_xml_bulk": {
+      "status": "PASS",
+      "details": "POST /api/crm/tax-invoices/tally-xml-bulk works with enriched output"
+    },
+    "frontend_preview_icon": {
+      "status": "PASS",
+      "details": "44 Eye icons found with data-testid='tax-invoice-preview-{id}', opens new window"
+    },
+    "frontend_packing_icon_dimming": {
+      "status": "PASS",
+      "details": "44 packing icons found with data-testid='tax-invoice-packing-{id}', dimmed when packing_list_no is set"
+    },
+    "frontend_hsn_column_width": {
+      "status": "PASS",
+      "details": "HSN column header has style='width: 120px;'"
+    },
+    "frontend_item_description_autofill": {
+      "status": "PASS",
+      "details": "applyItemToLine uses (it.description && it.description.trim()) || it.name"
+    },
+    "frontend_stock_badge": {
+      "status": "PASS",
+      "details": "SearchableItemSelect shows stock badge with color tiers (green/amber/red) based on current_stock vs reorder_level"
+    },
+    "frontend_print_running_header": {
+      "status": "PASS",
+      "details": "CSS includes .print-running-header with position:fixed, @page margin reservation, display:none on screen, display:flex in @media print"
+    },
+    "regression_pi_tally_xml": {
+      "status": "PASS",
+      "details": "PI Tally XML single and bulk endpoints work"
+    },
+    "regression_tax_invoice_crud": {
+      "status": "PASS",
+      "details": "Tax Invoice list and status change work"
+    },
+    "regression_packing_list_crud": {
+      "status": "PASS",
+      "details": "Packing List list endpoint works"
+    },
+    "regression_grn_pi": {
+      "status": "PASS",
+      "details": "GRN list and pending-grns endpoints work"
+    }
+  },
+  "bug_fixed": {
+    "file": "/app/backend/server.py",
+    "line": "10880",
+    "issue": "Tally XML generation failed with 'tuple object has no attribute split' error",
+    "root_cause": "The expression `(invoice.get('billing_address') or customer.get('address') or '',).split('\\n')` was creating a tuple due to the trailing comma before the closing parenthesis, then calling .split() on the tuple instead of the string",
+    "fix": "Extracted the address to a variable first: `addr_source = invoice.get('billing_address') or customer.get('address') or ''` then `for raw in addr_source.split('\\n'):`"
+  }
+}

@@ -10859,40 +10859,72 @@ async def export_purchase_invoices_bulk_tally(request: Request, payload: dict = 
 # names change.
 
 def _build_tally_sales_voucher_xml(invoice, customer, company, lines, is_inter_state):
-    """Build a single <TALLYMESSAGE> block for a SALES voucher (Tax Invoice)."""
+    """Build a single <TALLYMESSAGE> block for a SALES voucher (Tax Invoice).
+
+    Enriched output (per user request 2026-02-17):
+    - Full party address block (BUYERADDRESS.LIST) so the bill-to ledger
+      page in Tally shows the customer's billing address.
+    - Per-line stock item entries include description + discount %
+      (Tally's `DISCOUNT` element on ALLINVENTORYENTRIES.LIST).
+    - A 'Discount Allowed' ledger entry is added when the invoice has any
+      discount so the gross / net values reconcile cleanly in Tally.
+    """
     inv_no = _xml_escape(invoice.get("invoice_no") or "")
     inv_date = _tally_date(invoice.get("invoice_date"))
     party_name = _xml_escape(customer.get("name") or invoice.get("customer_name") or "")
     narration = _xml_escape(invoice.get("notes", "") or f"Sale against invoice {inv_no}")
 
+    # Party address block — Tally expects each line of the address as its
+    # own <ADDRESS> child wrapped inside <BUYERADDRESS.LIST>.
+    addr_lines = []
+    addr_source = invoice.get("billing_address") or customer.get("address") or ""
+    for raw in addr_source.split("\n"):
+        s = (raw or "").strip()
+        if s:
+            addr_lines.append(s)
+    city_state_pin = ", ".join([x for x in [customer.get("city"), customer.get("state"), customer.get("pin_code")] if x])
+    if city_state_pin:
+        addr_lines.append(city_state_pin)
+    if customer.get("gstin"):
+        addr_lines.append(f"GSTIN: {customer.get('gstin')}")
+    if customer.get("state_code"):
+        addr_lines.append(f"State Code: {customer.get('state_code')}")
+    addr_block = "".join(f"<ADDRESS>{_xml_escape(a)}</ADDRESS>" for a in addr_lines)
+
     subtotal = float(invoice.get("subtotal", 0) or 0)
+    total_discount = sum(
+        (float(ln.get("quantity", 0) or 0) * float(ln.get("unit_price") or ln.get("rate") or 0) * float(ln.get("discount_pct") or ln.get("discount") or 0) / 100.0)
+        for ln in lines
+    )
     total_cgst = float(invoice.get("cgst", 0) or 0)
     total_sgst = float(invoice.get("sgst", 0) or 0)
     total_igst = float(invoice.get("igst", 0) or 0)
     grand_total = float(invoice.get("grand_total", 0) or 0)
 
-    # Inventory entries per line — for SALES, stock leaves the company so
-    # ISDEEMEDPOSITIVE=No (outflow) and AMOUNT is positive.
     inv_entries = []
     for ln in lines:
         it = ln.get("item") or {}
         name = _xml_escape(f"{it.get('part_number','')} - {it.get('name','')}".strip(" -"))
         qty = float(ln.get("quantity", 0) or 0)
-        rate = float(ln.get("unit_price", 0) or 0)
-        amt = qty * rate
-        uom = _xml_escape(it.get("unit_of_measure", "Nos"))
+        rate = float(ln.get("unit_price") or ln.get("rate") or 0)
+        disc_pct = float(ln.get("discount_pct") or ln.get("discount") or 0)
+        gross = qty * rate
+        net_after_disc = gross * (1 - disc_pct / 100.0)
+        uom = _xml_escape(it.get("unit_of_measure") or it.get("uom") or "Nos")
+        desc = _xml_escape((ln.get("description") or it.get("description") or "").strip())
         inv_entries.append(f"""
           <ALLINVENTORYENTRIES.LIST>
             <STOCKITEMNAME>{name}</STOCKITEMNAME>
             <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
             <RATE>{rate:.2f}/{uom}</RATE>
-            <AMOUNT>{amt:.2f}</AMOUNT>
+            <AMOUNT>{net_after_disc:.2f}</AMOUNT>
             <ACTUALQTY>{qty} {uom}</ACTUALQTY>
             <BILLEDQTY>{qty} {uom}</BILLEDQTY>
+            <DISCOUNT>{disc_pct:.2f}</DISCOUNT>
+            {('<DESCRIPTION>' + desc + '</DESCRIPTION>') if desc else ''}
           </ALLINVENTORYENTRIES.LIST>""")
     inventory_block = "".join(inv_entries)
 
-    # Ledger entries: Party (debit / +ve), Sales Account (credit / -ve), GST output (credit / -ve)
     ledger_entries = [f"""
         <LEDGERENTRIES.LIST>
           <LEDGERNAME>{party_name}</LEDGERNAME>
@@ -10905,6 +10937,13 @@ def _build_tally_sales_voucher_xml(invoice, customer, company, lines, is_inter_s
           <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
           <AMOUNT>{subtotal:.2f}</AMOUNT>
         </LEDGERENTRIES.LIST>"""]
+    if total_discount > 0:
+        ledger_entries.append(f"""
+        <LEDGERENTRIES.LIST>
+          <LEDGERNAME>Discount Allowed</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+          <AMOUNT>-{total_discount:.2f}</AMOUNT>
+        </LEDGERENTRIES.LIST>""")
     if is_inter_state:
         if total_igst > 0:
             ledger_entries.append(f"""
@@ -10930,6 +10969,9 @@ def _build_tally_sales_voucher_xml(invoice, customer, company, lines, is_inter_s
         </LEDGERENTRIES.LIST>""")
     ledger_block = "".join(ledger_entries)
 
+    gstin = _xml_escape(customer.get("gstin") or "")
+    state_code = _xml_escape(customer.get("state_code") or "")
+
     return f"""
     <TALLYMESSAGE xmlns:UDF="TallyUDF">
       <VOUCHER VCHTYPE="Sales" ACTION="Create" OBJVIEW="Invoice Voucher View">
@@ -10939,7 +10981,13 @@ def _build_tally_sales_voucher_xml(invoice, customer, company, lines, is_inter_s
         <VOUCHERNUMBER>{inv_no}</VOUCHERNUMBER>
         <REFERENCE>{inv_no}</REFERENCE>
         <PARTYLEDGERNAME>{party_name}</PARTYLEDGERNAME>
+        <PARTYNAME>{party_name}</PARTYNAME>
         <BASICBUYERNAME>{party_name}</BASICBUYERNAME>
+        <BASICBUYERADDRESS.LIST>{addr_block}</BASICBUYERADDRESS.LIST>
+        <BUYERADDRESS.LIST>{addr_block}</BUYERADDRESS.LIST>
+        {('<PARTYGSTIN>' + gstin + '</PARTYGSTIN>') if gstin else ''}
+        {('<STATENAME>' + state_code + '</STATENAME>') if state_code else ''}
+        {('<PLACEOFSUPPLY>' + _xml_escape(invoice.get('place_of_supply') or '') + '</PLACEOFSUPPLY>') if invoice.get('place_of_supply') else ''}
         <ISINVOICE>Yes</ISINVOICE>
         <EFFECTIVEDATE>{inv_date}</EFFECTIVEDATE>
         {ledger_block}
@@ -14826,6 +14874,15 @@ async def create_packing_list(data: PackingListCreate, request: Request):
     ti = await db.tax_invoices.find_one({"id": data.tax_invoice_id})
     if not ti:
         raise HTTPException(status_code=404, detail="Tax Invoice not found")
+    # Block duplicate Packing Lists per Tax Invoice. Backend enforcement is
+    # defense-in-depth — frontend also disables the action button.
+    if ti.get("packing_list_id") or ti.get("packing_list_no"):
+        existing = await db.packing_lists.find_one({"tax_invoice_id": data.tax_invoice_id}, {"_id": 0, "packing_list_no": 1})
+        existing_no = (existing or {}).get("packing_list_no") or ti.get("packing_list_no")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Packing List {existing_no} already exists for this Tax Invoice. Delete it first to regenerate."
+        )
     pl_no = await _get_next_number("packing_list")
     doc = {
         "id": str(uuid.uuid4()),

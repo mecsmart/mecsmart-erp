@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import {
   Plus, Edit2, Trash2, MessageSquare, UserCheck, AlertTriangle, Clock,
-  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload, GitBranch, Share2, Package2, Download
+  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload, GitBranch, Share2, Package2, Download, Eye
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -1498,7 +1498,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                     <tr>
                       <th className="row-num">#</th>
                       <th style={{ minWidth: '300px' }}>Item Name &amp; Description</th>
-                      <th style={{ width: '90px' }}>HSN</th>
+                      <th style={{ width: '120px' }}>HSN</th>
                       <th style={{ width: '80px' }}>Qty</th>
                       <th style={{ width: '70px' }}>UOM</th>
                       <th style={{ width: '110px' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
@@ -2861,7 +2861,9 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
     if (!it) return;
     updateLine(idx, {
       item_id: itemId,
-      description: it.name || '',
+      // Prefer the item's description (richer copy maintained on the item master).
+      // Fall back to the item name only if no description has been captured yet.
+      description: (it.description && it.description.trim()) || it.name || '',
       hsn_code: it.hsn_code || '',
       uom: it.uom || 'Nos',
       rate: parseFloat(it.sale_price) || parseFloat(it.purchase_price) || parseFloat(it.unit_cost) || 0,
@@ -2949,6 +2951,10 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   const totalPaid = filtered.filter(t => t.status === 'paid').reduce((a, t) => a + (t.grand_total || 0), 0);
 
   const printInvoice = (t) => printInvoiceDoc(t, { kind: 'tax_invoice', title: 'TAX INVOICE', numberKey: 'invoice_no', company: companySettings, user });
+  // Preview opens the rendered invoice in a new tab with an in-window action
+  // bar so the user can visually verify the layout before triggering
+  // print / Save-as-PDF. Skip-able by going straight to the Printer icon.
+  const previewInvoice = (t) => printInvoiceDoc(t, { kind: 'tax_invoice', title: 'TAX INVOICE', numberKey: 'invoice_no', company: companySettings, user, preview: true });
 
   // ============== Tally XML export ==============
   // Mirrors the PI flow: single-invoice icon + bulk checkbox selection.
@@ -3065,13 +3071,14 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                   </td>
                   <td>
                     <div className="flex gap-0.5">
-                      <button onClick={() => printInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`tax-invoice-print-${t.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => previewInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Preview before print" data-testid={`tax-invoice-preview-${t.id}`}><Eye className="w-4 h-4" /></button>
+                      <button onClick={() => printInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print / Save as PDF" data-testid={`tax-invoice-print-${t.id}`}><Printer className="w-4 h-4" /></button>
                       <button onClick={() => downloadTallyXML(t)} className="p-1.5 text-[#1D3557] hover:bg-[#E1EFFE] rounded" title="Download Tally XML (Sales voucher for Tally import)" data-testid={`tally-ti-${t.id}`}><Download className="w-4 h-4" /></button>
                       <button onClick={() => setWaShare({ open: true, doc: t })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`tax-invoice-wa-${t.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && ['draft', 'issued'].includes(t.status) && (
                         <button onClick={() => openDialog(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`tax-invoice-edit-${t.id}`}><Edit2 className="w-4 h-4" /></button>
                       )}
-                      <button onClick={() => setPackingDialog({ open: true, invoice: t })} className="p-1.5 text-[#92400E] hover:bg-[#FEF3C7] rounded" title={t.packing_list_no ? `Packing List ${t.packing_list_no} exists — open to regenerate` : 'Generate Packing List'} data-testid={`tax-invoice-packing-${t.id}`}><Package2 className="w-4 h-4" /></button>
+                      <button onClick={() => setPackingDialog({ open: true, invoice: t })} className={`p-1.5 rounded ${t.packing_list_no ? 'text-[#9CA3AF] hover:bg-[#F3F4F6] cursor-help' : 'text-[#92400E] hover:bg-[#FEF3C7]'}`} title={t.packing_list_no ? `Packing List ${t.packing_list_no} already exists. Delete it from the Packing Lists tab to regenerate.` : 'Generate Packing List'} data-testid={`tax-invoice-packing-${t.id}`}><Package2 className="w-4 h-4" /></button>
                       {canEdit && t.status === 'draft' && (
                         <button onClick={() => setDeleteConfirm({ open: true, invoice: t })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`tax-invoice-delete-${t.id}`}><Trash2 className="w-4 h-4" /></button>
                       )}
@@ -3187,7 +3194,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                   <thead><tr>
                     <th className="row-num">#</th>
                     <th style={{ minWidth: '260px' }}>Item &amp; Description</th>
-                    <th style={{ width: '90px' }}>HSN</th>
+                    <th style={{ width: '120px' }}>HSN</th>
                     <th style={{ width: '70px', textAlign: 'right' }}>Qty</th>
                     <th style={{ width: '60px' }}>UOM</th>
                     <th style={{ width: '100px', textAlign: 'right' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
@@ -3518,7 +3525,7 @@ function PackingListDialog({ open, invoice, onClose, onCreated }) {
           {existingPL && (
             <div className="border border-[#FCD34D] bg-[#FEF3C7] rounded-sm p-3 text-xs text-[#78350F]" data-testid="pl-existing-warning">
               <strong>A Packing List already exists for this invoice: {existingPL}.</strong><br />
-              Creating a new one will add a second Packing List. To regenerate, delete the existing one from the Packing Lists tab first (CRM → Marketing → Packing Lists or Stores → Packing Lists).
+              Generating a new one is blocked to avoid duplicate dispatch documentation. To regenerate, first delete the existing Packing List from the Packing Lists tab (CRM → Marketing → Packing Lists or Stores → Packing Lists).
             </div>
           )}
           <div className="text-xs text-[#4B5563]">
@@ -3590,8 +3597,8 @@ function PackingListDialog({ open, invoice, onClose, onCreated }) {
 
           <div className="flex justify-end gap-2 border-t border-[#E5E7EB] pt-3">
             <button className="btn-secondary" onClick={onClose}>Cancel</button>
-            <button className="btn-primary" onClick={save} disabled={saving || loading || lines.length === 0} data-testid="pl-save-btn">
-              {saving ? 'Generating…' : 'Generate Packing List'}
+            <button className="btn-primary" onClick={save} disabled={saving || loading || lines.length === 0 || !!existingPL} title={existingPL ? `Blocked — Packing List ${existingPL} already exists` : ''} data-testid="pl-save-btn">
+              {saving ? 'Generating…' : (existingPL ? 'Already Generated' : 'Generate Packing List')}
             </button>
           </div>
         </div>
@@ -4213,8 +4220,63 @@ function printInvoiceDoc(doc, opts) {
   .copy-ticks .tk{display:flex;align-items:center;gap:4px}
   .copy-ticks .tk .box{width:10px;height:10px;border:1.2px solid #2D3E50;display:inline-block;border-radius:1px}
   ` : ''}
-  @media print {@page {size:A4;margin:0} body{padding:0}}
+  @media print {
+    @page {size:A4;margin:18mm 12mm 14mm 12mm}
+    body{padding:0}
+    /* Repeating header / footer on every printed page (Tax Invoice).
+       The print-running-header element sits in the @page top margin
+       via position:fixed at top:0, replicating the company brand on
+       every page. Chrome / Edge / Safari all paint position:fixed
+       elements on every printed page. */
+    .print-running-header{
+      position:fixed;
+      top:0;left:0;right:0;
+      display:flex;align-items:center;gap:10px;
+      padding:6px 12mm;
+      background:#fff;
+      border-bottom:1.5px solid ${accentColor};
+      font-size:10px;color:#0f172a;
+      height:14mm;
+    }
+    .print-running-header .ph-name{font-size:12px;font-weight:800;color:${accentColor}}
+    .print-running-header .ph-meta{font-size:9px;color:#475569;line-height:1.3}
+    .print-running-header img.ph-logo{max-height:11mm;max-width:30mm;object-fit:contain}
+    .print-running-footer{
+      position:fixed;
+      bottom:0;left:0;right:0;
+      padding:4px 12mm;
+      border-top:1px solid #e2e8f0;
+      font-size:8px;color:#64748b;text-align:center;
+      background:#fff;
+      height:8mm;
+    }
+    /* Reserve room above page content so the first-page in-flow header
+       isn't hidden behind the running header. */
+    .page{padding-top:4mm}
+    /* On printed pages the in-flow header (logo + address block) keeps the
+       full company info on page 1; the small running header above repeats on
+       subsequent pages. To avoid duplicate-looking logos on page 1, the
+       running header is hidden on screen — only the print stylesheet shows it. */
+  }
+  .print-running-header,.print-running-footer{display:none}
+  @media print {.print-running-header,.print-running-footer{display:flex}}
 </style></head><body>
+<!-- Running header — printed on EVERY page (kept in @page top margin via position:fixed) -->
+<div class="print-running-header">
+  ${cfg.logo_data ? `<img src="${esc(cfg.logo_data)}" class="ph-logo" alt="logo"/>` : ''}
+  <div style="flex:1">
+    <div class="ph-name">${esc(cfg.name)}</div>
+    <div class="ph-meta">
+      ${[cfg.address_line1, cfg.address_line2].filter(Boolean).map(esc).join(' · ')}
+      ${cfg.gstin ? ` · GSTIN: <strong>${esc(cfg.gstin)}</strong>` : ''}
+    </div>
+  </div>
+  <div style="text-align:right">
+    <div style="font-size:10px;font-weight:700;color:${accentColor}">${esc(opts.title)}</div>
+    <div style="font-size:9px;color:#475569" class="mono">${esc(docNo)}</div>
+  </div>
+</div>
+<div class="print-running-footer">${esc(cfg.name)} · ${esc(opts.title)} ${esc(docNo)} · Generated ${new Date().toLocaleDateString('en-IN')}</div>
 ${(isQuotation && opts.includeCover) ? `
 <!-- Cover Page (full A4, outside .page padding) -->
 <div class="cover-page">
@@ -4324,7 +4386,7 @@ ${(isQuotation && opts.includeCover) ? `
       <tr>
         <th class="sn">Sl</th>
         <th>Item Name &amp; Description</th>
-        <th class="center">HSN</th>
+        <th class="center" style="min-width:70px">HSN</th>
         <th class="right">Qty</th>
         <th class="center">UOM</th>
         <th class="right">Rate</th>
@@ -4410,6 +4472,40 @@ ${(isQuotation && opts.includeCover) ? `
     document.open();
     document.write(html);
     document.close();
+  } else if (opts.preview) {
+    // PREVIEW MODE — open a new tab/window with the rendered HTML and a
+    // floating action bar so the user can review on-screen before printing
+    // or downloading. No auto-download triggered.
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Pop-up blocked. Allow pop-ups for this site to use the preview.');
+      return;
+    }
+    const actionBar = `
+<style>
+  .preview-actions{
+    position:fixed;bottom:16px;right:16px;
+    display:flex;gap:8px;z-index:10000;
+    background:#fff;border:1px solid #e2e8f0;border-radius:8px;
+    padding:8px 10px;box-shadow:0 4px 18px rgba(0,0,0,0.12);
+    font-family:'Helvetica Neue',Arial,sans-serif;font-size:12px;
+  }
+  .preview-actions button{
+    border:0;padding:6px 12px;border-radius:6px;cursor:pointer;
+    font-size:12px;font-weight:600;
+  }
+  .preview-actions .primary{background:${accentColor};color:${headerFg}}
+  .preview-actions .secondary{background:#f1f5f9;color:#0f172a}
+  @media print {.preview-actions{display:none !important}}
+</style>
+<div class="preview-actions">
+  <button class="primary" onclick="window.print()">Print / Save as PDF</button>
+  <button class="secondary" onclick="window.close()">Close</button>
+</div>`;
+    win.document.open();
+    win.document.write(html.replace('</body>', actionBar + '</body>'));
+    win.document.close();
+    try { win.document.title = filename.replace('.pdf', ''); } catch (_e) { /* cross-origin no-op */ }
   } else {
     downloadHtmlAsPdf(html, filename);
   }

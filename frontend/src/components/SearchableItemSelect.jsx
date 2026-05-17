@@ -241,7 +241,20 @@ export const SearchableItemSelect = ({
           {list.length === 0 ? (
             <div className="p-3 text-xs text-[#9CA3AF] text-center italic">No items found</div>
           ) : (
-            list.map(i => (
+            list.map(i => {
+              // Show live availability inline so the user picks an item knowing
+              // how much stock is on hand — critical for sales invoicing and
+              // production planning. Green when in-stock, amber when low (≤
+              // reorder_level), red when zero/negative.
+              const stock = Number(i.current_stock ?? 0);
+              const reorder = Number(i.reorder_level ?? 0);
+              const uom = i.unit_of_measure || i.uom || '';
+              const stockColor = stock <= 0
+                ? 'bg-[#FDE8E8] text-[#9B1C1C]'
+                : (reorder > 0 && stock <= reorder)
+                  ? 'bg-[#FEF3C7] text-[#92400E]'
+                  : 'bg-[#DEF7EC] text-[#03543F]';
+              return (
               <button
                 key={i.id}
                 type="button"
@@ -258,16 +271,20 @@ export const SearchableItemSelect = ({
                   {/* Allow the name to wrap onto multiple lines so long item
                       names are visible without hover (user feedback: search
                       results were getting truncated to ellipsis). */}
-                  <span className="break-words">{i.name}</span>
+                  <span className="break-words flex-1">{i.name}</span>
+                  <span className={`text-[10px] mono px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap ${stockColor}`} title={`In-stock: ${stock} ${uom}${reorder > 0 ? ` · Reorder ≤ ${reorder}` : ''}`}>
+                    {stock} {uom}
+                  </span>
                   {showCategory && i.category && (
-                    <span className="ml-auto text-[10px] text-[#6B7280] italic shrink-0">({i.category.replace('_', ' ')})</span>
+                    <span className="text-[10px] text-[#6B7280] italic shrink-0">({i.category.replace('_', ' ')})</span>
                   )}
                 </div>
                 {i.description && (
                   <div className="text-[11px] text-[#6B7280] break-words mt-0.5">{i.description}</div>
                 )}
               </button>
-            ))
+              );
+            })
           )}
         </div>,
         document.body,
