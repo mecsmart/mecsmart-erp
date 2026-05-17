@@ -4279,39 +4279,44 @@ function printInvoiceDoc(doc, opts) {
   .copy-ticks .tk{display:flex;align-items:center;gap:4px}
   .copy-ticks .tk .box{width:10px;height:10px;border:1.2px solid #2D3E50;display:inline-block;border-radius:1px}
   ` : ''}
-  /* ----- Page 2+ running header (text-only) ---------------------------
-     CSS at-page margin boxes accept only string + counter content (not
-     images). We use top-left + top-right slots so page 2+ carries the
-     company name + GSTIN on the left and the invoice title + number on
-     the right. The inline .repeat-head element below is HIDDEN in print
-     (display:none) so it never leaks onto page 1 even if the renderer
-     ignores position:running. Bottom-right shows Page X of Y.
-     NOTE: The PDF download path (html2pdf raster) does NOT support these
-     margin-box rules. The page-2+ header therefore renders correctly
-     only when the user goes through Browser → Print → Save as PDF
-     (native dialog). The in-app Download/Preview button uses html2pdf
-     and produces a single-shot raster — page 2+ then has no running
-     header, but at least page 1 stays clean (no duplicate). */
+  /* ----- Page 2+ running header (text + logo via <thead> repeat) ------
+     We wrap the entire page content in a <table> whose <thead> contains
+     a compact "running band" with logo + company name + address + GSTIN
+     + invoice title + number. Browsers natively repeat the <thead> on
+     every page when the table spans multiple printed pages, so the logo
+     and full address appear on every page in BOTH paths:
+       • Native browser Print → Save as PDF (preview flow)
+       • html2pdf raster (direct print/download flow)
+     The compact band is shown on EVERY page including page 1; on page 1
+     it appears as a small letterhead strip just above the in-flow full
+     brand block, which is normal corporate letterhead behaviour. */
   .repeat-head { display: none !important; }
+  .print-doc { width: 100%; border-collapse: collapse; }
+  .print-doc > thead { display: table-header-group; }
+  .print-doc > tbody > tr > td,
+  .print-doc > thead > tr > td { padding: 0; vertical-align: top; }
+  .running-band {
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 10px 6px 10px;
+    border-bottom: 1.5px solid ${accentColor};
+    background: #fff;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+  }
+  .running-band .rb-logo {
+    height: 36px; width: auto; max-width: 90px; object-fit: contain;
+    flex-shrink: 0;
+  }
+  .running-band .rb-center { flex: 1; line-height: 1.35; }
+  .running-band .rb-name { font-size: 12px; font-weight: 800; color: #0f172a; }
+  .running-band .rb-meta { font-size: 9px; color: #475569; margin-top: 1px; }
+  .running-band .rb-gst { font-size: 9px; color: ${accentColor}; font-weight: 700; margin-top: 1px; }
+  .running-band .rb-right { text-align: right; flex-shrink: 0; }
+  .running-band .rb-title { font-size: 11px; font-weight: 800; color: ${accentColor}; letter-spacing: 0.3px; text-transform: uppercase; }
+  .running-band .rb-docno { font-size: 10px; color: #0f172a; font-weight: 700; margin-top: 1px; }
   @media print {
     @page {
       size: A4;
-      margin: 16mm 8mm 14mm 8mm;
-      @top-left {
-        content: "${runHeadLeft}";
-        font-family: 'Helvetica Neue', Arial, sans-serif;
-        font-size: 9.5px;
-        font-weight: 700;
-        color: ${accentColor};
-        padding-left: 4mm;
-      }
-      @top-right {
-        content: "${runHeadRight}";
-        font-family: 'Helvetica Neue', Arial, sans-serif;
-        font-size: 9.5px;
-        color: #475569;
-        padding-right: 4mm;
-      }
+      margin: 4mm 8mm 14mm 8mm;
       @bottom-right {
         content: "Page " counter(page) " of " counter(pages);
         font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -4320,20 +4325,33 @@ function printInvoiceDoc(doc, opts) {
         padding-right: 4mm;
       }
     }
-    /* Page 1: suppress @top-* slots so the in-flow brand block doesn't
-       compete with a duplicate running header. Page numbers stay on
-       page 1 (via @bottom-right above which @page :first doesn't reset). */
-    @page :first {
-      margin-top: 8mm;
-      @top-left { content: none; }
-      @top-right { content: none; }
-    }
     body { padding: 0; }
+    .print-doc > thead { display: table-header-group; }
   }
 </style></head><body>
-<!-- Running header (page 2+ only) — moved into at-page top margin by
-     CSS position-running. Carries logo + name + address + GSTIN +
-     invoice title + number. Page 1 hides it via at-page :first override. -->
+<!-- Cross-browser repeating header: <thead> repeats on every page in
+     native browser print AND in html2pdf raster. Carries logo + company
+     name + multi-line address + GSTIN on the left and the document
+     title + number on the right. -->
+<table class="print-doc">
+<thead>
+  <tr><td>
+    <div class="running-band">
+      ${cfg.logo_data ? `<img src="${esc(cfg.logo_data)}" class="rb-logo" alt="logo"/>` : ''}
+      <div class="rb-center">
+        <div class="rb-name">${esc(cfg.name)}</div>
+        ${(cfg.address_line1 || cfg.address_line2) ? `<div class="rb-meta">${[cfg.address_line1, cfg.address_line2].filter(Boolean).map(esc).join(' · ')}</div>` : ''}
+        ${cfg.gstin ? `<div class="rb-gst">GSTIN: ${esc(cfg.gstin)}</div>` : ''}
+      </div>
+      <div class="rb-right">
+        <div class="rb-title">${esc(opts.title)}</div>
+        <div class="rb-docno">${esc(docNo)}</div>
+      </div>
+    </div>
+  </td></tr>
+</thead>
+<tbody>
+<tr><td>
 <div class="repeat-head">
   ${cfg.logo_data ? `<img src="${esc(cfg.logo_data)}" class="rh-logo" alt="logo"/>` : ''}
   <div style="flex:1">
@@ -4530,6 +4548,9 @@ ${(isQuotation && opts.includeCover) ? `
 
   <div class="footer-note">This is a computer-generated document.${isTaxInvoice ? ' Subject to Jurisdiction as per Place of Supply.' : ''}</div>
 </div>
+</td></tr>
+</tbody>
+</table>
 
 </body></html>`;
   // Document number / filename — `docNo` was already computed earlier from
@@ -4578,39 +4599,11 @@ ${(isQuotation && opts.includeCover) ? `
     win.document.close();
     try { win.document.title = filename.replace('.pdf', ''); } catch (_e) { /* cross-origin no-op */ }
   } else {
-    // Build a running-header config for the html2pdf path. This carries
-    // the logo (as data URL — already loaded into cfg.logo_data), company
-    // name, multi-line address, GSTIN, doc title and number.
-    // pdfPrint.js draws this on every page 2+ via jsPDF.addImage so a
-    // proper logo + full address appears as a running header in the PDF.
-    // We pass BOTH `addressLine` (legacy single-line) and `addressLines`
-    // (array, preferred — preserves line breaks like the in-flow letterhead),
-    // PLUS individual fields (`addr1`, `addr2`, `phoneEmail`) so pdfPrint
-    // can fall back to drawing them line-by-line even if the array gets
-    // mangled by minifier/cache.
-    const phoneEmail = [cfg.phone && `Phone: ${cfg.phone}`, cfg.email && `Email: ${cfg.email}`].filter(Boolean).join(' · ');
-    const addrLines = [cfg.address_line1, cfg.address_line2, phoneEmail].filter(Boolean);
-    const addrSummary = addrLines.join(', ');
-    const runningHeader = isTaxInvoice ? {
-      logoDataUrl: cfg.logo_data || '',
-      companyName: cfg.name || '',
-      addressLine: addrSummary,
-      addressLines: addrLines,
-      addr1: cfg.address_line1 || '',
-      addr2: cfg.address_line2 || '',
-      phoneEmail,
-      gstin: cfg.gstin || '',
-      docTitle: opts.title || '',
-      docNo: docNo || '',
-    } : null;
-    // eslint-disable-next-line no-console
-    console.info('[printInvoiceDoc] runningHeader →', isTaxInvoice ? {
-      hasLogo: !!runningHeader.logoDataUrl,
-      logoFmt: (runningHeader.logoDataUrl || '').slice(0, 30),
-      addrLinesCount: addrLines.length,
-      addrLines, gstin: runningHeader.gstin, companyName: runningHeader.companyName,
-    } : 'not a tax invoice');
-    downloadHtmlAsPdf(html, filename, runningHeader ? { runningHeader } : {});
+    // Cross-browser running header is now baked into the printable HTML
+    // as a <thead> that repeats on every page. html2pdf uses the browser
+    // print pipeline internally, so the thead band naturally repeats in
+    // the rasterized PDF too — no jsPDF overlay needed.
+    downloadHtmlAsPdf(html, filename, {});
   }
 }
 

@@ -5722,26 +5722,38 @@ async def get_work_orders(request: Request, status: Optional[str] = None, produc
     if needs_sc_lookup:
         sc_ids = list({op["outsource_sc_order_id"] for _wo_id, _item_id, op in needs_sc_lookup})
         sc_map = {}
-        async for sc in db.subcontract_orders.find({"id": {"$in": sc_ids}}, {"_id": 0, "id": 1, "job_work_parts": 1, "reference_wo_ids": 1, "reference_operation_seqs": 1}):
+        async for sc in db.subcontract_orders.find({"id": {"$in": sc_ids}}, {"_id": 0, "id": 1, "job_work_parts": 1, "reference_wo_ids": 1, "reference_operation_seqs": 1, "lines": 1}):
             sc_map[sc["id"]] = sc
+        # Build a quick wo_id → wo.quantity lookup so we can fall back to
+        # "entire WO outsourced" when no job_work_parts match.
+        wo_qty_lookup = {wo.get("id"): float(wo.get("quantity") or 0) for wo in work_orders}
         for _wo_id, item_id, op in needs_sc_lookup:
             sc = sc_map.get(op.get("outsource_sc_order_id"))
             if not sc:
                 continue
-            # Find the matching job_work_part — prefer (item_id + process_name + wo_id)
-            # for surgical matches; fall back to (item_id + process_name) which
-            # is also unique within a single SC.
             op_name = op.get("operation_name", "") or ""
             matched_qty = 0.0
+            # Pass 1: surgical match on item + process + (optional) wo_id.
             for jp in (sc.get("job_work_parts") or []):
                 if jp.get("item_id") != item_id:
                     continue
                 if (jp.get("process_name") or "") != op_name:
                     continue
-                # If a wo_id was attached to the JWP, require it to match.
                 if jp.get("wo_id") and jp.get("wo_id") != _wo_id:
                     continue
                 matched_qty += float(jp.get("quantity") or 0)
+            # Pass 2: any job_work_part referencing this WO (regardless of
+            # process name — legacy SCs sometimes have a single SA line).
+            if matched_qty == 0:
+                for jp in (sc.get("job_work_parts") or []):
+                    if jp.get("wo_id") == _wo_id:
+                        matched_qty += float(jp.get("quantity") or 0)
+            # Pass 3: SC's reference_wo_ids includes this WO and the SC has
+            # exactly one reference — assume the entire WO qty was outsourced.
+            if matched_qty == 0:
+                ref_wos = sc.get("reference_wo_ids") or []
+                if _wo_id in ref_wos:
+                    matched_qty = wo_qty_lookup.get(_wo_id, 0.0)
             if matched_qty > 0:
                 op["outsourced_quantity"] = matched_qty
 
@@ -6530,8 +6542,15 @@ async def short_close_wo_operation(wo_id: str, sequence: int, request: Request):
     target["runs"] = [r for r in runs if not (r.get("operator") or "").startswith("OS: ")]
     await db.work_orders.update_one({"id": wo_id}, {"$set": {"operations_status": ops}})
 
-    # Trim the SC's job_work_parts to remove this WO+process pair
+    # Trim the SC's job_work_parts to remove this WO+process pair.
+    # Behaviour change (per user request): when the revoke removes the
+    # LAST line from the SC AND no other WOs reference it, DELETE the SC
+    # entirely so the Job Work list stays clean. If there are still
+    # references (consolidated SC across multiple MOs) we just trim the
+    # parts and update reference_wo_ids; the SC remains visible for the
+    # other MOs.
     sc_updated = False
+    sc_deleted = False
     if sc_order_id:
         sc = await db.subcontract_orders.find_one({"id": sc_order_id})
         if sc:
@@ -6540,18 +6559,33 @@ async def short_close_wo_operation(wo_id: str, sequence: int, request: Request):
                 if line.get("wo_id") == wo_id and (line.get("process_name") or "").strip() == op_name:
                     continue  # drop this line
                 new_jwp.append(line)
-            update_payload = {"job_work_parts": new_jwp, "updated_at": datetime.now(timezone.utc)}
-            # If no parts remain, mark the SC short_closed automatically.
-            if not new_jwp:
-                update_payload["status"] = "short_closed"
-                update_payload["short_closed_at"] = datetime.now(timezone.utc)
-                update_payload["short_closed_by"] = user["id"]
             # Prune reference_wo_ids if this WO no longer appears.
             remaining_wo_ids = {(p.get("wo_id") or "") for p in new_jwp if p.get("wo_id")}
-            if sc.get("reference_wo_ids"):
-                update_payload["reference_wo_ids"] = [w for w in sc["reference_wo_ids"] if w in remaining_wo_ids]
-            await db.subcontract_orders.update_one({"id": sc_order_id}, {"$set": update_payload})
-            sc_updated = True
+            ref_wo_ids = [w for w in (sc.get("reference_wo_ids") or []) if w in remaining_wo_ids]
+            # If NO parts remain AND no other WOs reference it AND no DC/GRN
+            # was ever sent, hard-delete the SC. Otherwise keep it open with
+            # whatever lines/refs are left.
+            already_sent_dc = bool(sc.get("dc_created")) or await db.delivery_challans.find_one({
+                "subcontract_order_id": sc_order_id, "status": {"$in": ["sent", "approved"]}
+            })
+            has_received = any(float(p.get("received_quantity") or 0) > 0 for p in new_jwp)
+            if not new_jwp and not ref_wo_ids and not already_sent_dc and not has_received:
+                await db.subcontract_orders.delete_one({"id": sc_order_id})
+                sc_deleted = True
+                sc_updated = True
+            else:
+                update_payload = {"job_work_parts": new_jwp, "reference_wo_ids": ref_wo_ids, "updated_at": datetime.now(timezone.utc)}
+                # Recompute processing_charges from remaining parts.
+                update_payload["processing_charges"] = sum(
+                    float(p.get("charges") or 0) * float(p.get("quantity") or 0) for p in new_jwp
+                )
+                # If empty but can't delete (DC sent / received), mark short_closed.
+                if not new_jwp:
+                    update_payload["status"] = "short_closed"
+                    update_payload["short_closed_at"] = datetime.now(timezone.utc)
+                    update_payload["short_closed_by"] = user["id"]
+                await db.subcontract_orders.update_one({"id": sc_order_id}, {"$set": update_payload})
+                sc_updated = True
 
     return {
         "ok": True,
@@ -6559,6 +6593,7 @@ async def short_close_wo_operation(wo_id: str, sequence: int, request: Request):
         "sc_order_id": sc_order_id,
         "sc_order_number": sc_order_number,
         "sc_updated": sc_updated,
+        "sc_deleted": sc_deleted,
     }
 
 
@@ -6625,6 +6660,10 @@ async def short_close_wo_operation_no_grn(wo_id: str, sequence: int, payload: Sh
     await db.work_orders.update_one({"id": wo_id}, {"$set": {"operations_status": ops}})
 
     # Mark the SC's matching line short_closed (don't delete — keep audit).
+    # Per user request: when short-closing a line, ZERO its charges so the
+    # JW list's "CHARGES" column shows ₹0 for short-closed lines (the
+    # vendor isn't paid for work that was written off). The original
+    # quantity stays for the audit trail.
     sc_updated = False
     if sc_order_id:
         sc = await db.subcontract_orders.find_one({"id": sc_order_id})
@@ -6635,13 +6674,24 @@ async def short_close_wo_operation_no_grn(wo_id: str, sequence: int, payload: Sh
                     line["short_closed"] = True
                     line["short_close_reason"] = payload.reason or ""
                     line["short_closed_at"] = now
+                    # Zero out charges for the short-closed line so the
+                    # SC list/print doesn't show fees for written-off work.
+                    line["charges"] = 0
             # If all remaining lines are short_closed OR received in full, mark the SC short_closed
             still_open = [
                 p for p in new_jwp
                 if not p.get("short_closed")
                 and float(p.get("received_quantity") or 0) < float(p.get("quantity") or 0)
             ]
-            update_payload = {"job_work_parts": new_jwp, "updated_at": now}
+            # Recompute processing_charges from the remaining (non-zero) lines.
+            processing_charges = sum(
+                float(p.get("charges") or 0) * float(p.get("quantity") or 0) for p in new_jwp
+            )
+            update_payload = {
+                "job_work_parts": new_jwp,
+                "processing_charges": processing_charges,
+                "updated_at": now,
+            }
             if not still_open:
                 update_payload["status"] = "short_closed"
                 update_payload["short_closed_at"] = now

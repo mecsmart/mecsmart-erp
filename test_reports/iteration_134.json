@@ -1,0 +1,56 @@
+{
+  "summary": "Iteration 134 - Round 4 Fixes Testing. Backend tests: 11/11 passed. ISSUE A (Outsourced qty backfill): 54.4% success rate (37/68 OS ops have outsourced_quantity > 0). Many missing ops are TEST_ prefixed test data. ISSUE B (Tax Invoice PDF): Code structure verified - <table class='print-doc'> with <thead> containing <div class='running-band'> for repeating header. ISSUE C (Revoke deletes SC): Endpoint exists and responds correctly. ISSUE D (Short Close zeros charges): Endpoint exists and responds correctly.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/work-orders (outsourced_quantity backfill)",
+        "issue": "Only 54.4% of OS operations have outsourced_quantity populated. The 3-pass backfill algorithm may not be covering all cases. Many failing ops have TEST_ prefixed operation names (test data), but some real ops may also be affected.",
+        "priority": "HIGH",
+        "details": "Total OS ops: 68, With qty: 37, Without qty: 31. The backfill uses reference_wo_ids (plural) but some SCs only have reference_wo_id (singular)."
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_134_round4_fixes.py",
+    "/app/test_reports/pytest/pytest_iteration_134.xml"
+  ],
+  "action_items": [
+    "ISSUE A - Outsourced qty backfill: The 3-pass algorithm may need a 4th pass to check reference_wo_id (singular) in addition to reference_wo_ids (plural). Some legacy SCs use the singular field. Current success rate is 54.4% (37/68 OS ops have outsourced_quantity > 0).",
+    "ISSUE B - Tax Invoice PDF: Code implementation looks correct with <table class='print-doc'><thead><tr><td><div class='running-band'>...</div></td></tr></thead><tbody>...</tbody></table> structure. The running-band contains logo, company name, address lines, GSTIN, invoice title, and doc number. Browser native print should repeat the thead on every page.",
+    "ISSUE C - Revoke deletes SC: Endpoint POST /api/work-orders/{wo_id}/operations/{seq}/short-close exists and returns sc_deleted flag. Code logic checks for empty job_work_parts, no other WO refs, and no DC sent before hard-deleting.",
+    "ISSUE D - Short Close zeros charges: Endpoint POST /api/work-orders/{wo_id}/operations/{seq}/short-close-no-grn exists. Code sets line.charges=0 and line.short_closed=true, then recomputes processing_charges."
+  ],
+  "critical_code_review_comments": [
+    "ISSUE A BUG: The backfill Pass 3 checks sc.get('reference_wo_ids') but some legacy SCs only have sc.get('reference_wo_id') (singular). This causes the backfill to fail for those SCs. Add a fallback: if reference_wo_ids is empty, check reference_wo_id (singular) and if it matches wo_id, use wo.quantity.",
+    "Company settings has no 'name' field set (returns None). The logo_data is also not set. This may affect the Tax Invoice PDF header display."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_134_round4_fixes.py"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 tests passed)",
+    "frontend": "N/A - UI navigation issues prevented full testing"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "ISSUE A (Outsourced qty backfill) has a bug: the 3-pass algorithm doesn't check reference_wo_id (singular), only reference_wo_ids (plural). Many legacy SCs use the singular field. ISSUE B (Tax Invoice PDF) code looks correct but needs manual verification via browser print. ISSUE C and D endpoints exist and respond correctly. Company settings may need name and logo_data to be set for full PDF header display.",
+  "rca_of_the_issue": {
+    "issue_a_outsourced_qty_backfill": {
+      "root_cause": "The 3-pass backfill algorithm in GET /api/work-orders (lines 5736-5758) checks sc.get('reference_wo_ids') (plural) in Pass 3, but some legacy SCs only have sc.get('reference_wo_id') (singular). When reference_wo_ids is None or empty, the backfill fails even though reference_wo_id contains the correct WO ID.",
+      "reproduction_steps": [
+        "1. Find an OS operation with outsource_sc_order_id set",
+        "2. Check the linked SC - if it has reference_wo_id (singular) but not reference_wo_ids (plural), the backfill will fail",
+        "3. GET /api/work-orders will return outsourced_quantity=0 for that operation"
+      ],
+      "mitigation": "Add a 4th pass or modify Pass 3 to also check reference_wo_id (singular): if matched_qty == 0 and sc.get('reference_wo_id') == _wo_id: matched_qty = wo_qty_lookup.get(_wo_id, 0.0)"
+    }
+  }
+}
