@@ -6506,6 +6506,100 @@ async def short_close_wo_operation(wo_id: str, sequence: int, request: Request):
     }
 
 
+class ShortCloseNoGRNPayload(BaseModel):
+    reason: Optional[str] = ""
+
+
+@work_orders_router.post("/{wo_id}/operations/{sequence}/short-close-no-grn")
+async def short_close_wo_operation_no_grn(wo_id: str, sequence: int, payload: ShortCloseNoGRNPayload, request: Request):
+    """Admin-only: hard-close an in-progress OS operation as COMPLETED
+    WITHOUT receiving any material via GRN.
+
+    Use when the vendor confirms total scrap / loss / write-off and the
+    workflow needs to advance. Unlike the regular `short-close` endpoint
+    (which reverts the operation to `pending` so it can be re-run), this
+    one marks the op as `completed` and `short_closed=true`, so the next
+    process in the routing becomes immediately startable.
+
+    Side-effects on the linked SC:
+      - the matching `job_work_parts` line is marked `short_closed=true`
+      - if no parts remain unreceived, the SC itself flips to `short_closed`
+      - NO stock movement / GRN is created — the cost is treated as an
+        accounting write-off the user handles outside this flow.
+    """
+    user = await get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admin can short-close (no GRN) an operation")
+    wo = await db.work_orders.find_one({"id": wo_id})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    ops = wo.get("operations_status") or []
+    target = None
+    for op in ops:
+        if op.get("sequence") == sequence:
+            target = op
+            break
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Operation sequence {sequence} not found")
+    if not target.get("is_job_work") or target.get("status") != "in_progress":
+        raise HTTPException(status_code=400, detail="Operation must be an in-progress outsourced (OS) operation")
+    sc_order_id = target.get("outsource_sc_order_id")
+    sc_order_number = target.get("outsource_sc_order_number")
+    op_name_val = target.get("operation_name") or ""
+    if isinstance(op_name_val, dict):
+        op_name_val = op_name_val.get("name", "")
+    op_name = (op_name_val or "").strip()
+
+    # Mark the op completed + short_closed. Keep the OS metadata so the
+    # audit trail of who/where the material went remains visible.
+    now = datetime.now(timezone.utc)
+    target["status"] = "completed"
+    target["short_closed"] = True
+    target["short_close_reason"] = payload.reason or ""
+    target["short_closed_at"] = now
+    target["short_closed_by"] = user["id"]
+    target["actual_end"] = now
+    # Treat the entire op qty as accounted for so downstream MO logic
+    # (e.g. quantity_completed roll-up) doesn't think work is still pending.
+    op_qty = float(target.get("allocated_qty") or wo.get("quantity") or 0)
+    target["quantity_completed"] = op_qty
+    target["quantity_accepted"] = op_qty
+    await db.work_orders.update_one({"id": wo_id}, {"$set": {"operations_status": ops}})
+
+    # Mark the SC's matching line short_closed (don't delete — keep audit).
+    sc_updated = False
+    if sc_order_id:
+        sc = await db.subcontract_orders.find_one({"id": sc_order_id})
+        if sc:
+            new_jwp = list(sc.get("job_work_parts") or [])
+            for line in new_jwp:
+                if line.get("wo_id") == wo_id and (line.get("process_name") or "").strip() == op_name:
+                    line["short_closed"] = True
+                    line["short_close_reason"] = payload.reason or ""
+                    line["short_closed_at"] = now
+            # If all remaining lines are short_closed OR received in full, mark the SC short_closed
+            still_open = [
+                p for p in new_jwp
+                if not p.get("short_closed")
+                and float(p.get("received_quantity") or 0) < float(p.get("quantity") or 0)
+            ]
+            update_payload = {"job_work_parts": new_jwp, "updated_at": now}
+            if not still_open:
+                update_payload["status"] = "short_closed"
+                update_payload["short_closed_at"] = now
+                update_payload["short_closed_by"] = user["id"]
+            await db.subcontract_orders.update_one({"id": sc_order_id}, {"$set": update_payload})
+            sc_updated = True
+
+    return {
+        "ok": True,
+        "sc_order_id": sc_order_id,
+        "sc_order_number": sc_order_number,
+        "sc_updated": sc_updated,
+        "completed_qty": op_qty,
+    }
+
+
 @work_orders_router.post("/{wo_id}/reserve")
 async def reserve_materials_for_wo(wo_id: str, request: Request):
     """Reserve materials for an MO by computing its full BOM requirement recursively.

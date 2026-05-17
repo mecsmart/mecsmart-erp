@@ -114,6 +114,23 @@ code, .mono {
    scrolling and without truncated cell values.
    Apply by giving the <table> the class `.line-items-grid`.
    ======================================================================== */
+/* MO Family table — sticky thead so the column headers stay visible
+   when scrolling a long FG-MO + child-MO tree. The parent <details>
+   wraps the table, and the page-level scroll container is the body,
+   so `position: sticky` on the thead pins it relative to the viewport
+   as the user scrolls through the table. `z-index` keeps it above the
+   table rows + chevron rotations. */
+.mo-family-table thead.sticky-mo-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #F3F4F6;
+}
+.mo-family-table thead.sticky-mo-head th {
+  background: #F3F4F6;
+  box-shadow: 0 1px 0 0 #D1D5DB;
+}
+
 .line-items-grid {
   border-collapse: collapse;
   width: 100%;

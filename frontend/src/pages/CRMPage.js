@@ -4279,51 +4279,76 @@ function printInvoiceDoc(doc, opts) {
   .copy-ticks .tk{display:flex;align-items:center;gap:4px}
   .copy-ticks .tk .box{width:10px;height:10px;border:1.2px solid #2D3E50;display:inline-block;border-radius:1px}
   ` : ''}
+  /* ----- Page 2+ running header with LOGO -----------------------------
+     CSS GCPM position-running removes the element from normal flow
+     and places it inside the named at-page margin box. This is the ONLY
+     pure-CSS technique that supports IMAGES + arbitrary HTML in the
+     repeating header (text-only top-left content: ... cannot render the
+     company logo). Chrome print pipeline supports both position-running
+     and content: element() since v96. at-page :first overrides @top-center
+     to content: none so the running header is suppressed on page 1
+     (which already has the full in-flow brand block — no duplication). */
+  .repeat-head { display: none; }
+  @media print {
+    .repeat-head {
+      position: running(invoiceRunningHeader);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 4mm;
+      border-bottom: 1.5px solid ${accentColor};
+      font-size: 10px;
+      color: #0f172a;
+      background: #fff;
+    }
+    .repeat-head img.rh-logo { max-height: 14mm; max-width: 50mm; object-fit: contain; }
+    .repeat-head .rh-name { font-size: 12px; font-weight: 800; color: ${accentColor}; line-height: 1.2; }
+    .repeat-head .rh-meta { font-size: 8.5px; color: #475569; line-height: 1.3; margin-top: 1px; }
+    .repeat-head .rh-right .rh-title { font-size: 11px; font-weight: 700; color: ${accentColor}; }
+    .repeat-head .rh-right .rh-docno { font-size: 9px; color: #475569; font-family: 'Courier New', monospace; }
+  }
   @media print {
     @page {
-      size:A4;
-      margin:16mm 8mm 14mm 8mm;
-      /* Running header for page 2+ — @page :first below suppresses this on
-         page 1 so the in-flow big brand block isn't duplicated. Content is
-         pure CSS-counter text (no images) which is the only thing the
-         margin-box spec allows; the trade-off is no logo on page 2+, but
-         the user explicitly asked for the running header to ONLY repeat
-         from page 2 — and a slim text-only repeat is exactly what's needed. */
-      @top-left {
-        content: "${runHeadLeft}";
-        font-family:'Helvetica Neue',Arial,sans-serif;
-        font-size:9.5px;
-        font-weight:700;
-        color:${accentColor};
-        padding-left:4mm;
-      }
-      @top-right {
-        content: "${runHeadRight}";
-        font-family:'Helvetica Neue',Arial,sans-serif;
-        font-size:9.5px;
-        color:#475569;
-        padding-right:4mm;
+      size: A4;
+      margin: 22mm 8mm 14mm 8mm;
+      @top-center {
+        content: element(invoiceRunningHeader);
       }
       @bottom-right {
         content: "Page " counter(page) " of " counter(pages);
-        font-family:'Helvetica Neue',Arial,sans-serif;
-        font-size:9px;
-        color:#64748b;
-        padding-right:4mm;
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        font-size: 9px;
+        color: #64748b;
+        padding-right: 4mm;
       }
     }
-    /* Suppress the running header on the FIRST printed page — the full
-       in-flow brand block already lives there, so a duplicated thin
-       running header would just be visual noise. Page number stays on
-       page 1 (it's printed by @bottom-right above which remains). */
+    /* Page 1: suppress the running header (the full in-flow brand block
+       already lives in the document body) and reduce the top margin so
+       no extra whitespace appears above it. */
     @page :first {
-      margin-top:8mm;
-      @top-left { content: none; }
-      @top-right { content: none; }
+      margin-top: 8mm;
+      @top-center { content: none; }
     }
-    body{padding:0}
+    body { padding: 0; }
   }
 </style></head><body>
+<!-- Running header (page 2+ only) — moved into at-page top margin by
+     CSS position-running. Carries logo + name + address + GSTIN +
+     invoice title + number. Page 1 hides it via at-page :first override. -->
+<div class="repeat-head">
+  ${cfg.logo_data ? `<img src="${esc(cfg.logo_data)}" class="rh-logo" alt="logo"/>` : ''}
+  <div style="flex:1">
+    <div class="rh-name">${esc(cfg.name)}</div>
+    <div class="rh-meta">
+      ${[cfg.address_line1, cfg.address_line2].filter(Boolean).map(esc).join(' · ')}
+      ${cfg.gstin ? ` · GSTIN: <strong>${esc(cfg.gstin)}</strong>` : ''}
+    </div>
+  </div>
+  <div class="rh-right" style="text-align:right">
+    <div class="rh-title">${esc(opts.title)}</div>
+    <div class="rh-docno">${esc(docNo)}</div>
+  </div>
+</div>
 ${(isQuotation && opts.includeCover) ? `
 <!-- Cover Page (full A4, outside .page padding) -->
 <div class="cover-page">

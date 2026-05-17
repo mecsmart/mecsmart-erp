@@ -23,7 +23,8 @@ import {
   PackageX,
   Filter,
   FileText,
-  X as XIcon
+  X as XIcon,
+  RefreshCw
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -203,6 +204,30 @@ export default function ManufacturingPage() {
       fetchData();
     } catch (e) {
       alert(e.response?.data?.detail || 'Failed to short close operation');
+    }
+  };
+
+  // Rename above ("Short Close") to REVOKE in the UI — same backend endpoint;
+  // it reverts an OS op to pending so it can be redone elsewhere.
+  // ----------------------------------------------------------------------
+  // True Short Close — closes the OS op as COMPLETED without any GRN. The
+  // qty is treated as fully accounted for (no return material expected) so
+  // the next process becomes immediately startable. Used when the vendor
+  // confirms scrap/loss or when the cost has been written off but the
+  // workflow needs to proceed.
+  const handleShortCloseNoGRN = async (op) => {
+    if (!jobCardWO?.id) return;
+    const opName = typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : (op.operation_name || '');
+    const reason = window.prompt(`Short Close (no GRN) operation "${opName}" on ${jobCardWO.wo_number}?\n\nThis will:\n• Mark this operation as COMPLETED (no material will be received).\n• Allow the next process to start immediately.\n• Cannot be undone — the SC line will be marked short_closed.\n\nEnter a short reason for the audit trail:`, 'Vendor scrap / loss written off');
+    if (reason === null) return;  // user cancelled
+    try {
+      const { data } = await api.post(`/api/work-orders/${jobCardWO.id}/operations/${op.sequence}/short-close-no-grn`, { reason });
+      alert(`Operation "${opName}" short-closed without GRN.\n${data?.sc_order_id ? `SC ${data.sc_order_number || data.sc_order_id} marked short_closed.` : ''}\nNext process is now unlocked.`);
+      const fresh = await api.get(`/api/work-orders/${jobCardWO.id}`);
+      setJobCardWO(fresh.data);
+      fetchData();
+    } catch (e) {
+      alert(e.response?.data?.detail || 'Failed to short close (no GRN) operation');
     }
   };
 
@@ -1949,8 +1974,12 @@ export default function ManufacturingPage() {
                           </div>
                         </summary>
                         <div className="overflow-x-auto">
-                          <table className="w-full data-table"><thead><tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
-                          <tbody>{renderMORow(parentMO, 0, activePanelFilter, panelSearch[parentMO.id] || '', panelStatus[parentMO.id] || '', familyMask)}</tbody></table>
+                          <table className="w-full data-table mo-family-table">
+                            <thead className="sticky-mo-head">
+                              <tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr>
+                            </thead>
+                            <tbody>{renderMORow(parentMO, 0, activePanelFilter, panelSearch[parentMO.id] || '', panelStatus[parentMO.id] || '', familyMask)}</tbody>
+                          </table>
                         </div>
                       </details>
                     );
@@ -2312,22 +2341,45 @@ export default function ManufacturingPage() {
                           {op.status === 'in_progress' && op.is_job_work && (
                             <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium" data-testid={`outsourced-op-${op.sequence}`}>
                               {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'} — Receive via GRN
+                              {(op.outsourced_quantity || 0) > 0 && (
+                                <span className="block text-[9px] text-[#92400E] font-normal mt-0.5" data-testid={`outsourced-qty-${op.sequence}`}>
+                                  Outsourced qty: <span className="mono">{op.outsourced_quantity}</span>{' '}
+                                  / {jobCardWO.quantity}
+                                </span>
+                              )}
                             </span>
                           )}
-                          {/* Admin-only Short Close at the OPERATION level — terminates a
-                              running OS operation mid-way and releases JUST THIS OP back to
-                              pending. Use this when the SC has multiple MOs and only one
-                              operation needs to be aborted (the SC-level Short Close
-                              terminates the whole SC for all linked MOs). */}
+                          {op.short_closed && (
+                            <span className="text-[10px] text-[#9B1C1C] bg-[#FDE8E8] px-2 py-1 rounded font-medium" data-testid={`short-closed-op-${op.sequence}`}>
+                              <XIcon className="w-3 h-3 inline mr-0.5" />Short Closed{op.short_close_reason ? ` — ${op.short_close_reason}` : ''}
+                            </span>
+                          )}
+                          {/* REVOKE — admin-only. Reverts a running OS operation back to
+                              "pending" so it can be re-outsourced or done in-house.
+                              Previously this button was labelled "Short Close" but the
+                              user clarified the action is actually a revoke (the SC line
+                              survives in restored state, ready for a fresh DC).
+                              For TRUE short-close (terminate without GRN) use the
+                              "Short Close (no GRN)" button below. */}
                           {user?.role === 'admin' && op.status === 'in_progress' && op.is_job_work && (
-                            <button
-                              onClick={() => handleShortCloseOperation(op)}
-                              className="btn-secondary text-xs px-2 py-1 text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]"
-                              data-testid={`short-close-op-${op.sequence}`}
-                              title="Short Close this operation (admin) — releases just this op back to pending"
-                            >
-                              <XIcon className="w-3 h-3 inline mr-1" />Short Close
-                            </button>
+                            <>
+                              <button
+                                onClick={() => handleShortCloseOperation(op)}
+                                className="btn-secondary text-xs px-2 py-1 text-[#92400E] border-[#92400E] hover:bg-[#FEF3C7]"
+                                data-testid={`revoke-op-${op.sequence}`}
+                                title="Revoke — release this op back to pending (SC line is restored)"
+                              >
+                                <RefreshCw className="w-3 h-3 inline mr-1" />Revoke
+                              </button>
+                              <button
+                                onClick={() => handleShortCloseNoGRN(op)}
+                                className="btn-secondary text-xs px-2 py-1 text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]"
+                                data-testid={`short-close-nogrn-op-${op.sequence}`}
+                                title="Short Close (no GRN) — mark this OS op as completed without receiving material. The next process becomes available immediately."
+                              >
+                                <XIcon className="w-3 h-3 inline mr-1" />Short Close
+                              </button>
+                            </>
                           )}
                           {op.status === 'completed' && (
                             <CheckCircle2 className="w-4 h-4 text-[#03543F]" />
