@@ -19,6 +19,15 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-17 (Page-2+ logo header + JW-OS Revoke/Short-Close split + outsourced-qty hint + sticky MO header — DONE & VERIFIED ✅):**
+  1. **Page-2+ running header now carries logo + name + address + GSTIN + invoice#** — switched from CSS `@page` margin-box strings to CSS GCPM `position: running()` + `content: element(invoiceRunningHeader)`. Chrome's print pipeline supports `element()` since v96 so the running header now displays arbitrary HTML (including images). `@page :first { @top-center { content: none; } }` suppresses it on page 1.
+  2. **Renamed existing JW-OS "Short Close" → "Revoke"** in MO Job Card (the action reverts the op to pending so it can be re-outsourced — that's a revoke, not a short close). Uses RefreshCw icon, amber styling.
+  3. **NEW "Short Close" button on JW-OS** (`/app/backend/server.py` `short_close_wo_operation_no_grn` + frontend `handleShortCloseNoGRN`). Marks the op `completed` + `short_closed=true` WITHOUT any GRN — the next process becomes immediately startable. The matching SC line is flagged short_closed; SC itself flips to short_closed when no open lines remain. Admin-only.
+  4. **Outsourced qty hint** on the Job Card chip — small "Outsourced qty: N / total" line under the JW chip so operators can see how much is currently with the vendor.
+  5. **Sticky FG-MO header row** when scrolling — `.mo-family-table thead.sticky-mo-head { position: sticky; top: 0; z-index: 5; }` in `index.css`.
+  - **Testing**: `testing_agent_v3_fork` iteration 132 — 9/10 backend (1 skipped: non-admin auth test env limitation) + all frontend code-review items pass.
+
+
 - **2026-02-17 (Page-2+ running header + Wider TI dialog — DONE ✅):**
   1. **Running header on page 2+ only**: Used CSS `@page` margin boxes — `@top-left` = company name + GSTIN, `@top-right` = invoice title + number, `@bottom-right` = "Page X of Y". `@page :first` overrides both `@top-*` slots to `content: none` so page 1 keeps only the in-flow big brand block (no duplicate). Trade-off: no logo image in the page 2+ margin (CSS spec restricts margin-box content to strings + counters only), but the slim text-only repeat is exactly what the user requested.
   2. **TI dialog widened**: `<DialogContent>` `max-w-5xl` → `!max-w-[1400px] w-[95vw]` so the customer block, billing/shipping address textareas and the wider line-items table all fit comfortably without horizontal scroll.
