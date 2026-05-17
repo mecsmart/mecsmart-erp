@@ -1,0 +1,99 @@
+{
+  "summary": "Iteration 130 - Tax Invoice Stock Consumption + Tally XML Seller Details + Packing List Self-Heal: All 12 backend tests pass. Frontend UI verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/crm/tax-invoices",
+        "issue": "Response does not include stock_consumed flag immediately after creation (requires re-fetch from list). The DB is updated correctly but the returned doc is stale.",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_130_tax_invoice_stock_tally.py",
+    "/app/test_reports/pytest/pytest_iteration_130.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: create_tax_invoice returns doc before _consume_tax_invoice_stock updates the DB. The stock_consumed flag is not in the immediate response but IS correctly set in DB and visible on subsequent list/fetch calls."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_130_tax_invoice_stock_tally.py"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  "seed_data_creation": "Created test items, customers, and tax invoices for stock consumption testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 130 tests all pass. Stock consumption feature works correctly - creates dispatch/dispatch_reversal inventory_transactions, decrements/restores item.current_stock, and is idempotent via stock_consumed flag. Tally XML includes seller details (BASICCOMPANYNAME, COMPANYGSTIN, COMPANYADDRESS.LIST, SVCURRENTCOMPANY). Packing List duplicate guard blocks duplicates and self-heals missing back-links.",
+  "features_verified": {
+    "stock_consumption_issued_invoice": {
+      "status": "PASS",
+      "details": "POST /api/crm/tax-invoices with status='issued' and ship_from_warehouse_id: stock_consumed=true (after re-fetch), item.current_stock decreases, dispatch inventory_transaction created with warehouse_id"
+    },
+    "stock_consumption_draft_invoice": {
+      "status": "PASS",
+      "details": "POST /api/crm/tax-invoices with status='draft': stock_consumed NOT true, item.current_stock unchanged, NO dispatch inventory_transaction"
+    },
+    "stock_consumption_draft_to_issued": {
+      "status": "PASS",
+      "details": "PUT /api/crm/tax-invoices/{tid} draft→issued: stock_consumed becomes true, item.current_stock decrements exactly once (idempotent)"
+    },
+    "stock_consumption_issued_to_cancelled": {
+      "status": "PASS",
+      "details": "PUT /api/crm/tax-invoices/{tid} issued→cancelled: stock_consumed becomes false, item.current_stock restored, dispatch_reversal inventory_transaction recorded"
+    },
+    "packing_list_duplicate_guard_self_heal": {
+      "status": "PASS",
+      "details": "POST /api/crm/packing-lists for TI with existing PL: returns 400 'already exists', back-link self-healed on TI doc"
+    },
+    "tally_xml_seller_details": {
+      "status": "PASS",
+      "details": "GET /api/crm/tax-invoices/{tid}/tally-xml contains BASICCOMPANYNAME, COMPANYGSTIN, COMPANYADDRESS.LIST with ADDRESS elements, SVCURRENTCOMPANY in envelope"
+    },
+    "tally_xml_bulk_svcurrentcompany": {
+      "status": "PASS",
+      "details": "POST /api/crm/tax-invoices/tally-xml-bulk: envelope contains SVCURRENTCOMPANY, multiple vouchers in output"
+    },
+    "regression_pi_tally_xml_single": {
+      "status": "PASS",
+      "details": "PI Tally XML single endpoint works"
+    },
+    "regression_pi_tally_xml_bulk": {
+      "status": "PASS",
+      "details": "PI Tally XML bulk endpoint works"
+    },
+    "regression_grn_list": {
+      "status": "PASS",
+      "details": "GRN list endpoint works"
+    },
+    "regression_pending_grns": {
+      "status": "PASS",
+      "details": "Pending GRNs for PO endpoint works"
+    },
+    "regression_subcontract_orders": {
+      "status": "PASS",
+      "details": "Subcontract orders (JW-SO) list endpoint works"
+    },
+    "frontend_ship_from_store_dropdown": {
+      "status": "PASS",
+      "details": "Ship From Store dropdown found with data-testid='ti-ship-from-warehouse' in Tax Invoice dialog"
+    },
+    "frontend_hsn_column_width": {
+      "status": "PASS",
+      "details": "HSN column has style={{ width: '150px', minWidth: '150px' }} on Quotation (line 1501) and Tax Invoice (line 3211) tables"
+    },
+    "frontend_print_doc_wrap": {
+      "status": "PASS",
+      "details": "Print HTML uses <table class='doc-wrap'> with thead/tfoot containing repeat-head/repeat-foot for running header/footer"
+    }
+  }
+}

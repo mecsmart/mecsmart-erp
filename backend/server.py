@@ -10782,7 +10782,16 @@ def _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inte
       </VOUCHER>
     </TALLYMESSAGE>"""
 
-def _wrap_tally_envelope(messages_xml, report_desc="Vouchers"):
+def _wrap_tally_envelope(messages_xml, report_desc="Vouchers", company=None):
+    """Wrap a list of <TALLYMESSAGE> blocks in the standard Tally import envelope.
+
+    When `company` is provided, the seller's company name is embedded in
+    `<SVCURRENTCOMPANY>` so the import targets the right Tally company file
+    automatically (instead of relying on the default `##SVCurrentCompany`
+    placeholder).
+    """
+    comp_name = (company or {}).get("company_name") or "##SVCurrentCompany"
+    comp_name_x = _xml_escape(comp_name)
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <ENVELOPE>
   <HEADER>
@@ -10793,7 +10802,7 @@ def _wrap_tally_envelope(messages_xml, report_desc="Vouchers"):
       <REQUESTDESC>
         <REPORTNAME>{report_desc}</REPORTNAME>
         <STATICVARIABLES>
-          <SVCURRENTCOMPANY>##SVCurrentCompany</SVCURRENTCOMPANY>
+          <SVCURRENTCOMPANY>{comp_name_x}</SVCURRENTCOMPANY>
         </STATICVARIABLES>
       </REQUESTDESC>
       <REQUESTDATA>{messages_xml}
@@ -10817,7 +10826,7 @@ async def export_purchase_invoice_to_tally(invoice_id: str, request: Request):
     for ln in lines:
         ln["item"] = await db.items.find_one({"id": ln.get("item_id")}, {"_id": 0}) or {}
     msg = _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inter_state)
-    xml = _wrap_tally_envelope(msg)
+    xml = _wrap_tally_envelope(msg, company=company)
     fname = f"tally_{invoice.get('invoice_number', invoice_id)}.xml"
     return Response(
         content=xml,
@@ -10844,7 +10853,7 @@ async def export_purchase_invoices_bulk_tally(request: Request, payload: dict = 
         for ln in lines:
             ln["item"] = await db.items.find_one({"id": ln.get("item_id")}, {"_id": 0}) or {}
         messages.append(_build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inter_state))
-    xml = _wrap_tally_envelope("".join(messages))
+    xml = _wrap_tally_envelope("".join(messages), company=company)
     return Response(
         content=xml,
         media_type="application/xml",
@@ -10972,6 +10981,26 @@ def _build_tally_sales_voucher_xml(invoice, customer, company, lines, is_inter_s
     gstin = _xml_escape(customer.get("gstin") or "")
     state_code = _xml_escape(customer.get("state_code") or "")
 
+    # ----- Seller (company) details ----------------------------------------
+    # Tally usually picks the seller from the loaded company file, but we
+    # embed the seller block so imports into a fresh / wrong-company target
+    # still carry the correct GSTIN, address, and state code on the voucher.
+    seller_name = _xml_escape(company.get("company_name") or "")
+    seller_addr_src = (
+        company.get("address") or company.get("address_line1") or ""
+    )
+    seller_addr_lines = [s.strip() for s in seller_addr_src.split("\n") if s.strip()]
+    seller_city_state = ", ".join([x for x in [company.get("city"), company.get("state"), company.get("pin_code")] if x])
+    if seller_city_state:
+        seller_addr_lines.append(seller_city_state)
+    if company.get("gstin"):
+        seller_addr_lines.append(f"GSTIN: {company.get('gstin')}")
+    if company.get("state_code"):
+        seller_addr_lines.append(f"State Code: {company.get('state_code')}")
+    seller_addr_block = "".join(f"<ADDRESS>{_xml_escape(a)}</ADDRESS>" for a in seller_addr_lines)
+    seller_gstin = _xml_escape(company.get("gstin") or "")
+    seller_state_code = _xml_escape(company.get("state_code") or "")
+
     return f"""
     <TALLYMESSAGE xmlns:UDF="TallyUDF">
       <VOUCHER VCHTYPE="Sales" ACTION="Create" OBJVIEW="Invoice Voucher View">
@@ -10988,6 +11017,13 @@ def _build_tally_sales_voucher_xml(invoice, customer, company, lines, is_inter_s
         {('<PARTYGSTIN>' + gstin + '</PARTYGSTIN>') if gstin else ''}
         {('<STATENAME>' + state_code + '</STATENAME>') if state_code else ''}
         {('<PLACEOFSUPPLY>' + _xml_escape(invoice.get('place_of_supply') or '') + '</PLACEOFSUPPLY>') if invoice.get('place_of_supply') else ''}
+        <!-- Seller / Company details — embedded so imports carry GSTIN + address -->
+        {('<BASICCOMPANYNAME>' + seller_name + '</BASICCOMPANYNAME>') if seller_name else ''}
+        {('<BASICCOMPANYFORMALNAME>' + seller_name + '</BASICCOMPANYFORMALNAME>') if seller_name else ''}
+        <BASICCOMPANYADDRESS.LIST>{seller_addr_block}</BASICCOMPANYADDRESS.LIST>
+        <COMPANYADDRESS.LIST>{seller_addr_block}</COMPANYADDRESS.LIST>
+        {('<COMPANYGSTIN>' + seller_gstin + '</COMPANYGSTIN>') if seller_gstin else ''}
+        {('<COMPANYSTATENAME>' + seller_state_code + '</COMPANYSTATENAME>') if seller_state_code else ''}
         <ISINVOICE>Yes</ISINVOICE>
         <EFFECTIVEDATE>{inv_date}</EFFECTIVEDATE>
         {ledger_block}
@@ -11016,7 +11052,7 @@ async def export_tax_invoice_to_tally(tid: str, request: Request):
     is_inter_state = bool(invoice.get("is_inter_state"))
     await _hydrate_ti_lines_for_tally(invoice)
     msg = _build_tally_sales_voucher_xml(invoice, customer, company, invoice.get("lines", []), is_inter_state)
-    xml = _wrap_tally_envelope(msg)
+    xml = _wrap_tally_envelope(msg, company=company)
     fname = f"tally_{invoice.get('invoice_no', tid)}.xml"
     return Response(
         content=xml,
@@ -11042,7 +11078,7 @@ async def export_tax_invoices_bulk_tally(request: Request, payload: dict = Body(
         is_inter_state = bool(invoice.get("is_inter_state"))
         await _hydrate_ti_lines_for_tally(invoice)
         messages.append(_build_tally_sales_voucher_xml(invoice, customer, company, invoice.get("lines", []), is_inter_state))
-    xml = _wrap_tally_envelope("".join(messages))
+    xml = _wrap_tally_envelope("".join(messages), company=company)
     return Response(
         content=xml,
         media_type="application/xml",
@@ -14234,6 +14270,7 @@ class TaxInvoiceCreate(BaseModel):
     terms: Optional[str] = ""
     status: Optional[str] = "draft"  # draft / issued / paid / cancelled
     currency: Optional[str] = "INR"  # INR (default), USD, EUR, GBP, AED — non-INR = export (no GST)
+    ship_from_warehouse_id: Optional[str] = ""  # Source store — stock is decremented from this warehouse on save
 
 class TaxInvoiceUpdate(BaseModel):
     status: Optional[str] = None
@@ -14246,6 +14283,7 @@ class TaxInvoiceUpdate(BaseModel):
     shipping_address: Optional[str] = None
     customer_po_number: Optional[str] = None
     currency: Optional[str] = None
+    ship_from_warehouse_id: Optional[str] = None
 
 async def _enrich_tax_invoice(t):
     t.pop("_id", None)
@@ -14259,6 +14297,10 @@ async def _enrich_tax_invoice(t):
         so = await db.production_orders.find_one({"id": t["sales_order_id"]}, {"_id": 0, "order_number": 1})
         if so:
             t["sales_order"] = so
+    if t.get("ship_from_warehouse_id"):
+        w = await db.warehouses.find_one({"id": t["ship_from_warehouse_id"]}, {"_id": 0, "name": 1, "code": 1})
+        if w:
+            t["ship_from_warehouse"] = w
     for ln in (t.get("lines") or []):
         if ln.get("item_id"):
             it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1, "hsn_code": 1})
@@ -14267,6 +14309,84 @@ async def _enrich_tax_invoice(t):
     # Attach document creator for signature stamping on the printed TI.
     t["created_by_user"] = await _lookup_creator(t.get("created_by"))
     return t
+
+
+async def _consume_tax_invoice_stock(invoice_doc, user_id):
+    """Decrement on-hand stock + record inventory_transactions for every
+    physical-item line on a Tax Invoice. Idempotent — sets
+    invoice_doc['stock_consumed']=True so a second call is a no-op.
+
+    Stock is reduced from `current_stock` on the item master. When a
+    `ship_from_warehouse_id` is specified, the warehouse is recorded on the
+    inventory_transaction row for audit; future iterations can add
+    per-warehouse stock breakdowns without changing this contract.
+    """
+    if invoice_doc.get("stock_consumed"):
+        return
+    warehouse_id = invoice_doc.get("ship_from_warehouse_id") or ""
+    inv_no = invoice_doc.get("invoice_no", "")
+    consumed_any = False
+    for ln in (invoice_doc.get("lines") or []):
+        item_id = ln.get("item_id")
+        qty = float(ln.get("quantity") or 0)
+        if not item_id or qty <= 0:
+            continue
+        # Fetch BEFORE-stock for the audit trail (snapshot of running stock).
+        item = await db.items.find_one({"id": item_id}, {"_id": 0, "current_stock": 1})
+        prev_stock = float((item or {}).get("current_stock") or 0)
+        new_stock = prev_stock - qty
+        await db.items.update_one({"id": item_id}, {"$set": {"current_stock": new_stock}})
+        await db.inventory_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "item_id": item_id,
+            "transaction_type": "dispatch",
+            "quantity": -qty,
+            "reference_type": "tax_invoice",
+            "reference_id": inv_no,
+            "warehouse_id": warehouse_id,
+            "previous_stock": prev_stock,
+            "new_stock": new_stock,
+            "notes": f"Dispatched via Tax Invoice {inv_no}",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user_id,
+        })
+        consumed_any = True
+    if consumed_any:
+        await db.tax_invoices.update_one({"id": invoice_doc["id"]}, {"$set": {"stock_consumed": True, "stock_consumed_at": datetime.now(timezone.utc)}})
+
+
+async def _restore_tax_invoice_stock(invoice_doc, user_id):
+    """Reverse of _consume_tax_invoice_stock — used when an issued TI is
+    cancelled. Idempotent: only runs if `stock_consumed` is True.
+    """
+    if not invoice_doc.get("stock_consumed"):
+        return
+    inv_no = invoice_doc.get("invoice_no", "")
+    warehouse_id = invoice_doc.get("ship_from_warehouse_id") or ""
+    for ln in (invoice_doc.get("lines") or []):
+        item_id = ln.get("item_id")
+        qty = float(ln.get("quantity") or 0)
+        if not item_id or qty <= 0:
+            continue
+        item = await db.items.find_one({"id": item_id}, {"_id": 0, "current_stock": 1})
+        prev_stock = float((item or {}).get("current_stock") or 0)
+        new_stock = prev_stock + qty
+        await db.items.update_one({"id": item_id}, {"$set": {"current_stock": new_stock}})
+        await db.inventory_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "item_id": item_id,
+            "transaction_type": "dispatch_reversal",
+            "quantity": qty,
+            "reference_type": "tax_invoice",
+            "reference_id": inv_no,
+            "warehouse_id": warehouse_id,
+            "previous_stock": prev_stock,
+            "new_stock": new_stock,
+            "notes": f"Restored — Tax Invoice {inv_no} cancelled",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": user_id,
+        })
+    await db.tax_invoices.update_one({"id": invoice_doc["id"]}, {"$set": {"stock_consumed": False, "stock_restored_at": datetime.now(timezone.utc)}})
 
 @crm_router.get("/tax-invoices")
 async def list_tax_invoices(request: Request, status: Optional[str] = None):
@@ -14315,19 +14435,12 @@ async def create_tax_invoice(data: TaxInvoiceCreate, request: Request):
     else:
         doc["qr_code"] = ""
     await db.tax_invoices.insert_one(doc)
-    # Fix 4 — Tax invoices DELIVER goods; decrement on-hand stock for every
-    # line that references an actual item (skips free-text/service lines).
-    # Skips draft / cancelled invoices.
+    # Stock consumption: only run when the invoice is being created in an
+    # ALREADY-committed state (not draft / cancelled). The reusable helper
+    # tracks `stock_consumed` so subsequent updates won't double-consume.
     inv_status = (doc.get("status") or "issued").lower()
     if inv_status not in ("draft", "cancelled"):
-        for ln in lines:
-            item_id = ln.get("item_id")
-            qty = float(ln.get("quantity") or 0)
-            if item_id and qty > 0:
-                await db.items.update_one(
-                    {"id": item_id},
-                    {"$inc": {"current_stock": -qty}},
-                )
+        await _consume_tax_invoice_stock(doc, user["id"])
     return await _enrich_tax_invoice(doc)
 
 @crm_router.put("/tax-invoices/{tid}")
@@ -14371,7 +14484,18 @@ async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request)
             update["qr_code"] = ""
     update["updated_at"] = datetime.now(timezone.utc)
     await db.tax_invoices.update_one({"id": tid}, {"$set": update})
-    return await _enrich_tax_invoice(await db.tax_invoices.find_one({"id": tid}))
+    # Handle stock-consumption transitions based on status change:
+    #   - draft → issued/paid: consume stock (one-time, gated by stock_consumed flag)
+    #   - issued/paid → cancelled: restore stock
+    # NB: the helper is idempotent so a no-op transition is safe.
+    fresh = await db.tax_invoices.find_one({"id": tid})
+    if fresh:
+        prev_status = (existing.get("status") or "draft").lower()
+        new_status = (fresh.get("status") or prev_status).lower()
+        if new_status not in ("draft", "cancelled") and not fresh.get("stock_consumed"):
+            await _consume_tax_invoice_stock(fresh, user["id"])
+        elif new_status == "cancelled" and fresh.get("stock_consumed"):
+            await _restore_tax_invoice_stock(fresh, user["id"])
     return await _enrich_tax_invoice(await db.tax_invoices.find_one({"id": tid}))
 
 @crm_router.delete("/tax-invoices/{tid}")
@@ -14875,10 +14999,22 @@ async def create_packing_list(data: PackingListCreate, request: Request):
     if not ti:
         raise HTTPException(status_code=404, detail="Tax Invoice not found")
     # Block duplicate Packing Lists per Tax Invoice. Backend enforcement is
-    # defense-in-depth — frontend also disables the action button.
-    if ti.get("packing_list_id") or ti.get("packing_list_no"):
-        existing = await db.packing_lists.find_one({"tax_invoice_id": data.tax_invoice_id}, {"_id": 0, "packing_list_no": 1})
-        existing_no = (existing or {}).get("packing_list_no") or ti.get("packing_list_no")
+    # defense-in-depth — frontend also disables the action button. Check the
+    # AUTHORITATIVE source first (packing_lists collection) so legacy TIs
+    # whose back-link was never populated still get blocked when a PL exists.
+    existing_pl = await db.packing_lists.find_one(
+        {"tax_invoice_id": data.tax_invoice_id},
+        {"_id": 0, "packing_list_no": 1, "id": 1},
+    )
+    if existing_pl or ti.get("packing_list_id") or ti.get("packing_list_no"):
+        existing_no = (existing_pl or {}).get("packing_list_no") or ti.get("packing_list_no") or "(existing)"
+        # If we found a PL but the TI back-link is missing, repair it so the
+        # FE will see the "already created" state on next refresh.
+        if existing_pl and not ti.get("packing_list_id"):
+            await db.tax_invoices.update_one(
+                {"id": data.tax_invoice_id},
+                {"$set": {"packing_list_id": existing_pl.get("id"), "packing_list_no": existing_no, "updated_at": datetime.now(timezone.utc)}},
+            )
         raise HTTPException(
             status_code=400,
             detail=f"Packing List {existing_no} already exists for this Tax Invoice. Delete it first to regenerate."

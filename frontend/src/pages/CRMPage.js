@@ -1498,7 +1498,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                     <tr>
                       <th className="row-num">#</th>
                       <th style={{ minWidth: '300px' }}>Item Name &amp; Description</th>
-                      <th style={{ width: '120px' }}>HSN</th>
+                      <th style={{ width: '150px', minWidth: '150px' }}>HSN</th>
                       <th style={{ width: '80px' }}>Qty</th>
                       <th style={{ width: '70px' }}>UOM</th>
                       <th style={{ width: '110px' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
@@ -2716,6 +2716,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   const [list, setList] = useState([]);
   const [salesOrders, setSalesOrders] = useState([]);
   const [items, setItems] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
   const [dialog, setDialog] = useState(false);
   const [sourceType, setSourceType] = useState('sales_order');  // 'sales_order' | 'po' | 'manual'
   const [selectedSO, setSelectedSO] = useState('');
@@ -2735,6 +2736,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
     notes: '',
     terms: '',
     currency: 'INR',
+    ship_from_warehouse_id: '',  // Source store for stock deduction on save
     lines: [emptyTaxInvoiceLine()],
   };
   const [form, setForm] = useState(emptyForm);
@@ -2750,15 +2752,17 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // Fetch sales orders + items when dialog opens
+  // Fetch sales orders + items + warehouses when dialog opens
   const openDialog = async (ti) => {
     try {
-      const [soRes, itRes] = await Promise.all([
+      const [soRes, itRes, whRes] = await Promise.all([
         api.get('/api/production').catch(() => ({ data: [] })),
         api.get('/api/items').catch(() => ({ data: [] })),
+        api.get('/api/warehouses').catch(() => ({ data: [] })),
       ]);
       setSalesOrders((soRes.data || []).filter(o => ['confirmed', 'in_progress', 'completed', 'partially_cancelled'].includes(o.status)));
       setItems(itRes.data || []);
+      setWarehouses((whRes.data || []).filter(w => (w.status || 'active') === 'active'));
     } catch (e) { console.error(e); }
     if (ti) {
       // EDIT mode — pre-fill from existing TI
@@ -2781,6 +2785,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
         notes: ti.notes || '',
         terms: ti.terms || '',
         currency: ti.currency || 'INR',
+        ship_from_warehouse_id: ti.ship_from_warehouse_id || '',
         lines: (ti.lines || []).map(l => ({ ...l })),
       });
     } else {
@@ -3142,7 +3147,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
             )}
 
             {/* Common fields */}
-            <div className="grid grid-cols-5 gap-3">
+            <div className="grid grid-cols-6 gap-3">
               <div>
                 <label className="text-xs text-[#4B5563]">Invoice Date</label>
                 <input type="date" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" value={form.invoice_date} onChange={e => setForm({ ...form, invoice_date: e.target.value })} data-testid="ti-invoice-date" />
@@ -3152,12 +3157,21 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                 <input type="date" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} data-testid="ti-due-date" />
               </div>
               <div>
-                <label className="text-xs text-[#4B5563]">Place of Supply (State Code)</label>
+                <label className="text-xs text-[#4B5563]">Place of Supply</label>
                 <input type="text" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm mono uppercase" maxLength={2} placeholder="27" value={form.place_of_supply} onChange={e => setForm({ ...form, place_of_supply: e.target.value.toUpperCase() })} data-testid="ti-pos" />
               </div>
               <div>
                 <label className="text-xs text-[#4B5563]">Customer PO Ref <span className="text-[#9CA3AF]">(optional)</span></label>
                 <input type="text" className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" placeholder="optional" value={form.customer_po_number} onChange={e => setForm({ ...form, customer_po_number: e.target.value })} data-testid="ti-po-ref" />
+              </div>
+              <div>
+                <label className="text-xs text-[#4B5563]">Ship From Store <span className="text-[10px] text-[#9CA3AF]">(stock deducts here)</span></label>
+                <select className="w-full mt-1 px-2 py-1.5 border border-[#D1D5DB] rounded-sm text-sm" value={form.ship_from_warehouse_id || ''} onChange={e => setForm({ ...form, ship_from_warehouse_id: e.target.value })} data-testid="ti-ship-from-warehouse">
+                  <option value="">— Select warehouse —</option>
+                  {warehouses.map(w => (
+                    <option key={w.id} value={w.id}>{w.code ? `${w.code} · ` : ''}{w.name}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="text-xs text-[#4B5563]">Currency <span className="text-[10px] text-[#9CA3AF]">(non-INR ⇒ no GST)</span></label>
@@ -3194,7 +3208,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                   <thead><tr>
                     <th className="row-num">#</th>
                     <th style={{ minWidth: '260px' }}>Item &amp; Description</th>
-                    <th style={{ width: '120px' }}>HSN</th>
+                    <th style={{ width: '150px', minWidth: '150px' }}>HSN</th>
                     <th style={{ width: '70px', textAlign: 'right' }}>Qty</th>
                     <th style={{ width: '60px' }}>UOM</th>
                     <th style={{ width: '100px', textAlign: 'right' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
@@ -4221,62 +4235,30 @@ function printInvoiceDoc(doc, opts) {
   .copy-ticks .tk .box{width:10px;height:10px;border:1.2px solid #2D3E50;display:inline-block;border-radius:1px}
   ` : ''}
   @media print {
-    @page {size:A4;margin:18mm 12mm 14mm 12mm}
+    @page {size:A4;margin:8mm 8mm 10mm 8mm}
     body{padding:0}
-    /* Repeating header / footer on every printed page (Tax Invoice).
-       The print-running-header element sits in the @page top margin
-       via position:fixed at top:0, replicating the company brand on
-       every page. Chrome / Edge / Safari all paint position:fixed
-       elements on every printed page. */
-    .print-running-header{
-      position:fixed;
-      top:0;left:0;right:0;
-      display:flex;align-items:center;gap:10px;
-      padding:6px 12mm;
-      background:#fff;
-      border-bottom:1.5px solid ${accentColor};
-      font-size:10px;color:#0f172a;
-      height:14mm;
-    }
-    .print-running-header .ph-name{font-size:12px;font-weight:800;color:${accentColor}}
-    .print-running-header .ph-meta{font-size:9px;color:#475569;line-height:1.3}
-    .print-running-header img.ph-logo{max-height:11mm;max-width:30mm;object-fit:contain}
-    .print-running-footer{
-      position:fixed;
-      bottom:0;left:0;right:0;
-      padding:4px 12mm;
-      border-top:1px solid #e2e8f0;
-      font-size:8px;color:#64748b;text-align:center;
-      background:#fff;
-      height:8mm;
-    }
-    /* Reserve room above page content so the first-page in-flow header
-       isn't hidden behind the running header. */
-    .page{padding-top:4mm}
-    /* On printed pages the in-flow header (logo + address block) keeps the
-       full company info on page 1; the small running header above repeats on
-       subsequent pages. To avoid duplicate-looking logos on page 1, the
-       running header is hidden on screen — only the print stylesheet shows it. */
   }
-  .print-running-header,.print-running-footer{display:none}
-  @media print {.print-running-header,.print-running-footer{display:flex}}
+  /* Repeating header / footer on every printed page (Tax Invoice).
+     Uses the canonical thead/tfoot pattern — Chrome / Edge / Safari all
+     repeat <thead> on every printed page when the parent table breaks
+     across pages. The compact running header replaces the previously
+     used position:fixed approach which overlapped page-1 content. */
+  table.doc-wrap{width:100%;border-collapse:collapse}
+  table.doc-wrap > thead, table.doc-wrap > tfoot{display:none}
+  table.doc-wrap > tbody > tr > td{padding:0}
+  @media print {
+    table.doc-wrap > thead{display:table-header-group}
+    table.doc-wrap > tfoot{display:table-footer-group}
+    .repeat-head{display:flex;align-items:center;gap:10px;
+      padding:4px 4mm;border-bottom:1.5px solid ${accentColor};
+      font-size:10px;color:#0f172a;background:#fff;}
+    .repeat-head .rh-name{font-size:11px;font-weight:800;color:${accentColor}}
+    .repeat-head .rh-meta{font-size:8.5px;color:#475569;line-height:1.3}
+    .repeat-head img.rh-logo{max-height:9mm;max-width:24mm;object-fit:contain}
+    .repeat-foot{padding:3px 4mm;border-top:1px solid #e2e8f0;
+      font-size:8px;color:#64748b;text-align:center;background:#fff;}
+  }
 </style></head><body>
-<!-- Running header — printed on EVERY page (kept in @page top margin via position:fixed) -->
-<div class="print-running-header">
-  ${cfg.logo_data ? `<img src="${esc(cfg.logo_data)}" class="ph-logo" alt="logo"/>` : ''}
-  <div style="flex:1">
-    <div class="ph-name">${esc(cfg.name)}</div>
-    <div class="ph-meta">
-      ${[cfg.address_line1, cfg.address_line2].filter(Boolean).map(esc).join(' · ')}
-      ${cfg.gstin ? ` · GSTIN: <strong>${esc(cfg.gstin)}</strong>` : ''}
-    </div>
-  </div>
-  <div style="text-align:right">
-    <div style="font-size:10px;font-weight:700;color:${accentColor}">${esc(opts.title)}</div>
-    <div style="font-size:9px;color:#475569" class="mono">${esc(docNo)}</div>
-  </div>
-</div>
-<div class="print-running-footer">${esc(cfg.name)} · ${esc(opts.title)} ${esc(docNo)} · Generated ${new Date().toLocaleDateString('en-IN')}</div>
 ${(isQuotation && opts.includeCover) ? `
 <!-- Cover Page (full A4, outside .page padding) -->
 <div class="cover-page">
@@ -4299,6 +4281,28 @@ ${(isQuotation && opts.includeCover) ? `
   </div>
 </div>
 ` : ''}
+<table class="doc-wrap">
+<thead><tr><td>
+<!-- Running header — printed on EVERY page (via thead repeat) -->
+<div class="repeat-head">
+  ${cfg.logo_data ? `<img src="${esc(cfg.logo_data)}" class="rh-logo" alt="logo"/>` : ''}
+  <div style="flex:1">
+    <div class="rh-name">${esc(cfg.name)}</div>
+    <div class="rh-meta">
+      ${[cfg.address_line1, cfg.address_line2].filter(Boolean).map(esc).join(' · ')}
+      ${cfg.gstin ? ` · GSTIN: <strong>${esc(cfg.gstin)}</strong>` : ''}
+    </div>
+  </div>
+  <div style="text-align:right">
+    <div style="font-size:10px;font-weight:700;color:${accentColor}">${esc(opts.title)}</div>
+    <div style="font-size:9px;color:#475569" class="mono">${esc(docNo)}</div>
+  </div>
+</div>
+</td></tr></thead>
+<tfoot><tr><td>
+<div class="repeat-foot">${esc(cfg.name)} · ${esc(opts.title)} ${esc(docNo)} · Generated ${new Date().toLocaleDateString('en-IN')}</div>
+</td></tr></tfoot>
+<tbody><tr><td>
 <div class="page">
   <!-- Header -->
   <div class="header">
@@ -4459,6 +4463,8 @@ ${(isQuotation && opts.includeCover) ? `
 
   <div class="footer-note">This is a computer-generated document.${isTaxInvoice ? ' Subject to Jurisdiction as per Place of Supply.' : ''}</div>
 </div>
+</td></tr></tbody>
+</table>
 
 </body></html>`;
   // Document number / filename — `docNo` was already computed earlier from
