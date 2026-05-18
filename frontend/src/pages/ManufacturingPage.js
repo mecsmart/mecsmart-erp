@@ -1245,8 +1245,33 @@ export default function ManufacturingPage() {
           {activeTab === 'work-orders' && (() => {
             const mainFGs = workOrders.filter(w => !w.parent_wo_id);
             const totalFG = mainFGs.length;
+            // Helper: walk all descendants of a FG and return their statuses.
+            const descStatuses = (fgId) => {
+              const out = [];
+              const walk = (pid) => {
+                for (const w of workOrders) {
+                  if (w.parent_wo_id === pid) {
+                    out.push(w.status);
+                    walk(w.id);
+                  }
+                }
+              };
+              walk(fgId);
+              return out;
+            };
+            // "Under Process" rules (broader than just w.status==='in_progress'):
+            //   • FG itself is in_progress, OR
+            //   • Any descendant (SG/part) is in_progress / completed (i.e.,
+            //     work has started somewhere in the family even if the FG
+            //     itself is still pending — production has begun)
             const finishedFG = mainFGs.filter(w => w.status === 'completed').length;
-            const underProcessFG = mainFGs.filter(w => w.status === 'in_progress').length;
+            const underProcessFG = mainFGs.filter(w => {
+              if (w.status === 'completed' || w.status === 'cancelled') return false;
+              if (w.status === 'in_progress') return true;
+              // FG still 'pending'? Check if any descendant has started.
+              const ds = descStatuses(w.id);
+              return ds.some(s => s === 'in_progress' || s === 'completed');
+            }).length;
             const card = (label, value, color, testId) => (
               <div
                 key={testId}

@@ -19,6 +19,9 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-17 (Round 9 — "Under Process" includes FGs with started descendants — DONE ✅):**
+  An FG MO whose own status is still `pending` but whose SG/Part descendants are in_progress or completed is now correctly counted in the "Under Process MO(s)" stat card. Without this, started SG-level work was invisible to the dashboard. Verified count: 319 → 340 (picked up 21 additional FGs with started descendants).
+
 - **2026-02-17 (Round 8 — FG header cleaner + recursive descendant count + Main-FG stat cards — DONE ✅):**
   1. **FG header — qty removed** — Dropped the "Qty done/total" from the FG-MO summary band. Now shows just `X/Y MO(s)` where X=completed, Y=total.
   2. **Recursive descendant MO count** — Replaced `[parentMO, ...children]` (direct children only) with a recursive walk that collects ALL descendants of the FG. A multi-level BOM (FG → SGs → grand-SGs → parts) now correctly counts every level. So a deep FG with 11 direct children but 197 total descendants now shows `X/197 MO(s)`.
