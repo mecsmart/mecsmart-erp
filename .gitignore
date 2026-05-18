@@ -1998,3 +1998,4 @@ credentials.json
 *.key
 .credentials
 frontend/node_modules/.cache/default-development/220.pack
+frontend/node_modules/.cache/default-development/97.pack

@@ -5788,6 +5788,24 @@ async def get_work_orders(request: Request, status: Optional[str] = None, produc
             if matched_qty > 0:
                 op["outsourced_quantity"] = matched_qty
 
+        # Also backfill per-run SC info for legacy OS runs (created before
+        # runs carried `outsource_sc_order_id`). Without this, the
+        # per-vendor Revoke / Short Close buttons can't find the right SC
+        # for runs created via the old code path.
+        for _wo_id, item_id, op in needs_sc_lookup:
+            for r in (op.get("runs") or []):
+                if not (r.get("operator") or "").startswith("OS: "):
+                    continue
+                if r.get("outsource_sc_order_id"):
+                    continue  # already populated
+                r["outsource_sc_order_id"] = op.get("outsource_sc_order_id")
+                r["outsource_sc_order_number"] = op.get("outsource_sc_order_number")
+                r["outsource_supplier_name"] = r.get("outsource_supplier_name") or op.get("outsource_supplier_name") or (r.get("operator") or "").replace("OS: ", "", 1)
+                r["outsource_supplier_id"] = r.get("outsource_supplier_id") or op.get("job_work_supplier_id")
+                # Also backfill quantity_planned if missing (= op.outsourced_quantity)
+                if not r.get("quantity_planned"):
+                    r["quantity_planned"] = op.get("outsourced_quantity") or 0
+
     return work_orders
 
 @work_orders_router.get("/{wo_id}")
@@ -6502,32 +6520,41 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
     }
 
 
+class RevokeOpPayload(BaseModel):
+    run_number: Optional[int] = None  # When provided, revoke ONLY that vendor's run/SC line
+    reason: Optional[str] = ""
+
+
 @work_orders_router.post("/{wo_id}/operations/{sequence}/short-close")
-async def short_close_wo_operation(wo_id: str, sequence: int, request: Request):
-    """Admin-only: short-close a single in-progress OS operation on a WO.
+async def short_close_wo_operation(wo_id: str, sequence: int, request: Request, payload: Optional[RevokeOpPayload] = None):
+    """Revoke an OS allocation on a WO operation.
 
-    Use when a consolidated JW SC covers multiple MOs and only ONE of those
-    operations needs to be aborted mid-way (e.g. another MO on the same SC
-    is still healthy and should continue). The SC-level short-close in
-    `subcontract_orders/{id}/short-close` terminates ALL linked operations,
-    which would unnecessarily impact the healthy ones.
+    Two modes:
+      - **Op-level** (no `run_number` in body): Revoke ALL OS allocations on
+        this op (legacy behaviour). Removes every OS run, clears OS fields
+        on the op, drops every matching JWP line from the linked SC, and
+        hard-deletes the SC if no other refs remain.
+      - **Per-vendor** (with `run_number`): Revoke ONLY that specific run's
+        vendor allocation. Reads the run's `outsource_sc_order_id` (stored
+        at run-creation time) to find the right SC line. Removes only that
+        line + that run. If the op still has other OS runs, op stays
+        in 'pending' (partial OS); outsource_sc_order_id is repointed at
+        a remaining OS run's SC for compatibility. If this was the LAST
+        OS run, the op is fully reverted to pending (no OS metadata).
 
-    Behaviour:
-      - The WO operation's `is_job_work` / `outsource_*` / `operator`
-        fields are cleared.
-      - Its status is reset to `pending` so the user can redo the work
-        in-house or re-outsource to a different vendor.
-      - The OS run row (`operator` startswith "OS: ") is removed.
-      - On the linked SC, the matching `job_work_parts` line is either
-        removed (if it was the only matching wo+process pair) or its qty
-        is reduced. If removing it leaves no parts on the SC, the SC's
-        status is flipped to `short_closed`.
-      - Operations whose SC line already has `received_quantity > 0`
-        cannot be short-closed — the user must reverse the GRN first.
+    Permission: admin OR any user with manufacturing 'edit' access — the
+    latter covers production managers, supervisors etc. who need to manage
+    in-flight outsource allocations without admin role escalation.
     """
     user = await get_current_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Only admin can short-close an operation")
+    # Allow admin OR users with manufacturing 'edit' permission. The
+    # previous policy was admin-only, which blocked production managers
+    # from managing their own job-card outsource flows.
+    role = user.get("role")
+    perms = ((user.get("permissions") or {}).get("manufacturing") or [])
+    if role != "admin" and "edit" not in perms and "create" not in perms:
+        raise HTTPException(status_code=403, detail="You don't have permission to revoke operations")
+    run_number_filter = payload.run_number if payload else None
     wo = await db.work_orders.find_one({"id": wo_id})
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -6543,6 +6570,110 @@ async def short_close_wo_operation(wo_id: str, sequence: int, request: Request):
         raise HTTPException(status_code=400, detail="Operation must be an outsourced (OS) operation to short close")
     if target.get("status") == "completed":
         raise HTTPException(status_code=400, detail="Operation is already completed — cannot short close")
+
+    # ---------- PER-VENDOR (per-run) revoke branch -----------------------
+    # When `run_number` is supplied, only that vendor's allocation is
+    # revoked. We use the run's stored `outsource_sc_order_id` (added at
+    # run-creation time) to find the right SC. Legacy runs that pre-date
+    # that field fall back to the op-level outsource_sc_order_id.
+    if run_number_filter is not None:
+        runs_all = target.get("runs") or []
+        target_run = next((r for r in runs_all if r.get("run_number") == run_number_filter and (r.get("operator") or "").startswith("OS: ")), None)
+        if not target_run:
+            raise HTTPException(status_code=404, detail=f"OS run #{run_number_filter} not found on this operation")
+        run_sc_id = target_run.get("outsource_sc_order_id") or target.get("outsource_sc_order_id")
+        run_sc_number = target_run.get("outsource_sc_order_number") or target.get("outsource_sc_order_number")
+        run_qty = float(target_run.get("quantity_planned") or 0)
+        run_supplier_id = target_run.get("outsource_supplier_id") or target.get("job_work_supplier_id")
+        op_name_val = target.get("operation_name") or ""
+        if isinstance(op_name_val, dict):
+            op_name_val = op_name_val.get("name", "")
+        op_name = (op_name_val or "").strip()
+        # GRN safety check on the SC line matching this run's supplier
+        if run_sc_id:
+            sc = await db.subcontract_orders.find_one({"id": run_sc_id})
+            if sc:
+                for line in (sc.get("job_work_parts") or []):
+                    same_op = (line.get("process_name") or "").strip() == op_name or op_name in (line.get("process_names") or [])
+                    if line.get("wo_id") == wo_id and same_op and (line.get("received_quantity") or 0) > 0:
+                        raise HTTPException(status_code=400, detail=f"Cannot revoke this vendor allocation — GRN already received against {run_sc_number}. Reverse the GRN first.")
+        # Remove just this run; recompute outsourced_quantity from remaining OS runs
+        target["runs"] = [r for r in runs_all if r.get("run_number") != run_number_filter]
+        remaining_os_runs = [r for r in target["runs"] if (r.get("operator") or "").startswith("OS: ")]
+        remaining_os_qty = sum(float(r.get("quantity_planned") or 0) for r in remaining_os_runs)
+        target["outsourced_quantity"] = remaining_os_qty
+        if not remaining_os_runs:
+            # No OS runs left → fully revert op to pending
+            for f in ("is_job_work", "job_work_supplier_id", "outsource_status",
+                      "outsource_supplier_name", "outsource_charges",
+                      "outsource_sc_order_id", "outsource_sc_order_number",
+                      "actual_start", "operator"):
+                target.pop(f, None)
+            target["status"] = "pending"
+        else:
+            # Re-point the op's outsource_sc_order_id at one of the remaining runs
+            # so the rest of the workflow keeps working.
+            first_remaining = remaining_os_runs[0]
+            target["outsource_sc_order_id"] = first_remaining.get("outsource_sc_order_id") or target.get("outsource_sc_order_id")
+            target["outsource_sc_order_number"] = first_remaining.get("outsource_sc_order_number") or target.get("outsource_sc_order_number")
+            target["outsource_supplier_name"] = first_remaining.get("outsource_supplier_name") or target.get("outsource_supplier_name")
+            target["job_work_supplier_id"] = first_remaining.get("outsource_supplier_id") or target.get("job_work_supplier_id")
+            target["operator"] = first_remaining.get("operator")
+        await db.work_orders.update_one({"id": wo_id}, {"$set": {"operations_status": ops}})
+
+        # Update the SC: remove ONLY the JWP line that matches this wo +
+        # process + supplier. If the SC ends up empty, hard-delete it.
+        sc_deleted_pv = False
+        sc_updated_pv = False
+        if run_sc_id:
+            sc = await db.subcontract_orders.find_one({"id": run_sc_id})
+            if sc:
+                new_jwp = []
+                dropped_any = False
+                for line in (sc.get("job_work_parts") or []):
+                    same_op = (line.get("process_name") or "").strip() == op_name or op_name in (line.get("process_names") or [])
+                    # Match by wo+op; if the SC was vendor-specific (single
+                    # supplier_id matches run_supplier_id at top level), the
+                    # match is already unambiguous.
+                    if line.get("wo_id") == wo_id and same_op and not dropped_any:
+                        dropped_any = True
+                        continue
+                    new_jwp.append(line)
+                remaining_wo_ids = {(p.get("wo_id") or "") for p in new_jwp if p.get("wo_id")}
+                ref_wo_ids = [w for w in (sc.get("reference_wo_ids") or []) if w in remaining_wo_ids]
+                already_sent_dc = bool(sc.get("dc_created")) or await db.delivery_challans.find_one({
+                    "subcontract_order_id": run_sc_id, "status": {"$in": ["sent", "approved"]}
+                })
+                has_received = any(float(p.get("received_quantity") or 0) > 0 for p in new_jwp)
+                if not new_jwp and not ref_wo_ids and not already_sent_dc and not has_received:
+                    await db.subcontract_orders.delete_one({"id": run_sc_id})
+                    sc_deleted_pv = True
+                else:
+                    update_payload = {
+                        "job_work_parts": new_jwp,
+                        "reference_wo_ids": ref_wo_ids,
+                        "processing_charges": sum(float(p.get("charges") or 0) * float(p.get("quantity") or 0) for p in new_jwp),
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                    if not new_jwp:
+                        update_payload["status"] = "short_closed"
+                        update_payload["short_closed_at"] = datetime.now(timezone.utc)
+                        update_payload["short_closed_by"] = user["id"]
+                    await db.subcontract_orders.update_one({"id": run_sc_id}, {"$set": update_payload})
+                sc_updated_pv = True
+
+        return {
+            "ok": True,
+            "released": True,
+            "per_vendor": True,
+            "run_number": run_number_filter,
+            "sc_order_id": run_sc_id,
+            "sc_order_number": run_sc_number,
+            "sc_updated": sc_updated_pv,
+            "sc_deleted": sc_deleted_pv,
+            "supplier_id": run_supplier_id,
+        }
+    # ---------- end per-vendor branch — fall through to op-level revoke --
     sc_order_id = target.get("outsource_sc_order_id")
     sc_order_number = target.get("outsource_sc_order_number")
     op_name_val = target.get("operation_name") or ""
@@ -6630,28 +6761,25 @@ async def short_close_wo_operation(wo_id: str, sequence: int, request: Request):
 
 class ShortCloseNoGRNPayload(BaseModel):
     reason: Optional[str] = ""
+    run_number: Optional[int] = None  # When provided, short-close ONLY that vendor's run/SC line
 
 
 @work_orders_router.post("/{wo_id}/operations/{sequence}/short-close-no-grn")
 async def short_close_wo_operation_no_grn(wo_id: str, sequence: int, payload: ShortCloseNoGRNPayload, request: Request):
-    """Admin-only: hard-close an in-progress OS operation as COMPLETED
-    WITHOUT receiving any material via GRN.
+    """Hard-close an in-progress OS operation/run as COMPLETED without GRN.
 
-    Use when the vendor confirms total scrap / loss / write-off and the
-    workflow needs to advance. Unlike the regular `short-close` endpoint
-    (which reverts the operation to `pending` so it can be re-run), this
-    one marks the op as `completed` and `short_closed=true`, so the next
-    process in the routing becomes immediately startable.
+    Two modes (mirrors `/short-close`):
+      - **Op-level** (no `run_number`): all OS runs short-closed.
+      - **Per-vendor** (`run_number`): only that vendor's run is short-closed.
+        The op stays in-progress with the other vendor's run still active.
 
-    Side-effects on the linked SC:
-      - the matching `job_work_parts` line is marked `short_closed=true`
-      - if no parts remain unreceived, the SC itself flips to `short_closed`
-      - NO stock movement / GRN is created — the cost is treated as an
-        accounting write-off the user handles outside this flow.
+    Permission: admin OR users with manufacturing 'edit' permission.
     """
     user = await get_current_user(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Only admin can short-close (no GRN) an operation")
+    role = user.get("role")
+    perms = ((user.get("permissions") or {}).get("manufacturing") or [])
+    if role != "admin" and "edit" not in perms and "create" not in perms:
+        raise HTTPException(status_code=403, detail="You don't have permission to short-close (no GRN) operations")
     wo = await db.work_orders.find_one({"id": wo_id})
     if not wo:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -6667,6 +6795,77 @@ async def short_close_wo_operation_no_grn(wo_id: str, sequence: int, payload: Sh
         raise HTTPException(status_code=400, detail="Operation must be an outsourced (OS) operation")
     if target.get("status") == "completed":
         raise HTTPException(status_code=400, detail="Operation is already completed")
+    run_number_filter = payload.run_number if payload else None
+
+    # ---------- PER-VENDOR (per-run) short-close branch -----------------
+    if run_number_filter is not None:
+        now = datetime.now(timezone.utc)
+        runs_all = target.get("runs") or []
+        target_run = next((r for r in runs_all if r.get("run_number") == run_number_filter and (r.get("operator") or "").startswith("OS: ")), None)
+        if not target_run:
+            raise HTTPException(status_code=404, detail=f"OS run #{run_number_filter} not found")
+        run_sc_id = target_run.get("outsource_sc_order_id") or target.get("outsource_sc_order_id")
+        run_sc_number = target_run.get("outsource_sc_order_number") or target.get("outsource_sc_order_number")
+        run_qty = float(target_run.get("quantity_planned") or 0)
+        op_name_val = target.get("operation_name") or ""
+        if isinstance(op_name_val, dict):
+            op_name_val = op_name_val.get("name", "")
+        op_name = (op_name_val or "").strip()
+        # Mark just this run as short-closed/completed; sum into op's completed/short_closed buckets.
+        target_run["ended_at"] = now
+        target_run["short_closed"] = True
+        target_run["short_close_reason"] = payload.reason or ""
+        target_run["quantity_completed"] = run_qty
+        # Recompute op-level totals
+        target["quantity_completed"] = (target.get("quantity_completed") or 0) + run_qty
+        # If all OS runs are now short_closed/completed AND in-house completed
+        # matches plan, mark the whole op completed.
+        os_runs = [r for r in runs_all if (r.get("operator") or "").startswith("OS: ")]
+        if all(r.get("short_closed") or r.get("ended_at") for r in os_runs):
+            # Only flip to completed if there's no remaining in-house qty pending.
+            total_done = float(target.get("quantity_completed") or 0)
+            if total_done >= float(wo.get("quantity") or 0):
+                target["status"] = "completed"
+                target["short_closed"] = True
+                target["short_close_reason"] = payload.reason or ""
+                target["actual_end"] = now
+        await db.work_orders.update_one({"id": wo_id}, {"$set": {"operations_status": ops}})
+        # Update the matching SC JWP line — set short_closed + charges=0.
+        sc_updated_pv = False
+        if run_sc_id:
+            sc = await db.subcontract_orders.find_one({"id": run_sc_id})
+            if sc:
+                new_jwp = list(sc.get("job_work_parts") or [])
+                dropped_any = False
+                for line in new_jwp:
+                    same_op = (line.get("process_name") or "").strip() == op_name or op_name in (line.get("process_names") or [])
+                    if line.get("wo_id") == wo_id and same_op and not dropped_any:
+                        dropped_any = True
+                        line["short_closed"] = True
+                        line["short_close_reason"] = payload.reason or ""
+                        line["short_closed_at"] = now
+                        line["charges"] = 0  # zero out so the JW list shows ₹0 for written-off work
+                still_open = [p for p in new_jwp if not p.get("short_closed") and float(p.get("received_quantity") or 0) < float(p.get("quantity") or 0)]
+                update_payload = {
+                    "job_work_parts": new_jwp,
+                    "processing_charges": sum(float(p.get("charges") or 0) * float(p.get("quantity") or 0) for p in new_jwp),
+                    "updated_at": now,
+                }
+                if not still_open:
+                    update_payload["status"] = "short_closed"
+                    update_payload["short_closed_at"] = now
+                    update_payload["short_closed_by"] = user["id"]
+                await db.subcontract_orders.update_one({"id": run_sc_id}, {"$set": update_payload})
+                sc_updated_pv = True
+        return {
+            "ok": True,
+            "per_vendor": True,
+            "run_number": run_number_filter,
+            "sc_order_id": run_sc_id,
+            "sc_order_number": run_sc_number,
+            "sc_updated": sc_updated_pv,
+        }
+    # ---------- end per-vendor — fall through to op-level short-close --
     sc_order_id = target.get("outsource_sc_order_id")
     sc_order_number = target.get("outsource_sc_order_number")
     op_name_val = target.get("operation_name") or ""
@@ -7900,7 +8099,15 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
                 "quality_result": None,
                 "reject_qty": 0,
                 "rework_qty": 0,
-                "notes": f"Outsourced to {supplier_name}"
+                "notes": f"Outsourced to {supplier_name}",
+                # Per-run SC info — required so per-vendor Revoke / Short Close
+                # can find the right SC line (different vendors create different
+                # SCs OR different lines on a shared SC). Without this, multi-
+                # vendor partial OS can't be individually managed.
+                "outsource_sc_order_id": sc_order_doc["id"],
+                "outsource_sc_order_number": sc_order_doc.get("order_number", ""),
+                "outsource_supplier_id": op_data.outsource_supplier_id,
+                "outsource_supplier_name": supplier_name,
             })
             target_op["runs"] = runs
         else:

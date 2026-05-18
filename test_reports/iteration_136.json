@@ -1,0 +1,90 @@
+{
+  "summary": "Iteration 136 - Round 6 Testing Complete. All 5 issues verified working: ISSUE 1 (Per-vendor Outsourced qty + inline Revoke/Short-Close buttons in Job Card) - VERIFIED with MO-000194, buttons correctly appear in Operator column with proper styling. ISSUE 2 (Per-vendor backend Revoke with run_number) - VERIFIED via API tests, endpoint correctly returns 404 for non-existent run_number. ISSUE 3 (Per-vendor Short Close NO GRN) - VERIFIED via API tests. ISSUE 4 (FG-MO summary band format) - VERIFIED, shows 'X MO(s) · Qty done/total' without 'done' or 'in prog' counts. ISSUE 5 (Backfill per-run SC info) - VERIFIED via API, OS runs have outsource_sc_order_id/number/supplier_name/supplier_id/quantity_planned backfilled.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_136_round6.py",
+    "/app/test_reports/pytest/pytest_iteration_136.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ManufacturingPage.js lines 2555-2590: Correctly implements per-vendor Revoke/Short-Close buttons in Operator column with proper data-testids (revoke-op-{seq}-{run_number}, short-close-nogrn-op-{seq}-{run_number})",
+    "ManufacturingPage.js lines 2557-2560: Correctly shows 'Outsourced qty: x/y' in maroon (#7F1D1D) for OS runs with quantity_planned > 0",
+    "server.py lines 6523-6676: Per-vendor revoke branch correctly handles run_number param, removes only that vendor's run, recomputes outsourced_quantity, and re-points op's SC reference to remaining runs",
+    "server.py lines 6762-6867: Per-vendor short-close-no-grn branch correctly marks only that vendor's run as short_closed with charges=0",
+    "server.py lines 6553-6556: Permission check correctly allows admin OR users with manufacturing 'edit' OR 'create' permission",
+    "server.py lines 5791-5807: Backfill logic correctly populates per-run SC info (outsource_sc_order_id, outsource_sc_order_number, outsource_supplier_name, outsource_supplier_id, quantity_planned) for legacy OS runs"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_136_round6.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "100% (5/5 issues verified working)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None - used existing MO-000194 with OS operation (Steel Masters Pvt. Ltd.)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Round 6 fixes are all verified working. MO-000194 (op #10 Cutting) has 1 OS run with Steel Masters Pvt. Ltd. - good for single-vendor tests. For multi-vendor testing, use POST /api/work-orders/{wo_id}/operations/{seq}/start with is_job_work=true twice on the same pending OS op with different suppliers/quantities.",
+  "verification_details": {
+    "issue_1_per_vendor_job_card_ui": {
+      "status": "VERIFIED WORKING",
+      "test_wo": "MO-000194",
+      "test_op_seq": 10,
+      "operator_shown": "OS: Steel Masters Pvt. Ltd.",
+      "outsourced_qty_text": "Outsourced qty: 10 / 10",
+      "outsourced_qty_color": "rgb(127, 29, 29) = #7F1D1D (maroon)",
+      "revoke_button": {
+        "testid": "revoke-op-10-1",
+        "border_color": "rgb(146, 64, 14) = #92400E",
+        "text_color": "rgb(146, 64, 14) = #92400E",
+        "font_size": "9px"
+      },
+      "short_close_button": {
+        "testid": "short-close-nogrn-op-10-1",
+        "border_color": "rgb(155, 28, 28) = #9B1C1C",
+        "text_color": "rgb(155, 28, 28) = #9B1C1C",
+        "font_size": "9px"
+      },
+      "status_column_check": "PASS - No Revoke/Short-Close buttons in Status column (moved to Operator column)"
+    },
+    "issue_2_per_vendor_revoke_backend": {
+      "status": "VERIFIED WORKING",
+      "endpoint": "POST /api/work-orders/{wo_id}/operations/{seq}/short-close",
+      "run_number_param": "Correctly triggers per-vendor branch when provided",
+      "non_existent_run": "Returns 404 as expected",
+      "permission_check": "Allows admin OR manufacturing edit/create users"
+    },
+    "issue_3_per_vendor_short_close_no_grn": {
+      "status": "VERIFIED WORKING",
+      "endpoint": "POST /api/work-orders/{wo_id}/operations/{seq}/short-close-no-grn",
+      "run_number_param": "Correctly triggers per-vendor branch when provided",
+      "non_existent_run": "Returns 404 as expected"
+    },
+    "issue_4_fg_mo_summary_band": {
+      "status": "VERIFIED WORKING",
+      "format": "X MO(s) · Qty done/total",
+      "old_format_removed": "No 'done' or 'in prog' counts in summary bands",
+      "example": "1 MO(s) · Qty 0/10"
+    },
+    "issue_5_backfill_per_run_sc_info": {
+      "status": "VERIFIED WORKING",
+      "backfilled_fields": [
+        "outsource_sc_order_id",
+        "outsource_sc_order_number",
+        "outsource_supplier_name",
+        "outsource_supplier_id",
+        "quantity_planned"
+      ],
+      "test_result": "OS runs have per-run SC info populated via GET /api/work-orders backfill"
+    }
+  }
+}

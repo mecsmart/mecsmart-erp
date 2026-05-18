@@ -191,19 +191,28 @@ export default function ManufacturingPage() {
   // Useful when a multi-MO SC has just ONE in-progress operation that needs
   // to be aborted without short-closing the entire SC (which would impact
   // the other MOs sharing that SC).
-  const handleShortCloseOperation = async (op) => {
+  // Per-run Revoke: when `runNumber` is supplied, only that vendor's
+  // allocation is reverted. Otherwise the entire op (all OS runs) is
+  // revoked — kept as the fallback for the Status-column buttons.
+  const handleShortCloseOperation = async (op, runNumber = null) => {
     if (!jobCardWO?.id) return;
     const opName = typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : (op.operation_name || '');
-    const msg = `Short close operation "${opName}" on ${jobCardWO.wo_number}?\n\nThis will:\n• Revert this operation to "pending" so it can be redone in-house or re-outsourced.\n• Remove the OS run row (operator starting with "OS: ").\n• Reduce the SC line's planned qty by ${op.allocated_qty || jobCardWO.quantity || 0}; if that's the entire line, the SC line is marked short_closed.\n\nIf any quantity for this op has been received via GRN, the operation will NOT be reverted — reverse the GRN first.`;
+    const targetRun = runNumber != null ? (op.runs || []).find(r => r.run_number === runNumber) : null;
+    const vendorLabel = targetRun ? (targetRun.outsource_supplier_name || (targetRun.operator || '').replace(/^OS:\s*/, '')) : null;
+    const qty = targetRun ? (targetRun.quantity_planned || 0) : (op.allocated_qty || jobCardWO.quantity || 0);
+    const msg = runNumber != null
+      ? `Revoke vendor "${vendorLabel}" allocation of ${qty} units on operation "${opName}"?\n\n• Removes only this vendor's SC line.\n• Other vendor allocations on this op stay intact.\n• If this is the last OS run, op reverts to pending.\n\nProceed?`
+      : `Short close operation "${opName}" on ${jobCardWO.wo_number}?\n\nThis will revoke ALL OS allocations on this op.\nProceed?`;
     if (!window.confirm(msg)) return;
     try {
-      const { data } = await api.post(`/api/work-orders/${jobCardWO.id}/operations/${op.sequence}/short-close`);
-      alert(`Operation "${opName}" short-closed.\nReleased: ${data?.released ? 'yes' : 'no'}\n${data?.sc_order_id ? `Updated SC: ${data.sc_order_number || data.sc_order_id}` : ''}`);
+      const body = runNumber != null ? { run_number: runNumber } : {};
+      const { data } = await api.post(`/api/work-orders/${jobCardWO.id}/operations/${op.sequence}/short-close`, body);
+      alert(`Revoke OK.${data?.sc_deleted ? '\nSC was deleted.' : ''}${data?.sc_order_number ? `\nSC: ${data.sc_order_number}` : ''}`);
       const fresh = await api.get(`/api/work-orders/${jobCardWO.id}`);
       setJobCardWO(fresh.data);
       fetchData();
     } catch (e) {
-      alert(e.response?.data?.detail || 'Failed to short close operation');
+      alert(e.response?.data?.detail || 'Failed to revoke operation');
     }
   };
 
@@ -215,14 +224,23 @@ export default function ManufacturingPage() {
   // the next process becomes immediately startable. Used when the vendor
   // confirms scrap/loss or when the cost has been written off but the
   // workflow needs to proceed.
-  const handleShortCloseNoGRN = async (op) => {
+  // Per-run Short Close (no GRN): mirrors handleShortCloseOperation —
+  // when runNumber is supplied, only that vendor's run is short-closed.
+  const handleShortCloseNoGRN = async (op, runNumber = null) => {
     if (!jobCardWO?.id) return;
     const opName = typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : (op.operation_name || '');
-    const reason = window.prompt(`Short Close (no GRN) operation "${opName}" on ${jobCardWO.wo_number}?\n\nThis will:\n• Mark this operation as COMPLETED (no material will be received).\n• Allow the next process to start immediately.\n• Cannot be undone — the SC line will be marked short_closed.\n\nEnter a short reason for the audit trail:`, 'Vendor scrap / loss written off');
-    if (reason === null) return;  // user cancelled
+    const targetRun = runNumber != null ? (op.runs || []).find(r => r.run_number === runNumber) : null;
+    const vendorLabel = targetRun ? (targetRun.outsource_supplier_name || (targetRun.operator || '').replace(/^OS:\s*/, '')) : null;
+    const reason = window.prompt(
+      runNumber != null
+        ? `Short Close (no GRN) — vendor "${vendorLabel}" on op "${opName}"?\n\nMarks this vendor's allocation as written off (charges=0). Other vendor runs unaffected.\n\nReason:`
+        : `Short Close (no GRN) operation "${opName}" on ${jobCardWO.wo_number}?\n\nMarks the op COMPLETED. No material received. Reason:`,
+      'Vendor scrap / loss written off');
+    if (reason === null) return;
     try {
-      const { data } = await api.post(`/api/work-orders/${jobCardWO.id}/operations/${op.sequence}/short-close-no-grn`, { reason });
-      alert(`Operation "${opName}" short-closed without GRN.\n${data?.sc_order_id ? `SC ${data.sc_order_number || data.sc_order_id} marked short_closed.` : ''}\nNext process is now unlocked.`);
+      const body = runNumber != null ? { reason, run_number: runNumber } : { reason };
+      const { data } = await api.post(`/api/work-orders/${jobCardWO.id}/operations/${op.sequence}/short-close-no-grn`, body);
+      alert(`Short Close OK.${data?.sc_order_number ? `\nSC: ${data.sc_order_number}` : ''}`);
       const fresh = await api.get(`/api/work-orders/${jobCardWO.id}`);
       setJobCardWO(fresh.data);
       fetchData();
@@ -1955,16 +1973,11 @@ export default function ManufacturingPage() {
                               // at a glance without expanding the panel.
                               const allMos = [parentMO, ...children];
                               const total = allMos.length;
-                              const done = allMos.filter(m => m.status === 'completed').length;
-                              const inProg = allMos.filter(m => m.status === 'in_progress').length;
                               const totalQty = allMos.reduce((s, m) => s + (m.quantity || 0), 0);
                               const completedQty = allMos.reduce((s, m) => s + (m.quantity_completed || 0), 0);
                               return (
                                 <>
                                   <span className="font-semibold text-[#1D3557]">{total}</span> MO(s)
-                                  {' · '}
-                                  <span className="font-semibold text-[#03543F]">{done}</span> done
-                                  {inProg > 0 && <>{' · '}<span className="font-semibold text-[#1E429F]">{inProg}</span> in prog</>}
                                   {' · Qty '}
                                   <span className="mono font-semibold text-[#03543F]">{completedQty}</span>
                                   <span className="mono text-[#6B7280]">/{totalQty}</span>
@@ -2376,11 +2389,15 @@ export default function ManufacturingPage() {
                         ) : '-'
                       );
 
-                      // STATUS column cell: status badge + (for OS) JW chip
-                      // + Revoke/Short Close admin buttons. This block lives
-                      // ENTIRELY in the Status <td> per the user's spec
-                      // screenshot, so it does NOT bleed into Operator or
-                      // Action columns.
+                      // STATUS column cell: status badge + (for OS) op-level
+                      // JW chip. Per-vendor Revoke/Short-Close buttons live
+                      // in the Operator column next to each vendor's row
+                      // (so multi-vendor partial OS can be managed
+                      // individually). Keep the short_closed-summary chip
+                      // here for the audit trail.
+                      const canManageOS = user?.role === 'admin'
+                        || (user?.permissions?.manufacturing || []).includes('edit')
+                        || (user?.permissions?.manufacturing || []).includes('create');
                       const statusCell = (
                         <div className="flex flex-col items-center gap-1.5">
                           {statusBadge}
@@ -2388,26 +2405,6 @@ export default function ManufacturingPage() {
                             <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium text-center" data-testid={`outsourced-op-${op.sequence}`}>
                               {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'} — Receive via GRN
                             </span>
-                          )}
-                          {user?.role === 'admin' && hasLiveOS && (
-                            <div className="flex items-center justify-center gap-1 flex-wrap">
-                              <button
-                                onClick={() => handleShortCloseOperation(op)}
-                                className="btn-secondary text-[10px] px-1.5 py-0.5 text-[#92400E] border-[#92400E] hover:bg-[#FEF3C7]"
-                                data-testid={`revoke-op-${op.sequence}`}
-                                title="Revoke — release this op back to pending (SC line is restored, vendor allocation cleared)"
-                              >
-                                <RefreshCw className="w-3 h-3 inline mr-0.5" />Revoke
-                              </button>
-                              <button
-                                onClick={() => handleShortCloseNoGRN(op)}
-                                className="btn-secondary text-[10px] px-1.5 py-0.5 text-[#9B1C1C] border-[#9B1C1C] hover:bg-[#FDE8E8]"
-                                data-testid={`short-close-nogrn-op-${op.sequence}`}
-                                title="Short Close (no GRN) — mark this OS op as completed without receiving material. Next process becomes available immediately."
-                              >
-                                <XIcon className="w-3 h-3 inline mr-0.5" />Short Close
-                              </button>
-                            </div>
                           )}
                           {op.short_closed && (
                             <span className="text-[10px] text-[#9B1C1C] bg-[#FDE8E8] px-2 py-1 rounded font-medium" data-testid={`short-closed-op-${op.sequence}`}>
@@ -2553,16 +2550,43 @@ export default function ManufacturingPage() {
                                   <User className="w-3 h-3 text-[#6B7280]" />
                                   <span className="font-medium">{r.operator || '-'}</span>
                                 </div>
-                                {/* Show the maroon "Outsourced qty: x/y" line
-                                    on the FIRST OS run (so it sits directly
-                                    below the "OS: VENDOR" operator name in
-                                    the same Operator column cell). Mirrors
-                                    the no-runs branch which renders the same
-                                    hint via operatorCell. */}
-                                {isFirst && hasLiveOS && osQty > 0 && (r.operator || '').startsWith('OS: ') && (
-                                  <span className="text-[10px] text-[#7F1D1D] font-semibold" data-testid={`outsourced-qty-${op.sequence}`}>
-                                    Outsourced qty: <span className="mono">{osQty}</span>{' / '}<span className="mono">{jobCardWO.quantity}</span>
+                                {/* Per-vendor outsourced qty: shows THIS run's
+                                    planned qty against the WO total — so a
+                                    multi-vendor partial OS (e.g. 8 to vendor
+                                    A + 4 to vendor B) reads correctly. */}
+                                {(r.operator || '').startsWith('OS: ') && !r.short_closed && (r.quantity_planned || 0) > 0 && (
+                                  <span className="text-[10px] text-[#7F1D1D] font-semibold" data-testid={`outsourced-qty-${op.sequence}-${r.run_number || ri}`}>
+                                    Outsourced qty: <span className="mono">{r.quantity_planned}</span>{' / '}<span className="mono">{jobCardWO.quantity}</span>
                                   </span>
+                                )}
+                                {r.short_closed && (
+                                  <span className="text-[10px] text-[#9B1C1C] font-semibold" data-testid={`run-short-closed-${op.sequence}-${r.run_number || ri}`}>
+                                    Short closed{r.short_close_reason ? ` — ${r.short_close_reason}` : ''}
+                                  </span>
+                                )}
+                                {/* Per-vendor Revoke + Short Close (small,
+                                    inline). Only shown for active OS runs
+                                    AND users with manufacturing edit/create
+                                    permission OR admin. */}
+                                {canManageOS && (r.operator || '').startsWith('OS: ') && !r.short_closed && !r.ended_at && (
+                                  <div className="flex items-center gap-1 mt-0.5">
+                                    <button
+                                      onClick={() => handleShortCloseOperation(op, r.run_number)}
+                                      className="text-[9px] px-1.5 py-[1px] border border-[#92400E] text-[#92400E] rounded hover:bg-[#FEF3C7]"
+                                      data-testid={`revoke-op-${op.sequence}-${r.run_number || ri}`}
+                                      title={`Revoke this vendor (${r.outsource_supplier_name || ''}) — releases the SC line, other vendor runs unaffected`}
+                                    >
+                                      <RefreshCw className="w-2.5 h-2.5 inline mr-0.5" />Revoke
+                                    </button>
+                                    <button
+                                      onClick={() => handleShortCloseNoGRN(op, r.run_number)}
+                                      className="text-[9px] px-1.5 py-[1px] border border-[#9B1C1C] text-[#9B1C1C] rounded hover:bg-[#FDE8E8]"
+                                      data-testid={`short-close-nogrn-op-${op.sequence}-${r.run_number || ri}`}
+                                      title="Short Close (no GRN) — write off this vendor's work without receiving material"
+                                    >
+                                      <XIcon className="w-2.5 h-2.5 inline mr-0.5" />Short Close
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             </td>
