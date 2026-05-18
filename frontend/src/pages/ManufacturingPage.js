@@ -1214,29 +1214,58 @@ export default function ManufacturingPage() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="bg-[#F3F4F6] p-1 rounded-sm">
-          <TabsTrigger 
-            value="work-orders" 
-            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
-            data-testid="tab-work-orders"
-          >
-            Manufacturing Orders
-          </TabsTrigger>
-          <TabsTrigger 
-            value="routings" 
-            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
-            data-testid="tab-routings"
-          >
-            Routings
-          </TabsTrigger>
-          <TabsTrigger 
-            value="work-centers" 
-            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
-            data-testid="tab-work-centers"
-          >
-            Work Centers
-          </TabsTrigger>
-        </TabsList>
+        {/* Tab strip + MAIN-FG dashboard stat cards on the same row. The
+            cards count ONLY top-level (parent_wo_id===null) FG MOs since
+            those are what the customer/business tracks — children/SGs
+            are derivative work. */}
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <TabsList className="bg-[#F3F4F6] p-1 rounded-sm">
+            <TabsTrigger
+              value="work-orders"
+              className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
+              data-testid="tab-work-orders"
+            >
+              Manufacturing Orders
+            </TabsTrigger>
+            <TabsTrigger
+              value="routings"
+              className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
+              data-testid="tab-routings"
+            >
+              Routings
+            </TabsTrigger>
+            <TabsTrigger
+              value="work-centers"
+              className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
+              data-testid="tab-work-centers"
+            >
+              Work Centers
+            </TabsTrigger>
+          </TabsList>
+          {activeTab === 'work-orders' && (() => {
+            const mainFGs = workOrders.filter(w => !w.parent_wo_id);
+            const totalFG = mainFGs.length;
+            const finishedFG = mainFGs.filter(w => w.status === 'completed').length;
+            const underProcessFG = mainFGs.filter(w => w.status === 'in_progress').length;
+            const card = (label, value, color, testId) => (
+              <div
+                key={testId}
+                className={`min-w-[120px] px-3 py-1.5 border-[1.5px] rounded ${color} bg-white text-center`}
+                data-testid={testId}
+              >
+                <div className={`text-[10px] font-bold tracking-wider uppercase ${color.replace('border-', 'text-')}`}>{label}</div>
+                <div className={`text-xl font-bold mono ${color.replace('border-', 'text-')}`}>{value}</div>
+              </div>
+            );
+            return (
+              <div className="flex items-center gap-2" data-testid="fg-stat-cards">
+                {card('Total MO(s)', totalFG, 'border-[#9B1C1C]', 'stat-card-total')}
+                {card('Under Process MO(s)', underProcessFG, 'border-[#1E429F]', 'stat-card-under-process')}
+                {card('Finished MO(s)', finishedFG, 'border-[#03543F]', 'stat-card-finished')}
+              </div>
+            );
+          })()}
+        </div>
 
         {/* Work Orders Tab */}
         <TabsContent value="work-orders" className="mt-4">
@@ -1968,22 +1997,29 @@ export default function ManufacturingPage() {
                           <span className="text-xs text-[#6B7280]" data-testid={`fg-totals-${parentMO.id}`}>
                             {(() => {
                               // Inline totals on the parent FG-MO header —
-                              // shows total MOs in the family + how many are
-                              // completed. Lets the user see family progress
-                              // at a glance without expanding the panel.
-                              const allMos = [parentMO, ...children];
-                              const total = allMos.length;
-                              const done = allMos.filter(m => m.status === 'completed').length;
-                              const totalQty = allMos.reduce((s, m) => s + (m.quantity || 0), 0);
-                              const completedQty = allMos.reduce((s, m) => s + (m.quantity_completed || 0), 0);
+                              // shows total MOs in the family (including
+                              // every level of the multi-level BOM tree)
+                              // and how many are completed. Walks ALL
+                              // descendants, not just direct children, so
+                              // a 5-level FG correctly shows all SGs +
+                              // grand-SGs + parts in the count.
+                              const familyMos = [parentMO];
+                              const walk = (pid) => {
+                                for (const w of workOrders) {
+                                  if (w.parent_wo_id === pid) {
+                                    familyMos.push(w);
+                                    walk(w.id);
+                                  }
+                                }
+                              };
+                              walk(parentMO.id);
+                              const total = familyMos.length;
+                              const done = familyMos.filter(m => m.status === 'completed').length;
                               return (
                                 <>
                                   <span className="font-semibold text-[#03543F]">{done}</span>
                                   <span className="text-[#6B7280]">/</span>
                                   <span className="font-semibold text-[#1D3557]">{total}</span> MO(s)
-                                  {' · Qty '}
-                                  <span className="mono font-semibold text-[#03543F]">{completedQty}</span>
-                                  <span className="mono text-[#6B7280]">/{totalQty}</span>
                                 </>
                               );
                             })()}
