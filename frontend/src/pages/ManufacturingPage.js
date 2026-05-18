@@ -1973,10 +1973,13 @@ export default function ManufacturingPage() {
                               // at a glance without expanding the panel.
                               const allMos = [parentMO, ...children];
                               const total = allMos.length;
+                              const done = allMos.filter(m => m.status === 'completed').length;
                               const totalQty = allMos.reduce((s, m) => s + (m.quantity || 0), 0);
                               const completedQty = allMos.reduce((s, m) => s + (m.quantity_completed || 0), 0);
                               return (
                                 <>
+                                  <span className="font-semibold text-[#03543F]">{done}</span>
+                                  <span className="text-[#6B7280]">/</span>
                                   <span className="font-semibold text-[#1D3557]">{total}</span> MO(s)
                                   {' · Qty '}
                                   <span className="mono font-semibold text-[#03543F]">{completedQty}</span>
@@ -2389,23 +2392,18 @@ export default function ManufacturingPage() {
                         ) : '-'
                       );
 
-                      // STATUS column cell: status badge + (for OS) op-level
-                      // JW chip. Per-vendor Revoke/Short-Close buttons live
-                      // in the Operator column next to each vendor's row
-                      // (so multi-vendor partial OS can be managed
-                      // individually). Keep the short_closed-summary chip
-                      // here for the audit trail.
+                      // STATUS column cell: status badge only. Per-vendor
+                      // JW chip + Revoke/Short-Close buttons live in the
+                      // Operator column next to each vendor (so multi-
+                      // vendor partial OS shows each vendor's own JW number
+                      // and management controls). Keep short_closed-summary
+                      // chip here for the audit trail.
                       const canManageOS = user?.role === 'admin'
                         || (user?.permissions?.manufacturing || []).includes('edit')
                         || (user?.permissions?.manufacturing || []).includes('create');
                       const statusCell = (
                         <div className="flex flex-col items-center gap-1.5">
                           {statusBadge}
-                          {hasLiveOS && (
-                            <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-1 rounded font-medium text-center" data-testid={`outsourced-op-${op.sequence}`}>
-                              {op.outsource_sc_order_number ? `JW: ${op.outsource_sc_order_number}` : 'Outsourced'} — Receive via GRN
-                            </span>
-                          )}
                           {op.short_closed && (
                             <span className="text-[10px] text-[#9B1C1C] bg-[#FDE8E8] px-2 py-1 rounded font-medium" data-testid={`short-closed-op-${op.sequence}`}>
                               <XIcon className="w-3 h-3 inline mr-0.5" />Short Closed{op.short_close_reason ? ` — ${op.short_close_reason}` : ''}
@@ -2550,6 +2548,16 @@ export default function ManufacturingPage() {
                                   <User className="w-3 h-3 text-[#6B7280]" />
                                   <span className="font-medium">{r.operator || '-'}</span>
                                 </div>
+                                {/* Per-vendor JW chip — each vendor's run
+                                    shows its own JW (SC) number so multi-
+                                    vendor partial OS (e.g. CREATIVE FINISHERS
+                                    on JW-000012 + V R FABRICATION on
+                                    JW-000013) reads correctly. */}
+                                {(r.operator || '').startsWith('OS: ') && !r.short_closed && (r.outsource_sc_order_number || op.outsource_sc_order_number) && (
+                                  <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-1.5 py-0.5 rounded font-medium inline-block" data-testid={`run-jw-chip-${op.sequence}-${r.run_number || ri}`}>
+                                    JW: {r.outsource_sc_order_number || op.outsource_sc_order_number} — Receive via GRN
+                                  </span>
+                                )}
                                 {/* Per-vendor outsourced qty: shows THIS run's
                                     planned qty against the WO total — so a
                                     multi-vendor partial OS (e.g. 8 to vendor

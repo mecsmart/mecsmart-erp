@@ -14765,6 +14765,44 @@ async def _consume_tax_invoice_stock(invoice_doc, user_id):
         return
     warehouse_id = invoice_doc.get("ship_from_warehouse_id") or ""
     inv_no = invoice_doc.get("invoice_no", "")
+    # ---------- Pre-flight stock check ---------------------------------
+    # Reject the consume if ANY line would push the item's current_stock
+    # negative. Without this guard the issue flow silently went into the
+    # red — finance teams then can't reconcile WIP / inventory ledgers.
+    # We aggregate quantities per item so a TI that has the same item on
+    # multiple lines is checked against the SUM, not each line in turn.
+    needed = {}
+    for ln in (invoice_doc.get("lines") or []):
+        item_id = ln.get("item_id")
+        qty = float(ln.get("quantity") or 0)
+        if not item_id or qty <= 0:
+            continue
+        needed[item_id] = needed.get(item_id, 0.0) + qty
+    shortages = []
+    if needed:
+        items_now = await db.items.find({"id": {"$in": list(needed.keys())}}, {"_id": 0, "id": 1, "part_number": 1, "name": 1, "current_stock": 1, "unit_of_measure": 1}).to_list(2000)
+        items_map = {it["id"]: it for it in items_now}
+        for iid, req_qty in needed.items():
+            it = items_map.get(iid) or {}
+            avail = float(it.get("current_stock") or 0)
+            if req_qty > avail:
+                shortages.append({
+                    "item_id": iid,
+                    "part_number": it.get("part_number") or iid,
+                    "name": it.get("name") or "",
+                    "required": req_qty,
+                    "available": avail,
+                    "short_by": req_qty - avail,
+                    "uom": it.get("unit_of_measure") or "pcs",
+                })
+    if shortages:
+        # 422 lets the frontend show a structured dialog with the per-item
+        # shortage breakdown instead of a generic error toast.
+        raise HTTPException(status_code=422, detail={
+            "error": "insufficient_stock",
+            "message": f"Cannot issue invoice — {len(shortages)} item(s) would go to negative stock.",
+            "shortages": shortages,
+        })
     consumed_any = False
     for ln in (invoice_doc.get("lines") or []):
         item_id = ln.get("item_id")
@@ -14926,18 +14964,28 @@ async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request)
         else:
             update["qr_code"] = ""
     update["updated_at"] = datetime.now(timezone.utc)
-    await db.tax_invoices.update_one({"id": tid}, {"$set": update})
     # Handle stock-consumption transitions based on status change:
     #   - draft → issued/paid: consume stock (one-time, gated by stock_consumed flag)
     #   - issued/paid → cancelled: restore stock
-    # NB: the helper is idempotent so a no-op transition is safe.
+    # IMPORTANT: Check stock BEFORE updating the database to prevent status change
+    # when stock is insufficient. The _consume_tax_invoice_stock function raises
+    # HTTPException 422 if stock is insufficient.
+    prev_status = (existing.get("status") or "draft").lower()
+    new_status = (update.get("status") or prev_status).lower()
+    # Pre-flight stock check: if transitioning to issued/paid and stock not yet consumed,
+    # verify stock availability BEFORE updating the invoice status
+    if new_status not in ("draft", "cancelled") and prev_status in ("draft",) and not existing.get("stock_consumed"):
+        # Build a temporary doc with the new status to check stock
+        temp_doc = {**existing, **update}
+        await _consume_tax_invoice_stock(temp_doc, user["id"])
+        # If we get here, stock was consumed successfully - mark it in the update
+        update["stock_consumed"] = True
+    # Now safe to update the database
+    await db.tax_invoices.update_one({"id": tid}, {"$set": update})
     fresh = await db.tax_invoices.find_one({"id": tid})
     if fresh:
-        prev_status = (existing.get("status") or "draft").lower()
-        new_status = (fresh.get("status") or prev_status).lower()
-        if new_status not in ("draft", "cancelled") and not fresh.get("stock_consumed"):
-            await _consume_tax_invoice_stock(fresh, user["id"])
-        elif new_status == "cancelled" and fresh.get("stock_consumed"):
+        # Handle cancellation - restore stock if previously consumed
+        if new_status == "cancelled" and fresh.get("stock_consumed"):
             await _restore_tax_invoice_stock(fresh, user["id"])
     return await _enrich_tax_invoice(await db.tax_invoices.find_one({"id": tid}))
 

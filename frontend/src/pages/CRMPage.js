@@ -2957,8 +2957,30 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   };
 
   const statusChange = async (t, status) => {
-    try { await api.put(`/api/crm/tax-invoices/${t.id}`, { status }); load(); onRefresh(); }
-    catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+    try {
+      await api.put(`/api/crm/tax-invoices/${t.id}`, { status });
+      load();
+      onRefresh();
+    } catch (e) {
+      // Structured insufficient-stock error from backend — show a clear
+      // per-item shortage dialog instead of a generic toast so the user
+      // can immediately see what needs to be replenished.
+      const det = e.response?.data?.detail;
+      if (det && typeof det === 'object' && det.error === 'insufficient_stock') {
+        const lines = (det.shortages || []).map(s =>
+          `  • ${s.part_number} ${s.name ? `(${s.name})` : ''} — need ${s.required} ${s.uom}, have ${s.available}, short by ${s.short_by}`
+        ).join('\n');
+        alert(
+          `Cannot issue this invoice — insufficient stock for ${(det.shortages || []).length} item(s):\n\n${lines}\n\n` +
+          `Please:\n` +
+          `• Reduce the Ship-From-Warehouse quantity OR\n` +
+          `• Manufacture / receive more stock first OR\n` +
+          `• Keep the invoice in DRAFT until stock is available.`
+        );
+      } else {
+        alert(det || 'Failed');
+      }
+    }
   };
 
   const filtered = list.filter(t => {
