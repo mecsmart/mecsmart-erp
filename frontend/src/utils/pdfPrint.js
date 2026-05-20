@@ -298,6 +298,20 @@ async function svgDataUrlToPngDataUrl(dataUrl, targetW = 256, targetH = 96) {
  */
 export async function downloadHtmlAsPdf(html, filename, options = {}) {
   const cleanFilename = sanitizeFilename(filename);
+  // Preview mode → dispatch a global event for the in-page PreviewPdfDialog
+  // to pick up. We deliberately don't import the dialog component here to
+  // avoid a circular import; the App-level dialog listens for this event.
+  // Callers that want to FORCE direct-download even when preview was the
+  // original intent can pass `options.forceDownload = true` (used by the
+  // dialog's own "Download PDF" button).
+  if (options.preview && !options.forceDownload) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('mecsmart:preview', {
+        detail: { html, filename: cleanFilename },
+      }));
+    }
+    return;
+  }
   const finalHtml = injectPrintCss(html);
 
   // Build hidden iframe — sits in the corner so it never repaints visible UI.

@@ -14,6 +14,7 @@ import { SearchableSelect } from '../components/SearchableSelect';
 import { SearchableItemSelect } from '../components/SearchableItemSelect';
 import { useDraggableRows } from '../hooks/useDraggableRows';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
+import { openPdfPreview } from '../components/PreviewPdfDialog';
 import { fmtAmtForCurrency } from '../utils/numberFormat';
 import { QuickAddPartyDialog } from '../components/QuickAddPartyDialog';
 import { toast } from 'sonner';
@@ -4644,15 +4645,14 @@ ${(isQuotation && opts.includeCover) ? `
     document.write(html);
     document.close();
   } else if (opts.preview) {
-    // PREVIEW MODE (Electron-safe) — instead of opening a popup window
-    // (which Electron blocks by default and many corporate browsers also
-    // squash), we route through the SAME hidden-iframe + native print
-    // dialog flow as the direct-download path. The browser's "Save as
-    // PDF" destination IS the preview — user sees a full-page preview,
-    // can flip through pages, and saves a real vector PDF in one click.
-    // This bypasses every popup blocker and works identically on Chrome,
-    // Edge, Firefox, Safari and Electron without any desktop rebuild.
-    downloadHtmlAsPdf(html, filename, {});
+    // PREVIEW MODE — open the in-page PDF preview dialog. The dialog
+    // renders the printable HTML in an iframe and gives the user two
+    // explicit actions: "Print / Save as PDF" (native print dialog) and
+    // "Download PDF" (forced html2pdf raster). The dispatch goes through
+    // a global custom event listener mounted in App.js — no popup window
+    // is opened so this works in Electron, kiosk browsers, and corporate
+    // popup-blocker environments without any extra config.
+    openPdfPreview(html, filename);
   } else {
     // Cross-browser running header is now baked into the printable HTML
     // as a <thead> that repeats on every page. html2pdf uses the browser

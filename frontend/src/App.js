@@ -25,6 +25,7 @@ import CRMPage from "./pages/CRMPage";
 import PublicPrintPage from "./pages/PublicPrintPage";
 import JobWorkPage from "./pages/JobWorkPage";
 import { Toaster } from "./components/ui/sonner";
+import PreviewPdfDialog from "./components/PreviewPdfDialog";
 
 function App() {
   return (
@@ -75,6 +76,11 @@ function App() {
       </BrowserRouter>
       </CompanySettingsProvider>
       <Toaster />
+      {/* Global PDF preview modal — listens for `mecsmart:preview` events
+          dispatched from anywhere in the app and renders the printable
+          HTML in an in-page iframe with Print + Download actions. Works
+          inside Electron without any popup-blocker workaround. */}
+      <PreviewPdfDialog />
     </AuthProvider>
   );
 }
