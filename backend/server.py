@@ -9295,7 +9295,7 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
     wb = load_workbook(io.BytesIO(content))
     ws = wb.active
 
-    results = {"created": 0, "updated": 0, "errors": []}
+    results = {"created": 0, "updated": 0, "errors": [], "imported_bom_ids": []}
 
     items_by_pn = {}
     async for item in db.items.find({}, {"_id": 0}):
@@ -9474,6 +9474,7 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
                 }}
             )
             results["updated"] += 1
+            results["imported_bom_ids"].append(existing["id"])
         else:
             bom_doc = {
                 "id": str(uuid.uuid4()),
@@ -9489,6 +9490,7 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
             }
             await db.boms.insert_one(bom_doc)
             results["created"] += 1
+            results["imported_bom_ids"].append(bom_doc["id"])
 
     return results
 

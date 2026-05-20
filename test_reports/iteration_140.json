@@ -1,0 +1,40 @@
+{
+  "summary": "Round 12.5 Bug Fix Testing - All 3 fixes verified successfully. Bug 1 (PDF page fit): Quotation, PO, Proforma Invoice, and Tax Invoice PDFs all fit properly within A4 page width with no columns clipped. Bug 2 (Nested SG dedup): BOM list shows only FG items at top level - no SG duplicates visible. Bug 3 (BOM import visibility): Import toast message correctly shows 'Imported BOMs are pinned to the top of the list — refresh to re-group.' Regression check: PO Print dialog working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_round12_5.py"],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": ["/app/backend/tests/test_round12_5.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Round 12.5 fixes verified: (1) pdfPrint.js CSS changes for PDF page fit working - tables fit within A4 with word-break on wide columns, (2) BOMPage.js childItemIds filter restored - nested SGs don't duplicate at top level, (3) BOM import returns imported_bom_ids and toast message updated. All PDF templates (Quotation, PO, Proforma, Tax Invoice) render correctly with all columns visible.",
+  "bugs_verified": {
+    "bug_1_pdf_page_fit": {
+      "status": "VERIFIED",
+      "details": "Tested Quotation PDF, PO PDF, Proforma Invoice PDF, Tax Invoice PDF - all tables fit within A4 page width with GST and Total columns fully visible"
+    },
+    "bug_2_nested_sg_dedup": {
+      "status": "VERIFIED",
+      "details": "BOM list shows only FG items at top level. No SG items appear as separate top-level rows - they only appear inside expanded FG explosion trees"
+    },
+    "bug_3_bom_import_visibility": {
+      "status": "VERIFIED",
+      "details": "BOM import toast shows 'BOM import complete: X created, Y updated. Imported BOMs are pinned to the top of the list — refresh to re-group.' Backend returns imported_bom_ids in response"
+    },
+    "regression_draft_watermark": {
+      "status": "VERIFIED",
+      "details": "PO Print dialog working correctly with all display options. DRAFT watermark logic intact (only shown for draft status POs)"
+    }
+  }
+}

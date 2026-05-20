@@ -108,9 +108,19 @@ function injectPrintCss(html, { draft = false } = {}) {
   ` : '';
   const extra = `
     <style id="__pdfprint_overrides__">
-      html, body { width: ${A4_WIDTH_PX}px !important; max-width: ${A4_WIDTH_PX}px !important; margin: 0; }
+      /* Keep colors / backgrounds in saved PDF — browsers strip these by
+         default in print to save toner. */
       * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-      @page { size: A4; margin: 0; }
+      /* Only enforce paper size — let each template control its own
+         margins. Forcing a 0-margin here previously pushed table content
+         past the printer's non-printable edge, clipping the rightmost
+         columns (GST / Total on Quotations). */
+      @page { size: A4; }
+      /* Constrain content to the printable column so wide tables wrap
+         rather than overflow the right edge. */
+      html, body { max-width: 210mm !important; margin: 0 auto !important; }
+      table { max-width: 100% !important; box-sizing: border-box; }
+      td, th { word-break: break-word; overflow-wrap: anywhere; }
       .page-break-before { page-break-before: always; break-before: page; }
       .avoid-break { page-break-inside: avoid; break-inside: avoid; }
       tr, thead { page-break-inside: avoid; break-inside: avoid; }

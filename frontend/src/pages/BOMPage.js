@@ -73,6 +73,13 @@ export default function BOMPage() {
   // Top-level BOM panels: collapsed by default for ALL parent categories (FG, SG, CP, RM).
   // Stores `true` for explicitly-EXPANDED panels; missing key === collapsed.
   const [expandedBomPanels, setExpandedBomPanels] = useState({});
+  // Recently-imported BOM IDs. When a fresh Excel import creates BOMs whose
+  // parent is referenced as a CHILD in another BOM, the normal "nested only"
+  // filter hides them at top-level — so the user sees the success toast but
+  // can't find the new BOMs. We keep IDs returned from `/import/excel` here
+  // and add them to the visible set on top of the filter, so imported BOMs
+  // always appear at top-level until the page is reloaded.
+  const [recentImportedIds, setRecentImportedIds] = useState(new Set());
   const [allExplosions, setAllExplosions] = useState({});
   const [bomSearch, setBomSearch] = useState('');
   // Per-FG (per-parent-pid) search input shown in the BOM panel header.
@@ -649,11 +656,22 @@ export default function BOMPage() {
       formData.append('file', file);
       const { data } = await api.post('/api/bom/import/excel', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       const created = data.created || 0, updated = data.updated || 0, errCount = data.errors?.length || 0;
+      // Stash imported IDs so the grouping pass below keeps them visible at
+      // top-level even when their parent is a child elsewhere. Without this
+      // the user saw "import successful" but never found the new BOMs
+      // because nested-only suppression was hiding them.
+      if (Array.isArray(data.imported_bom_ids) && data.imported_bom_ids.length > 0) {
+        setRecentImportedIds(prev => {
+          const next = new Set(prev);
+          data.imported_bom_ids.forEach(id => next.add(id));
+          return next;
+        });
+      }
       if (errCount > 0) {
         toast.warning(`BOM import partial: ${created} created, ${updated} updated, ${errCount} errors (see console)`, { id: toastId, duration: 8000 });
         console.warn('BOM import errors:', data.errors);
       } else {
-        toast.success(`BOM import complete: ${created} created, ${updated} updated`, { id: toastId });
+        toast.success(`BOM import complete: ${created} created, ${updated} updated. Imported BOMs are pinned to the top of the list — refresh to re-group.`, { id: toastId, duration: 6000 });
       }
       fetchBoms();
     } catch (error) {
@@ -1523,26 +1541,26 @@ export default function BOMPage() {
         ) : (
           <div className="p-3 space-y-4">
             {(() => {
-              // (Previously a `childItemIds` set was built here to suppress
-              // BOMs whose parent appears as a child elsewhere. We removed
-              // that filter so BOM imports remain visible at top level —
-              // see Group ALL BOMs comment below.)
+              // Build a set of item_ids that appear as a COMPONENT in at
+              // least one other BOM. Their BOMs render nested in their
+              // parent's explosion tree, so rendering them as separate
+              // top-level rows would clutter the list with duplicates.
+              const childItemIds = new Set();
+              boms.forEach(bom => {
+                (bom.components || []).forEach(c => {
+                  if (c.item_id) childItemIds.add(c.item_id);
+                });
+              });
 
-              // Group ALL BOMs by parent at the top level.
-              //
-              // Earlier we suppressed top-level rows whose parent_item_id was
-              // also a child component in another BOM (so they would "only"
-              // appear nested inside their parent's explosion). That caused
-              // a real-world bug: after a fresh BOM Excel import, the
-              // imported BOMs silently disappeared from the list because
-              // their parent was referenced as a child of an existing FG
-              // BOM. The user saw the "BOM import complete" toast but no
-              // visible new rows. We now ALWAYS show every BOM as its own
-              // top-level group — the nested explosion view still drills
-              // through children, but the imported BOMs no longer vanish.
+              // Group BOMs by parent_item_id, suppressing rows whose
+              // parent is nested elsewhere — UNLESS the BOM was just
+              // imported (we never hide imports so the user can verify
+              // them right after the toast).
               const grouped = {};
               const orderedCats = ['finished_good', 'sub_assembly', 'component', 'raw_material'];
               boms.forEach(bom => {
+                const isRecent = recentImportedIds.has(bom.id);
+                if (!isRecent && childItemIds.has(bom.parent_item_id)) return;
                 const pid = bom.parent_item_id || 'x';
                 if (!grouped[pid]) grouped[pid] = { item: bom.parent_item, boms: [] };
                 grouped[pid].boms.push(bom);
