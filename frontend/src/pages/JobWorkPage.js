@@ -703,7 +703,7 @@ export default function JobWorkPage() {
     </div>
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
     </body></html>`;
-    downloadHtmlAsPdf(html, `${dcTitle.replace(/\s+/g, '-')}-${dc.dc_number || 'document'}.pdf`, { preview: true });
+    downloadHtmlAsPdf(html, `${dcTitle.replace(/\s+/g, '-')}-${dc.dc_number || 'document'}.pdf`, { preview: true, draft: (dc.status || '').toLowerCase() === 'draft' });
   };
 
   const getStatusColor = (s) => {
@@ -987,7 +987,7 @@ export default function JobWorkPage() {
                               </button>
                             )}
                             <button onClick={() => openPrintDC(dc)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-dc-${dc.id}`}>
-                              <Printer className="w-3 h-3 inline mr-1" />Print
+                              <Printer className="w-3 h-3 inline mr-1" />PDF
                             </button>
                           </div>
                         </td>
@@ -1583,7 +1583,7 @@ export default function JobWorkPage() {
             <div className="flex justify-end space-x-3 pt-3 border-t">
               <button onClick={() => setDcPrintDialog(false)} className="btn-secondary">Cancel</button>
               <button onClick={() => { if (dcPrintTarget) printDC(dcPrintTarget, dcTerms); setDcPrintDialog(false); }} className="btn-primary flex items-center space-x-2" data-testid="dc-print-confirm">
-                <Printer className="w-4 h-4" /><span>Print DC</span>
+                <Printer className="w-4 h-4" /><span>Preview &amp; PDF</span>
               </button>
             </div>
           </div>

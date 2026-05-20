@@ -409,8 +409,8 @@ export default function PurchaseOrdersPage() {
                           </span>
                         )}
                         {/* Print button */}
-                        <button onClick={() => setPrintPO(po)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Download PDF (opens preview — use Ctrl+P or Save as PDF)" data-testid={`print-po-${po.id}`}>
-                          <Printer className="w-4 h-4" />
+                        <button onClick={() => setPrintPO(po)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded border border-[#E5E7EB]" title="Preview &amp; Save as PDF" data-testid={`print-po-${po.id}`}>
+                          <Printer className="w-3.5 h-3.5" /> PDF
                         </button>
                         {/* Short-close: only for active POs that haven't been fully received/cancelled */}
                         {['draft', 'approved', 'sent', 'partial'].includes(po.status) && canEdit && (

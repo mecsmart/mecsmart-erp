@@ -14,7 +14,6 @@ import { SearchableSelect } from '../components/SearchableSelect';
 import { SearchableItemSelect } from '../components/SearchableItemSelect';
 import { useDraggableRows } from '../hooks/useDraggableRows';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
-import { openPdfPreview } from '../components/PreviewPdfDialog';
 import { fmtAmtForCurrency } from '../utils/numberFormat';
 import { QuickAddPartyDialog } from '../components/QuickAddPartyDialog';
 import { toast } from 'sonner';
@@ -1344,7 +1343,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   </td>
                   <td>
                     <div className="flex items-center gap-0.5">
-                      <button onClick={() => printQuotation(q)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Download PDF (opens preview — use Ctrl+P or Save as PDF)" data-testid={`quotation-print-${q.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => printQuotation(q)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded border border-[#E5E7EB]" title="Preview &amp; Save as PDF" data-testid={`quotation-print-${q.id}`}><Printer className="w-3.5 h-3.5" /> PDF</button>
                       <button onClick={() => setWaShare({ open: true, doc: q })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`quotation-wa-${q.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && !isLocked && q.status === 'draft' && (
                         <button onClick={() => quickStatusChange(q, 'sent')} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Send to customer" data-testid={`quotation-send-${q.id}`}><Send className="w-4 h-4" /></button>
@@ -2691,7 +2690,7 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
                   </td>
                   <td>
                     <div className="flex gap-0.5">
-                      <button onClick={() => printProforma(p)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Download PDF (opens preview — use Ctrl+P or Save as PDF)" data-testid={`proforma-print-${p.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => printProforma(p)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded border border-[#E5E7EB]" title="Preview &amp; Save as PDF" data-testid={`proforma-print-${p.id}`}><Printer className="w-3.5 h-3.5" /> PDF</button>
                       <button onClick={() => setWaShare({ open: true, doc: p })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`proforma-wa-${p.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && !isLocked && (
                         <button onClick={() => setConvertConfirm({ open: true, proforma: p })} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Convert to Tax Invoice" data-testid={`proforma-to-invoice-${p.id}`}><Send className="w-4 h-4" /></button>
@@ -3156,7 +3155,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                   </td>
                   <td>
                     <div className="flex gap-0.5">
-                      <button onClick={() => previewInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Download PDF (opens preview — use Ctrl+P or Save as PDF)" data-testid={`tax-invoice-print-${t.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => previewInvoice(t)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded border border-[#E5E7EB]" title="Preview &amp; Save as PDF" data-testid={`tax-invoice-print-${t.id}`}><Printer className="w-3.5 h-3.5" /> PDF</button>
                       <button onClick={() => downloadTallyXML(t)} className="p-1.5 text-[#1D3557] hover:bg-[#E1EFFE] rounded" title="Download Tally XML (Sales voucher for Tally import)" data-testid={`tally-ti-${t.id}`}><Download className="w-4 h-4" /></button>
                       <button onClick={() => setWaShare({ open: true, doc: t })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`tax-invoice-wa-${t.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && ['draft', 'issued'].includes(t.status) && (
@@ -3792,7 +3791,7 @@ export function PackingListsPanel({ search = '', canEdit = true }) {
                   </td>
                   <td>
                     <div className="flex gap-0.5">
-                      <button onClick={() => printPL(pl)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Download PDF (opens preview — use Ctrl+P or Save as PDF)" data-testid={`pl-print-${pl.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => printPL(pl)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded border border-[#E5E7EB]" title="Preview &amp; Save as PDF" data-testid={`pl-print-${pl.id}`}><Printer className="w-3.5 h-3.5" /> PDF</button>
                       <button onClick={() => setWaShare({ open: true, doc: pl })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`pl-wa-${pl.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && pl.status === 'draft' && <button onClick={() => setDeleteConfirm({ open: true, pl })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`pl-delete-${pl.id}`}><Trash2 className="w-4 h-4" /></button>}
                     </div>
@@ -3988,7 +3987,7 @@ function printPackingListDoc(pl, company) {
   <div class="footer">This is a computer-generated document. ${esc(cfg.name)}</div>
 </div>
 </body></html>`;
-  downloadHtmlAsPdf(html, `Packing-List-${pl.packing_list_no || 'document'}.pdf`, { preview: true });
+  downloadHtmlAsPdf(html, `Packing-List-${pl.packing_list_no || 'document'}.pdf`, { preview: true, draft: (pl.status || '').toLowerCase() === 'draft' });
 }
 
 /* ============================================================================
@@ -4304,8 +4303,14 @@ function printInvoiceDoc(doc, opts) {
   .sign-col .line-box{border-top:1px solid #0f172a;padding-top:4px;color:#475569;font-weight:600}
   .sign-col .auth-label{font-size:9px;color:#94a3b8}
   .footer-note{text-align:center;margin-top:24px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:9px;color:#94a3b8}
-  /* Cover page — exactly A4, standalone (outside .page wrapper) */
-  .cover-page{width:210mm;min-height:297mm;max-height:297mm;display:flex;flex-direction:column;padding:14mm 18mm;box-sizing:border-box;page-break-after:always;overflow:hidden}
+  /* Cover page — exactly A4, standalone (outside .page wrapper). Pulled UP
+     by 22mm with a solid white background so the repeating <thead> running
+     band is masked on the cover page (page 1). Internal padding-top is
+     bumped to 30mm so the cover content still starts visually below where
+     the band would have been, keeping the layout clean. Subsequent body
+     pages get their own mask via .page-one-cover; on every page 2+ the
+     band shows normally above the spillover content. */
+  .cover-page{width:210mm;min-height:297mm;max-height:297mm;display:flex;flex-direction:column;padding:30mm 18mm 14mm 18mm;box-sizing:border-box;page-break-after:always;overflow:hidden;margin-top:-22mm;background:#fff;position:relative;z-index:5}
   .cover-head{display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:8px}
   .cover-logo{max-height:96px;max-width:260px;object-fit:contain}
   .cover-company{font-size:20px;font-weight:800;color:#0f172a;letter-spacing:0.3px;text-align:center}
@@ -4652,13 +4657,14 @@ ${(isQuotation && opts.includeCover) ? `
     // a global custom event listener mounted in App.js — no popup window
     // is opened so this works in Electron, kiosk browsers, and corporate
     // popup-blocker environments without any extra config.
-    openPdfPreview(html, filename);
+    // Pass `draft` so the watermark CSS is injected into the iframe too.
+    downloadHtmlAsPdf(html, filename, { preview: true, draft: (doc.status || '').toLowerCase() === 'draft' });
   } else {
     // Cross-browser running header is now baked into the printable HTML
     // as a <thead> that repeats on every page. html2pdf uses the browser
     // print pipeline internally, so the thead band naturally repeats in
     // the rasterized PDF too — no jsPDF overlay needed.
-    downloadHtmlAsPdf(html, filename, {});
+    downloadHtmlAsPdf(html, filename, { draft: (doc.status || '').toLowerCase() === 'draft' });
   }
 }
 

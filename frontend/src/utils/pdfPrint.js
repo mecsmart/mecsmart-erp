@@ -75,7 +75,37 @@ function sanitizeFilename(name) {
 //   - Force body width to A4 (no horizontal scale-down)
 //   - Disable any leftover @media print rules that hide content
 //   - Add `print-color-adjust: exact` so colored headers/badges survive
-function injectPrintCss(html) {
+//   - If `draft` is true, inject a "DRAFT COPY" diagonal watermark on every page.
+function injectPrintCss(html, { draft = false } = {}) {
+  // Diagonal "DRAFT COPY" watermark, fixed to viewport so it appears on every
+  // printed page (Chrome/Edge/Firefox honour `position:fixed` repeats during
+  // native print). Faded grey so it doesn't obscure line items.
+  const draftWatermark = draft ? `
+    body::before {
+      content: "DRAFT COPY";
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%) rotate(-30deg);
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      font-size: 120px;
+      font-weight: 900;
+      color: rgba(220, 38, 38, 0.18);
+      letter-spacing: 10px;
+      white-space: nowrap;
+      z-index: 9999;
+      pointer-events: none;
+      user-select: none;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    @media print {
+      body::before {
+        position: fixed;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%) rotate(-30deg);
+      }
+    }
+  ` : '';
   const extra = `
     <style id="__pdfprint_overrides__">
       html, body { width: ${A4_WIDTH_PX}px !important; max-width: ${A4_WIDTH_PX}px !important; margin: 0; }
@@ -84,6 +114,7 @@ function injectPrintCss(html) {
       .page-break-before { page-break-before: always; break-before: page; }
       .avoid-break { page-break-inside: avoid; break-inside: avoid; }
       tr, thead { page-break-inside: avoid; break-inside: avoid; }
+      ${draftWatermark}
     </style>
   </head>`;
   // Inject before the closing </head>; if no </head>, prepend at top of body.
@@ -298,6 +329,10 @@ async function svgDataUrlToPngDataUrl(dataUrl, targetW = 256, targetH = 96) {
  */
 export async function downloadHtmlAsPdf(html, filename, options = {}) {
   const cleanFilename = sanitizeFilename(filename);
+  // If a `draft` flag is set, we inject the diagonal "DRAFT COPY" watermark
+  // upfront so both the preview iframe and the html2pdf raster path render
+  // it. injectPrintCss(html, { draft }) is idempotent.
+  const drafted = options.draft ? injectPrintCss(html, { draft: true }) : html;
   // Preview mode → dispatch a global event for the in-page PreviewPdfDialog
   // to pick up. We deliberately don't import the dialog component here to
   // avoid a circular import; the App-level dialog listens for this event.
@@ -307,12 +342,12 @@ export async function downloadHtmlAsPdf(html, filename, options = {}) {
   if (options.preview && !options.forceDownload) {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('mecsmart:preview', {
-        detail: { html, filename: cleanFilename },
+        detail: { html: drafted, filename: cleanFilename },
       }));
     }
     return;
   }
-  const finalHtml = injectPrintCss(html);
+  const finalHtml = injectPrintCss(drafted, { draft: !!options.draft });
 
   // Build hidden iframe — sits in the corner so it never repaints visible UI.
   const iframe = document.createElement('iframe');

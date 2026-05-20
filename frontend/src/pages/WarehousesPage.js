@@ -1344,8 +1344,8 @@ export default function WarehousesPage() {
                                 </button>
                               </>
                             )}
-                            <button onClick={() => setPrintGRN(grn)} className="p-1 text-[#4B5563] hover:text-[#03543F]" title="Download PDF (opens preview — use Ctrl+P or Save as PDF)" data-testid={`print-grn-${grn.id}`}>
-                              <Printer className="w-4 h-4" />
+                            <button onClick={() => setPrintGRN(grn)} className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-[#4B5563] hover:text-[#03543F] hover:bg-[#F3F4F6] rounded border border-[#E5E7EB]" title="Preview &amp; Save as PDF" data-testid={`print-grn-${grn.id}`}>
+                              <Printer className="w-3.5 h-3.5" /> PDF
                             </button>
                           </div>
                         </td>

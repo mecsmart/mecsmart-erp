@@ -1,19 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
-import { Printer, Eye, Settings2, FileText, X } from 'lucide-react';
+import { Printer, Settings2, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
 import { fmtAmtForCurrency } from '../utils/numberFormat';
 
-const TEMPLATES = [
-  { id: 'standard', name: 'Standard', desc: 'Clean layout with item table and totals' },
-  { id: 'detailed', name: 'Detailed GST', desc: 'Full GST breakup per line with discount' },
-  { id: 'compact', name: 'Compact', desc: 'Minimal columns: Item, Qty, Rate, Amount' },
-  { id: 'modern', name: 'Modern', desc: 'Contemporary design with color accents' },
-];
+// Removed TEMPLATES grid: PO prints are locked to the "Detailed GST" layout
+// per user spec (Feb 2026). GRN dialog still has its own inline template
+// switcher (Standard / Detailed Verification) — see further down.
 
 const PAPER_SIZES = [
   { id: 'a4', name: 'A4', w: '210mm', h: '297mm' },
@@ -41,7 +38,7 @@ function getCurrencySymbol(company, override) {
 }
 
 const defaultOpts = {
-  template: 'standard',
+  template: 'detailed',
   paperSize: 'a4',
   showLetterhead: true,
   showLogo: true,
@@ -366,13 +363,24 @@ export function POPrintDialog({ po, open, onClose }) {
 
   const handlePrint = () => {
     const html = buildHTML();
-    downloadHtmlAsPdf(html, `PO-${po?.po_number || 'document'}.pdf`);
+    // Always route through the preview dialog so the user can verify the PO
+    // before printing/saving — bypasses Electron's popup blocker too.
+    downloadHtmlAsPdf(html, `PO-${po?.po_number || 'document'}.pdf`, {
+      preview: true,
+      draft: (po?.status || '').toLowerCase() === 'draft',
+    });
+    onClose();
   };
 
   const handlePreview = () => {
-    // Same as Download — kept for backward compatibility with the dialog button.
+    // Same as Print — both buttons open the in-page preview dialog. Kept as
+    // a separate handler so the "Preview" button's data-testid stays stable.
     const html = buildHTML();
-    downloadHtmlAsPdf(html, `PO-${po?.po_number || 'document'}.pdf`);
+    downloadHtmlAsPdf(html, `PO-${po?.po_number || 'document'}.pdf`, {
+      preview: true,
+      draft: (po?.status || '').toLowerCase() === 'draft',
+    });
+    onClose();
   };
 
   if (!open) return null;
@@ -393,19 +401,12 @@ export function POPrintDialog({ po, open, onClose }) {
           </div>
         ) : (
           <div className="space-y-5 mt-3" data-testid="po-print-dialog">
-            {/* Template Selection */}
-            <div>
-              <label className="text-xs font-semibold text-[#374151] uppercase tracking-wide mb-2 block">Print Format</label>
-              <div className="grid grid-cols-2 gap-2">
-                {TEMPLATES.map(t => (
-                  <button key={t.id} onClick={() => setOpts({ ...opts, template: t.id })}
-                    className={`text-left p-3 rounded-sm border-2 transition-all ${opts.template === t.id ? 'border-[#1D3557] bg-[#F0F4F8]' : 'border-[#E5E7EB] hover:border-[#9CA3AF]'}`}
-                    data-testid={`template-${t.id}`}>
-                    <span className="text-sm font-semibold block">{t.name}</span>
-                    <span className="text-xs text-[#6B7280]">{t.desc}</span>
-                  </button>
-                ))}
-              </div>
+            {/* Format note — only one PO format supported (Detailed GST). The
+                template grid was removed per user request: every PO prints as
+                the GST-detailed layout (per-line CGST/SGST/IGST breakup +
+                discount column). */}
+            <div className="text-xs text-[#4B5563] bg-[#F0F4F8] border border-[#CBD5E1] px-3 py-2 rounded-sm">
+              <span className="font-semibold text-[#1D3557]">Format:</span> Detailed GST (per-line tax breakup with discount column).
             </div>
 
             {/* Paper & Layout */}
@@ -455,11 +456,8 @@ export function POPrintDialog({ po, open, onClose }) {
                 <X className="w-4 h-4" /> Close
               </button>
               <div className="flex items-center gap-2">
-                <button onClick={handlePreview} className="btn-secondary flex items-center gap-1" data-testid="po-preview-btn">
-                  <Eye className="w-4 h-4" /> Preview
-                </button>
                 <button onClick={handlePrint} className="btn-primary flex items-center gap-1" data-testid="po-print-btn">
-                  <Printer className="w-4 h-4" /> Print
+                  <Printer className="w-4 h-4" /> Preview &amp; PDF
                 </button>
               </div>
             </div>
@@ -594,8 +592,8 @@ export function GRNPrintDialog({ grn, open, onClose }) {
       </div></body></html>`;
   };
 
-  const handlePrint = () => { downloadHtmlAsPdf(buildGRNHTML(), `GRN-${grn?.grn_number || 'document'}.pdf`); };
-  const handlePreview = () => { downloadHtmlAsPdf(buildGRNHTML(), `GRN-${grn?.grn_number || 'document'}.pdf`); };
+  const handlePrint = () => { downloadHtmlAsPdf(buildGRNHTML(), `GRN-${grn?.grn_number || 'document'}.pdf`, { preview: true, draft: (grn?.status || '').toLowerCase() === 'draft' }); onClose(); };
+  const handlePreview = () => { downloadHtmlAsPdf(buildGRNHTML(), `GRN-${grn?.grn_number || 'document'}.pdf`, { preview: true, draft: (grn?.status || '').toLowerCase() === 'draft' }); onClose(); };
 
   if (!open) return null;
 
@@ -636,8 +634,7 @@ export function GRNPrintDialog({ grn, open, onClose }) {
             <div className="flex justify-between items-center pt-4 border-t border-[#E5E7EB]">
               <button onClick={onClose} className="btn-secondary flex items-center gap-1"><X className="w-4 h-4" /> Close</button>
               <div className="flex items-center gap-2">
-                <button onClick={handlePreview} className="btn-secondary flex items-center gap-1" data-testid="grn-preview-btn"><Eye className="w-4 h-4" /> Preview</button>
-                <button onClick={handlePrint} className="btn-primary flex items-center gap-1" data-testid="grn-print-btn"><Printer className="w-4 h-4" /> Print</button>
+                <button onClick={handlePrint} className="btn-primary flex items-center gap-1" data-testid="grn-print-btn"><Printer className="w-4 h-4" /> Preview &amp; PDF</button>
               </div>
             </div>
           </div>

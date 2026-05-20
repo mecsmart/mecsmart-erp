@@ -802,7 +802,7 @@ export default function BOMPage() {
     </div>` : ''}
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:30px">Printed on ${new Date().toLocaleString()}</p>
     </body></html>`;
-    downloadHtmlAsPdf(html, `BOM-${parentItem?.part_number || 'print'}.pdf`, { preview: true });
+    downloadHtmlAsPdf(html, `BOM-${parentItem?.part_number || 'print'}.pdf`, { preview: true, draft: (bomInfo?.status || '').toLowerCase() === 'draft' });
   };
 
   const renderExplosionTree = (items, parentKey = '', level = 0) => {
@@ -1523,25 +1523,26 @@ export default function BOMPage() {
         ) : (
           <div className="p-3 space-y-4">
             {(() => {
-              // Build a set of item_ids that appear as a COMPONENT in at least one other BOM.
-              // These are already nested under a parent in the explosion tree, so rendering
-              // them as standalone top-level rows would duplicate + clutter the list.
-              const childItemIds = new Set();
-              boms.forEach(bom => {
-                (bom.components || []).forEach(c => {
-                  if (c.item_id) childItemIds.add(c.item_id);
-                });
-              });
+              // (Previously a `childItemIds` set was built here to suppress
+              // BOMs whose parent appears as a child elsewhere. We removed
+              // that filter so BOM imports remain visible at top level —
+              // see Group ALL BOMs comment below.)
 
-              // Group all BOMs by parent category (FG/SG/CP/RM), EXCEPT ones whose parent_item
-              // is referenced as a child component in another BOM (those show nested in their
-              // parent's explosion tree instead).
+              // Group ALL BOMs by parent at the top level.
+              //
+              // Earlier we suppressed top-level rows whose parent_item_id was
+              // also a child component in another BOM (so they would "only"
+              // appear nested inside their parent's explosion). That caused
+              // a real-world bug: after a fresh BOM Excel import, the
+              // imported BOMs silently disappeared from the list because
+              // their parent was referenced as a child of an existing FG
+              // BOM. The user saw the "BOM import complete" toast but no
+              // visible new rows. We now ALWAYS show every BOM as its own
+              // top-level group — the nested explosion view still drills
+              // through children, but the imported BOMs no longer vanish.
               const grouped = {};
               const orderedCats = ['finished_good', 'sub_assembly', 'component', 'raw_material'];
               boms.forEach(bom => {
-                // Skip BOMs whose parent is already a child in some other BOM — they'll render
-                // automatically inside their parent's explosion, so no duplicate top-level row.
-                if (childItemIds.has(bom.parent_item_id)) return;
                 const pid = bom.parent_item_id || 'x';
                 if (!grouped[pid]) grouped[pid] = { item: bom.parent_item, boms: [] };
                 grouped[pid].boms.push(bom);
@@ -1777,10 +1778,10 @@ export default function BOMPage() {
                               const total = exp?.total_rollup_cost || 0;
                               printBomExplosion(parentItem, exp.explosion || [], total, activeBom, exp.fg_process_cost_per_unit || 0, exp.components_cost || 0);
                             }}
-                            className="p-1 hover:bg-white/20 rounded"
-                            title="Print BOM"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold bg-white/15 hover:bg-white/25 rounded"
+                            title="Preview &amp; Save as PDF"
                             data-testid={`print-bom-${pid}`}
-                          ><Printer className="w-4 h-4" /></button>
+                          ><Printer className="w-3 h-3" /> PDF</button>
                         )}
                         {activeBom && <button onClick={(e) => { e.stopPropagation(); handleBomExport(activeBom.id); }} className="p-1 hover:bg-white/20 rounded" title="Export this BOM (full tree)" data-testid={`export-bom-${pid}`}><Download className="w-4 h-4" /></button>}
                         {activeBom && <button onClick={(e) => { e.stopPropagation(); handleBomPartsExport(activeBom.id); }} className="p-1 hover:bg-white/20 rounded text-[10px] font-semibold tracking-wide" title="Export aggregated parts list for this FG (1 row per leaf part)" data-testid={`export-bom-parts-${pid}`}>PARTS</button>}

@@ -945,7 +945,7 @@ export default function ManufacturingPage() {
       </tbody>
     </table>` : '<p style="color:#888;margin:10px 0;">No material requirements (no active BOM or zero-quantity components).</p>'}
     </body></html>`;
-      downloadHtmlAsPdf(html, `MaterialReq-${wo.wo_number || wo.id}.pdf`, { preview: true });
+      downloadHtmlAsPdf(html, `MaterialReq-${wo.wo_number || wo.id}.pdf`, { preview: true, draft: (wo.status || '').toLowerCase() === 'draft' });
   };
 
   const printWorkOrder = async (wo) => {
@@ -1044,7 +1044,7 @@ export default function ManufacturingPage() {
       </div>
       <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
       </body></html>`;
-      downloadHtmlAsPdf(html, `MO-${data.wo_number || 'document'}.pdf`, { preview: true });
+      downloadHtmlAsPdf(html, `MO-${data.wo_number || 'document'}.pdf`, { preview: true, draft: (data.status || wo.status || '').toLowerCase() === 'draft' });
     } catch (error) {
       alert('Failed to load print data');
     }
@@ -1167,7 +1167,7 @@ export default function ManufacturingPage() {
       </div>
       <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
       </body></html>`;
-      downloadHtmlAsPdf(html, `JobCard-${data.wo_number || 'document'}.pdf`, { preview: true });
+      downloadHtmlAsPdf(html, `JobCard-${data.wo_number || 'document'}.pdf`, { preview: true, draft: (data.status || wo.status || '').toLowerCase() === 'draft' });
     } catch (error) {
       alert('Failed to load print data');
     }
@@ -1891,8 +1891,8 @@ export default function ManufacturingPage() {
                               {/* Job Card is always available for in-progress inhouse MOs with ops — for BOTH parent and child MOs. Operations must be completed via Job Card (no shortcut). */}
                               {wo.status === 'in_progress' && ops.length > 0 && !wo.is_subcontract && <button onClick={() => openJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`jobcard-wo-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Job Card</button>}
                               {canShowSC && wo.status !== 'in_progress' && <button onClick={() => handleMarkSubcontract(wo)} className="btn-secondary text-xs px-2 py-1 text-[#723B13] border-[#723B13]" data-testid={`subcontract-wo-${wo.id}`}><Truck className="w-3 h-3 inline mr-0.5" />SC</button>}
-                              {wo.status === 'completed' && <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-wo-${wo.id}`}><Printer className="w-3 h-3 inline mr-0.5" />Print</button>}
-                              {wo.status === 'completed' && ops.length > 0 && <button onClick={() => printJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-jobcard-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Print Job Card</button>}
+                              {wo.status === 'completed' && <button onClick={() => printWorkOrder(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-wo-${wo.id}`}><Printer className="w-3 h-3 inline mr-0.5" />PDF</button>}
+                              {wo.status === 'completed' && ops.length > 0 && <button onClick={() => printJobCard(wo)} className="btn-secondary text-xs px-2 py-1" data-testid={`print-jobcard-${wo.id}`}><ClipboardList className="w-3 h-3 inline mr-0.5" />Job Card PDF</button>}
                             </div>
                             )}
                           </td>
@@ -2719,10 +2719,10 @@ export default function ManufacturingPage() {
               {/* Print Buttons */}
               <div className="flex justify-end space-x-2 pt-3 border-t border-[#E5E7EB]">
                 <button onClick={() => printWorkOrder(jobCardWO)} className="btn-secondary text-xs flex items-center space-x-1" data-testid="print-wo-from-jobcard">
-                  <Printer className="w-3 h-3" /><span>Print Manufacturing Order</span>
+                  <Printer className="w-3 h-3" /><span>MO PDF</span>
                 </button>
                 <button onClick={() => printJobCard(jobCardWO)} className="btn-primary text-xs flex items-center space-x-1" data-testid="print-jobcard-from-dialog">
-                  <Printer className="w-3 h-3" /><span>Print Job Card</span>
+                  <Printer className="w-3 h-3" /><span>Job Card PDF</span>
                 </button>
               </div>
             </div>
