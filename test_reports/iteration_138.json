@@ -1,0 +1,57 @@
+{
+  "summary": "Round 10 testing completed. All 5 major features verified: (1a) Manual DC BOM preview tree working - shows constituent parts/RMs with costs, (1b) DC date editable via date picker, (1c) Manual GRN can pick Manual DC to auto-fill items, (2) dc_sent flag correctly hides Revoke button after DC dispatched (14 ops verified), (3) Quotation HSN column reduced to 80px and Rate shows comma formatting (1,12,500), (4) Print buttons open preview in new tab instead of direct download.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "issue_1a_bom_preview_tree": {
+      "status": "VERIFIED",
+      "details": "Manual DC dialog shows BOM preview toggle (▶/▼) next to selected items. Clicking expands a sub-row showing constituent parts/RMs with columns: Part No, Name, Category, Qty, UOM, Unit Cost, Ext. Cost + Total BOM Cost. Items without BOM show 'No active BOM for this item — it ships as a leaf'. Tested with SA-001 (Pump Assembly) which shows RM-001 Steel Sheet 4mm component."
+    },
+    "issue_1b_dc_date_editable": {
+      "status": "VERIFIED",
+      "details": "Manual DC dialog has 'DC Date *' field (date picker) with data-testid='manual-dc-date'. Defaults to today's date (2026-05-20). Backend accepts dc_date in POST /api/job-work/challans/manual payload. DC list shows the custom date in DATE column."
+    },
+    "issue_1c_manual_grn_dc_picker": {
+      "status": "VERIFIED",
+      "details": "Manual GRN dialog has 'Optionally pick a Manual DC' dropdown at top with data-testid='mgrn-pick-dc'. Lists open Manual DCs from GET /api/job-work/manual-dc/open with format 'DC000010 · Steel Masters Pvt. Ltd. · 4 pcs pending'. Selecting auto-fills supplier + lines with remaining qty + unit price. Backend bumps DC's received_qty on GRN creation."
+    },
+    "issue_2_hide_revoke_after_dc": {
+      "status": "VERIFIED",
+      "details": "Backend GET /api/work-orders sets dc_sent=true on each OS run when SC has dc_created or has DC with status in (sent, approved, received). 14 operations currently have dc_sent=true. Frontend ManufacturingPage.js line 2650 hides Revoke button when r.dc_sent is true; Short Close button remains visible."
+    },
+    "issue_3_quotation_table": {
+      "status": "VERIFIED",
+      "details": "(a) HSN column width reduced to 80px (verified via computed style). (b) Rate input shows comma-grouped value on blur: typing '112500' displays '1,12,500' (Indian lakh format). (c) Responsive media query at max-width:1280px applies tighter padding (4px) and smaller font (11px) to .line-items-grid."
+    },
+    "issue_4_preview_instead_of_print": {
+      "status": "VERIFIED",
+      "details": "Print button tooltip updated to 'Download PDF (opens preview — use Ctrl+P or Save as PDF)'. Clicking opens new tab (page count increased from 1 to 2) instead of triggering direct file download. Verified on Quotation print button."
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_138_round10.py",
+    "/app/test_reports/pytest/pytest_iteration_138.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_138_round10.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created Manual DC with custom dc_date (2025-12-15) for testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Round 10 features all verified. Key endpoints: /api/bom/by-item/{id}/preview (BOM preview), /api/job-work/manual-dc/open (open DCs for GRN picker), manual_dc_id field in POST /api/grn/manual. dc_sent flag on OS runs controls Revoke button visibility. Print buttons now use preview:true for new-tab preview flow.",
+  "rca_of_the_issue": null
+}

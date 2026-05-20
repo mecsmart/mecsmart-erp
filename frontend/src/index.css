@@ -169,7 +169,20 @@ code, .mono {
   border-collapse: collapse;
   width: 100%;
   font-size: 13px;
+  /* Auto layout = column widths shrink/grow based on content (Odoo style).
+     The min-width: 0 on the wrapper + table-layout:auto means small
+     viewports compress numeric columns first while keeping the wide
+     Item Name & Description column readable. */
   table-layout: auto;
+  min-width: 0;
+}
+@media (max-width: 1280px) {
+  /* Tighter padding on narrow viewports so the table fits without
+     forcing horizontal scroll. */
+  .line-items-grid thead th { padding: 4px 4px; font-size: 11px; }
+  .line-items-grid td .grid-input,
+  .line-items-grid td .grid-select,
+  .line-items-grid td .grid-textarea { padding: 3px 4px; font-size: 12px; }
 }
 .line-items-grid thead th {
   padding: 6px 6px;

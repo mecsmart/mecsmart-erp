@@ -945,7 +945,7 @@ export default function ManufacturingPage() {
       </tbody>
     </table>` : '<p style="color:#888;margin:10px 0;">No material requirements (no active BOM or zero-quantity components).</p>'}
     </body></html>`;
-    downloadHtmlAsPdf(html, `MaterialReq-${wo.wo_number || wo.id}.pdf`);
+      downloadHtmlAsPdf(html, `MaterialReq-${wo.wo_number || wo.id}.pdf`, { preview: true });
   };
 
   const printWorkOrder = async (wo) => {
@@ -1044,7 +1044,7 @@ export default function ManufacturingPage() {
       </div>
       <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
       </body></html>`;
-      downloadHtmlAsPdf(html, `MO-${data.wo_number || 'document'}.pdf`);
+      downloadHtmlAsPdf(html, `MO-${data.wo_number || 'document'}.pdf`, { preview: true });
     } catch (error) {
       alert('Failed to load print data');
     }
@@ -1167,7 +1167,7 @@ export default function ManufacturingPage() {
       </div>
       <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
       </body></html>`;
-      downloadHtmlAsPdf(html, `JobCard-${data.wo_number || 'document'}.pdf`);
+      downloadHtmlAsPdf(html, `JobCard-${data.wo_number || 'document'}.pdf`, { preview: true });
     } catch (error) {
       alert('Failed to load print data');
     }
@@ -2639,14 +2639,24 @@ export default function ManufacturingPage() {
                                     permission OR admin. */}
                                 {canManageOS && (r.operator || '').startsWith('OS: ') && !r.short_closed && !r.ended_at && (
                                   <div className="flex items-center gap-1 mt-0.5">
-                                    <button
-                                      onClick={() => handleShortCloseOperation(op, r.run_number)}
-                                      className="text-[9px] px-1.5 py-[1px] border border-[#92400E] text-[#92400E] rounded hover:bg-[#FEF3C7]"
-                                      data-testid={`revoke-op-${op.sequence}-${r.run_number || ri}`}
-                                      title={`Revoke this vendor (${r.outsource_supplier_name || ''}) — releases the SC line, other vendor runs unaffected`}
-                                    >
-                                      <RefreshCw className="w-2.5 h-2.5 inline mr-0.5" />Revoke
-                                    </button>
+                                    {/* Revoke is HIDDEN once the JW-DC has
+                                        been dispatched (r.dc_sent=true) —
+                                        material is already with the vendor,
+                                        so revoke is no longer safe (would
+                                        leave the vendor holding material
+                                        with no SC line referencing it).
+                                        Short Close stays available to mark
+                                        the work as scrap/write-off. */}
+                                    {!r.dc_sent && (
+                                      <button
+                                        onClick={() => handleShortCloseOperation(op, r.run_number)}
+                                        className="text-[9px] px-1.5 py-[1px] border border-[#92400E] text-[#92400E] rounded hover:bg-[#FEF3C7]"
+                                        data-testid={`revoke-op-${op.sequence}-${r.run_number || ri}`}
+                                        title={`Revoke this vendor (${r.outsource_supplier_name || ''}) — releases the SC line, other vendor runs unaffected`}
+                                      >
+                                        <RefreshCw className="w-2.5 h-2.5 inline mr-0.5" />Revoke
+                                      </button>
+                                    )}
                                     <button
                                       onClick={() => handleShortCloseNoGRN(op, r.run_number)}
                                       className="text-[9px] px-1.5 py-[1px] border border-[#9B1C1C] text-[#9B1C1C] rounded hover:bg-[#FDE8E8]"

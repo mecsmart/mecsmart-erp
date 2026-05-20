@@ -638,6 +638,10 @@ class ManualGRNCreate(BaseModel):
     lines: List[ManualGRNLine]
     warehouse_id: Optional[str] = ""
     notes: Optional[str] = ""
+    # Optional Manual-DC linkage. When set, the GRN bumps each matching
+    # DC line's `received_qty` so the DC list shows accurate balance and
+    # the DC picker filters out fully-received DCs.
+    manual_dc_id: Optional[str] = None
 
 class POChargeTypeCreate(BaseModel):
     name: str
@@ -740,6 +744,7 @@ class ManualDCCreate(BaseModel):
     dc_purpose: Optional[str] = "subcontract"  # subcontract | rework | repair | other
     notes: Optional[str] = ""
     skip_stock_deduct: Optional[bool] = False
+    dc_date: Optional[str] = None  # YYYY-MM-DD; defaults to today server-side
 
 class SubcontractReceiptLineItem(BaseModel):
     item_id: str
@@ -2004,6 +2009,44 @@ async def get_bom(bom_id: str, request: Request):
             comp["child_bom_id"] = child_bom.get("id")
     
     return bom
+
+@bom_router.get("/by-item/{item_id}/preview")
+async def get_bom_preview_by_item(item_id: str, request: Request):
+    """Lightweight BOM preview by ITEM id (not bom id). Used by the Manual DC
+    dialog and similar list-row "expand" UIs to show the constituent
+    parts/RMs of a selected item with each child's unit cost. Single-level
+    explode (children of the item's active BOM). Returns:
+      { has_bom: bool, bom_id, components: [{item_id, part_number, name,
+        category, quantity, uom, unit_cost, extended_cost}] }
+    """
+    await get_current_user(request)
+    bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
+    if not bom:
+        return {"has_bom": False, "bom_id": None, "components": []}
+    components = []
+    comp_ids = [c.get("item_id") for c in (bom.get("components") or []) if c.get("item_id")]
+    items_map = {}
+    if comp_ids:
+        async for it in db.items.find({"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "part_number": 1, "name": 1, "category": 1, "unit_of_measure": 1, "purchase_price": 1, "unit_cost": 1}):
+            items_map[it["id"]] = it
+    for c in (bom.get("components") or []):
+        if c.get("is_alternate"):
+            continue  # alternates aren't shipped — skip in preview
+        it = items_map.get(c.get("item_id")) or {}
+        qty = float(c.get("quantity") or 0)
+        unit_cost = float(it.get("purchase_price") or it.get("unit_cost") or 0)
+        components.append({
+            "item_id": c.get("item_id"),
+            "part_number": it.get("part_number") or "",
+            "name": it.get("name") or "",
+            "category": it.get("category") or "",
+            "quantity": qty,
+            "uom": it.get("unit_of_measure") or "pcs",
+            "unit_cost": unit_cost,
+            "extended_cost": qty * unit_cost,
+        })
+    return {"has_bom": True, "bom_id": bom.get("id"), "components": components}
+
 
 @bom_router.get("/{bom_id}/explode")
 async def explode_bom(bom_id: str, request: Request, levels: int = 10):
@@ -5401,6 +5444,36 @@ async def create_manual_grn(data: ManualGRNCreate, request: Request):
     }
     await db.grn.insert_one(grn_doc)
     grn_doc.pop("_id", None)
+    # Bump matching Manual-DC line received_qty so the DC picker filters
+    # out fully-received DCs and partials stay open with the balance. We
+    # match by item_id; if multiple lines have the same item, qty is
+    # distributed FIFO into the lines with remaining balance.
+    if data.manual_dc_id:
+        dc = await db.delivery_challans.find_one({"id": data.manual_dc_id, "is_manual": True})
+        if dc:
+            new_lines = list(dc.get("lines") or [])
+            for grn_line in grn_lines:
+                remaining = float(grn_line["received_quantity"])
+                if remaining <= 0:
+                    continue
+                for dl in new_lines:
+                    if remaining <= 0:
+                        break
+                    if dl.get("item_id") != grn_line["item_id"]:
+                        continue
+                    open_qty = float(dl.get("quantity") or 0) - float(dl.get("received_qty") or 0)
+                    if open_qty <= 0:
+                        continue
+                    take = min(open_qty, remaining)
+                    dl["received_qty"] = float(dl.get("received_qty") or 0) + take
+                    remaining -= take
+            # If every line is now fully received, flip DC status to received.
+            all_done = all(float(l.get("quantity") or 0) <= float(l.get("received_qty") or 0) for l in new_lines)
+            update_set = {"lines": new_lines, "updated_at": datetime.now(timezone.utc)}
+            if all_done:
+                update_set["status"] = "received"
+                update_set["received_at"] = datetime.now(timezone.utc)
+            await db.delivery_challans.update_one({"id": data.manual_dc_id}, {"$set": update_set})
     return grn_doc
 
 
@@ -5713,20 +5786,50 @@ async def get_work_orders(request: Request, status: Optional[str] = None, produc
     # lookup of all referenced SC orders, then fill in qty from the matching
     # job_work_part. This keeps the response shape backwards-compatible while
     # guaranteeing the field is populated for the frontend.
+    # Collect ALL live OS ops (not just those missing outsourced_quantity)
+    # so we can also flag `dc_sent` on each OS run — used by the frontend
+    # to hide the Revoke button once a DC has been dispatched (which would
+    # otherwise leave the vendor expecting material but the SC erased).
     needs_sc_lookup = []
+    all_os_ops = []
     for wo in work_orders:
         for op in (wo.get("operations_status") or []):
-            if (op.get("is_job_work") and op.get("outsource_sc_order_id")
-                    and not op.get("outsourced_quantity")):
-                needs_sc_lookup.append((wo.get("id"), wo.get("item_id"), op))
-    if needs_sc_lookup:
-        sc_ids = list({op["outsource_sc_order_id"] for _wo_id, _item_id, op in needs_sc_lookup})
+            if op.get("is_job_work") and op.get("outsource_sc_order_id"):
+                all_os_ops.append((wo.get("id"), wo.get("item_id"), op))
+                if not op.get("outsourced_quantity"):
+                    needs_sc_lookup.append((wo.get("id"), wo.get("item_id"), op))
+    if all_os_ops:
+        sc_ids = list({op["outsource_sc_order_id"] for _wo_id, _item_id, op in all_os_ops})
         sc_map = {}
-        async for sc in db.subcontract_orders.find({"id": {"$in": sc_ids}}, {"_id": 0, "id": 1, "job_work_parts": 1, "reference_wo_ids": 1, "reference_wo_id": 1, "reference_operation_seqs": 1, "lines": 1}):
+        async for sc in db.subcontract_orders.find({"id": {"$in": sc_ids}}, {"_id": 0, "id": 1, "job_work_parts": 1, "reference_wo_ids": 1, "reference_wo_id": 1, "reference_operation_seqs": 1, "lines": 1, "dc_created": 1}):
             sc_map[sc["id"]] = sc
+        # Pre-compute which SCs have an active DC. A DC is "active" when
+        # its status is sent/approved (i.e., the material physically left
+        # the premises). Pending/draft DCs don't count — those can still
+        # be cancelled and the revoke is safe.
+        dc_active_scs = set()
+        async for dc in db.delivery_challans.find(
+            {"subcontract_order_id": {"$in": sc_ids}, "status": {"$in": ["sent", "approved", "received"]}},
+            {"_id": 0, "subcontract_order_id": 1}
+        ):
+            dc_active_scs.add(dc.get("subcontract_order_id"))
         # Build a quick wo_id → wo.quantity lookup so we can fall back to
         # "entire WO outsourced" when no job_work_parts match.
         wo_qty_lookup = {wo.get("id"): float(wo.get("quantity") or 0) for wo in work_orders}
+        # Flag dc_sent on each OS run + on op-level so the UI can hide
+        # Revoke globally for that vendor allocation.
+        for _wo_id, _item_id, op in all_os_ops:
+            sc = sc_map.get(op.get("outsource_sc_order_id"))
+            op_dc_sent = (sc and bool(sc.get("dc_created"))) or op.get("outsource_sc_order_id") in dc_active_scs
+            op["dc_sent"] = op_dc_sent
+            for r in (op.get("runs") or []):
+                if not (r.get("operator") or "").startswith("OS: "):
+                    continue
+                run_sc_id = r.get("outsource_sc_order_id") or op.get("outsource_sc_order_id")
+                if run_sc_id and (run_sc_id in dc_active_scs or (sc_map.get(run_sc_id) or {}).get("dc_created")):
+                    r["dc_sent"] = True
+                else:
+                    r["dc_sent"] = False
         for _wo_id, item_id, op in needs_sc_lookup:
             sc = sc_map.get(op.get("outsource_sc_order_id"))
             if not sc:
@@ -12343,6 +12446,43 @@ async def get_delivery_challans(request: Request):
                 part["item"] = items_map.get(part.get("item_id"))
     return challans
 
+@jobwork_router.get("/manual-dc/open")
+async def list_open_manual_dcs(request: Request):
+    """List Manual DCs that still have receivable balance — used by the
+    Manual GRN dialog's DC picker to auto-fill items + remaining qty + unit
+    price. A DC is "open" when status is in (draft, sent, approved) AND
+    at least one line has `quantity > received_qty`. Includes the
+    supplier_name for the picker label.
+    """
+    await get_current_user(request)
+    dcs = await db.delivery_challans.find(
+        {"is_manual": True, "status": {"$in": ["draft", "sent", "approved"]}},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(500)
+    # Attach supplier_name and per-line received_qty (default 0 if not set).
+    sup_ids = list({d.get("supplier_id") for d in dcs if d.get("supplier_id")})
+    sup_map = {}
+    if sup_ids:
+        async for s in db.suppliers.find({"id": {"$in": sup_ids}}, {"_id": 0, "id": 1, "name": 1}):
+            sup_map[s["id"]] = s.get("name") or ""
+    out = []
+    for d in dcs:
+        new_lines = []
+        any_open = False
+        for ln in (d.get("lines") or []):
+            rq = float(ln.get("received_qty") or 0)
+            qty = float(ln.get("quantity") or 0)
+            new_lines.append({**ln, "received_qty": rq})
+            if qty - rq > 0:
+                any_open = True
+        if not any_open:
+            continue
+        d["lines"] = new_lines
+        d["supplier_name"] = sup_map.get(d.get("supplier_id") or "", "")
+        out.append(d)
+    return out
+
+
 @jobwork_router.post("/challans/manual", status_code=201)
 async def create_manual_delivery_challan(data: ManualDCCreate, request: Request):
     """Create a standalone (manual) DC — not linked to any Subcontract Order.
@@ -12426,6 +12566,11 @@ async def create_manual_delivery_challan(data: ManualDCCreate, request: Request)
         "lines": dc_lines,
         "notes": data.notes or "",
         "status": "draft",
+        # User-pickable DC date (YYYY-MM-DD). Defaults to today when the
+        # client doesn't send one. Stored as ISO date string so the
+        # printable DC and GRN-from-DC flows can show the original DC
+        # date instead of the server timestamp.
+        "dc_date": data.dc_date or datetime.now(timezone.utc).date().isoformat(),
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -12545,6 +12690,7 @@ async def update_manual_delivery_challan(dc_id: str, data: ManualDCCreate, reque
             "warehouse_id": data.warehouse_id or "",
             "lines": dc_lines,
             "notes": data.notes or "",
+            "dc_date": data.dc_date or dc.get("dc_date") or datetime.now(timezone.utc).date().isoformat(),
             "updated_at": datetime.now(timezone.utc),
             "updated_by": user["id"],
         }},

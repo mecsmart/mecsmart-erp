@@ -65,6 +65,24 @@ export default function JobWorkPage() {
     supplier_id: '', dc_purpose: 'subcontract', warehouse_id: '', notes: '',
     lines: [{ item_id: '', item_search: '', quantity: 1, unit_price: 0, processing_charges: 0, notes: '' }]
   });
+  // BOM preview cache keyed by item_id — populates the expandable "show RM
+  // detail" sub-table beneath each selected Manual DC line. We fetch lazily
+  // when the user clicks the chevron so we don't blow N+1 network calls
+  // on dialog open for every line.
+  const [bomPreviewCache, setBomPreviewCache] = useState({});
+  const [bomPreviewOpen, setBomPreviewOpen] = useState({});  // { [idx]: bool }
+  const toggleBomPreview = async (idx, itemId) => {
+    const next = !bomPreviewOpen[idx];
+    setBomPreviewOpen(prev => ({ ...prev, [idx]: next }));
+    if (next && itemId && !bomPreviewCache[itemId]) {
+      try {
+        const { data } = await api.get(`/api/bom/by-item/${itemId}/preview`);
+        setBomPreviewCache(prev => ({ ...prev, [itemId]: data }));
+      } catch {
+        setBomPreviewCache(prev => ({ ...prev, [itemId]: { has_bom: false, components: [] } }));
+      }
+    }
+  };
 
   // DC Print T&C dialog
   const [dcPrintDialog, setDcPrintDialog] = useState(false);
@@ -338,6 +356,7 @@ export default function JobWorkPage() {
     setManualDcForm({
       id: null,
       supplier_id: '', dc_purpose: 'subcontract', warehouse_id: '', notes: '',
+      dc_date: new Date().toISOString().slice(0, 10),
       lines: [{ item_id: '', item_search: '', quantity: 1, unit_price: 0, processing_charges: 0, notes: '' }]
     });
     setManualDcDialog(true);
@@ -353,6 +372,9 @@ export default function JobWorkPage() {
       dc_purpose: dc.dc_purpose || 'subcontract',
       warehouse_id: dc.warehouse_id || '',
       notes: dc.notes || '',
+      // dc_date stored as ISO date string on the doc; fall back to created_at's
+      // date so the picker shows the original DC date instead of today.
+      dc_date: (dc.dc_date || (dc.created_at ? new Date(dc.created_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10))),
       lines: (dc.lines || []).map(l => ({
         item_id: l.item_id,
         item_search: '',
@@ -387,6 +409,7 @@ export default function JobWorkPage() {
         dc_purpose: manualDcForm.dc_purpose || 'subcontract',
         warehouse_id: manualDcForm.warehouse_id || '',
         notes: manualDcForm.notes || '',
+        dc_date: manualDcForm.dc_date || new Date().toISOString().slice(0, 10),
         lines: validLines.map(l => ({
           item_id: l.item_id,
           quantity: parseFloat(l.quantity),
@@ -574,7 +597,7 @@ export default function JobWorkPage() {
       <div class="dc-title">${dcTitle}</div>
       <div style="text-align:right;">
         <div class="dc-number">${dc.dc_number}</div>
-        <div class="dc-date">${dc.created_at ? new Date(dc.created_at).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-'}</div>
+        <div class="dc-date">${dc.dc_date ? new Date(dc.dc_date + 'T00:00:00').toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : (dc.created_at ? new Date(dc.created_at).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-')}</div>
       </div>
     </div>
     <div class="info-grid">
@@ -680,7 +703,7 @@ export default function JobWorkPage() {
     </div>
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
     </body></html>`;
-    downloadHtmlAsPdf(html, `${dcTitle.replace(/\s+/g, '-')}-${dc.dc_number || 'document'}.pdf`);
+    downloadHtmlAsPdf(html, `${dcTitle.replace(/\s+/g, '-')}-${dc.dc_number || 'document'}.pdf`, { preview: true });
   };
 
   const getStatusColor = (s) => {
@@ -937,7 +960,7 @@ export default function JobWorkPage() {
                         </div></td>
                         <td className="text-right mono">{formatCurrency(dc.lines.reduce((s, l) => { const it = l.item || items.find(i => i.id === l.item_id); return s + (l.quantity * (it?.unit_cost || l.rate || 0)); }, 0))}</td>
                         <td><span className={`status-badge ${getStatusColor(dc.status)}`}>{dc.status}</span></td>
-                        <td className="text-sm">{dc.created_at ? new Date(dc.created_at).toLocaleDateString() : '-'}</td>
+                        <td className="text-sm">{dc.dc_date ? new Date(dc.dc_date + 'T00:00:00').toLocaleDateString() : (dc.created_at ? new Date(dc.created_at).toLocaleDateString() : '-')}</td>
                         <td>
                           <div className="flex items-center space-x-1">
                             {dc.status === 'draft' && dc.is_manual && canEdit && (
@@ -1192,12 +1215,24 @@ export default function JobWorkPage() {
                 </Select>
               </div>
             </div>
-            <div>
-              <label className="block text-sm font-semibold mb-1">From Warehouse (optional)</label>
-              <Select value={manualDcForm.warehouse_id} onValueChange={(v) => setManualDcForm({ ...manualDcForm, warehouse_id: v })}>
-                <SelectTrigger data-testid="manual-dc-warehouse"><SelectValue placeholder="(Main stock)" /></SelectTrigger>
-                <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-semibold mb-1">DC Date *</label>
+                <input
+                  type="date"
+                  value={manualDcForm.dc_date || new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setManualDcForm({ ...manualDcForm, dc_date: e.target.value })}
+                  className="input-field w-full"
+                  data-testid="manual-dc-date"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-semibold mb-1">From Warehouse (optional)</label>
+                <Select value={manualDcForm.warehouse_id} onValueChange={(v) => setManualDcForm({ ...manualDcForm, warehouse_id: v })}>
+                  <SelectTrigger data-testid="manual-dc-warehouse"><SelectValue placeholder="(Main stock)" /></SelectTrigger>
+                  <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="border border-[#E5E7EB] rounded-sm overflow-hidden">
               <div className="bg-[#F3F4F6] px-3 py-2">
@@ -1230,13 +1265,28 @@ export default function JobWorkPage() {
                       const uom = selected?.unit_of_measure || 'pcs';
                       const lineTotal = (parseFloat(line.quantity) || 0) * (parseFloat(line.unit_price) || 0);
                       return (
-                        <tr key={idx} data-testid={`manual-dc-line-${idx}`}>
+                        <React.Fragment key={idx}>
+                        <tr data-testid={`manual-dc-line-${idx}`}>
                           <td className="row-num">{idx + 1}</td>
                           <td>
                             <div className="px-1 py-1">
                               {selected ? (
                                 <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-2 py-1" data-testid={`manual-dc-selected-${idx}`}>
-                                  <div className="text-xs truncate">
+                                  <div className="text-xs truncate flex items-center gap-1">
+                                    {/* BOM preview chevron — opens an inline
+                                        sub-table beneath this row showing the
+                                        selected item's BOM children (Parts
+                                        of an SG, or RMs of a Part) with each
+                                        child's quantity + unit cost. */}
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleBomPreview(idx, selected.id)}
+                                      className="text-[#1D3557] hover:bg-[#E1EFFE] rounded px-0.5"
+                                      title={bomPreviewOpen[idx] ? 'Hide BOM detail' : 'Show BOM detail (constituent parts / RMs)'}
+                                      data-testid={`manual-dc-bom-toggle-${idx}`}
+                                    >
+                                      {bomPreviewOpen[idx] ? '▼' : '▶'}
+                                    </button>
                                     <span className="mono font-semibold">{selected.part_number}</span>
                                     <span className="mx-1">—</span>
                                     <span>{selected.name}</span>
@@ -1289,6 +1339,61 @@ export default function JobWorkPage() {
                             )}
                           </td>
                         </tr>
+                        {/* BOM preview sub-row (lazy, expandable) — Shows
+                            constituent parts/RMs of the selected line item
+                            with each child's quantity, UOM, unit cost, and
+                            extended cost. Used to verify the right RM/Parts
+                            are being shipped under each SG/Part. Pattern
+                            mirrors the JW-DC tree visualisation. */}
+                        {selected && bomPreviewOpen[idx] && (
+                          <tr key={`bom-${idx}`} className="bg-[#F9FAFB]" data-testid={`manual-dc-bom-row-${idx}`}>
+                            <td></td>
+                            <td colSpan={6} className="px-2 py-1">
+                              {(() => {
+                                const cache = bomPreviewCache[selected.id];
+                                if (!cache) return <div className="text-[10px] text-[#6B7280] italic">Loading BOM…</div>;
+                                if (!cache.has_bom) return <div className="text-[10px] text-[#9B1C1C] italic">No active BOM for this item — it ships as a leaf (no constituent parts/RMs to break down).</div>;
+                                const totalCost = (cache.components || []).reduce((s, c) => s + (c.extended_cost || 0), 0);
+                                return (
+                                  <div>
+                                    <div className="text-[10px] font-semibold text-[#1D3557] mb-1 uppercase tracking-wider">BOM Detail — Parts / RM ({cache.components.length})</div>
+                                    <table className="w-full text-[11px] border border-[#E5E7EB]">
+                                      <thead className="bg-[#F3F4F6]">
+                                        <tr>
+                                          <th className="px-2 py-1 text-left">Part No</th>
+                                          <th className="px-2 py-1 text-left">Name</th>
+                                          <th className="px-2 py-1 text-left">Category</th>
+                                          <th className="px-2 py-1 text-right">Qty</th>
+                                          <th className="px-2 py-1 text-left">UOM</th>
+                                          <th className="px-2 py-1 text-right">Unit Cost</th>
+                                          <th className="px-2 py-1 text-right">Ext. Cost</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {cache.components.map((c, ci) => (
+                                          <tr key={ci} className={ci % 2 ? 'bg-[#FFFFFF]' : 'bg-[#F9FAFB]'}>
+                                            <td className="px-2 py-1 mono">{c.part_number}</td>
+                                            <td className="px-2 py-1">{c.name}</td>
+                                            <td className="px-2 py-1 text-[10px] text-[#6B7280]">{c.category}</td>
+                                            <td className="px-2 py-1 text-right mono">{c.quantity}</td>
+                                            <td className="px-2 py-1">{c.uom}</td>
+                                            <td className="px-2 py-1 text-right mono">{currencySymbol}{(c.unit_cost || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                            <td className="px-2 py-1 text-right mono">{currencySymbol}{(c.extended_cost || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                          </tr>
+                                        ))}
+                                        <tr className="bg-[#FEF3C7] font-semibold">
+                                          <td colSpan={6} className="px-2 py-1 text-right">Total BOM Cost (per 1 unit of {selected.part_number}):</td>
+                                          <td className="px-2 py-1 text-right mono">{currencySymbol}{totalCost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                        </tr>
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                );
+                              })()}
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>

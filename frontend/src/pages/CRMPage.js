@@ -920,6 +920,32 @@ function emptyQuotationLine() {
 // Reverted to a non-memoized component; SearchableItemSelect already
 // memoizes its internal item-filtering work, so per-row keystroke cost is
 // acceptable.
+// Rate input with comma-grouped display on blur, raw numeric on focus.
+// Gives users readable rate values like "1,12,500" without breaking the
+// numeric onChange contract. Used in Quotation/Proforma/SO/Tax Invoice.
+const RateInput = ({ value, onChange, testId }) => {
+  const [focused, setFocused] = React.useState(false);
+  const num = Number(value || 0);
+  const display = focused
+    ? (value === '' || value === null || value === undefined ? '' : String(value))
+    : (Number.isFinite(num) && Number(value || 0) !== 0 ? num.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : (value === '' ? '' : '0'));
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      className="grid-input mono num"
+      value={display}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      onChange={e => {
+        const raw = e.target.value.replace(/[\s,]/g, '');
+        if (raw === '' || /^-?\d*\.?\d*$/.test(raw)) onChange(raw);
+      }}
+      data-testid={testId}
+    />
+  );
+};
+
 const QuotationLineRow = function QuotationLineRow({
   line, idx, items, currency, formatCurrency, canRemove, updateLine, removeLine, onPickItem, rowProps,
 }) {
@@ -945,7 +971,17 @@ const QuotationLineRow = function QuotationLineRow({
       <td><input type="text" className="grid-input mono" value={line.hsn_code || ''} onChange={e => updateLine(idx, { hsn_code: e.target.value })} data-testid={`quotation-line-hsn-${idx}`} placeholder="HSN" /></td>
       <td><input type="number" step="0.01" className="grid-input mono num" value={line.quantity} onChange={e => updateLine(idx, { quantity: e.target.value })} data-testid={`quotation-line-qty-${idx}`} /></td>
       <td><input type="text" className="grid-input" value={line.uom} onChange={e => updateLine(idx, { uom: e.target.value })} /></td>
-      <td><input type="number" step="0.01" className="grid-input mono num" value={line.rate} onChange={e => updateLine(idx, { rate: e.target.value })} data-testid={`quotation-line-rate-${idx}`} /></td>
+      <td>
+        {/* Rate column: comma-formatted display on blur, raw number while
+            editing. Uses a controlled local state to swap formatted ↔ raw
+            so the user sees "1,12,500" not "112500" when not focused —
+            matches Tax Invoice rate behaviour. */}
+        <RateInput
+          value={line.rate}
+          onChange={(v) => updateLine(idx, { rate: v })}
+          testId={`quotation-line-rate-${idx}`}
+        />
+      </td>
       <td><input type="number" step="0.01" className="grid-input mono num" value={line.discount_pct || 0} onChange={e => updateLine(idx, { discount_pct: e.target.value })} data-testid={`quotation-line-discount-${idx}`} /></td>
       <td><input type="number" step="0.01" className="grid-input mono num" value={line.gst_rate} onChange={e => updateLine(idx, { gst_rate: e.target.value })} /></td>
       <td className="static-cell amount">{formatCurrency(amount, currency)}</td>
@@ -1207,7 +1243,13 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     catch (e) { alert(e.response?.data?.detail || 'Failed'); }
   };
 
-  const printQuotation = (q) => printInvoiceDoc(q, { kind: 'quotation', title: 'QUOTATION', numberKey: 'quotation_no', company: companySettings, user, includeCover: !!(companySettings?.quotation_cover_intro || '').trim() });
+  // PDF Download (preview-and-print): opens the printable view in a new
+  // tab where the user can hit Ctrl+P / Save as PDF. This replaces the
+  // older direct-download flow that rasterized via html2pdf inline — the
+  // preview path is more flexible (user can scroll/inspect before saving)
+  // and uses the browser's native PDF engine which preserves the running
+  // <thead> letterhead on every page.
+  const printQuotation = (q) => printInvoiceDoc(q, { kind: 'quotation', title: 'QUOTATION', numberKey: 'quotation_no', company: companySettings, user, includeCover: !!(companySettings?.quotation_cover_intro || '').trim(), preview: true });
 
   const reviseQuotation = async (q) => {
     try {
@@ -1301,7 +1343,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   </td>
                   <td>
                     <div className="flex items-center gap-0.5">
-                      <button onClick={() => printQuotation(q)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`quotation-print-${q.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => printQuotation(q)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Download PDF (opens preview — use Ctrl+P or Save as PDF)" data-testid={`quotation-print-${q.id}`}><Printer className="w-4 h-4" /></button>
                       <button onClick={() => setWaShare({ open: true, doc: q })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`quotation-wa-${q.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && !isLocked && q.status === 'draft' && (
                         <button onClick={() => quickStatusChange(q, 'sent')} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Send to customer" data-testid={`quotation-send-${q.id}`}><Send className="w-4 h-4" /></button>
@@ -1497,14 +1539,14 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   <thead>
                     <tr>
                       <th className="row-num">#</th>
-                      <th style={{ minWidth: '300px' }}>Item Name &amp; Description</th>
-                      <th style={{ width: '150px', minWidth: '150px' }}>HSN</th>
-                      <th style={{ width: '80px' }}>Qty</th>
-                      <th style={{ width: '70px' }}>UOM</th>
-                      <th style={{ width: '110px' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
-                      <th style={{ width: '70px' }}>Disc %</th>
-                      <th style={{ width: '70px' }}>GST %</th>
-                      <th style={{ width: '130px', textAlign: 'right' }}>Amount</th>
+                      <th style={{ minWidth: '260px' }}>Item Name &amp; Description</th>
+                      <th style={{ width: '80px', minWidth: '80px' }}>HSN</th>
+                      <th style={{ width: '70px' }}>Qty</th>
+                      <th style={{ width: '60px' }}>UOM</th>
+                      <th style={{ width: '120px' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
+                      <th style={{ width: '60px' }}>Disc %</th>
+                      <th style={{ width: '60px' }}>GST %</th>
+                      <th style={{ width: '120px', textAlign: 'right' }}>Amount</th>
                       <th className="remove-cell"></th>
                     </tr>
                   </thead>
@@ -2612,7 +2654,7 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
     return [p.proforma_no, p.customer_name, p.quotation?.quotation_no].some(v => (v || '').toLowerCase().includes(q));
   });
 
-  const printProforma = (p) => printInvoiceDoc(p, { kind: 'proforma', title: 'PROFORMA INVOICE', numberKey: 'proforma_no', company: companySettings, user });
+  const printProforma = (p) => printInvoiceDoc(p, { kind: 'proforma', title: 'PROFORMA INVOICE', numberKey: 'proforma_no', company: companySettings, user, preview: true });
 
   return (
     <div className="space-y-4" data-testid="proformas-panel">
@@ -2648,7 +2690,7 @@ function ProformasPanel({ customers, search, onRefresh, canEdit }) {
                   </td>
                   <td>
                     <div className="flex gap-0.5">
-                      <button onClick={() => printProforma(p)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`proforma-print-${p.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => printProforma(p)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Download PDF (opens preview — use Ctrl+P or Save as PDF)" data-testid={`proforma-print-${p.id}`}><Printer className="w-4 h-4" /></button>
                       <button onClick={() => setWaShare({ open: true, doc: p })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`proforma-wa-${p.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && !isLocked && (
                         <button onClick={() => setConvertConfirm({ open: true, proforma: p })} className="p-1.5 text-[#03543F] hover:bg-[#DEF7EC] rounded" title="Convert to Tax Invoice" data-testid={`proforma-to-invoice-${p.id}`}><Send className="w-4 h-4" /></button>
@@ -2992,7 +3034,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   const totalIssued = filtered.filter(t => t.status === 'issued').reduce((a, t) => a + (t.grand_total || 0), 0);
   const totalPaid = filtered.filter(t => t.status === 'paid').reduce((a, t) => a + (t.grand_total || 0), 0);
 
-  const printInvoice = (t) => printInvoiceDoc(t, { kind: 'tax_invoice', title: 'TAX INVOICE', numberKey: 'invoice_no', company: companySettings, user });
+  const printInvoice = (t) => printInvoiceDoc(t, { kind: 'tax_invoice', title: 'TAX INVOICE', numberKey: 'invoice_no', company: companySettings, user, preview: true });
   // Preview opens the rendered invoice in a new tab with an in-window action
   // bar so the user can visually verify the layout before triggering
   // print / Save-as-PDF. Skip-able by going straight to the Printer icon.
@@ -3113,8 +3155,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                   </td>
                   <td>
                     <div className="flex gap-0.5">
-                      <button onClick={() => previewInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Preview before print" data-testid={`tax-invoice-preview-${t.id}`}><Eye className="w-4 h-4" /></button>
-                      <button onClick={() => printInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print / Save as PDF" data-testid={`tax-invoice-print-${t.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => previewInvoice(t)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Download PDF (opens preview — use Ctrl+P or Save as PDF)" data-testid={`tax-invoice-print-${t.id}`}><Printer className="w-4 h-4" /></button>
                       <button onClick={() => downloadTallyXML(t)} className="p-1.5 text-[#1D3557] hover:bg-[#E1EFFE] rounded" title="Download Tally XML (Sales voucher for Tally import)" data-testid={`tally-ti-${t.id}`}><Download className="w-4 h-4" /></button>
                       <button onClick={() => setWaShare({ open: true, doc: t })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`tax-invoice-wa-${t.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && ['draft', 'issued'].includes(t.status) && (
@@ -3750,7 +3791,7 @@ export function PackingListsPanel({ search = '', canEdit = true }) {
                   </td>
                   <td>
                     <div className="flex gap-0.5">
-                      <button onClick={() => printPL(pl)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Print" data-testid={`pl-print-${pl.id}`}><Printer className="w-4 h-4" /></button>
+                      <button onClick={() => printPL(pl)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Download PDF (opens preview — use Ctrl+P or Save as PDF)" data-testid={`pl-print-${pl.id}`}><Printer className="w-4 h-4" /></button>
                       <button onClick={() => setWaShare({ open: true, doc: pl })} className="p-1.5 text-[#25D366] hover:bg-[#DCFCE7] rounded" title="Share on WhatsApp" data-testid={`pl-wa-${pl.id}`}><MessageSquare className="w-4 h-4" /></button>
                       {canEdit && pl.status === 'draft' && <button onClick={() => setDeleteConfirm({ open: true, pl })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`pl-delete-${pl.id}`}><Trash2 className="w-4 h-4" /></button>}
                     </div>
@@ -3946,7 +3987,7 @@ function printPackingListDoc(pl, company) {
   <div class="footer">This is a computer-generated document. ${esc(cfg.name)}</div>
 </div>
 </body></html>`;
-  downloadHtmlAsPdf(html, `Packing-List-${pl.packing_list_no || 'document'}.pdf`);
+  downloadHtmlAsPdf(html, `Packing-List-${pl.packing_list_no || 'document'}.pdf`, { preview: true });
 }
 
 /* ============================================================================

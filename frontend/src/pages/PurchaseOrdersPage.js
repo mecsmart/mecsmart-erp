@@ -409,7 +409,7 @@ export default function PurchaseOrdersPage() {
                           </span>
                         )}
                         {/* Print button */}
-                        <button onClick={() => setPrintPO(po)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Print PO" data-testid={`print-po-${po.id}`}>
+                        <button onClick={() => setPrintPO(po)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Download PDF (opens preview — use Ctrl+P or Save as PDF)" data-testid={`print-po-${po.id}`}>
                           <Printer className="w-4 h-4" />
                         </button>
                         {/* Short-close: only for active POs that haven't been fully received/cancelled */}

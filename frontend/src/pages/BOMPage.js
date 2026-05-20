@@ -802,7 +802,7 @@ export default function BOMPage() {
     </div>` : ''}
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:30px">Printed on ${new Date().toLocaleString()}</p>
     </body></html>`;
-    downloadHtmlAsPdf(html, `BOM-${parentItem?.part_number || 'print'}.pdf`);
+    downloadHtmlAsPdf(html, `BOM-${parentItem?.part_number || 'print'}.pdf`, { preview: true });
   };
 
   const renderExplosionTree = (items, parentKey = '', level = 0) => {

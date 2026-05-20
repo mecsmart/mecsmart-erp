@@ -172,6 +172,9 @@ export default function WarehousesPage() {
   });
   const [manualGrnSubmitting, setManualGrnSubmitting] = useState(false);
 
+  // When user picks a DC, capture both supplier and DC id so the backend
+  // can bump the DC's received_qty per line on GRN creation.
+  const [linkedDc, setLinkedDc] = useState(null);
   const submitManualGrn = async () => {
     if (!manualGrnForm.supplier_id) { toast.error('Please select a supplier'); return; }
     if (!manualGrnForm.supplier_invoice_no.trim()) { toast.error('Supplier Invoice No. is mandatory'); return; }
@@ -185,6 +188,7 @@ export default function WarehousesPage() {
         supplier_invoice_date: manualGrnForm.supplier_invoice_date ? new Date(manualGrnForm.supplier_invoice_date).toISOString() : null,
         warehouse_id: manualGrnForm.warehouse_id || '',
         notes: manualGrnForm.notes || '',
+        manual_dc_id: linkedDc?.id || null,
         lines: validLines.map(l => ({
           item_id: l.item_id,
           received_quantity: Number(l.received_quantity),
@@ -1340,7 +1344,7 @@ export default function WarehousesPage() {
                                 </button>
                               </>
                             )}
-                            <button onClick={() => setPrintGRN(grn)} className="p-1 text-[#4B5563] hover:text-[#03543F]" title="Print GRN" data-testid={`print-grn-${grn.id}`}>
+                            <button onClick={() => setPrintGRN(grn)} className="p-1 text-[#4B5563] hover:text-[#03543F]" title="Download PDF (opens preview — use Ctrl+P or Save as PDF)" data-testid={`print-grn-${grn.id}`}>
                               <Printer className="w-4 h-4" />
                             </button>
                           </div>
@@ -1550,6 +1554,32 @@ export default function WarehousesPage() {
             <DialogTitle className="font-[Chivo] text-[#1D3557]">Manual GRN (No Purchase Order)</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 mt-3 text-sm">
+            {/* Manual DC picker — auto-fetches items + remaining qty + unit
+                price from a selected open Manual DC. Lets the user fully
+                or partially receive against a DC without re-typing each
+                line. Stays optional: leaving it blank keeps the dialog
+                in its legacy "type items manually" mode. */}
+            <ManualDcPicker
+              onPick={(dc) => {
+                setLinkedDc(dc || null);
+                if (!dc) return;
+                const lines = (dc.lines || []).map(l => {
+                  const remaining = Math.max(0, (l.quantity || 0) - (l.received_qty || 0));
+                  return {
+                    item_id: l.item_id,
+                    received_quantity: remaining,
+                    verified_price: l.unit_price || 0,
+                    _dc_ref: dc.dc_number,
+                  };
+                });
+                setManualGrnForm(f => ({
+                  ...f,
+                  supplier_id: dc.supplier_id || f.supplier_id,
+                  notes: (f.notes ? f.notes + ' · ' : '') + `Against DC ${dc.dc_number}`,
+                  lines: lines.length ? lines : f.lines,
+                }));
+              }}
+            />
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold mb-1">Supplier *</label>
@@ -1644,6 +1674,63 @@ export default function WarehousesPage() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+
+// ManualDcPicker — Compact searchable dropdown that lists OPEN Manual DCs
+// (status sent/approved with non-zero remaining qty). Selecting one
+// auto-fills the Manual GRN dialog with its supplier + lines + remaining
+// qty + unit price. Used by the "Receive against Manual DC" workflow.
+function ManualDcPicker({ onPick }) {
+  const [dcs, setDcs] = React.useState([]);
+  const [open, setOpen] = React.useState(false);
+  const [picked, setPicked] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        // Backend returns Manual DCs with each line's remaining qty
+        // (quantity − received_qty) already computed so the picker
+        // can filter out fully-received DCs.
+        const { data } = await api.get('/api/job-work/manual-dc/open');
+        if (alive) setDcs(Array.isArray(data) ? data : []);
+      } catch {
+        if (alive) setDcs([]);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+  const openDcs = dcs.filter(d => (d.lines || []).some(l => ((l.quantity || 0) - (l.received_qty || 0)) > 0));
+  return (
+    <div className="border border-[#E5E7EB] bg-[#FFFBEB] rounded-sm px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold text-[#723B13]">
+          {picked ? `Receiving against DC: ${picked}` : 'Optionally pick a Manual DC to auto-fill items'}
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            className="input-field text-xs h-8"
+            value={picked || ''}
+            onChange={(e) => {
+              const dc = openDcs.find(d => d.dc_number === e.target.value);
+              setPicked(dc ? dc.dc_number : null);
+              onPick && onPick(dc || null);
+              setOpen(false);
+            }}
+            data-testid="mgrn-pick-dc"
+          >
+            <option value="">— Manual entry —</option>
+            {openDcs.map(d => {
+              const remain = (d.lines || []).reduce((s, l) => s + Math.max(0, (l.quantity || 0) - (l.received_qty || 0)), 0);
+              return <option key={d.id} value={d.dc_number}>{d.dc_number} · {d.supplier_name || ''} · {remain} pcs pending</option>;
+            })}
+          </select>
+          {picked && <button type="button" className="text-[10px] text-[#9B1C1C]" onClick={() => { setPicked(null); onPick && onPick(null); }} data-testid="mgrn-clear-dc">Clear</button>}
+        </div>
+      </div>
+      {picked && <div className="text-[10px] text-[#6B7280] mt-1">Lines auto-filled with remaining qty. Edit qty on any line to do partial receive — DC stays open with the balance.</div>}
     </div>
   );
 }
