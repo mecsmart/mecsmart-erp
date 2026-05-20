@@ -4644,39 +4644,15 @@ ${(isQuotation && opts.includeCover) ? `
     document.write(html);
     document.close();
   } else if (opts.preview) {
-    // PREVIEW MODE — open a new tab/window with the rendered HTML and a
-    // floating action bar so the user can review on-screen before printing
-    // or downloading. No auto-download triggered.
-    const win = window.open('', '_blank');
-    if (!win) {
-      alert('Pop-up blocked. Allow pop-ups for this site to use the preview.');
-      return;
-    }
-    const actionBar = `
-<style>
-  .preview-actions{
-    position:fixed;bottom:16px;right:16px;
-    display:flex;gap:8px;z-index:10000;
-    background:#fff;border:1px solid #e2e8f0;border-radius:8px;
-    padding:8px 10px;box-shadow:0 4px 18px rgba(0,0,0,0.12);
-    font-family:'Helvetica Neue',Arial,sans-serif;font-size:12px;
-  }
-  .preview-actions button{
-    border:0;padding:6px 12px;border-radius:6px;cursor:pointer;
-    font-size:12px;font-weight:600;
-  }
-  .preview-actions .primary{background:${accentColor};color:${headerFg}}
-  .preview-actions .secondary{background:#f1f5f9;color:#0f172a}
-  @media print {.preview-actions{display:none !important}}
-</style>
-<div class="preview-actions">
-  <button class="primary" onclick="window.print()">Print / Save as PDF</button>
-  <button class="secondary" onclick="window.close()">Close</button>
-</div>`;
-    win.document.open();
-    win.document.write(html.replace('</body>', actionBar + '</body>'));
-    win.document.close();
-    try { win.document.title = filename.replace('.pdf', ''); } catch (_e) { /* cross-origin no-op */ }
+    // PREVIEW MODE (Electron-safe) — instead of opening a popup window
+    // (which Electron blocks by default and many corporate browsers also
+    // squash), we route through the SAME hidden-iframe + native print
+    // dialog flow as the direct-download path. The browser's "Save as
+    // PDF" destination IS the preview — user sees a full-page preview,
+    // can flip through pages, and saves a real vector PDF in one click.
+    // This bypasses every popup blocker and works identically on Chrome,
+    // Edge, Firefox, Safari and Electron without any desktop rebuild.
+    downloadHtmlAsPdf(html, filename, {});
   } else {
     // Cross-browser running header is now baked into the printable HTML
     // as a <thead> that repeats on every page. html2pdf uses the browser
