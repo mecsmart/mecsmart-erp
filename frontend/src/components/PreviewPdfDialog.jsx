@@ -21,6 +21,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 import { Printer, Download, X } from 'lucide-react';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
+import { api } from '../context/AuthContext';
 
 // Global event bridge — callers anywhere in the app can pop the preview
 // by dispatching a custom event, so we don't have to thread an
@@ -101,15 +102,13 @@ export default function PreviewPdfDialog() {
   };
 
   const handleDownload = async () => {
-    // Server-side Chromium-based PDF generation. This gives a true
-    // "Save as PDF" quality output as a real downloaded file — no
-    // browser print dialog, no html2canvas rasterisation drift.
+    // Server-side Chromium PDF — true direct file download, no print
+    // dialog. Static import of `api` avoids the dynamic-import script
+    // error we saw in Electron production builds.
     try {
       const ifr = document.querySelector('[data-testid="pdf-preview-iframe"]');
       const srcHtml = (ifr && ifr.srcdoc) || html;
-      const { api } = await import('../context/AuthContext');
       const resp = await api.post('/api/print/html-to-pdf', { html: srcHtml, filename }, { responseType: 'blob' });
-      // Build a Blob URL + click an invisible <a> to trigger the download.
       const blob = new Blob([resp.data], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -120,8 +119,11 @@ export default function PreviewPdfDialog() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
-      console.warn('[PreviewPdfDialog] server PDF failed, falling back to print', err);
-      handlePrint();
+      console.warn('[PreviewPdfDialog] server PDF failed', err);
+      // Hard-fail visibly so the user knows what to do instead of silently
+      // jumping to native print (which Round 20 explicitly forbade).
+      // eslint-disable-next-line no-alert
+      alert('PDF download failed. Please retry, or use "Print / Save as PDF" as a fallback.\n\n' + (err?.message || ''));
     }
   };
 

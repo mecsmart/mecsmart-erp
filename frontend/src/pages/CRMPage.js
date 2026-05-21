@@ -983,7 +983,11 @@ const QuotationLineRow = function QuotationLineRow({
         />
       </td>
       <td><input type="number" step="0.01" className="grid-input mono num" value={line.discount_pct || 0} onChange={e => updateLine(idx, { discount_pct: e.target.value })} data-testid={`quotation-line-discount-${idx}`} /></td>
-      <td><input type="number" step="0.01" className="grid-input mono num" value={line.gst_rate} onChange={e => updateLine(idx, { gst_rate: e.target.value })} /></td>
+      {/* GST% column removed from line items per user request (Round 20).
+          GST is still applied via the line's `gst_rate` field (auto-filled
+          from item master + editable in the dialog header). The column was
+          removed from the editor grid + printed PDF to declutter — only
+          the totals box shows the consolidated GST. */}
       <td className="static-cell amount">{formatCurrency(amount, currency)}</td>
       <td className="remove-cell">
         {canRemove && (
@@ -1549,17 +1553,16 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                 </div>
               </div>
               <div className="border border-[#E5E7EB] rounded-sm overflow-x-auto">
-                <table className="line-items-grid w-full" data-testid="quotation-lines-table" style={{ tableLayout: 'fixed' }}>
+                <table className="line-items-grid w-full" data-testid="quotation-lines-table" style={{ tableLayout: 'fixed', fontSize: '13px' }}>
                   <colgroup>
                     <col style={{ width: '32px' }} />
                     <col />
-                    <col style={{ width: '90px' }} />
-                    <col style={{ width: '64px' }} />
-                    <col style={{ width: '64px' }} />
-                    <col style={{ width: '110px' }} />
-                    <col style={{ width: '60px' }} />
-                    <col style={{ width: '60px' }} />
-                    <col style={{ width: '120px' }} />
+                    <col style={{ width: '100px' }} />
+                    <col style={{ width: '72px' }} />
+                    <col style={{ width: '70px' }} />
+                    <col style={{ width: '130px' }} />
+                    <col style={{ width: '68px' }} />
+                    <col style={{ width: '130px' }} />
                     <col style={{ width: '32px' }} />
                   </colgroup>
                   <thead>
@@ -1571,7 +1574,6 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                       <th>UOM</th>
                       <th>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
                       <th>Disc %</th>
-                      <th>GST %</th>
                       <th style={{ textAlign: 'right' }}>Amount</th>
                       <th className="remove-cell"></th>
                     </tr>
@@ -3323,17 +3325,16 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                 <button type="button" onClick={addLine} className="text-xs text-[#1D3557] flex items-center gap-1" data-testid="ti-add-line"><Plus className="w-3 h-3" /> Add Line</button>
               </div>
               <div className="border border-[#E5E7EB] rounded-sm overflow-x-auto">
-                <table className="line-items-grid w-full" data-testid="ti-lines-table" style={{ tableLayout: 'fixed' }}>
+                <table className="line-items-grid w-full" data-testid="ti-lines-table" style={{ tableLayout: 'fixed', fontSize: '13px' }}>
                   <colgroup>
                     <col style={{ width: '32px' }} />
                     <col />
-                    <col style={{ width: '90px' }} />
-                    <col style={{ width: '64px' }} />
-                    <col style={{ width: '64px' }} />
-                    <col style={{ width: '110px' }} />
-                    <col style={{ width: '60px' }} />
-                    <col style={{ width: '60px' }} />
-                    <col style={{ width: '120px' }} />
+                    <col style={{ width: '100px' }} />
+                    <col style={{ width: '72px' }} />
+                    <col style={{ width: '70px' }} />
+                    <col style={{ width: '130px' }} />
+                    <col style={{ width: '68px' }} />
+                    <col style={{ width: '130px' }} />
                     <col style={{ width: '32px' }} />
                   </colgroup>
                   <thead><tr>
@@ -3344,7 +3345,6 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                     <th>UOM</th>
                     <th style={{ textAlign: 'right' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
                     <th style={{ textAlign: 'right' }}>Disc%</th>
-                    <th style={{ textAlign: 'right' }}>GST%</th>
                     <th style={{ textAlign: 'right' }}>Amount</th>
                     <th className="remove-cell"></th>
                   </tr></thead>
@@ -3443,7 +3443,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                             data-testid={`ti-line-rate-${i}`}
                           /></td>
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.discount_pct} onChange={e => updateLine(i, { discount_pct: e.target.value })} data-testid={`ti-line-disc-${i}`} /></td>
-                          <td><input type="number" step="0.01" className="grid-input mono num" value={l.gst_rate} onChange={e => updateLine(i, { gst_rate: e.target.value })} data-testid={`ti-line-gst-${i}`} /></td>
+                          {/* GST% removed per Round 20 — see Quotation editor for context. */}
                           <td className="static-cell amount">{formatCurrency(amount, form.currency)}</td>
                           <td className="remove-cell">
                             <button type="button" onClick={() => removeLine(i)} className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded p-1" data-testid={`ti-line-remove-${i}`} title="Remove line"><X className="w-3 h-3" /></button>
@@ -4245,8 +4245,6 @@ function printInvoiceDoc(doc, opts) {
       <td class="center">${esc(l.uom || '')}</td>
       <td class="right">${fa(rate)}</td>
       <td class="right">${discPct > 0 ? discPct.toFixed(2) + '%' : '-'}</td>
-      <td class="right">${fa(basic)}</td>
-      <td class="right">${gstRate.toFixed(1)}%<div class="subamt">${fa(gstAmt)}</div></td>
       <td class="right total-cell">${fa(total)}</td>
     </tr>`;
   }).join('');
@@ -4301,10 +4299,12 @@ function printInvoiceDoc(doc, opts) {
   .addr-box .name{font-size:13px;font-weight:700;color:#0f172a;margin-bottom:2px}
   .addr-box .line{font-size:10px;color:#475569;line-height:1.5;white-space:pre-line}
   /* Items table — fixed layout + explicit colgroup widths below so HSN, Rate,
-     Discount, Total don't get squashed when item descriptions are long. */
+     Discount, Total don't get squashed when item descriptions are long.
+     Font size bumped 9.5px → 11px per user request (Round 20) for better
+     readability in printed quotations. */
   table.items{width:100%;border-collapse:collapse;margin-top:6px;table-layout:fixed}
-  table.items thead th{background:${accentColor};color:${headerFg};font-size:9.5px;text-transform:uppercase;letter-spacing:0.3px;padding:6px 4px;font-weight:600;border:none;word-break:break-word}
-  table.items tbody td{border-bottom:1px solid #e2e8f0;padding:6px 4px;font-size:9.5px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere}
+  table.items thead th{background:${accentColor};color:${headerFg};font-size:10.5px;text-transform:uppercase;letter-spacing:0.3px;padding:6px 4px;font-weight:600;border:none;word-break:break-word}
+  table.items tbody td{border-bottom:1px solid #e2e8f0;padding:7px 5px;font-size:11px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere}
   table.items tbody tr:last-child td{border-bottom:2px solid ${accentColor}}
   .sn{width:28px;text-align:center;color:#64748b;font-weight:600}
   .itemcell{min-width:150px}
@@ -4356,20 +4356,22 @@ function printInvoiceDoc(doc, opts) {
      min/max-height to 260mm so even with the 22mm negative margin pulling
      up + content padding, total height stays under one A4 sheet. Solid
      white background + z-index masks the running band on the cover. */
-  .cover-page{width:210mm;min-height:260mm;max-height:260mm;display:flex;flex-direction:column;padding:12mm 18mm 10mm 18mm;box-sizing:border-box;page-break-after:always;break-after:page;overflow:hidden;margin-top:-22mm;background:#fff;position:relative;z-index:5}
-  .cover-head{display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:8px}
-  .cover-logo{max-height:96px;max-width:260px;object-fit:contain}
-  .cover-company{font-size:20px;font-weight:800;color:#0f172a;letter-spacing:0.3px;text-align:center}
+  .cover-page{width:210mm;min-height:270mm;max-height:270mm;display:flex;flex-direction:column;padding:10mm 18mm 6mm 18mm;box-sizing:border-box;page-break-after:always;break-after:page;overflow:hidden;margin-top:-14mm;background:#fff;position:relative;z-index:5}
+  .cover-head{display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:6px}
+  .cover-logo{max-height:64px;max-width:200px;object-fit:contain}
+  .cover-company{font-size:18px;font-weight:800;color:#0f172a;letter-spacing:0.3px;text-align:center}
   .cover-tagline{font-size:11px;color:${accentColor};font-style:italic;letter-spacing:0.3px;text-align:center}
-  .cover-title{font-size:24px;font-weight:800;color:${accentColor};letter-spacing:3px;text-align:center;margin:0 0 4px}
-  .cover-docno{font-size:12px;color:#334155;font-family:'Courier New',monospace;text-align:center;margin-bottom:12px}
-  .cover-meta{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#334155;margin-bottom:14px;align-self:flex-start}
-  .cover-meta-label{color:#64748b;text-transform:uppercase;font-size:10px;letter-spacing:1px;margin-right:6px}
-  .cover-intro{font-size:11px;color:#334155;line-height:1.7;text-align:left;padding:4px 0;white-space:pre-line;margin-bottom:auto}
-  .cover-sign{margin-top:16px;text-align:left;font-size:11px;color:#475569;align-self:flex-start}
-  .cover-sign-img{max-height:64px;max-width:220px;object-fit:contain;margin-bottom:4px;display:block}
+  .cover-title{font-size:22px;font-weight:800;color:${accentColor};letter-spacing:3px;text-align:center;margin:0 0 4px}
+  .cover-docno{font-size:13px;color:#334155;font-family:'Courier New',monospace;text-align:center;margin-bottom:10px}
+  .cover-meta{display:flex;flex-direction:column;gap:6px;font-size:13.5px;color:#1e293b;margin-bottom:14px;align-self:flex-start}
+  .cover-meta-label{color:#64748b;text-transform:uppercase;font-size:10.5px;letter-spacing:1px;margin-right:6px}
+  /* Body / intro paragraph — bumped from 11px → 13px line-height 1.7 →
+     1.6 per user request (Round 20). Larger but still fits in one A4. */
+  .cover-intro{font-size:13px;color:#1e293b;line-height:1.6;text-align:left;padding:4px 0;white-space:pre-line;margin-bottom:auto}
+  .cover-sign{margin-top:12px;text-align:left;font-size:12px;color:#475569;align-self:flex-start}
+  .cover-sign-img{max-height:54px;max-width:200px;object-fit:contain;margin-bottom:4px;display:block}
   .cover-sign-name{font-size:13px;font-weight:700;color:#0f172a}
-  .cover-sign-title{font-size:10px;color:#64748b}
+  .cover-sign-title{font-size:10.5px;color:#64748b}
   /* ========================= TAX INVOICE — PLAIN OVERRIDES =========================
    * Per user spec: TI must look plain. Only company name, "TAX INVOICE" title, invoice no,
    * grand total, T&C heading and item table header retain the #2D3E50 accent.
@@ -4414,29 +4416,29 @@ function printInvoiceDoc(doc, opts) {
   .print-doc > tbody > tr > td,
   .print-doc > thead > tr > td { padding: 0; vertical-align: top; }
   .running-band {
-    display: flex; align-items: center; gap: 12px;
-    padding: 6px 10px 6px 10px;
-    height: 22mm; box-sizing: border-box;
-    border-bottom: 1.5px solid ${accentColor};
+    display: flex; align-items: center; gap: 10px;
+    padding: 3px 10px 3px 10px;
+    height: 14mm; box-sizing: border-box;
+    border-bottom: 1px solid ${accentColor};
     background: #fff;
     font-family: 'Helvetica Neue', Arial, sans-serif;
   }
   .running-band .rb-logo {
-    height: 36px; width: auto; max-width: 90px; object-fit: contain;
+    height: 28px; width: auto; max-width: 72px; object-fit: contain;
     flex-shrink: 0;
   }
-  .running-band .rb-center { flex: 1; line-height: 1.35; }
-  .running-band .rb-name { font-size: 12px; font-weight: 800; color: #0f172a; }
-  .running-band .rb-meta { font-size: 9px; color: #475569; margin-top: 1px; }
-  .running-band .rb-gst { font-size: 9px; color: ${accentColor}; font-weight: 700; margin-top: 1px; }
+  .running-band .rb-center { flex: 1; line-height: 1.2; }
+  .running-band .rb-name { font-size: 11px; font-weight: 800; color: #0f172a; }
+  .running-band .rb-meta { font-size: 8.5px; color: #475569; margin-top: 1px; }
+  .running-band .rb-gst { font-size: 8.5px; color: ${accentColor}; font-weight: 700; margin-top: 1px; }
   .running-band .rb-right { text-align: right; flex-shrink: 0; }
-  .running-band .rb-title { font-size: 11px; font-weight: 800; color: ${accentColor}; letter-spacing: 0.3px; text-transform: uppercase; }
-  .running-band .rb-docno { font-size: 10px; color: #0f172a; font-weight: 700; margin-top: 1px; }
+  .running-band .rb-title { font-size: 10px; font-weight: 800; color: ${accentColor}; letter-spacing: 0.3px; text-transform: uppercase; }
+  .running-band .rb-docno { font-size: 9.5px; color: #0f172a; font-weight: 700; margin-top: 1px; }
   /* The page-1 cover: pulls the first tbody child UP by the running
      band's height with a solid white background to mask the band on
-     page 1 only. */
+     page 1 only. Updated to 14mm to match the shrunk running-band. */
   .page-one-cover {
-    margin-top: -22mm;
+    margin-top: -14mm;
     background: #fff;
     position: relative;
     z-index: 5;
@@ -4444,7 +4446,7 @@ function printInvoiceDoc(doc, opts) {
   @media print {
     @page {
       size: A4;
-      margin: 4mm 4mm 14mm 4mm;
+      margin: 4mm 4mm 6mm 4mm;
       @bottom-right {
         content: "Page " counter(page) " of " counter(pages);
         font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -4605,15 +4607,13 @@ ${(isQuotation && opts.includeCover) ? `
   <table class="items">
     <colgroup>
       <col style="width:3%">
-      <col style="width:28%">
+      <col style="width:36%">
+      <col style="width:8%">
       <col style="width:7%">
       <col style="width:6%">
-      <col style="width:5%">
+      <col style="width:12%">
       <col style="width:10%">
-      <col style="width:9%">
-      <col style="width:10%">
-      <col style="width:11%">
-      <col style="width:11%">
+      <col style="width:18%">
     </colgroup>
     <thead>
       <tr>
@@ -4624,12 +4624,10 @@ ${(isQuotation && opts.includeCover) ? `
         <th class="center">UOM</th>
         <th class="right">Rate</th>
         <th class="right">Discount</th>
-        <th class="right">Basic Amt</th>
-        <th class="right">GST</th>
         <th class="right">Total</th>
       </tr>
     </thead>
-    <tbody>${rows || '<tr><td colspan="10" style="text-align:center;padding:20px">No line items</td></tr>'}</tbody>
+    <tbody>${rows || '<tr><td colspan="8" style="text-align:center;padding:20px">No line items</td></tr>'}</tbody>
   </table>
 
   <!-- Bank + Totals -->
