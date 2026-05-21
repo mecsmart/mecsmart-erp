@@ -77,40 +77,48 @@ function sanitizeFilename(name) {
 //   - Add `print-color-adjust: exact` so colored headers/badges survive
 //   - If `draft` is true, inject a "DRAFT COPY" diagonal watermark on every page.
 function injectPrintCss(html, { draft = false } = {}) {
-  // Diagonal "DRAFT COPY" watermark, fixed to viewport so it appears on every
-  // printed page (Chrome/Edge/Firefox honour `position:fixed` repeats during
-  // native print). Faded grey so it doesn't obscure line items.
+  // Diagonal "DRAFT COPY" watermark.
+  //
+  // We tried `body::before { position: fixed }` — works on screen, but
+  // Chrome's "Save as PDF" only paints fixed-positioned content on the
+  // FIRST printed page (a long-standing Chromium limitation). To get the
+  // watermark on EVERY page of the saved PDF we instead use a SVG-as-
+  // background-image with `background-repeat: repeat-y` and `background-
+  // size: 100% 297mm` (one A4 sheet tall). The browser's print engine
+  // tiles the background per page, which Chrome respects in Save-as-PDF
+  // mode once `print-color-adjust: exact` is set. Inline-encoded SVG
+  // keeps it self-contained — no external requests, no CORS hassles.
+  const draftSvg = encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123" viewBox="0 0 794 1123">` +
+      `<text x="397" y="600" fill="rgba(220,38,38,0.18)" font-family="Helvetica, Arial, sans-serif" ` +
+        `font-size="120" font-weight="900" letter-spacing="10" text-anchor="middle" ` +
+        `transform="rotate(-30 397 600)">DRAFT COPY</text>` +
+    `</svg>`
+  );
   const draftWatermark = draft ? `
-    body::before {
-      content: "DRAFT COPY";
-      position: fixed;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%) rotate(-30deg);
-      font-family: 'Helvetica Neue', Arial, sans-serif;
-      font-size: 120px;
-      font-weight: 900;
-      color: rgba(220, 38, 38, 0.18);
-      letter-spacing: 10px;
-      white-space: nowrap;
-      z-index: 9999;
-      pointer-events: none;
-      user-select: none;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
+    body {
+      background-image: url("data:image/svg+xml;utf8,${draftSvg}") !important;
+      background-repeat: repeat-y !important;
+      background-position: center top !important;
+      background-size: 210mm 297mm !important;
+      background-attachment: scroll !important;
     }
     @media print {
-      body::before {
-        position: fixed;
-        top: 50%; left: 50%;
-        transform: translate(-50%, -50%) rotate(-30deg);
+      body {
+        background-image: url("data:image/svg+xml;utf8,${draftSvg}") !important;
+        background-repeat: repeat-y !important;
+        background-position: center top !important;
+        background-size: 210mm 297mm !important;
       }
     }
   ` : '';
   const extra = `
     <style id="__pdfprint_overrides__">
       /* Keep colors / backgrounds in saved PDF — browsers strip these by
-         default in print to save toner. */
+         default in print to save toner. CRITICAL for the DRAFT watermark
+         to be preserved through the print → Save-as-PDF pipeline. */
       * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+      html, body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
       /* Only enforce paper size — let each template control its own
          margins. Forcing a 0-margin here previously pushed table content
          past the printer's non-printable edge, clipping the rightmost
@@ -339,10 +347,14 @@ async function svgDataUrlToPngDataUrl(dataUrl, targetW = 256, targetH = 96) {
  */
 export async function downloadHtmlAsPdf(html, filename, options = {}) {
   const cleanFilename = sanitizeFilename(filename);
-  // If a `draft` flag is set, we inject the diagonal "DRAFT COPY" watermark
-  // upfront so both the preview iframe and the html2pdf raster path render
-  // it. injectPrintCss(html, { draft }) is idempotent.
-  const drafted = options.draft ? injectPrintCss(html, { draft: true }) : html;
+  // ALWAYS run the HTML through injectPrintCss — this enforces A4 size,
+  // tames wide tables (word-break, max-width:100%), and renders the
+  // DRAFT COPY watermark via a tiling SVG background when `draft` is set.
+  // Previously the preview path passed the raw HTML to the in-page
+  // dialog, which meant the saved PDF (printed from inside the iframe)
+  // had NO watermark and NO column-fit guardrails. Centralising the
+  // CSS injection here keeps every code path consistent.
+  const drafted = injectPrintCss(html, { draft: !!options.draft });
   // Preview mode → dispatch a global event for the in-page PreviewPdfDialog
   // to pick up. We deliberately don't import the dialog component here to
   // avoid a circular import; the App-level dialog listens for this event.
@@ -357,7 +369,7 @@ export async function downloadHtmlAsPdf(html, filename, options = {}) {
     }
     return;
   }
-  const finalHtml = injectPrintCss(drafted, { draft: !!options.draft });
+  const finalHtml = drafted;
 
   // Build hidden iframe — sits in the corner so it never repaints visible UI.
   const iframe = document.createElement('iframe');
