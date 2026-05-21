@@ -19,7 +19,11 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
-- **2026-02-21 (Round 14 — Cover page fit + Watermark visibility + BOM banner + JW-SO promptDialog — DONE ✅):**
+- **2026-02-21 (Round 16 — HSN visibility + Download PDF watermark intensity — DONE ✅):**
+  1. **HSN column populating from item fallback** — `_enrich_quotation()` was only fetching `part_number, name, uom` from the items collection — missing `hsn_code` and `gst_rate`. The print template already had the fallback chain `l.hsn_code || l.item?.hsn_code || '-'`, but `l.item.hsn_code` was always undefined. Backend now projects `hsn_code` + `gst_rate` + `unit_of_measure` on every line enrichment for both Quotations and Proforma Invoices. HSN codes saved on items (232 items in our DB have them) now render correctly on printed quotations + PIs without requiring users to re-enter the HSN on every quotation line.
+  2. **Download PDF watermark less intrusive** — User reported watermark "too opaque" obscuring content. jsPDF watermark switched from solid `rgb(220, 80, 80)` to `GState(opacity: 0.22)` + `rgb(220, 38, 38)` (matching the SVG-print watermark's 0.32 alpha). Falls back to `rgb(245, 200, 200)` light pink for jsPDF builds without GState support. Watermark stays clearly readable but no longer obscures table numbers.
+
+
   1. **Quotation cover page fits in ONE A4 sheet** — Reduced `.cover-page` `min/max-height` from 297mm → 260mm and tightened padding to `12mm 18mm 10mm 18mm`. The cover content (logo + title + customer + intro + signature) now fits comfortably in a single page with the repeating `<thead>` band taking its ~15mm at top, body starts cleanly on page 2.
   2. **Download PDF restored (html2pdf) — matches Print rendering** — Reverted PreviewPdfDialog to use `html2pdf` raster pipeline for the "Download PDF" button (per user — they wanted a true downloaded file). The pipeline reuses the SAME `injectPrintCss`-processed HTML as the preview iframe, so column widths/margins/fonts/watermark all match what's shown on screen.
   3. **DRAFT COPY watermark brought to the foreground in saved PDFs** — Increased jsPDF watermark color to `rgb(220, 80, 80)` (was faded `241, 178, 178`) and SVG background opacity to `0.32` (was `0.18`). The "DRAFT COPY" diagonal text is now clearly visible across every page of both Print PDF and Download PDF.

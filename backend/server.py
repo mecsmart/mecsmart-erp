@@ -13906,10 +13906,14 @@ async def _enrich_quotation(q):
     # Attach document creator so the printed doc signs in the creator's name
     # (not the current logged-in user's).
     q["created_by_user"] = await _lookup_creator(q.get("created_by"))
-    # Hydrate item details on each line
+    # Hydrate item details on each line.
+    # IMPORTANT: include hsn_code + gst_rate so the print template's
+    # `l.item?.hsn_code` fallback resolves on legacy lines that were
+    # saved before the line-level hsn_code field was added. Without
+    # this, the HSN column rendered as '-' on every printed line.
     for ln in (q.get("lines") or []):
         if ln.get("item_id"):
-            it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1})
+            it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1, "unit_of_measure": 1, "hsn_code": 1, "gst_rate": 1})
             if it:
                 ln["item"] = it
     # Back-fill GST split for legacy quotations saved before _compute_gst_split was
@@ -14643,7 +14647,7 @@ async def _enrich_proforma(p):
         p["tax_invoice"] = ti
     for ln in (p.get("lines") or []):
         if ln.get("item_id"):
-            it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1, "hsn_code": 1})
+            it = await db.items.find_one({"id": ln["item_id"]}, {"_id": 0, "part_number": 1, "name": 1, "uom": 1, "unit_of_measure": 1, "hsn_code": 1, "gst_rate": 1})
             if it:
                 ln["item"] = it
     # Attach document creator for signature stamping on the printed PI.

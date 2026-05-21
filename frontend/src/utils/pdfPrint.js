@@ -180,9 +180,21 @@ async function fallbackToHtml2Pdf(iframeBody, opts) {
       pdfObj.saveGraphicsState();
       pdfObj.setFont('helvetica', 'bold');
       pdfObj.setFontSize(110);
-      // Darker red so the watermark is unmistakably visible in saved
-      // PDFs even after the html2pdf raster pipeline.
-      pdfObj.setTextColor(220, 80, 80);
+      // Light faded red (rgba(220, 38, 38, 0.18)-ish equivalent). jsPDF
+      // doesn't have native alpha for text, but we can simulate it with a
+      // GState if available, falling back to a lighter solid colour.
+      try {
+        const GState = pdfObj.GState;
+        if (typeof GState === 'function') {
+          const gs = new GState({ opacity: 0.22 });
+          pdfObj.setGState(gs);
+          pdfObj.setTextColor(220, 38, 38);
+        } else {
+          pdfObj.setTextColor(245, 200, 200);
+        }
+      } catch {
+        pdfObj.setTextColor(245, 200, 200);
+      }
       // Rotate -30° around the page centre.
       pdfObj.text('DRAFT COPY', pageW / 2, pageH / 2, {
         align: 'center',
