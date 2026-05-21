@@ -15927,6 +15927,44 @@ api_router.include_router(public_router)
 async def health_check():
     return {"status": "healthy", "service": "machinery-erp"}
 
+
+# ─── Server-side HTML → PDF (Chromium headless) ────────────────────────
+# Client-side html2pdf / html2canvas rasterisation cannot reliably
+# reproduce Chrome's print engine output (column widths shift, logos
+# overflow, repeating headers double up). To give users a real
+# downloadable PDF that is byte-identical to "Print → Save as PDF", we
+# run a Chromium headless instance server-side and pipe the HTML
+# through page.pdf({format: 'A4', printBackground: true}).
+#
+# Trade-off: ~600ms extra latency vs in-browser; in exchange the user
+# gets a true Chrome-quality PDF file download.
+@api_router.post("/print/html-to-pdf")
+async def print_html_to_pdf(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    html = (payload or {}).get("html") or ""
+    filename = ((payload or {}).get("filename") or "document") + ""
+    if not filename.endswith(".pdf"):
+        filename = filename + ".pdf"
+    if not html or len(html) < 30:
+        raise HTTPException(status_code=400, detail="Missing 'html' in payload")
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Playwright not installed on server")
+    pdf_bytes = b""
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
+            ctx = await browser.new_context()
+            page = await ctx.new_page()
+            await page.set_content(html, wait_until="networkidle", timeout=15000)
+            pdf_bytes = await page.pdf(format="A4", print_background=True, prefer_css_page_size=True)
+            await browser.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
 app.include_router(api_router)
 
 # CORS

@@ -101,45 +101,27 @@ export default function PreviewPdfDialog() {
   };
 
   const handleDownload = async () => {
-    // Snapshot the LIVE iframe document (the one the user is looking at)
-    // and feed it to html2pdf. This guarantees the downloaded PDF is a
-    // pixel-perfect copy of the preview — same fonts, same column widths,
-    // same logo positions, same page breaks. We rely on the iframe's own
-    // CSS (already including @page rules + colgroups) rather than re-
-    // injecting anything, so there's no rendering divergence.
+    // Server-side Chromium-based PDF generation. This gives a true
+    // "Save as PDF" quality output as a real downloaded file — no
+    // browser print dialog, no html2canvas rasterisation drift.
     try {
       const ifr = document.querySelector('[data-testid="pdf-preview-iframe"]');
-      const ifrDoc = ifr && ifr.contentDocument;
-      const body = ifrDoc && ifrDoc.body;
-      if (!body) {
-        // Fallback to the old string-HTML path (rare — only if iframe
-        // didn't finish loading).
-        await downloadHtmlAsPdf(html, filename, { forceDownload: true });
-        return;
-      }
-      const html2pdf = (await import('html2pdf.js')).default;
-      await html2pdf().set({
-        filename,
-        margin: [0, 0, 0, 0],
-        image: { type: 'jpeg', quality: 0.98 },
-        // Match the iframe DPR + width exactly so layout doesn't reflow
-        // when html2canvas re-rasterises.
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          windowWidth: body.scrollWidth || 794,
-          logging: false,
-          backgroundColor: '#ffffff',
-        },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
-        // Honour the template's own page-break-* rules + avoid splitting
-        // table rows mid-line.
-        pagebreak: { mode: ['css', 'legacy'], avoid: 'tr' },
-      }).from(body).save();
+      const srcHtml = (ifr && ifr.srcdoc) || html;
+      const { api } = await import('../context/AuthContext');
+      const resp = await api.post('/api/print/html-to-pdf', { html: srcHtml, filename }, { responseType: 'blob' });
+      // Build a Blob URL + click an invisible <a> to trigger the download.
+      const blob = new Blob([resp.data], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
-      console.warn('[PreviewPdfDialog] download failed, falling back', err);
-      try { await downloadHtmlAsPdf(html, filename, { forceDownload: true }); } catch { /* noop */ }
+      console.warn('[PreviewPdfDialog] server PDF failed, falling back to print', err);
+      handlePrint();
     }
   };
 
