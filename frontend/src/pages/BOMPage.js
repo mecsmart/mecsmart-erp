@@ -687,7 +687,42 @@ export default function BOMPage() {
       } else {
         toast.success(`BOM import complete: ${created} created, ${updated} updated. Imported BOMs are pinned to the top of the list — refresh to re-group.`, { id: toastId, duration: 6000 });
       }
-      fetchBoms();
+      // Make absolutely sure the imported BOMs are visible:
+      //   1. Clear status filter — if user had 'active' selected and the
+      //      Excel BOMs are 'draft', they'd be hidden by the backend query.
+      //   2. After fetchBoms() resolves, scroll to the first imported BOM's
+      //      panel and pulse-highlight it so the user can see "yes, the
+      //      system saved it — here it is".
+      setStatusFilter('');
+      await fetchBoms();
+      // Defer the scroll to the next paint so the DOM has the new panels.
+      // Panel test-id is `bom-tree-${parent_item_id}`, not `${bom.id}` —
+      // look up the BOM in the fetched list and use its parent_item_id.
+      const firstId = (data.imported_bom_ids || [])[0];
+      if (firstId) {
+        // Allow React to commit the new boms state before querying the DOM.
+        setTimeout(() => {
+          // We can't rely on the captured `boms` variable here (stale closure
+          // inside the import handler). Read parent_item_id from the API
+          // response instead — backend response includes a flat list under
+          // `data.imported_bom_ids` but not the parent_item_id, so do a
+          // fresh fetch of just that BOM.
+          (async () => {
+            try {
+              const { data: bomRow } = await api.get(`/api/bom/${firstId}`);
+              const pid = bomRow?.parent_item_id;
+              if (!pid) return;
+              const el = document.querySelector(`[data-testid="bom-tree-${pid}"]`);
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.add('ring-2', 'ring-yellow-400');
+                setTimeout(() => el.classList.remove('ring-2', 'ring-yellow-400'), 4000);
+              }
+            } catch { /* noop */ }
+          })();
+        }, 350);
+      }
+      return;
     } catch (error) {
       const msg = error?.response?.data?.detail || error?.message || 'Network/server error';
       toast.error(`BOM import failed: ${msg}`, { id: toastId });

@@ -156,7 +156,7 @@ export function POPrintDialog({ po, open, onClose }) {
     const accentLight = '#E8EDF3';
 
     const baseStyles = `
-      @page { size: ${paper.w} ${paper.h}; margin: 25mm 12mm 15mm 12mm; }
+      @page { size: ${paper.w} ${paper.h}; margin: 25mm 6mm 15mm 6mm; }
       * { margin:0; padding:0; box-sizing:border-box; }
       body { font-family:'Segoe UI',Arial,sans-serif; font-size:10.5px; color:#222; line-height:1.5; }
       .page { max-width:${paper.w}; margin:0 auto; padding:${isModern ? '15px' : '15px'}; padding-top:${isModern ? '22px' : '22px'}; }
@@ -164,31 +164,31 @@ export function POPrintDialog({ po, open, onClose }) {
       ${letterheadCSS(accent)}
       .doc-title { font-size:14px; font-weight:700; color:${accent}; text-transform:uppercase; padding:8px 15px; ${isModern ? `background:${accentLight};` : `border-bottom:1px solid ${accent};`} margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
       .doc-title .rev { font-size:10px; color:#666; font-weight:normal; }
-      .info-section { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:0 15px; margin-bottom:14px; }
+      .info-section { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:0 6px; margin-bottom:14px; }
       .info-block { ${isModern ? `border-left:3px solid ${accent}; padding-left:10px;` : 'border:1px solid #ddd; padding:8px 10px; border-radius:2px;'} }
       .info-block .label { font-size:8.5px; color:#888; text-transform:uppercase; letter-spacing:0.5px; font-weight:600; }
       .info-block .value { font-size:11px; font-weight:600; color:#111; margin-top:1px; }
       .info-block .detail { font-size:9.5px; color:#555; }
-      table { width:calc(100% - 30px); margin:0 15px 12px; border-collapse:collapse; }
-      th { background:${isModern ? accent : '#2C3E50'}; color:white; padding:6px 8px; font-size:9px; text-transform:uppercase; letter-spacing:0.3px; text-align:left; }
-      td { padding:6px 8px; border-bottom:1px solid #e0e0e0; font-size:10.5px; vertical-align:top; }
+      table { width:calc(100% - 12px); margin:0 6px 12px; border-collapse:collapse; table-layout:fixed; }
+      th { background:${isModern ? accent : '#2C3E50'}; color:white; padding:6px 4px; font-size:9px; text-transform:uppercase; letter-spacing:0.2px; text-align:left; word-break:break-word; }
+      td { padding:6px 4px; border-bottom:1px solid #e0e0e0; font-size:10px; vertical-align:top; word-break:break-word; overflow-wrap:anywhere; }
       tbody tr:nth-child(even) { background:#f8f9fa; }
       ${isModern ? 'tbody tr:hover { background:#eef1f5; }' : ''}
       .text-right { text-align:right; } .text-center { text-align:center; }
-      .mono { font-family:'Courier New',monospace; font-size:10px; }
+      .mono { font-family:'Courier New',monospace; font-size:9.5px; }
       .total-row { background:${accentLight} !important; font-weight:700; }
       .grand-total { font-size:12px; color:${accent}; }
-      .section-title { font-size:11px; font-weight:700; color:${accent}; text-transform:uppercase; padding:4px 15px; margin:8px 0; ${isModern ? `border-left:3px solid ${accent};` : ''} }
-      .totals-box { width:280px; margin-left:auto; margin-right:15px; margin-bottom:15px; }
-      .totals-box table { width:100%; margin:0; }
+      .section-title { font-size:11px; font-weight:700; color:${accent}; text-transform:uppercase; padding:4px 6px; margin:8px 0; ${isModern ? `border-left:3px solid ${accent};` : ''} }
+      .totals-box { width:280px; margin-left:auto; margin-right:6px; margin-bottom:15px; }
+      .totals-box table { width:100%; margin:0; table-layout:auto; }
       .totals-box td { padding:4px 8px; border:none; font-size:10.5px; }
       .totals-box .label-cell { color:#555; text-align:right; }
       .totals-box .val-cell { text-align:right; font-weight:600; font-family:'Courier New',monospace; }
       .totals-box .grand { border-top:2px solid ${accent}; }
-      .terms { padding:8px 15px; font-size:9.5px; color:#444; border-top:1px dashed #ccc; margin-top:10px; }
+      .terms { padding:8px 6px; font-size:9.5px; color:#444; border-top:1px dashed #ccc; margin-top:10px; }
       .terms strong { color:#222; }
-      .amount-words { padding:4px 15px; font-size:9.5px; color:#333; font-style:italic; margin-bottom:8px; }
-      .signatures { display:grid; grid-template-columns:1fr 1fr 1fr; gap:30px; padding:30px 15px 15px; margin-top:20px; }
+      .amount-words { padding:4px 6px; font-size:9.5px; color:#333; font-style:italic; margin-bottom:8px; }
+      .signatures { display:grid; grid-template-columns:1fr 1fr 1fr; gap:30px; padding:30px 6px 15px; margin-top:20px; }
       .sign-block { text-align:center; }
       .sign-line { border-top:1px solid #333; padding-top:5px; font-size:9px; color:#555; font-weight:600; }
       .footer-note { text-align:center; font-size:8px; color:#aaa; padding:8px 0; ${isModern ? `border-top:2px solid ${accent};` : 'border-top:1px solid #eee;'} margin-top:10px; }
@@ -233,7 +233,18 @@ export function POPrintDialog({ po, open, onClose }) {
       cols.push('Net Amt');
       if (opts.showGSTBreakup) cols.push('GST%','GST Amt');
       cols.push('Total');
-      tableHTML = `<table><thead><tr>${cols.map((c,i) => `<th${i >= cols.length - 4 ? ' class="text-right"' : ''}>${c}</th>`).join('')}</tr></thead><tbody>`;
+      // Explicit column widths so HSN, Discount, Rate, Total etc. don't get
+      // squashed when there are many columns. Percentages sum to 100% and the
+      // table uses `table-layout:fixed` (set in baseStyles) so the browser
+      // honours these widths instead of letting content-driven sizing
+      // collapse the narrow numeric columns. Order MUST match `cols` above.
+      const colWidthMap = {
+        'SN': '3%', 'Item': '24%', 'HSN': '7%', 'Qty': '6%', 'UOM': '5%',
+        'Rate': '9%', 'Discount': '8%', 'Net Amt': '9%',
+        'GST%': '5%', 'GST Amt': '8%', 'Total': '10%',
+      };
+      const colgroup = `<colgroup>${cols.map(c => `<col style="width:${colWidthMap[c] || 'auto'}">`).join('')}</colgroup>`;
+      tableHTML = `<table>${colgroup}<thead><tr>${cols.map((c,i) => `<th${i >= cols.length - 4 ? ' class="text-right"' : ''}>${c}</th>`).join('')}</tr></thead><tbody>`;
       lines.forEach((l, i) => {
         const gross = (l.quantity||0) * (l.unit_price||0);
         const disc = l.discount_amount || (l.discount_type === 'percentage' ? gross * (l.discount_value||0)/100 : (l.discount_value||0));

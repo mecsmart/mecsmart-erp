@@ -1367,9 +1367,9 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
 
       {/* Create / Edit Quotation dialog */}
       <Dialog open={dialog} onOpenChange={(o) => { setDialog(o); if (!o) { setEditing(null); setForm(emptyForm); } }}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" data-testid="quotation-dialog">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto overflow-x-hidden" data-testid="quotation-dialog">
           <DialogHeader><DialogTitle className="font-[Chivo]">{editing ? `Edit Quotation — ${editing.quotation_no}` : 'New Quotation'}</DialogTitle></DialogHeader>
-          <div className="space-y-4 mt-3">
+          <div className="space-y-4 mt-3 w-full min-w-0">
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-semibold mb-1">Link to Lead (optional)</label>
@@ -4227,7 +4227,7 @@ function printInvoiceDoc(doc, opts) {
 <style>
   *{box-sizing:border-box}
   body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:#111;margin:0;padding:0}
-  .page{max-width:780px;margin:0 auto;padding:32px 24px 20px;box-sizing:border-box}
+  .page{max-width:780px;margin:0 auto;padding:32px 8px 20px;box-sizing:border-box}
   .item-desc{font-size:9px;color:#64748b;margin-top:3px;line-height:1.35;white-space:pre-line;font-style:italic}
   /* Header */
   .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
@@ -4253,10 +4253,11 @@ function printInvoiceDoc(doc, opts) {
   .addr-box h3{font-size:10px;color:#0f172a;text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;border-bottom:2px solid ${accentColor};padding-bottom:4px;display:inline-block}
   .addr-box .name{font-size:13px;font-weight:700;color:#0f172a;margin-bottom:2px}
   .addr-box .line{font-size:10px;color:#475569;line-height:1.5;white-space:pre-line}
-  /* Items table */
-  table.items{width:100%;border-collapse:collapse;margin-top:6px}
-  table.items thead th{background:${accentColor};color:${headerFg};font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding:8px 6px;font-weight:600;border:none}
-  table.items tbody td{border-bottom:1px solid #e2e8f0;padding:8px 6px;font-size:10px;vertical-align:top}
+  /* Items table — fixed layout + explicit colgroup widths below so HSN, Rate,
+     Discount, Total don't get squashed when item descriptions are long. */
+  table.items{width:100%;border-collapse:collapse;margin-top:6px;table-layout:fixed}
+  table.items thead th{background:${accentColor};color:${headerFg};font-size:9.5px;text-transform:uppercase;letter-spacing:0.3px;padding:6px 4px;font-weight:600;border:none;word-break:break-word}
+  table.items tbody td{border-bottom:1px solid #e2e8f0;padding:6px 4px;font-size:9.5px;vertical-align:top;word-break:break-word;overflow-wrap:anywhere}
   table.items tbody tr:last-child td{border-bottom:2px solid ${accentColor}}
   .sn{width:28px;text-align:center;color:#64748b;font-weight:600}
   .itemcell{min-width:150px}
@@ -4398,7 +4399,7 @@ function printInvoiceDoc(doc, opts) {
   @media print {
     @page {
       size: A4;
-      margin: 4mm 8mm 14mm 8mm;
+      margin: 4mm 4mm 14mm 4mm;
       @bottom-right {
         content: "Page " counter(page) " of " counter(pages);
         font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -4555,11 +4556,23 @@ ${(isQuotation && opts.includeCover) ? `
 
   <!-- Items -->
   <table class="items">
+    <colgroup>
+      <col style="width:3%">
+      <col style="width:28%">
+      <col style="width:7%">
+      <col style="width:6%">
+      <col style="width:5%">
+      <col style="width:10%">
+      <col style="width:9%">
+      <col style="width:10%">
+      <col style="width:11%">
+      <col style="width:11%">
+    </colgroup>
     <thead>
       <tr>
         <th class="sn">Sl</th>
         <th>Item Name &amp; Description</th>
-        <th class="center" style="min-width:70px">HSN</th>
+        <th class="center">HSN</th>
         <th class="right">Qty</th>
         <th class="center">UOM</th>
         <th class="right">Rate</th>
