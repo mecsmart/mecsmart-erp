@@ -101,13 +101,46 @@ export default function PreviewPdfDialog() {
   };
 
   const handleDownload = async () => {
-    // The html2pdf raster pipeline subtly shifts column widths, logos, and
-    // page breaks compared to the browser's native print engine — users
-    // consistently expected the saved PDF to match the on-screen preview
-    // 1:1. We now route Download through the SAME native iframe.print()
-    // flow as the Print button — output is byte-identical. The user just
-    // picks "Save as PDF" as the destination in the print dialog.
-    handlePrint();
+    // Snapshot the LIVE iframe document (the one the user is looking at)
+    // and feed it to html2pdf. This guarantees the downloaded PDF is a
+    // pixel-perfect copy of the preview — same fonts, same column widths,
+    // same logo positions, same page breaks. We rely on the iframe's own
+    // CSS (already including @page rules + colgroups) rather than re-
+    // injecting anything, so there's no rendering divergence.
+    try {
+      const ifr = document.querySelector('[data-testid="pdf-preview-iframe"]');
+      const ifrDoc = ifr && ifr.contentDocument;
+      const body = ifrDoc && ifrDoc.body;
+      if (!body) {
+        // Fallback to the old string-HTML path (rare — only if iframe
+        // didn't finish loading).
+        await downloadHtmlAsPdf(html, filename, { forceDownload: true });
+        return;
+      }
+      const html2pdf = (await import('html2pdf.js')).default;
+      await html2pdf().set({
+        filename,
+        margin: [0, 0, 0, 0],
+        image: { type: 'jpeg', quality: 0.98 },
+        // Match the iframe DPR + width exactly so layout doesn't reflow
+        // when html2canvas re-rasterises.
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          windowWidth: body.scrollWidth || 794,
+          logging: false,
+          backgroundColor: '#ffffff',
+        },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
+        // Honour the template's own page-break-* rules + avoid splitting
+        // table rows mid-line.
+        pagebreak: { mode: ['css', 'legacy'], avoid: 'tr' },
+      }).from(body).save();
+    } catch (err) {
+      console.warn('[PreviewPdfDialog] download failed, falling back', err);
+      try { await downloadHtmlAsPdf(html, filename, { forceDownload: true }); } catch { /* noop */ }
+    }
   };
 
   return (

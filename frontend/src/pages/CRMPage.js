@@ -1381,7 +1381,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
 
       {/* Create / Edit Quotation dialog */}
       <Dialog open={dialog} onOpenChange={(o) => { setDialog(o); if (!o) { setEditing(null); setForm(emptyForm); } }}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto overflow-x-hidden" data-testid="quotation-dialog">
+        <DialogContent className="!max-w-[95vw] xl:!max-w-[1400px] max-h-[90vh] overflow-y-auto overflow-x-hidden" data-testid="quotation-dialog">
           <DialogHeader><DialogTitle className="font-[Chivo]">{editing ? `Edit Quotation — ${editing.quotation_no}` : 'New Quotation'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3 w-full min-w-0">
             <div className="grid grid-cols-3 gap-3">
@@ -1549,18 +1549,30 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                 </div>
               </div>
               <div className="border border-[#E5E7EB] rounded-sm overflow-x-auto">
-                <table className="line-items-grid" data-testid="quotation-lines-table">
+                <table className="line-items-grid w-full" data-testid="quotation-lines-table" style={{ tableLayout: 'fixed' }}>
+                  <colgroup>
+                    <col style={{ width: '32px' }} />
+                    <col />
+                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '64px' }} />
+                    <col style={{ width: '64px' }} />
+                    <col style={{ width: '110px' }} />
+                    <col style={{ width: '60px' }} />
+                    <col style={{ width: '60px' }} />
+                    <col style={{ width: '120px' }} />
+                    <col style={{ width: '32px' }} />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th className="row-num">#</th>
-                      <th style={{ minWidth: '200px', width: '32%' }}>Item Name &amp; Description</th>
-                      <th style={{ width: '90px', minWidth: '90px' }}>HSN</th>
-                      <th style={{ width: '70px' }}>Qty</th>
-                      <th style={{ width: '60px' }}>UOM</th>
-                      <th style={{ width: '150px', minWidth: '150px' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
-                      <th style={{ width: '60px' }}>Disc %</th>
-                      <th style={{ width: '60px' }}>GST %</th>
-                      <th style={{ width: '130px', textAlign: 'right' }}>Amount</th>
+                      <th>Item Name &amp; Description</th>
+                      <th>HSN</th>
+                      <th>Qty</th>
+                      <th>UOM</th>
+                      <th>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
+                      <th>Disc %</th>
+                      <th>GST %</th>
+                      <th style={{ textAlign: 'right' }}>Amount</th>
                       <th className="remove-cell"></th>
                     </tr>
                   </thead>
@@ -3311,17 +3323,29 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                 <button type="button" onClick={addLine} className="text-xs text-[#1D3557] flex items-center gap-1" data-testid="ti-add-line"><Plus className="w-3 h-3" /> Add Line</button>
               </div>
               <div className="border border-[#E5E7EB] rounded-sm overflow-x-auto">
-                <table className="line-items-grid" data-testid="ti-lines-table">
+                <table className="line-items-grid w-full" data-testid="ti-lines-table" style={{ tableLayout: 'fixed' }}>
+                  <colgroup>
+                    <col style={{ width: '32px' }} />
+                    <col />
+                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '64px' }} />
+                    <col style={{ width: '64px' }} />
+                    <col style={{ width: '110px' }} />
+                    <col style={{ width: '60px' }} />
+                    <col style={{ width: '60px' }} />
+                    <col style={{ width: '120px' }} />
+                    <col style={{ width: '32px' }} />
+                  </colgroup>
                   <thead><tr>
                     <th className="row-num">#</th>
-                    <th style={{ minWidth: '200px', width: '32%' }}>Item &amp; Description</th>
-                    <th style={{ width: '90px', minWidth: '90px' }}>HSN</th>
-                    <th style={{ width: '70px', textAlign: 'right' }}>Qty</th>
-                    <th style={{ width: '60px' }}>UOM</th>
-                    <th style={{ width: '150px', minWidth: '150px', textAlign: 'right' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
-                    <th style={{ width: '60px', textAlign: 'right' }}>Disc%</th>
-                    <th style={{ width: '60px', textAlign: 'right' }}>GST%</th>
-                    <th style={{ width: '140px', minWidth: '140px', textAlign: 'right' }}>Amount</th>
+                    <th>Item &amp; Description</th>
+                    <th>HSN</th>
+                    <th style={{ textAlign: 'right' }}>Qty</th>
+                    <th>UOM</th>
+                    <th style={{ textAlign: 'right' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
+                    <th style={{ textAlign: 'right' }}>Disc%</th>
+                    <th style={{ textAlign: 'right' }}>GST%</th>
+                    <th style={{ textAlign: 'right' }}>Amount</th>
                     <th className="remove-cell"></th>
                   </tr></thead>
                   <tbody>
