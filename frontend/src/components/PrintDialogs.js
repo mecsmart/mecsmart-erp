@@ -356,7 +356,7 @@ export function POPrintDialog({ po, open, onClose }) {
       <div class="page">
         ${letterhead}
         <div class="doc-title">
-          <span>Purchase Order: ${d.po_number}</span>
+          <span>Purchase Order: ${d.po_number}${(d.status || '').toLowerCase() === 'draft' ? `<span style="display:inline-block;margin-left:10px;padding:2px 10px;background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;border-radius:3px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;vertical-align:middle">Draft Copy</span>` : ''}</span>
           ${d.revision > 0 ? `<span class="rev">Revision ${d.revision}</span>` : ''}
         </div>
         ${infoHTML}

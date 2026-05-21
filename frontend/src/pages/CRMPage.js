@@ -4458,6 +4458,7 @@ ${(isQuotation && opts.includeCover) ? `
   </div>
   <div class="cover-title">QUOTATION</div>
   <div class="cover-docno">${esc(docNo)}${(doc.revision && doc.revision > 0) ? ` · Rev ${doc.revision}` : ''}</div>
+  ${(doc.status || '').toLowerCase() === 'draft' ? `<div style="display:inline-block;margin:6px auto 12px;padding:3px 14px;background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;border-radius:3px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;text-align:center;">Draft Copy</div>` : ''}
   <div class="cover-meta">
     <div><span class="cover-meta-label">To:</span> <strong>${esc(doc.customer_name || '')}</strong></div>
     <div><span class="cover-meta-label">Date:</span> ${docDate ? new Date(docDate).toLocaleDateString('en-IN') : '-'}</div>
@@ -4496,6 +4497,7 @@ ${(isQuotation && opts.includeCover) ? `
       </div>` : ''}
       <div class="title">${esc(opts.title)}</div>
       <div class="docno">${esc(docNo)}${(doc.revision && doc.revision > 0) ? ` <span style="color:${accentColor};font-size:11px">· Rev ${doc.revision}</span>` : ''}</div>
+      ${(doc.status || '').toLowerCase() === 'draft' ? `<div class="draft-tag" style="display:inline-block;margin-top:4px;padding:2px 10px;background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;border-radius:3px;font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Draft Copy</div>` : ''}
       ${doc.quotation?.quotation_no ? `<div class="quoref">Ref Quotation: <strong>${esc(doc.quotation.quotation_no)}</strong></div>` : ''}
       ${doc.proforma?.proforma_no ? `<div class="quoref">Ref PI: <strong>${esc(doc.proforma.proforma_no)}</strong></div>` : ''}
       ${doc.sales_order?.order_number ? `<div class="quoref">Ref SO: <strong>${esc(doc.sales_order.order_number)}</strong></div>` : ''}

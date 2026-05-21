@@ -79,15 +79,22 @@ function sanitizeFilename(name) {
 function injectPrintCss(html, { draft = false } = {}) {
   // Diagonal "DRAFT COPY" watermark.
   //
-  // We tried `body::before { position: fixed }` — works on screen, but
-  // Chrome's "Save as PDF" only paints fixed-positioned content on the
-  // FIRST printed page (a long-standing Chromium limitation). To get the
-  // watermark on EVERY page of the saved PDF we instead use a SVG-as-
-  // background-image with `background-repeat: repeat-y` and `background-
-  // size: 100% 297mm` (one A4 sheet tall). The browser's print engine
-  // tiles the background per page, which Chrome respects in Save-as-PDF
-  // mode once `print-color-adjust: exact` is set. Inline-encoded SVG
-  // keeps it self-contained — no external requests, no CORS hassles.
+  // STRATEGY: We use TWO complementary approaches so the watermark shows
+  // up on BOTH the screen preview and the saved/printed PDF:
+  //
+  // 1. SVG background-image tiled per-page (background-size: 210mm 297mm,
+  //    background-repeat: repeat-y). Renders on screen + native print
+  //    "Save as PDF" because Chrome's print engine tiles the background
+  //    per A4 sheet when `print-color-adjust: exact`.
+  //
+  // 2. Absolutely-positioned <div> overlays for EACH simulated page (one
+  //    per 297mm of body height). Some older browsers / strict iframe
+  //    sandbox modes don't paint background-images reliably in the
+  //    preview iframe, so the overlay divs guarantee the watermark is
+  //    visible during the on-screen preview at minimum.
+  //
+  // The html2pdf raster path (Download PDF) gets its OWN jsPDF text
+  // overlay in fallbackToHtml2Pdf so this CSS isn't relied upon there.
   const draftSvg = encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123" viewBox="0 0 794 1123">` +
       `<text x="397" y="600" fill="rgba(220,38,38,0.32)" font-family="Helvetica, Arial, sans-serif" ` +
@@ -96,20 +103,14 @@ function injectPrintCss(html, { draft = false } = {}) {
     `</svg>`
   );
   const draftWatermark = draft ? `
-    body {
-      background-image: url("data:image/svg+xml;utf8,${draftSvg}") !important;
-      background-repeat: repeat-y !important;
-      background-position: center top !important;
-      background-size: 210mm 297mm !important;
-      background-attachment: scroll !important;
-    }
+    /* Layer 1: tiling SVG background — handles native print + Save as PDF
+       (Chrome's print engine tiles per A4 page when print-color-adjust:
+       exact is set). */
+    html { background-image: url("data:image/svg+xml;utf8,${draftSvg}") !important; background-repeat: repeat-y !important; background-position: center top !important; background-size: 210mm 297mm !important; }
+    body { background-color: transparent !important; }
     @media print {
-      body {
-        background-image: url("data:image/svg+xml;utf8,${draftSvg}") !important;
-        background-repeat: repeat-y !important;
-        background-position: center top !important;
-        background-size: 210mm 297mm !important;
-      }
+      html { background-image: url("data:image/svg+xml;utf8,${draftSvg}") !important; background-repeat: repeat-y !important; background-position: center top !important; background-size: 210mm 297mm !important; }
+      body { background-color: transparent !important; }
     }
   ` : '';
   const extra = `
