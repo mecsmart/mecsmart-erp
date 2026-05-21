@@ -1049,7 +1049,21 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
         currency: q.currency || 'INR',
         global_discount_type: q.global_discount_type || 'amount',
         global_discount_value: q.global_discount_value || 0,
-        lines: (q.lines && q.lines.length) ? q.lines.map(l => ({ ...l })) : [emptyQuotationLine()],
+        lines: (q.lines && q.lines.length)
+          ? q.lines.map(l => {
+              // Auto-fill HSN / GST from the item master when the line was
+              // saved before line-level hsn_code was supported, OR the user
+              // saved a line without entering HSN. Without this, opening an
+              // older quotation showed a blank HSN cell even though the
+              // referenced item HAS an HSN code on file.
+              const it = (items || []).find(i => i.id === l.item_id);
+              return {
+                ...l,
+                hsn_code: l.hsn_code || it?.hsn_code || '',
+                gst_rate: l.gst_rate ?? it?.gst_rate ?? 18,
+              };
+            })
+          : [emptyQuotationLine()],
       });
     } else if (fromLead) {
       setEditing(null);
@@ -1539,14 +1553,14 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   <thead>
                     <tr>
                       <th className="row-num">#</th>
-                      <th style={{ minWidth: '260px' }}>Item Name &amp; Description</th>
-                      <th style={{ width: '80px', minWidth: '80px' }}>HSN</th>
+                      <th style={{ minWidth: '200px', width: '32%' }}>Item Name &amp; Description</th>
+                      <th style={{ width: '90px', minWidth: '90px' }}>HSN</th>
                       <th style={{ width: '70px' }}>Qty</th>
                       <th style={{ width: '60px' }}>UOM</th>
-                      <th style={{ width: '120px' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
+                      <th style={{ width: '150px', minWidth: '150px' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
                       <th style={{ width: '60px' }}>Disc %</th>
                       <th style={{ width: '60px' }}>GST %</th>
-                      <th style={{ width: '120px', textAlign: 'right' }}>Amount</th>
+                      <th style={{ width: '130px', textAlign: 'right' }}>Amount</th>
                       <th className="remove-cell"></th>
                     </tr>
                   </thead>
@@ -2828,7 +2842,16 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
         terms: ti.terms || '',
         currency: ti.currency || 'INR',
         ship_from_warehouse_id: ti.ship_from_warehouse_id || '',
-        lines: (ti.lines || []).map(l => ({ ...l })),
+        lines: (ti.lines || []).map(l => {
+          // Auto-fill HSN / GST from item master when the saved line is
+          // missing them — same robustness as the Quotation editor.
+          const it = (items || []).find(i => i.id === l.item_id);
+          return {
+            ...l,
+            hsn_code: l.hsn_code || it?.hsn_code || '',
+            gst_rate: l.gst_rate ?? it?.gst_rate ?? 18,
+          };
+        }),
       });
     } else {
       setEditingTI(null);
@@ -3291,11 +3314,11 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                 <table className="line-items-grid" data-testid="ti-lines-table">
                   <thead><tr>
                     <th className="row-num">#</th>
-                    <th style={{ minWidth: '340px' }}>Item &amp; Description</th>
+                    <th style={{ minWidth: '200px', width: '32%' }}>Item &amp; Description</th>
                     <th style={{ width: '90px', minWidth: '90px' }}>HSN</th>
                     <th style={{ width: '70px', textAlign: 'right' }}>Qty</th>
                     <th style={{ width: '60px' }}>UOM</th>
-                    <th style={{ width: '140px', minWidth: '140px', textAlign: 'right' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
+                    <th style={{ width: '150px', minWidth: '150px', textAlign: 'right' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
                     <th style={{ width: '60px', textAlign: 'right' }}>Disc%</th>
                     <th style={{ width: '60px', textAlign: 'right' }}>GST%</th>
                     <th style={{ width: '140px', minWidth: '140px', textAlign: 'right' }}>Amount</th>

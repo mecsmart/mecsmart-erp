@@ -75,44 +75,14 @@ function sanitizeFilename(name) {
 //   - Force body width to A4 (no horizontal scale-down)
 //   - Disable any leftover @media print rules that hide content
 //   - Add `print-color-adjust: exact` so colored headers/badges survive
-//   - If `draft` is true, inject a "DRAFT COPY" diagonal watermark on every page.
-function injectPrintCss(html, { draft = false } = {}) {
-  // Diagonal "DRAFT COPY" watermark.
-  //
-  // STRATEGY: We use TWO complementary approaches so the watermark shows
-  // up on BOTH the screen preview and the saved/printed PDF:
-  //
-  // 1. SVG background-image tiled per-page (background-size: 210mm 297mm,
-  //    background-repeat: repeat-y). Renders on screen + native print
-  //    "Save as PDF" because Chrome's print engine tiles the background
-  //    per A4 sheet when `print-color-adjust: exact`.
-  //
-  // 2. Absolutely-positioned <div> overlays for EACH simulated page (one
-  //    per 297mm of body height). Some older browsers / strict iframe
-  //    sandbox modes don't paint background-images reliably in the
-  //    preview iframe, so the overlay divs guarantee the watermark is
-  //    visible during the on-screen preview at minimum.
-  //
-  // The html2pdf raster path (Download PDF) gets its OWN jsPDF text
-  // overlay in fallbackToHtml2Pdf so this CSS isn't relied upon there.
-  const draftSvg = encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123" viewBox="0 0 794 1123">` +
-      `<text x="397" y="600" fill="rgba(220,38,38,0.32)" font-family="Helvetica, Arial, sans-serif" ` +
-        `font-size="120" font-weight="900" letter-spacing="10" text-anchor="middle" ` +
-        `transform="rotate(-30 397 600)">DRAFT COPY</text>` +
-    `</svg>`
-  );
-  const draftWatermark = draft ? `
-    /* Layer 1: tiling SVG background — handles native print + Save as PDF
-       (Chrome's print engine tiles per A4 page when print-color-adjust:
-       exact is set). */
-    html { background-image: url("data:image/svg+xml;utf8,${draftSvg}") !important; background-repeat: repeat-y !important; background-position: center top !important; background-size: 210mm 297mm !important; }
-    body { background-color: transparent !important; }
-    @media print {
-      html { background-image: url("data:image/svg+xml;utf8,${draftSvg}") !important; background-repeat: repeat-y !important; background-position: center top !important; background-size: 210mm 297mm !important; }
-      body { background-color: transparent !important; }
-    }
-  ` : '';
+//   - NOTE: The diagonal "DRAFT COPY" watermark was removed per user
+//     request (Round 17). Draft documents now ONLY get a small red
+//     "Draft Copy" badge below the document number — see
+//     `printInvoiceDoc()` in CRMPage.js where the badge is injected into
+//     the doc header HTML when `doc.status === 'draft'`.
+function injectPrintCss(html /*, opts */) {
+  // Watermark removed per user request (Round 17).
+  const draftWatermark = '';
   const extra = `
     <style id="__pdfprint_overrides__">
       /* Keep colors / backgrounds in saved PDF — browsers strip these by
@@ -150,7 +120,8 @@ async function fallbackToHtml2Pdf(iframeBody, opts) {
   // (no images), so the only way to put a logo on each printed page is to
   // render the PDF and overlay the header via jsPDF directly.
   const hdr = opts.runningHeader;
-  const wantWatermark = !!opts.draft;
+  // Watermark removed per user request — `wantWatermark` always false now.
+  const wantWatermark = false;
   // Fast path — no header, no watermark → just save directly.
   if (!hdr && !wantWatermark) {
     await html2pdf().set(merged).from(iframeBody).save();
@@ -397,14 +368,9 @@ async function svgDataUrlToPngDataUrl(dataUrl, targetW = 256, targetH = 96) {
  */
 export async function downloadHtmlAsPdf(html, filename, options = {}) {
   const cleanFilename = sanitizeFilename(filename);
-  // ALWAYS run the HTML through injectPrintCss — this enforces A4 size,
-  // tames wide tables (word-break, max-width:100%), and renders the
-  // DRAFT COPY watermark via a tiling SVG background when `draft` is set.
-  // Previously the preview path passed the raw HTML to the in-page
-  // dialog, which meant the saved PDF (printed from inside the iframe)
-  // had NO watermark and NO column-fit guardrails. Centralising the
-  // CSS injection here keeps every code path consistent.
-  const drafted = injectPrintCss(html, { draft: !!options.draft });
+  // Always run HTML through injectPrintCss for A4 sizing + table word-wrap.
+  // (Watermark CSS was removed in Round 17 — `draft` flag now no-op here.)
+  const drafted = injectPrintCss(html);
   // Preview mode → dispatch a global event for the in-page PreviewPdfDialog
   // to pick up. We deliberately don't import the dialog component here to
   // avoid a circular import; the App-level dialog listens for this event.
