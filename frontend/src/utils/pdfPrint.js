@@ -149,18 +149,54 @@ async function fallbackToHtml2Pdf(iframeBody, opts) {
   // (no images), so the only way to put a logo on each printed page is to
   // render the PDF and overlay the header via jsPDF directly.
   const hdr = opts.runningHeader;
-  if (!hdr) {
+  const wantWatermark = !!opts.draft;
+  // Fast path — no header, no watermark → just save directly.
+  if (!hdr && !wantWatermark) {
     await html2pdf().set(merged).from(iframeBody).save();
     return;
   }
-  // Reserve top margin so the overlay doesn't crash into body content.
-  // 64pt ≈ 22.5mm — enough room for a 36pt logo block + multi-line address.
-  merged.margin = [64, 14, 18, 14];
+  // Reserve top margin only when running-header overlay needs room.
+  if (hdr) merged.margin = [64, 14, 18, 14];
   const worker = html2pdf().set(merged).from(iframeBody).toPdf();
   const pdfObj = await worker.get('pdf');
   const total = pdfObj.internal.getNumberOfPages();
   const pageW = pdfObj.internal.pageSize.getWidth();
   const pageH = pdfObj.internal.pageSize.getHeight();
+
+  // ----- DRAFT COPY watermark on every page -------------------------------
+  // The SVG-background approach in injectPrintCss works for the native
+  // print path (Path A) but html2canvas (used by html2pdf) does NOT
+  // reliably rasterise data:image/svg+xml background-images. So when the
+  // user clicks "Download PDF" from the preview dialog (which forces
+  // Path B → html2pdf raster) the watermark was missing. We now overlay
+  // it directly via jsPDF rotated text on every page — guaranteed to
+  // render because it's drawn AFTER html2pdf is done generating pages.
+  if (wantWatermark) {
+    for (let p = 1; p <= total; p++) {
+      pdfObj.setPage(p);
+      pdfObj.saveGraphicsState();
+      pdfObj.setFont('helvetica', 'bold');
+      pdfObj.setFontSize(110);
+      // Faded red (0xDC2626 @ 18% alpha approximation). jsPDF doesn't have
+      // a true alpha API on text without GState, so we use a light grey-red
+      // shade that mimics the screen watermark.
+      pdfObj.setTextColor(241, 178, 178);
+      // Rotate -30° around the page centre.
+      pdfObj.text('DRAFT COPY', pageW / 2, pageH / 2, {
+        align: 'center',
+        baseline: 'middle',
+        angle: 30,
+      });
+      pdfObj.restoreGraphicsState();
+    }
+  }
+
+  // No running header → save and return after watermark.
+  if (!hdr) {
+    pdfObj.save(merged.filename || 'document.pdf');
+    return;
+  }
+
   // eslint-disable-next-line no-console
   console.info('[pdfPrint] running-header path engaged', {
     pages: total, hasLogo: !!hdr.logoDataUrl, addrLines: (hdr.addressLines || []).length, companyName: hdr.companyName,
@@ -481,6 +517,7 @@ export async function downloadHtmlAsPdf(html, filename, options = {}) {
       ...(options.html2pdf || {}),
       filename: cleanFilename,
       runningHeader: options.runningHeader,
+      draft: !!options.draft,
     });
     toast.success(`Downloaded ${cleanFilename}`);
   } catch (e) {

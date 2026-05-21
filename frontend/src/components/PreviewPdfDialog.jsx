@@ -103,8 +103,16 @@ export default function PreviewPdfDialog() {
   const handleDownload = async () => {
     // Use the same html2pdf raster pipeline as the direct-download path
     // so the saved PDF matches what the user just previewed.
+    //
+    // Detect DRAFT mode from the already-injected style block — the
+    // caller has run the HTML through injectPrintCss(..., {draft:true})
+    // which adds a `data:image/svg+xml…DRAFT%20COPY` background-image
+    // marker. We sniff that marker so html2pdf's jsPDF post-processing
+    // can overlay the DRAFT COPY watermark via rotated text on every
+    // page (html2canvas can't reliably rasterize SVG background-images).
+    const isDraft = /DRAFT%20COPY/.test(html);
     try {
-      await downloadHtmlAsPdf(html, filename, { forceDownload: true });
+      await downloadHtmlAsPdf(html, filename, { forceDownload: true, draft: isDraft });
     } catch (err) {
       console.warn('[PreviewPdfDialog] download failed', err);
     }

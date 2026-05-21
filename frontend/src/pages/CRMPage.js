@@ -4584,14 +4584,14 @@ ${(isQuotation && opts.includeCover) ? `
       ${(!cfg.bank_name && !cfg.bank_account) ? '<div style="font-size:10px;color:#94a3b8">Bank details not configured. Set them in Settings → Company Details.</div>' : ''}
     </div>
     <table class="totals">
-      <tr><td class="lbl">Subtotal (after line discount)</td><td class="val">${sym}${(doc.subtotal || 0).toFixed(2)}</td></tr>
-      ${doc.global_discount_amount ? `<tr><td class="lbl">Global Discount${doc.global_discount_type === 'percent' && doc.global_discount_value ? ` (${doc.global_discount_value}%)` : ''}</td><td class="val">-${sym}${doc.global_discount_amount.toFixed(2)}</td></tr>` : ''}
-      ${doc.global_discount_amount ? `<tr><td class="lbl">Net Subtotal</td><td class="val">${sym}${(doc.net_subtotal || 0).toFixed(2)}</td></tr>` : ''}
+      <tr><td class="lbl">Subtotal (after line discount)</td><td class="val">${sym}${fa(doc.subtotal || 0)}</td></tr>
+      ${doc.global_discount_amount ? `<tr><td class="lbl">Global Discount${doc.global_discount_type === 'percent' && doc.global_discount_value ? ` (${doc.global_discount_value}%)` : ''}</td><td class="val">-${sym}${fa(doc.global_discount_amount)}</td></tr>` : ''}
+      ${doc.global_discount_amount ? `<tr><td class="lbl">Net Subtotal</td><td class="val">${sym}${fa(doc.net_subtotal || 0)}</td></tr>` : ''}
       ${isExportDoc ? '' : (isInter
-        ? `<tr><td class="lbl">IGST</td><td class="val">${sym}${(doc.igst || 0).toFixed(2)}</td></tr>`
-        : `<tr><td class="lbl">CGST</td><td class="val">${sym}${(doc.cgst || 0).toFixed(2)}</td></tr><tr><td class="lbl">SGST</td><td class="val">${sym}${(doc.sgst || 0).toFixed(2)}</td></tr>`)
+        ? `<tr><td class="lbl">IGST</td><td class="val">${sym}${fa(doc.igst || 0)}</td></tr>`
+        : `<tr><td class="lbl">CGST</td><td class="val">${sym}${fa(doc.cgst || 0)}</td></tr><tr><td class="lbl">SGST</td><td class="val">${sym}${fa(doc.sgst || 0)}</td></tr>`)
       }
-      <tr class="grand"><td class="lbl">Grand Total</td><td class="val">${sym}${(doc.grand_total || 0).toFixed(2)}</td></tr>
+      <tr class="grand"><td class="lbl">Grand Total</td><td class="val">${sym}${fa(doc.grand_total || 0)}</td></tr>
       ${isExportDoc ? `<tr><td colspan="2" style="font-size:9px;color:#6B7280;text-align:right;padding:2px 6px;">Export/Import — GST not applicable. Currency: ${docCurrency}</td></tr>` : ''}
       <tr class="words-row"><td colspan="2"><strong>In Words:</strong> ${esc(numberToIndianWords(doc.grand_total || 0, docCurrency))}</td></tr>
     </table>

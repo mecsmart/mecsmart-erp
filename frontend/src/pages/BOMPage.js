@@ -335,7 +335,21 @@ export default function BOMPage() {
       } else {
         promises.push(api.post('/api/bom', payload));
       }
-      await Promise.all(promises);
+      const responses = await Promise.all(promises);
+      // Pin manually-created/edited BOMs to top-level just like imported
+      // BOMs — otherwise a freshly-saved BOM whose parent is a child of
+      // another BOM would be hidden by the nested-SG suppression filter
+      // and the user would see "BOM created" toast but no new row.
+      try {
+        const createdId = responses?.[0]?.data?.id || editingBom?.id;
+        if (createdId) {
+          setRecentImportedIds(prev => {
+            const next = new Set(prev);
+            next.add(createdId);
+            return next;
+          });
+        }
+      } catch { /* noop */ }
       toast.success(`BOM "${payload.name}" ${editingBom ? 'updated' : 'created'}`, { id: toastId });
       // If the user was editing a child BOM (via the "Edit <child> BOM" button
       // inside a parent edit), pop the stack and restore the parent's edit
