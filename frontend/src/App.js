@@ -26,6 +26,7 @@ import PublicPrintPage from "./pages/PublicPrintPage";
 import JobWorkPage from "./pages/JobWorkPage";
 import { Toaster } from "./components/ui/sonner";
 import PreviewPdfDialog from "./components/PreviewPdfDialog";
+import PromptDialog from "./components/PromptDialog";
 
 function App() {
   return (
@@ -81,6 +82,7 @@ function App() {
           HTML in an in-page iframe with Print + Download actions. Works
           inside Electron without any popup-blocker workaround. */}
       <PreviewPdfDialog />
+      <PromptDialog />
     </AuthProvider>
   );
 }

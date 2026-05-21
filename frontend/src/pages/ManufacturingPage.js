@@ -31,6 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
+import { promptDialog } from '../components/PromptDialog';
 import { toast } from 'sonner';
 import { fmtAmt } from '../utils/numberFormat';
 
@@ -231,11 +232,14 @@ export default function ManufacturingPage() {
     const opName = typeof op.operation_name === 'object' && op.operation_name !== null ? (op.operation_name.name || '') : (op.operation_name || '');
     const targetRun = runNumber != null ? (op.runs || []).find(r => r.run_number === runNumber) : null;
     const vendorLabel = targetRun ? (targetRun.outsource_supplier_name || (targetRun.operator || '').replace(/^OS:\s*/, '')) : null;
-    const reason = window.prompt(
-      runNumber != null
-        ? `Short Close (no GRN) — vendor "${vendorLabel}" on op "${opName}"?\n\nMarks this vendor's allocation as written off (charges=0). Other vendor runs unaffected.\n\nReason:`
-        : `Short Close (no GRN) operation "${opName}" on ${jobCardWO.wo_number}?\n\nMarks the op COMPLETED. No material received. Reason:`,
-      'Vendor scrap / loss written off');
+    const reason = await promptDialog({
+      title: runNumber != null ? 'Short Close (no GRN) — Vendor Run' : 'Short Close (no GRN) — Operation',
+      message: runNumber != null
+        ? `Vendor "${vendorLabel}" on op "${opName}".\n\nMarks this vendor's allocation as written off (charges=0). Other vendor runs are unaffected.\n\nEnter reason:`
+        : `Operation "${opName}" on ${jobCardWO.wo_number}.\n\nMarks the op COMPLETED. No material received.\n\nEnter reason:`,
+      defaultValue: 'Vendor scrap / loss written off',
+      multiline: true,
+    });
     if (reason === null) return;
     try {
       const body = runNumber != null ? { reason, run_number: runNumber } : { reason };

@@ -73,13 +73,25 @@ export default function BOMPage() {
   // Top-level BOM panels: collapsed by default for ALL parent categories (FG, SG, CP, RM).
   // Stores `true` for explicitly-EXPANDED panels; missing key === collapsed.
   const [expandedBomPanels, setExpandedBomPanels] = useState({});
-  // Recently-imported BOM IDs. When a fresh Excel import creates BOMs whose
-  // parent is referenced as a CHILD in another BOM, the normal "nested only"
-  // filter hides them at top-level — so the user sees the success toast but
-  // can't find the new BOMs. We keep IDs returned from `/import/excel` here
-  // and add them to the visible set on top of the filter, so imported BOMs
-  // always appear at top-level until the page is reloaded.
-  const [recentImportedIds, setRecentImportedIds] = useState(new Set());
+  // Recently-imported / -created BOM IDs. When a fresh Excel import creates
+  // BOMs whose parent is referenced as a CHILD in another BOM, the normal
+  // "nested only" filter hides them at top-level — so the user sees the
+  // success toast but can't find the new BOMs. We keep IDs returned from
+  // `/import/excel` and POST `/api/bom` here and add them to the visible
+  // set on top of the filter, so imported BOMs always appear at top-level.
+  // Backed by `sessionStorage` so a page refresh during the same browser
+  // tab still pins them (cleared when the tab is closed).
+  const [recentImportedIds, setRecentImportedIds] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('bom.recentImportedIds');
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch { return new Set(); }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('bom.recentImportedIds', JSON.stringify(Array.from(recentImportedIds)));
+    } catch { /* noop */ }
+  }, [recentImportedIds]);
   const [allExplosions, setAllExplosions] = useState({});
   const [bomSearch, setBomSearch] = useState('');
   // Per-FG (per-parent-pid) search input shown in the BOM panel header.
@@ -1589,6 +1601,24 @@ export default function BOMPage() {
           </div>
         ) : (
           <div className="p-3 space-y-4">
+            {/* Pinned imports banner — visible whenever the user has recently
+                imported / created BOMs that the suppression filter would
+                otherwise hide. Gives a clear "yes the system saved them"
+                signal + lets the user clear the pin once they're done
+                reviewing. */}
+            {recentImportedIds.size > 0 && (
+              <div className="flex items-center justify-between bg-yellow-50 border border-yellow-300 rounded-sm px-3 py-2 text-xs" data-testid="recent-imports-banner">
+                <div className="text-yellow-900">
+                  <span className="font-semibold">{recentImportedIds.size}</span>
+                  &nbsp;recently imported / created BOM{recentImportedIds.size === 1 ? '' : 's'} pinned to the top of the list.
+                </div>
+                <button
+                  onClick={() => setRecentImportedIds(new Set())}
+                  className="text-yellow-800 hover:text-yellow-900 underline"
+                  data-testid="clear-recent-imports"
+                >Clear pin</button>
+              </div>
+            )}
             {(() => {
               // Build a set of item_ids that appear as a COMPONENT in at
               // least one other BOM. Their BOMs render nested in their

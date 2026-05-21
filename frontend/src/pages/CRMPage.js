@@ -4304,14 +4304,12 @@ function printInvoiceDoc(doc, opts) {
   .sign-col .line-box{border-top:1px solid #0f172a;padding-top:4px;color:#475569;font-weight:600}
   .sign-col .auth-label{font-size:9px;color:#94a3b8}
   .footer-note{text-align:center;margin-top:24px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:9px;color:#94a3b8}
-  /* Cover page — exactly A4, standalone (outside .page wrapper). Pulled UP
-     by 22mm with a solid white background so the repeating <thead> running
-     band is masked on the cover page (page 1). Top padding tightened to
-     14mm (was 30mm) so the cover content (logo + title + intro) fits
-     comfortably on ONE A4 page even with longer customer info blocks.
-     Subsequent body pages get their own mask via .page-one-cover; on every
-     page 2+ the band shows normally above the spillover content. */
-  .cover-page{width:210mm;min-height:297mm;max-height:297mm;display:flex;flex-direction:column;padding:14mm 18mm 14mm 18mm;box-sizing:border-box;page-break-after:always;overflow:hidden;margin-top:-22mm;background:#fff;position:relative;z-index:5}
+  /* Cover page — fits in ONE A4 page (297mm) including the repeating <thead>
+     running band (~15mm). Effective area = 297 - 15 = ~282mm. We set
+     min/max-height to 260mm so even with the 22mm negative margin pulling
+     up + content padding, total height stays under one A4 sheet. Solid
+     white background + z-index masks the running band on the cover. */
+  .cover-page{width:210mm;min-height:260mm;max-height:260mm;display:flex;flex-direction:column;padding:12mm 18mm 10mm 18mm;box-sizing:border-box;page-break-after:always;break-after:page;overflow:hidden;margin-top:-22mm;background:#fff;position:relative;z-index:5}
   .cover-head{display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:8px}
   .cover-logo{max-height:96px;max-width:260px;object-fit:contain}
   .cover-company{font-size:20px;font-weight:800;color:#0f172a;letter-spacing:0.3px;text-align:center}

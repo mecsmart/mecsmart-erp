@@ -90,7 +90,7 @@ function injectPrintCss(html, { draft = false } = {}) {
   // keeps it self-contained — no external requests, no CORS hassles.
   const draftSvg = encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="794" height="1123" viewBox="0 0 794 1123">` +
-      `<text x="397" y="600" fill="rgba(220,38,38,0.18)" font-family="Helvetica, Arial, sans-serif" ` +
+      `<text x="397" y="600" fill="rgba(220,38,38,0.32)" font-family="Helvetica, Arial, sans-serif" ` +
         `font-size="120" font-weight="900" letter-spacing="10" text-anchor="middle" ` +
         `transform="rotate(-30 397 600)">DRAFT COPY</text>` +
     `</svg>`
@@ -171,16 +171,17 @@ async function fallbackToHtml2Pdf(iframeBody, opts) {
   // Path B → html2pdf raster) the watermark was missing. We now overlay
   // it directly via jsPDF rotated text on every page — guaranteed to
   // render because it's drawn AFTER html2pdf is done generating pages.
+  // Use a darker, more opaque red so it's clearly visible over white
+  // tables (users complained the previous shade was too faded).
   if (wantWatermark) {
     for (let p = 1; p <= total; p++) {
       pdfObj.setPage(p);
       pdfObj.saveGraphicsState();
       pdfObj.setFont('helvetica', 'bold');
       pdfObj.setFontSize(110);
-      // Faded red (0xDC2626 @ 18% alpha approximation). jsPDF doesn't have
-      // a true alpha API on text without GState, so we use a light grey-red
-      // shade that mimics the screen watermark.
-      pdfObj.setTextColor(241, 178, 178);
+      // Darker red so the watermark is unmistakably visible in saved
+      // PDFs even after the html2pdf raster pipeline.
+      pdfObj.setTextColor(220, 80, 80);
       // Rotate -30° around the page centre.
       pdfObj.text('DRAFT COPY', pageW / 2, pageH / 2, {
         align: 'center',

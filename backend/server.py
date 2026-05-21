@@ -1833,7 +1833,7 @@ async def get_boms(request: Request, status: Optional[str] = None):
     query = {}
     if status:
         query["status"] = status
-    boms = await db.boms.find(query, {"_id": 0}).to_list(1000)
+    boms = await db.boms.find(query, {"_id": 0}).to_list(10000)
 
     # Batch-load parent items in ONE query instead of N find_one() calls.
     # Previously the per-BOM loop did `db.items.find_one({"id": parent_item_id})`
