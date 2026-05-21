@@ -4306,12 +4306,12 @@ function printInvoiceDoc(doc, opts) {
   .footer-note{text-align:center;margin-top:24px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:9px;color:#94a3b8}
   /* Cover page — exactly A4, standalone (outside .page wrapper). Pulled UP
      by 22mm with a solid white background so the repeating <thead> running
-     band is masked on the cover page (page 1). Internal padding-top is
-     bumped to 30mm so the cover content still starts visually below where
-     the band would have been, keeping the layout clean. Subsequent body
-     pages get their own mask via .page-one-cover; on every page 2+ the
-     band shows normally above the spillover content. */
-  .cover-page{width:210mm;min-height:297mm;max-height:297mm;display:flex;flex-direction:column;padding:30mm 18mm 14mm 18mm;box-sizing:border-box;page-break-after:always;overflow:hidden;margin-top:-22mm;background:#fff;position:relative;z-index:5}
+     band is masked on the cover page (page 1). Top padding tightened to
+     14mm (was 30mm) so the cover content (logo + title + intro) fits
+     comfortably on ONE A4 page even with longer customer info blocks.
+     Subsequent body pages get their own mask via .page-one-cover; on every
+     page 2+ the band shows normally above the spillover content. */
+  .cover-page{width:210mm;min-height:297mm;max-height:297mm;display:flex;flex-direction:column;padding:14mm 18mm 14mm 18mm;box-sizing:border-box;page-break-after:always;overflow:hidden;margin-top:-22mm;background:#fff;position:relative;z-index:5}
   .cover-head{display:flex;flex-direction:column;align-items:center;gap:2px;margin-bottom:8px}
   .cover-logo{max-height:96px;max-width:260px;object-fit:contain}
   .cover-company{font-size:20px;font-weight:800;color:#0f172a;letter-spacing:0.3px;text-align:center}

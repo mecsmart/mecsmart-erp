@@ -101,21 +101,18 @@ export default function PreviewPdfDialog() {
   };
 
   const handleDownload = async () => {
-    // Use the same html2pdf raster pipeline as the direct-download path
-    // so the saved PDF matches what the user just previewed.
+    // PRAGMATIC FIX: The html2pdf (raster) pipeline produces a different
+    // visual result than the browser's native print engine — column
+    // widths shift, fonts re-rasterize, watermark requires a separate
+    // overlay path, etc. Users consistently expected "Download PDF" to
+    // match what they see in the preview iframe.
     //
-    // Detect DRAFT mode from the already-injected style block — the
-    // caller has run the HTML through injectPrintCss(..., {draft:true})
-    // which adds a `data:image/svg+xml…DRAFT%20COPY` background-image
-    // marker. We sniff that marker so html2pdf's jsPDF post-processing
-    // can overlay the DRAFT COPY watermark via rotated text on every
-    // page (html2canvas can't reliably rasterize SVG background-images).
-    const isDraft = /DRAFT%20COPY/.test(html);
-    try {
-      await downloadHtmlAsPdf(html, filename, { forceDownload: true, draft: isDraft });
-    } catch (err) {
-      console.warn('[PreviewPdfDialog] download failed', err);
-    }
+    // We now route BOTH buttons through the same native iframe.print()
+    // flow. The user just clicks "Save as PDF" as the destination in the
+    // browser print dialog — output is byte-for-byte identical to the
+    // Print / Save as PDF button. We keep the "Download PDF" label
+    // because users are conditioned to look for it.
+    handlePrint();
   };
 
   return (

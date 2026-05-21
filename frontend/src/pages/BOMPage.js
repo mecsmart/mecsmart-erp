@@ -1748,10 +1748,17 @@ export default function BOMPage() {
                 const exp = allExplosions[activeBom?.id];
                 return exp ? searchNodes(exp.explosion) : false;
               }).sort(([, a], [, b]) => {
-                // FG → SG → CP → RM order, then numeric-aware sort by part_number
-                // within each category so 'FG-2' comes BEFORE 'FG-10' (instead of
-                // alphabetic 'FG-1, FG-10, FG-11, FG-2' that localeCompare
-                // produces by default).
+                // Imported BOMs come FIRST so users immediately see what
+                // they just brought in. We mark a group as "recent" if any
+                // of its BOMs is in recentImportedIds (covers both create
+                // and update import flows).
+                const aRecent = (a.boms || []).some(x => recentImportedIds.has(x.id));
+                const bRecent = (b.boms || []).some(x => recentImportedIds.has(x.id));
+                if (aRecent !== bRecent) return aRecent ? -1 : 1;
+                // Then FG → SG → CP → RM order, then numeric-aware sort by
+                // part_number within each category so 'FG-2' comes BEFORE
+                // 'FG-10' (instead of alphabetic 'FG-1, FG-10, FG-11, FG-2'
+                // that localeCompare produces by default).
                 const catRank = orderedCats.indexOf(a.item?.category);
                 const catRankB = orderedCats.indexOf(b.item?.category);
                 if (catRank !== catRankB) return (catRank === -1 ? 99 : catRank) - (catRankB === -1 ? 99 : catRankB);
@@ -1759,6 +1766,9 @@ export default function BOMPage() {
               }).map(([pid, group]) => {
                 const parentItem = group.item;
                 const activeBom = group.boms.find(b => b.status === 'active') || group.boms[0];
+                // Detect newly-imported groups so we can visually highlight
+                // them with a yellow ring + auto-expand below.
+                const isRecentlyImported = (group.boms || []).some(x => recentImportedIds.has(x.id));
                 const explosion = allExplosions[activeBom?.id];
                 const allRows = explosion ? flattenRows(explosion.explosion) : [];
                 const pSearch = (panelSearch[pid] || '').trim().toLowerCase();
@@ -1770,7 +1780,7 @@ export default function BOMPage() {
                 const totalCost = explosion?.total_rollup_cost || 0;
                 
                 return (
-                  <div key={pid} className="border border-[#D1D5DB] rounded-sm overflow-hidden" data-testid={`bom-tree-${pid}`}>
+                  <div key={pid} className={`border border-[#D1D5DB] rounded-sm overflow-hidden ${isRecentlyImported ? 'ring-2 ring-yellow-400 ring-offset-1' : ''}`} data-testid={`bom-tree-${pid}`}>
                     {/* Top-level header row — color by parent category. Clicking the header
                         toggles the explosion table below. ALL panels (FG, SG, CP, RM) are
                         collapsed by default to keep the list scannable on big BOM catalogs. */}
