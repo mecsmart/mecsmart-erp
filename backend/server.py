@@ -15940,6 +15940,10 @@ async def health_check():
 # gets a true Chrome-quality PDF file download.
 @api_router.post("/print/html-to-pdf")
 async def print_html_to_pdf(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Server-side Chromium HTML→PDF. Auto-installs the browser binary on
+    first call so production deployments don't need a separate provisioning
+    step.
+    """
     html = (payload or {}).get("html") or ""
     filename = ((payload or {}).get("filename") or "document") + ""
     if not filename.endswith(".pdf"):
@@ -15949,18 +15953,32 @@ async def print_html_to_pdf(payload: dict = Body(...), user: dict = Depends(get_
     try:
         from playwright.async_api import async_playwright
     except ImportError:
-        raise HTTPException(status_code=500, detail="Playwright not installed on server")
-    pdf_bytes = b""
-    try:
+        raise HTTPException(status_code=500, detail="Playwright not installed on server. Run: pip install playwright")
+    # Detect missing browser binary; auto-install once if needed.
+    async def _try_pdf():
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
             ctx = await browser.new_context()
             page = await ctx.new_page()
-            await page.set_content(html, wait_until="networkidle", timeout=15000)
-            pdf_bytes = await page.pdf(format="A4", print_background=True, prefer_css_page_size=True)
+            await page.set_content(html, wait_until="networkidle", timeout=20000)
+            data = await page.pdf(format="A4", print_background=True, prefer_css_page_size=True)
             await browser.close()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+            return data
+    try:
+        pdf_bytes = await _try_pdf()
+    except Exception as e1:
+        err_str = str(e1)
+        # If the browser binary is missing (common on fresh production
+        # deployments), kick off `playwright install chromium` and retry.
+        if "Executable doesn't exist" in err_str or "playwright install" in err_str.lower():
+            import subprocess
+            try:
+                subprocess.run(["playwright", "install", "chromium"], check=True, timeout=300)
+                pdf_bytes = await _try_pdf()
+            except Exception as e2:
+                raise HTTPException(status_code=500, detail=f"Chromium auto-install failed: {e2}. Manually run: playwright install chromium")
+        else:
+            raise HTTPException(status_code=500, detail=f"PDF generation failed: {e1}")
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 

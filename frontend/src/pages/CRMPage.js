@@ -949,9 +949,16 @@ const RateInput = ({ value, onChange, testId }) => {
 const QuotationLineRow = function QuotationLineRow({
   line, idx, items, currency, formatCurrency, canRemove, updateLine, removeLine, onPickItem, rowProps,
 }) {
-  const gross = (parseFloat(line.quantity) || 0) * (parseFloat(line.rate) || 0);
-  const disc = gross * ((parseFloat(line.discount_pct) || 0) / 100);
-  const amount = gross - disc;
+  // Round 21 redefinition:
+  //   Basic Amt = per-unit net price (unit rate − per-unit discount amt)
+  //   Amount    = Qty × Basic Amt  (i.e. the line total after discount)
+  // Net total is unchanged from before; only the per-line breakdown shown
+  // to the user differs (was gross-before-discount → now net-per-unit).
+  const qty = parseFloat(line.quantity) || 0;
+  const rate = parseFloat(line.rate) || 0;
+  const discPct = parseFloat(line.discount_pct) || 0;
+  const basicAmt = rate - (rate * discPct / 100); // per-unit net price
+  const amount = qty * basicAmt;
   return (
     <tr data-testid={`quotation-line-${idx}`} {...rowProps}>
       <td className="row-num drag-handle" title="Drag to reorder">{idx + 1}</td>
@@ -984,11 +991,11 @@ const QuotationLineRow = function QuotationLineRow({
       </td>
       <td><input type="number" step="0.01" className="grid-input mono num" value={line.discount_pct || 0} onChange={e => updateLine(idx, { discount_pct: e.target.value })} data-testid={`quotation-line-discount-${idx}`} /></td>
       {/* GST% column removed from line items per user request (Round 20).
-          GST is still applied via the line's `gst_rate` field (auto-filled
-          from item master + editable in the dialog header). The column was
-          removed from the editor grid + printed PDF to declutter — only
-          the totals box shows the consolidated GST. */}
-      <td className="static-cell amount">{formatCurrency(amount, currency)}</td>
+          Basic Amount column added in Round 21 — shows the gross
+          (qty × rate, BEFORE discount). The "Total" column then shows
+          the net amount after discount. */}
+      <td className="static-cell amount" data-testid={`quotation-line-basic-${idx}`}>{formatCurrency(basicAmt, currency)}</td>
+      <td className="static-cell amount" data-testid={`quotation-line-amount-${idx}`}>{formatCurrency(amount, currency)}</td>
       <td className="remove-cell">
         {canRemove && (
           <button className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded p-1" onClick={() => removeLine(idx)} title="Remove" data-testid={`quotation-line-remove-${idx}`}><X className="w-3 h-3" /></button>
@@ -1385,7 +1392,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
 
       {/* Create / Edit Quotation dialog */}
       <Dialog open={dialog} onOpenChange={(o) => { setDialog(o); if (!o) { setEditing(null); setForm(emptyForm); } }}>
-        <DialogContent className="!max-w-[95vw] xl:!max-w-[1400px] max-h-[90vh] overflow-y-auto overflow-x-hidden" data-testid="quotation-dialog">
+        <DialogContent className="!max-w-[80vw] xl:!max-w-[1190px] max-h-[90vh] overflow-y-auto overflow-x-hidden" data-testid="quotation-dialog">
           <DialogHeader><DialogTitle className="font-[Chivo]">{editing ? `Edit Quotation — ${editing.quotation_no}` : 'New Quotation'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3 w-full min-w-0">
             <div className="grid grid-cols-3 gap-3">
@@ -1555,15 +1562,16 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
               <div className="border border-[#E5E7EB] rounded-sm overflow-x-auto">
                 <table className="line-items-grid w-full" data-testid="quotation-lines-table" style={{ tableLayout: 'fixed', fontSize: '13px' }}>
                   <colgroup>
-                    <col style={{ width: '32px' }} />
+                    <col style={{ width: '28px' }} />
                     <col />
-                    <col style={{ width: '100px' }} />
-                    <col style={{ width: '72px' }} />
-                    <col style={{ width: '70px' }} />
-                    <col style={{ width: '130px' }} />
+                    <col style={{ width: '110px' }} />
                     <col style={{ width: '68px' }} />
-                    <col style={{ width: '130px' }} />
-                    <col style={{ width: '32px' }} />
+                    <col style={{ width: '60px' }} />
+                    <col style={{ width: '120px' }} />
+                    <col style={{ width: '64px' }} />
+                    <col style={{ width: '115px' }} />
+                    <col style={{ width: '115px' }} />
+                    <col style={{ width: '28px' }} />
                   </colgroup>
                   <thead>
                     <tr>
@@ -1574,7 +1582,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                       <th>UOM</th>
                       <th>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
                       <th>Disc %</th>
-                      <th style={{ textAlign: 'right' }}>Amount</th>
+                      <th style={{ textAlign: 'right' }}>Basic Amt</th>
+                      <th style={{ textAlign: 'right' }}>Total</th>
                       <th className="remove-cell"></th>
                     </tr>
                   </thead>
@@ -3212,7 +3221,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
       </div>
 
       <Dialog open={dialog} onOpenChange={(o) => { setDialog(o); if (!o) { setForm(emptyForm); setEditingTI(null); } }}>
-        <DialogContent className="!max-w-[1400px] w-[95vw] max-h-[90vh] overflow-y-auto" data-testid="tax-invoice-dialog">
+        <DialogContent className="!max-w-[1190px] w-[80vw] max-h-[90vh] overflow-y-auto" data-testid="tax-invoice-dialog">
           <DialogHeader><DialogTitle className="font-[Chivo]">{editingTI ? `Edit Tax Invoice · ${editingTI.invoice_no}` : 'New Tax Invoice'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-2">
             {/* Source type tabs */}
@@ -3327,15 +3336,16 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
               <div className="border border-[#E5E7EB] rounded-sm overflow-x-auto">
                 <table className="line-items-grid w-full" data-testid="ti-lines-table" style={{ tableLayout: 'fixed', fontSize: '13px' }}>
                   <colgroup>
-                    <col style={{ width: '32px' }} />
+                    <col style={{ width: '28px' }} />
                     <col />
-                    <col style={{ width: '100px' }} />
-                    <col style={{ width: '72px' }} />
-                    <col style={{ width: '70px' }} />
-                    <col style={{ width: '130px' }} />
+                    <col style={{ width: '110px' }} />
                     <col style={{ width: '68px' }} />
-                    <col style={{ width: '130px' }} />
-                    <col style={{ width: '32px' }} />
+                    <col style={{ width: '60px' }} />
+                    <col style={{ width: '120px' }} />
+                    <col style={{ width: '64px' }} />
+                    <col style={{ width: '115px' }} />
+                    <col style={{ width: '115px' }} />
+                    <col style={{ width: '28px' }} />
                   </colgroup>
                   <thead><tr>
                     <th className="row-num">#</th>
@@ -3345,12 +3355,19 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                     <th>UOM</th>
                     <th style={{ textAlign: 'right' }}>Rate ({CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'})</th>
                     <th style={{ textAlign: 'right' }}>Disc%</th>
-                    <th style={{ textAlign: 'right' }}>Amount</th>
+                    <th style={{ textAlign: 'right' }}>Basic Amt</th>
+                    <th style={{ textAlign: 'right' }}>Total</th>
                     <th className="remove-cell"></th>
                   </tr></thead>
                   <tbody>
                     {form.lines.map((l, i) => {
-                      const amount = ((parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0)) * (1 - (parseFloat(l.discount_pct) || 0) / 100);
+                      // Round 21: Basic Amt = per-unit net price (rate − per-unit disc),
+                      // Amount = Qty × Basic Amt. Same net total, clearer breakdown.
+                      const tiQty = parseFloat(l.quantity) || 0;
+                      const tiRate = parseFloat(l.rate) || 0;
+                      const tiDiscPct = parseFloat(l.discount_pct) || 0;
+                      const tiBasicAmt = tiRate - (tiRate * tiDiscPct / 100);
+                      const amount = tiQty * tiBasicAmt;
                       return (
                         <tr key={i} data-testid={`ti-line-${i}`} {...getTaxInvoiceRowProps(i)}>
                           <td className="row-num drag-handle" title="Drag to reorder">{i + 1}</td>
@@ -3443,8 +3460,9 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                             data-testid={`ti-line-rate-${i}`}
                           /></td>
                           <td><input type="number" step="0.01" className="grid-input mono num" value={l.discount_pct} onChange={e => updateLine(i, { discount_pct: e.target.value })} data-testid={`ti-line-disc-${i}`} /></td>
-                          {/* GST% removed per Round 20 — see Quotation editor for context. */}
-                          <td className="static-cell amount">{formatCurrency(amount, form.currency)}</td>
+                          {/* GST% removed per Round 20. Basic Amt added Round 21. */}
+                          <td className="static-cell amount" data-testid={`ti-line-basic-${i}`}>{formatCurrency(tiBasicAmt, form.currency)}</td>
+                          <td className="static-cell amount" data-testid={`ti-line-amount-${i}`}>{formatCurrency(amount, form.currency)}</td>
                           <td className="remove-cell">
                             <button type="button" onClick={() => removeLine(i)} className="text-[#9B1C1C] hover:bg-[#FDE8E8] rounded p-1" data-testid={`ti-line-remove-${i}`} title="Remove line"><X className="w-3 h-3" /></button>
                           </td>
@@ -4221,12 +4239,17 @@ function printInvoiceDoc(doc, opts) {
     const qty = parseFloat(l.quantity || 0);
     const rate = parseFloat(l.rate || 0);
     const discPct = parseFloat(l.discount_pct || 0);
+    // Round 21 definitions:
+    //   Discount column shows the per-line discount amount (qty × rate ×
+    //     discount_pct/100) so the user sees how much was knocked off.
+    //   Basic Amt = per-unit net price (rate − per-unit discount).
+    //   Total    = Qty × Basic Amt (net amount line-level, EX-GST).
+    // GST is no longer per-line — only consolidated in the totals box
+    // below the items table.
     const gross = qty * rate;
     const disc = gross * discPct / 100;
-    const basic = gross - disc;  // taxable value
-    const gstRate = parseFloat(l.gst_rate || 0);
-    const gstAmt = basic * gstRate / 100;
-    const total = basic + gstAmt;
+    const basicPerUnit = rate - (rate * discPct / 100);
+    const total = qty * basicPerUnit;
     const partNum = l.item?.part_number || '';
     const itemName = l.item?.name || '';
     const headTitle = partNum ? `${partNum} — ${itemName}` : (itemName || '-');
@@ -4240,11 +4263,12 @@ function printInvoiceDoc(doc, opts) {
         <div class="item-name">${esc(headTitle)}</div>
         ${desc ? `<div class="item-desc">${esc(desc)}</div>` : ''}
       </td>
-      <td class="center mono">${esc(l.hsn_code || l.item?.hsn_code || '-')}</td>
+      <td class="center mono" style="white-space:nowrap">${esc(l.hsn_code || l.item?.hsn_code || '-')}</td>
       <td class="right">${fa(qty)}</td>
       <td class="center">${esc(l.uom || '')}</td>
       <td class="right">${fa(rate)}</td>
-      <td class="right">${discPct > 0 ? discPct.toFixed(2) + '%' : '-'}</td>
+      <td class="right">${disc > 0 ? `${fa(disc)}<div class="subamt">(${discPct.toFixed(2)}%)</div>` : '-'}</td>
+      <td class="right">${fa(basicPerUnit)}</td>
       <td class="right total-cell">${fa(total)}</td>
     </tr>`;
   }).join('');
@@ -4607,13 +4631,14 @@ ${(isQuotation && opts.includeCover) ? `
   <table class="items">
     <colgroup>
       <col style="width:3%">
-      <col style="width:36%">
-      <col style="width:8%">
-      <col style="width:7%">
+      <col style="width:30%">
+      <col style="width:10%">
+      <col style="width:6%">
       <col style="width:6%">
       <col style="width:12%">
-      <col style="width:10%">
-      <col style="width:18%">
+      <col style="width:9%">
+      <col style="width:12%">
+      <col style="width:12%">
     </colgroup>
     <thead>
       <tr>
@@ -4624,10 +4649,11 @@ ${(isQuotation && opts.includeCover) ? `
         <th class="center">UOM</th>
         <th class="right">Rate</th>
         <th class="right">Discount</th>
+        <th class="right">Basic Amt</th>
         <th class="right">Total</th>
       </tr>
     </thead>
-    <tbody>${rows || '<tr><td colspan="8" style="text-align:center;padding:20px">No line items</td></tr>'}</tbody>
+    <tbody>${rows || '<tr><td colspan="9" style="text-align:center;padding:20px">No line items</td></tr>'}</tbody>
   </table>
 
   <!-- Bank + Totals -->
