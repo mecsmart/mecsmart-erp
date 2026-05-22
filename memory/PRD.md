@@ -19,6 +19,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 29 — Short-closed OS ops were blocking MO completion — FIXED ✅):**
+  1. **Root cause for MO-000188 (and similar)** — When a job-work (OS) operation is short-closed, the legacy short-close paths set `short_closed=True` and `status='completed'` but never cleared `outsource_status` (still `'sent'`). The WO-status guard "any op still sent to job-worker → can't complete" then refused to promote the MO. Result: all 3 ops showing `completed` in the UI, but MO stuck on `in_progress`.
+  2. **Fix #1** — Both `_recompute_wo_status_after_op_change` AND the inline auto-status logic in `PUT /work-orders/{id}/operations/{seq}` now skip short-closed ops when checking the `outsource_status=='sent'` guard. A short-closed OS leg is settled regardless of the stale field.
+  3. **Fix #2** — `short-close-no-grn` op-level path now also flips `outsource_status` from `'sent'` → `'short_closed'` so future inspections see a clean state.
+  4. **Verified** via curl simulation of the exact MO-000188 state (all ops `status=completed`, last op `short_closed=true` + `outsource_status='sent'`): `/sync-status` correctly promoted MO `in_progress` → `completed` with `actual_end` set.
+
+
 - **2026-02-22 (Round 28 — Sync MO Status now heals legacy short-closes + refreshes UI immediately — DONE ✅):**
   1. **Legacy short-close ops weren't recognized** — `_recompute_wo_status_after_op_change` only treated ops with `status=='completed'` as terminal. Older short-close paths (pre-Round 27) had marked ops with `short_closed=True` but never flipped their status. Helper now also treats `short_closed=True` as effectively completed, and as part of the WO promotion it back-fills `status='completed'` on those legacy ops so they display consistently as Done.
   2. **Job Card button visibility fixed** — Was only shown when every op had `status=='completed'`. Now also shown when ops have `short_closed=true` (the actual legacy stuck state).

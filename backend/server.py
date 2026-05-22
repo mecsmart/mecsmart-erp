@@ -6674,6 +6674,11 @@ async def _recompute_wo_status_after_op_change(wo_id: str) -> Optional[str]:
             if sc_order and sc_order.get("status") != "completed":
                 can_complete = False
         for op in operations:
+            # Short-closed ops are effectively settled — they should not
+            # block MO completion even if outsource_status is still 'sent'
+            # (legacy short-close paths didn't clear that field).
+            if op.get("short_closed"):
+                continue
             if op.get("is_job_work") and op.get("outsource_status") == "sent":
                 can_complete = False
                 break
@@ -7086,6 +7091,10 @@ async def short_close_wo_operation_no_grn(wo_id: str, sequence: int, payload: Sh
     target["short_closed_at"] = now
     target["short_closed_by"] = user["id"]
     target["actual_end"] = now
+    # Mark the OS leg as settled so the WO-status recompute (and the rest
+    # of the system) no longer thinks materials are out at the vendor.
+    if target.get("outsource_status") == "sent":
+        target["outsource_status"] = "short_closed"
     # Treat the entire op qty as accounted for so downstream MO logic
     # (e.g. quantity_completed roll-up) doesn't think work is still pending.
     op_qty = float(target.get("allocated_qty") or wo.get("quantity") or 0)
@@ -8497,9 +8506,15 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
         except Exception:
             pass
     
-    # Auto-determine WO status
-    all_completed = all(op.get("status") == "completed" for op in operations)
-    any_in_progress = any(op.get("status") in ["in_progress", "completed", "stopped"] for op in operations)
+    # Auto-determine WO status. Treat short-closed ops as effectively
+    # completed (legacy short-close paths may not have flipped status).
+    def _op_done(op):
+        return op.get("status") == "completed" or op.get("short_closed") is True
+    all_completed = all(_op_done(op) for op in operations)
+    any_in_progress = any(
+        op.get("status") in ["in_progress", "completed", "stopped"] or op.get("short_closed") is True
+        for op in operations
+    )
     
     wo_status = wo.get("status")
     if all_completed:
@@ -8509,8 +8524,11 @@ async def update_work_order_operation(wo_id: str, sequence: int, op_data: WorkOr
             sc_order = await db.subcontract_orders.find_one({"reference_wo_id": wo_id})
             if sc_order and sc_order.get("status") != "completed":
                 can_complete = False
-        # Check any outsourced operation has pending receipt
+        # Check any outsourced operation has pending receipt — but skip
+        # short-closed ops; those are settled regardless of outsource_status.
         for op in operations:
+            if op.get("short_closed"):
+                continue
             if op.get("is_job_work") and op.get("outsource_status") == "sent":
                 can_complete = False
         
