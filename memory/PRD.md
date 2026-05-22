@@ -19,6 +19,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 27 — MO stuck in "in_progress" after short-close — FIXED ✅):**
+  1. **Root cause** — The `/work-orders/{id}/operations/{seq}/short-close-no-grn` endpoint (both op-level path at line ~7053 and per-vendor path at line ~6993) was mutating `operations_status` and marking the target op as `completed`, but NEVER re-evaluating the parent WO's overall status. As a result, MOs whose last pending op was short-closed without a GRN stayed stuck on `in_progress` indefinitely. The user's MO-000163 was the visible symptom.
+  2. **Fix — new shared helper `_recompute_wo_status_after_op_change(wo_id)`** (server.py ~line 6630). Mirrors the inline status-derivation logic from `PUT /work-orders/{id}/operations/{seq}` (line ~8463): when every op is `completed` AND no blockers (subcontract MO with un-fulfilled SC; or job-work op with `outsource_status="sent"`), the WO is auto-promoted to `completed` with `actual_end` and `quantity_completed` set. Wired into both short-close-no-grn branches.
+  3. **Recovery for already-stuck MOs** — new admin endpoint `POST /api/work-orders/{wo_id}/sync-status` plus a "Sync MO Status" button in the Job Card dialog (only shown when MO is `in_progress` AND every op is `completed`). One click moves a stuck MO to `completed` without manual DB intervention.
+  4. **Verified end-to-end** — Forced a non-subcontract MO's ops to `completed` in DB, called `/sync-status` → MO transitioned `in_progress` → `completed` with proper `actual_end`. Subcontract MO correctly stayed `in_progress` (still gated by SC completion).
+
+
 - **2026-02-22 (Round 26 — PO ₹/% toggle + dropdown dedup across all docs — DONE ✅):**
   1. **PO Create/Edit ₹/% toggle** — Added the missing two-button toggle to PO Additional Charges, matching Quotation/Tax Invoice. % is computed against Items Subtotal (line totals after line discounts). `emptyCharge` extended with `value_type` ('amount' default) + `value`; `resolveChargeAmount()` helper feeds both `calcChargesTotal` and `calcGST`. `handleSubmit` resolves percent → concrete `amount` before posting so the backend continues to receive a flat number (no schema migration).
   2. **Dropdown deduplication across all three documents** — Once a charge type (Quotation/TI) or PO charge type is selected in a row, it disappears from the dropdown of all OTHER rows on the same document. The current row's own selection stays visible so the user can change it. Implemented via `availableMasters` / `availableCharges` filters that exclude `usedIds` from sibling rows.

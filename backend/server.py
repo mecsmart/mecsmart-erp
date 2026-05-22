@@ -6628,6 +6628,82 @@ class RevokeOpPayload(BaseModel):
     reason: Optional[str] = ""
 
 
+
+async def _recompute_wo_status_after_op_change(wo_id: str) -> Optional[str]:
+    """Re-evaluate a Work Order's overall status after one of its operations
+    has been mutated. Used by every endpoint that flips an op status (short-
+    close-no-grn op-level, per-vendor short-close, etc.) so a completed last
+    operation always promotes the WO to 'completed' instead of leaving it
+    stuck on 'in_progress'.
+
+    Rules (mirrors the inline logic in PUT /work-orders/{wo}/operations/{seq}):
+      - All ops completed AND no blockers (subcontract MO not yet GRN-ed, or
+        any op still 'sent' to a job-worker) → wo.status = 'completed'.
+      - At least one op in progress/completed/stopped → 'in_progress'.
+      - Otherwise → leave status as-is.
+
+    Returns the new status (or None if no change). Also flips
+    `actual_end` and triggers FG stock + cost roll-up when the WO transitions
+    to completed for the first time.
+    """
+    wo = await db.work_orders.find_one({"id": wo_id})
+    if not wo:
+        return None
+    operations = wo.get("operations_status") or []
+    if not operations:
+        return None
+    current = wo.get("status")
+    all_completed = all(op.get("status") == "completed" for op in operations)
+    any_active = any(op.get("status") in ("in_progress", "completed", "stopped") for op in operations)
+
+    new_status = current
+    if all_completed:
+        can_complete = True
+        if wo.get("is_subcontract"):
+            sc_order = await db.subcontract_orders.find_one({"reference_wo_id": wo_id})
+            if sc_order and sc_order.get("status") != "completed":
+                can_complete = False
+        for op in operations:
+            if op.get("is_job_work") and op.get("outsource_status") == "sent":
+                can_complete = False
+                break
+        if can_complete:
+            new_status = "completed"
+    elif any_active and current == "pending":
+        new_status = "in_progress"
+
+    if new_status == current:
+        return None
+
+    update_payload = {"status": new_status}
+    if new_status == "completed":
+        update_payload["actual_end"] = datetime.now(timezone.utc)
+        update_payload["quantity_completed"] = wo.get("quantity", 0)
+    await db.work_orders.update_one({"id": wo_id}, {"$set": update_payload})
+    return new_status
+
+
+@work_orders_router.post("/{wo_id}/sync-status")
+async def sync_wo_status(wo_id: str, request: Request):
+    """Manually re-evaluate a Work Order's status based on its current
+    operations. Useful for fixing MOs that got "stuck" in `in_progress`
+    after some legacy short-close paths didn't propagate the status flip.
+
+    Returns the resulting status (or null if nothing changed).
+    """
+    user = await get_current_user(request)
+    role = user.get("role")
+    perms = ((user.get("permissions") or {}).get("manufacturing") or [])
+    if role != "admin" and "edit" not in perms:
+        raise HTTPException(status_code=403, detail="You don't have permission to sync MO status")
+    wo = await db.work_orders.find_one({"id": wo_id})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    new_status = await _recompute_wo_status_after_op_change(wo_id)
+    return {"ok": True, "wo_id": wo_id, "previous_status": wo.get("status"), "new_status": new_status or wo.get("status"), "changed": new_status is not None}
+
+
+
 @work_orders_router.post("/{wo_id}/operations/{sequence}/short-close")
 async def short_close_wo_operation(wo_id: str, sequence: int, request: Request, payload: Optional[RevokeOpPayload] = None):
     """Revoke an OS allocation on a WO operation.
@@ -6933,6 +7009,9 @@ async def short_close_wo_operation_no_grn(wo_id: str, sequence: int, payload: Sh
                 target["short_close_reason"] = payload.reason or ""
                 target["actual_end"] = now
         await db.work_orders.update_one({"id": wo_id}, {"$set": {"operations_status": ops}})
+        # Re-evaluate WO status: if this run-close pushed the op to completed
+        # and it was the LAST pending op, the MO should auto-finish.
+        await _recompute_wo_status_after_op_change(wo_id)
         # Update the matching SC JWP line — set short_closed + charges=0.
         sc_updated_pv = False
         if run_sc_id:
@@ -6991,6 +7070,9 @@ async def short_close_wo_operation_no_grn(wo_id: str, sequence: int, payload: Sh
     target["quantity_completed"] = op_qty
     target["quantity_accepted"] = op_qty
     await db.work_orders.update_one({"id": wo_id}, {"$set": {"operations_status": ops}})
+    # Re-evaluate WO status: a short-closed op is functionally "completed",
+    # so if this was the last pending op the MO should now finish.
+    await _recompute_wo_status_after_op_change(wo_id)
 
     # Mark the SC's matching line short_closed (don't delete — keep audit).
     # Per user request: when short-closing a line, ZERO its charges so the

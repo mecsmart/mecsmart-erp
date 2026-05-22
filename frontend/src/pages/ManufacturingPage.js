@@ -2722,6 +2722,33 @@ export default function ManufacturingPage() {
 
               {/* Print Buttons */}
               <div className="flex justify-end space-x-2 pt-3 border-t border-[#E5E7EB]">
+                {/* Recovery: re-evaluates the MO's overall status from the
+                    current ops. Helps users unstick MOs whose status is
+                    stuck on 'in_progress' even though all ops are done
+                    (legacy short-close paths that pre-date the auto-sync). */}
+                {jobCardWO.status === 'in_progress' && (jobCardWO.operations_status || []).every(o => o.status === 'completed') && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        const { data } = await api.post(`/api/work-orders/${jobCardWO.id}/sync-status`);
+                        if (data.changed) {
+                          toast.success(`MO status updated to ${data.new_status}`);
+                          setJobCardWO({ ...jobCardWO, status: data.new_status });
+                          fetchWOs();
+                        } else {
+                          toast.info('MO status is already up-to-date');
+                        }
+                      } catch (e) {
+                        toast.error(e.response?.data?.detail || 'Failed to sync MO status');
+                      }
+                    }}
+                    className="btn-secondary text-xs flex items-center space-x-1"
+                    data-testid="sync-mo-status-btn"
+                    title="Re-evaluate MO status from current operations"
+                  >
+                    <CheckCircle2 className="w-3 h-3" /><span>Sync MO Status</span>
+                  </button>
+                )}
                 <button onClick={() => printWorkOrder(jobCardWO)} className="btn-secondary text-xs flex items-center space-x-1" data-testid="print-wo-from-jobcard">
                   <Printer className="w-3 h-3" /><span>MO PDF</span>
                 </button>
