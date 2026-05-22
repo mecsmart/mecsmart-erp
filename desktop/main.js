@@ -358,7 +358,19 @@ ipcMain.handle('mecsmart:clear-credentials', () => {
 // install on the customer's server which has been crashing with 500s in
 // the production deployment. Electron already bundles Chromium so this
 // works offline, on the customer's local machine, with zero extra deps.
+//
+// IMPLEMENTATION NOTES:
+//   - We use a TEMP FILE (loadFile) instead of a data: URL because data
+//     URLs have a ~2MB limit in Chromium and large quotation HTML with
+//     embedded base64 logos blows past that ceiling silently.
+//   - We wait for did-finish-load before calling printToPDF — otherwise
+//     Chromium can race and produce a blank page.
 ipcMain.handle('mecsmart:download-pdf', async (_event, { html, filename } = {}) => {
+  console.log('[mecsmart:download-pdf] invoked', {
+    hasHtml: !!html,
+    htmlLen: html ? html.length : 0,
+    filename,
+  });
   if (!html || typeof html !== 'string') {
     return { ok: false, error: 'HTML content is required' };
   }
@@ -374,51 +386,70 @@ ipcMain.handle('mecsmart:download-pdf', async (_event, { html, filename } = {}) 
     filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
   });
   if (saveResult.canceled || !saveResult.filePath) {
+    console.log('[mecsmart:download-pdf] user cancelled save dialog');
     return { ok: false, canceled: true };
   }
 
+  // Persist HTML to a temp .html file so we can loadFile() it. data:
+  // URLs are fragile for large HTML (~2MB ceiling in Chromium).
+  const os = require('os');
+  const tmpFile = path.join(os.tmpdir(), `mecsmart-pdf-${Date.now()}-${Math.floor(Math.random() * 1e6)}.html`);
   let pdfWin = null;
   try {
+    await fs.promises.writeFile(tmpFile, html, 'utf8');
+    console.log('[mecsmart:download-pdf] wrote temp HTML', { tmpFile, bytes: Buffer.byteLength(html, 'utf8') });
+
     // Offscreen window sized to A4 width @ 96dpi (794 CSS-px). Hidden so
-    // it never flashes on screen. nodeIntegration off + sandbox on for
-    // safety since we're loading arbitrary HTML.
+    // it never flashes on screen. nodeIntegration off for safety since
+    // we're loading arbitrary HTML.
     pdfWin = new BrowserWindow({
       show: false,
       width: 794,
       height: 1123,
       webPreferences: {
-        offscreen: false,
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: true,
         javascript: true,
       },
     });
 
-    // Load HTML via data URL so we don't have to write a temp file.
-    const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
-    await pdfWin.loadURL(dataUrl);
+    // Wait for the page to be FULLY loaded before printing. did-finish-load
+    // fires AFTER all subresources (CSS, images, fonts) have settled.
+    await new Promise((resolve, reject) => {
+      const onFail = (_e, code, desc) => reject(new Error(`page load failed: ${desc} (code ${code})`));
+      pdfWin.webContents.once('did-finish-load', () => {
+        pdfWin.webContents.removeListener('did-fail-load', onFail);
+        resolve();
+      });
+      pdfWin.webContents.once('did-fail-load', onFail);
+      pdfWin.loadFile(tmpFile).catch(reject);
+      // Hard safety: never wait more than 25 seconds for the page.
+      setTimeout(() => reject(new Error('page load timed out after 25s')), 25000);
+    });
 
-    // Give fonts + images a moment to settle. printToPDF doesn't wait
-    // for network-idle so any external assets need a small grace period.
-    await new Promise(resolve => setTimeout(resolve, 600));
+    // Extra grace period so any async font/image decoding settles.
+    await new Promise(r => setTimeout(r, 600));
 
+    console.log('[mecsmart:download-pdf] calling printToPDF…');
     const pdfBuffer = await pdfWin.webContents.printToPDF({
       pageSize: 'A4',
       printBackground: true,
       preferCSSPageSize: true,
       margins: { marginType: 'default' },
     });
+    console.log('[mecsmart:download-pdf] printToPDF ok', { pdfBytes: pdfBuffer.length });
 
     await fs.promises.writeFile(saveResult.filePath, pdfBuffer);
+    console.log('[mecsmart:download-pdf] saved to', saveResult.filePath);
     return { ok: true, path: saveResult.filePath };
   } catch (err) {
-    console.error('[mecsmart:download-pdf]', err);
+    console.error('[mecsmart:download-pdf] FAILED:', err);
     return { ok: false, error: String((err && err.message) || err) };
   } finally {
     if (pdfWin && !pdfWin.isDestroyed()) {
       try { pdfWin.destroy(); } catch { /* noop */ }
     }
+    try { await fs.promises.unlink(tmpFile); } catch { /* noop */ }
   }
 });
 

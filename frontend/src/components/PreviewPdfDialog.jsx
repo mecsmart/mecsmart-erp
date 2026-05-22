@@ -108,21 +108,32 @@ export default function PreviewPdfDialog() {
     // identical to the user's "Print → Save as PDF" output and
     // bypasses the unstable backend Playwright endpoint entirely.
     const desktop = typeof window !== 'undefined' ? window.mecsmart : null;
-    if (desktop && typeof desktop.downloadPdf === 'function') {
+    const hasDesktopBridge = !!(desktop && typeof desktop.downloadPdf === 'function');
+    if (hasDesktopBridge) {
+      let ipcError = null;
       try {
         const res = await desktop.downloadPdf(html, filename);
         if (res?.ok) return;                  // saved to disk
         if (res?.canceled) return;            // user cancelled the save dialog
-        // Surface IPC errors so we know the desktop path failed before
-        // falling back to the server endpoint.
-        console.warn('[PreviewPdfDialog] Electron downloadPdf failed:', res?.error);
-        // Fall through to the server fallback below.
+        ipcError = res?.error || 'Unknown Electron error';
       } catch (ipcErr) {
-        console.warn('[PreviewPdfDialog] Electron IPC threw, falling back:', ipcErr);
+        ipcError = (ipcErr && ipcErr.message) || String(ipcErr);
       }
+      // The Electron IPC bridge IS available but the PDF generation
+      // itself failed. Don't silently fall through to the (known-broken)
+      // backend Playwright endpoint — surface the actual desktop error
+      // so the user / support team can debug. The native print dialog
+      // is always available as a manual fallback.
+      console.warn('[PreviewPdfDialog] Electron downloadPdf failed:', ipcError);
+      // eslint-disable-next-line no-alert
+      alert(`Download PDF failed (desktop):\n\n${ipcError}\n\nFallback: click "Print / Save as PDF" instead.`);
+      return;
     }
 
     // FALLBACK — server-side Chromium PDF (browser users, dev preview).
+    // Only reached when running OUTSIDE the desktop wrapper (e.g. in a
+    // browser tab pointing at the dev server). The backend endpoint may
+    // be unstable in production, but works in dev/test.
     try {
       const ifr = document.querySelector('[data-testid="pdf-preview-iframe"]');
       const srcHtml = (ifr && ifr.srcdoc) || html;
@@ -148,7 +159,7 @@ export default function PreviewPdfDialog() {
       } catch { /* noop */ }
       console.warn('[PreviewPdfDialog] server PDF failed:', msg);
       // eslint-disable-next-line no-alert
-      alert(`Download PDF failed:\n\n${msg}\n\nFallback: use "Print / Save as PDF".`);
+      alert(`Download PDF failed (server):\n\n${msg}\n\nFallback: click "Print / Save as PDF" instead.`);
     }
   };
 
