@@ -15955,28 +15955,46 @@ async def print_html_to_pdf(payload: dict = Body(...), user: dict = Depends(get_
     except ImportError:
         raise HTTPException(status_code=500, detail="Playwright not installed on server. Run: pip install playwright")
     # Detect missing browser binary; auto-install once if needed.
-    async def _try_pdf():
+    async def _try_pdf(executable_path=None):
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
+            launch_args = {"args": ["--no-sandbox", "--disable-dev-shm-usage"]}
+            if executable_path:
+                launch_args["executable_path"] = executable_path
+            browser = await pw.chromium.launch(**launch_args)
             ctx = await browser.new_context()
             page = await ctx.new_page()
             await page.set_content(html, wait_until="networkidle", timeout=20000)
             data = await page.pdf(format="A4", print_background=True, prefer_css_page_size=True)
             await browser.close()
             return data
+
     try:
         pdf_bytes = await _try_pdf()
     except Exception as e1:
         err_str = str(e1)
-        # If the browser binary is missing (common on fresh production
-        # deployments), kick off `playwright install chromium` and retry.
+        # Last-ditch: use system Chrome/Chromium if installed (Docker
+        # images frequently have google-chrome at /usr/bin/google-chrome
+        # or chromium at /usr/bin/chromium).
+        system_chrome = None
+        for cand in ("/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/root/bin/chromium"):
+            import os as _os
+            if _os.path.exists(cand):
+                system_chrome = cand
+                break
         if "Executable doesn't exist" in err_str or "playwright install" in err_str.lower():
+            # Try (1) playwright install, (2) system chrome, in that order.
             import subprocess
             try:
                 subprocess.run(["playwright", "install", "chromium"], check=True, timeout=300)
                 pdf_bytes = await _try_pdf()
             except Exception as e2:
-                raise HTTPException(status_code=500, detail=f"Chromium auto-install failed: {e2}. Manually run: playwright install chromium")
+                if system_chrome:
+                    try:
+                        pdf_bytes = await _try_pdf(executable_path=system_chrome)
+                    except Exception as e3:
+                        raise HTTPException(status_code=500, detail=f"PDF gen failed (playwright auto-install + system chrome both failed): {e3}")
+                else:
+                    raise HTTPException(status_code=500, detail=f"Chromium auto-install failed and no system Chrome found. Run on server: PLAYWRIGHT_BROWSERS_PATH=/pw-browsers playwright install chromium. Error: {e2}")
         else:
             raise HTTPException(status_code=500, detail=f"PDF generation failed: {e1}")
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}

@@ -103,8 +103,13 @@ export default function PreviewPdfDialog() {
 
   const handleDownload = async () => {
     // Server-side Chromium PDF — true direct file download, no print
-    // dialog. Static import of `api` avoids the dynamic-import script
-    // error we saw in Electron production builds.
+    // dialog. Static-imported `api` (was dynamic import which threw
+    // Script error in Electron production builds).
+    //
+    // Error handling: when the server returns 500 the response body is
+    // JSON ({"detail": "..."}) but we asked for responseType:'blob' so
+    // axios won't parse it. We catch and read the Blob as text to
+    // surface a useful message instead of just "Network Error".
     try {
       const ifr = document.querySelector('[data-testid="pdf-preview-iframe"]');
       const srcHtml = (ifr && ifr.srcdoc) || html;
@@ -119,11 +124,18 @@ export default function PreviewPdfDialog() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
-      console.warn('[PreviewPdfDialog] server PDF failed', err);
-      // Hard-fail visibly so the user knows what to do instead of silently
-      // jumping to native print (which Round 20 explicitly forbade).
+      let msg = err?.message || 'Unknown error';
+      // Try to extract the detail from a Blob response (500 from server).
+      try {
+        const blob = err?.response?.data;
+        if (blob && typeof blob.text === 'function') {
+          const txt = await blob.text();
+          try { msg = JSON.parse(txt).detail || txt; } catch { msg = txt; }
+        }
+      } catch { /* noop */ }
+      console.warn('[PreviewPdfDialog] server PDF failed:', msg);
       // eslint-disable-next-line no-alert
-      alert('PDF download failed. Please retry, or use "Print / Save as PDF" as a fallback.\n\n' + (err?.message || ''));
+      alert(`Download PDF failed:\n\n${msg}\n\nFallback: use "Print / Save as PDF".`);
     }
   };
 

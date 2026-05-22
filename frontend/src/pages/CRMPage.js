@@ -4247,7 +4247,8 @@ function printInvoiceDoc(doc, opts) {
     // GST is no longer per-line — only consolidated in the totals box
     // below the items table.
     const gross = qty * rate;
-    const disc = gross * discPct / 100;
+    const disc = rate * discPct / 100;      // per-unit discount (Round 22)
+    const lineDisc = gross * discPct / 100; // total line discount (kept for reference)
     const basicPerUnit = rate - (rate * discPct / 100);
     const total = qty * basicPerUnit;
     const partNum = l.item?.part_number || '';
