@@ -1,0 +1,53 @@
+{
+  "summary": "P0 Frontend Fixes Verified - (1) Quotation Rate input 2-decimal persistence working correctly, (2) PO print template navy header, HSN width, and font family all verified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_144.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only testing)",
+    "frontend": "100% (all 4 test cases passed)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None - used existing PO records",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "P0 fixes verified: (1) RateInput component in CRMPage.js now normalizes stored value to 2 decimals on blur via toFixed(2), so '100' becomes '100.00' and persists across re-focus/re-render. (2) PO print template in PrintDialogs.js has navy (#1D3557) header background with white text, HSN column at 11% width, and Helvetica Neue/Arial 11px font family.",
+  "tests_verified": {
+    "RATE-1": {
+      "status": "PASSED",
+      "details": "Type '12500' in Rate field, blur → displays '12,500.00' (comma-formatted). Re-focus → shows '12500.00' (2-decimal normalized value, NOT '12500'). Basic Amt and Total columns calculate correctly."
+    },
+    "RATE-2": {
+      "status": "PASSED",
+      "details": "Type '100' in Rate field, blur → displays '100.00'. Re-focus → shows '100.00' (2-decimal persistence confirmed)."
+    },
+    "RATE-3": {
+      "status": "PASSED",
+      "details": "Empty Rate input stays empty when blurred (no '0.00' on empty)."
+    },
+    "PO-PRINT-1": {
+      "status": "PASSED",
+      "details": "PO print template items table header has NAVY (#1D3557 / rgb(29,53,87)) background with WHITE (rgb(255,255,255)) text - verified via computed styles inspection."
+    },
+    "PO-PRINT-2": {
+      "status": "PASSED",
+      "details": "HSN column width set to 11% in colWidthMap (line 242 of PrintDialogs.js). HSN data (84818090) displays correctly in preview."
+    },
+    "PO-PRINT-3": {
+      "status": "PASSED",
+      "details": "Body text uses 'Helvetica Neue', Arial, sans-serif font family at 11px (line 163 of PrintDialogs.js baseStyles)."
+    }
+  }
+}

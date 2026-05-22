@@ -927,9 +927,18 @@ function emptyQuotationLine() {
 const RateInput = ({ value, onChange, testId }) => {
   const [focused, setFocused] = React.useState(false);
   const num = Number(value || 0);
+  const isEmpty = value === '' || value === null || value === undefined;
+  // While focused → show the raw user-entered string so typing works
+  // naturally (no thousand separators getting in the way).
+  // On blur → render the Indian-grouped, 2-decimal version so the user
+  // always sees "1,12,500.00" not "112500". The stored value is also
+  // normalised to a 2-decimal string on blur so the formatted display
+  // persists across re-focus/re-render.
   const display = focused
-    ? (value === '' || value === null || value === undefined ? '' : String(value))
-    : (Number.isFinite(num) && Number(value || 0) !== 0 ? num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (value === '' ? '' : '0.00'));
+    ? (isEmpty ? '' : String(value))
+    : (isEmpty ? '' : (Number.isFinite(num)
+        ? num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : ''));
   return (
     <input
       type="text"
@@ -937,7 +946,15 @@ const RateInput = ({ value, onChange, testId }) => {
       className="grid-input mono num"
       value={display}
       onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
+      onBlur={() => {
+        setFocused(false);
+        // Normalise stored value to a 2-decimal string ("100" → "100.00")
+        // so the formatted display sticks even after re-render.
+        if (!isEmpty && Number.isFinite(num)) {
+          const fixed = num.toFixed(2);
+          if (String(value) !== fixed) onChange(fixed);
+        }
+      }}
       onChange={e => {
         const raw = e.target.value.replace(/[\s,]/g, '');
         if (raw === '' || /^-?\d*\.?\d*$/.test(raw)) onChange(raw);

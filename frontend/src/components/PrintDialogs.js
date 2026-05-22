@@ -159,31 +159,32 @@ export function POPrintDialog({ po, open, onClose }) {
       /* Compact margins to match the Quotation print template. */
       @page { size: ${paper.w} ${paper.h}; margin: 8mm 8mm 14mm 8mm; }
       * { margin:0; padding:0; box-sizing:border-box; }
-      body { font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif; font-size:10px; color:#1f2937; line-height:1.45; background:#fff; }
+      /* Font stack now matches Quotation/Tax Invoice exactly. */
+      body { font-family:'Helvetica Neue',Arial,sans-serif; font-size:11px; color:#111; line-height:1.45; background:#fff; }
       .page { max-width:${paper.w}; margin:0 auto; padding:0; padding-top:4px; background:#fff; }
       ${letterheadCSS(accent)}
       .doc-title { font-size:13px; font-weight:700; color:${accent}; text-transform:uppercase; padding:6px 0; border-bottom:1px solid ${accent}; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; }
       .doc-title .rev { font-size:10px; color:#666; font-weight:normal; }
       .info-section { display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:0; margin-bottom:12px; }
       .info-block { border:1px solid #e5e7eb; padding:6px 8px; border-radius:2px; background:#fff; }
-      .info-block .label { font-size:8.5px; color:#6b7280; text-transform:uppercase; letter-spacing:0.5px; font-weight:600; }
-      .info-block .value { font-size:11px; font-weight:600; color:#111; margin-top:1px; }
-      .info-block .detail { font-size:9.5px; color:#374151; }
-      /* Match Quotation: no row striping, plain white background. */
+      .info-block .label { font-size:9px; color:#6b7280; text-transform:uppercase; letter-spacing:1px; font-weight:600; }
+      .info-block .value { font-size:13px; font-weight:700; color:#0f172a; margin-top:2px; }
+      .info-block .detail { font-size:10px; color:#475569; line-height:1.5; }
+      /* Items table — sized & spaced to match the Quotation print template. */
       table { width:100%; margin:0 0 10px; border-collapse:collapse; table-layout:fixed; background:#fff; }
-      th { background:#fff; color:${accent}; padding:6px 4px; font-size:9px; text-transform:uppercase; letter-spacing:0.2px; text-align:left; word-break:break-word; border-bottom:1.5px solid ${accent}; border-top:1.5px solid ${accent}; font-weight:700; }
-      td { padding:5px 4px; border-bottom:1px solid #e5e7eb; font-size:10px; vertical-align:top; word-break:break-word; overflow-wrap:anywhere; background:#fff; }
-      tbody tr:last-child td { border-bottom:1.5px solid ${accent}; }
+      th { background:${accent}; color:#fff; padding:6px 4px; font-size:10.5px; text-transform:uppercase; letter-spacing:0.3px; text-align:left; word-break:break-word; font-weight:600; border:none; }
+      td { padding:7px 5px; border-bottom:1px solid #e2e8f0; font-size:11px; vertical-align:top; word-break:break-word; overflow-wrap:anywhere; background:#fff; }
+      tbody tr:last-child td { border-bottom:2px solid ${accent}; }
       .text-right { text-align:right; } .text-center { text-align:center; }
-      .mono { font-family:'Courier New',monospace; font-size:9.5px; }
+      .mono { font-family:'Courier New',monospace; }
       .total-row { font-weight:700; }
       .grand-total { font-size:12px; color:${accent}; }
-      .section-title { font-size:10px; font-weight:700; color:${accent}; text-transform:uppercase; padding:2px 0; margin:6px 0 4px; letter-spacing:0.5px; }
+      .section-title { font-size:10px; font-weight:700; color:${accent}; text-transform:uppercase; padding:2px 0; margin:10px 0 4px; letter-spacing:1px; }
       .totals-box { width:280px; margin-left:auto; margin-bottom:12px; }
       .totals-box table { width:100%; margin:0; table-layout:auto; }
-      .totals-box td { padding:3px 6px; border:none; font-size:10px; }
-      .totals-box .label-cell { color:#374151; text-align:right; }
-      .totals-box .val-cell { text-align:right; font-weight:600; font-family:'Courier New',monospace; }
+      .totals-box td { padding:4px 8px; border:none; font-size:11px; }
+      .totals-box .label-cell { color:#475569; text-align:right; }
+      .totals-box .val-cell { text-align:right; font-weight:600; font-family:'Courier New',monospace; color:#0f172a; }
       .totals-box .grand { border-top:1.5px solid ${accent}; }
       .terms { padding:8px 10px; font-size:9.5px; color:#475569; border:1px solid #cbd5e1; border-radius:6px; margin-top:8px; white-space:pre-line; }
       .terms strong { color:${accent}; font-weight:700; }
@@ -238,7 +239,7 @@ export function POPrintDialog({ po, open, onClose }) {
       // removed per user request (round 22) — only GST% shows; total is the
       // pre-GST line total (net × qty).
       const colWidthMap = {
-        'SN': '3%', 'Item': '28%', 'HSN': '7%', 'Qty': '6%', 'UOM': '5%',
+        'SN': '3%', 'Item': '24%', 'HSN': '11%', 'Qty': '6%', 'UOM': '5%',
         'Rate': '10%', 'Discount': '9%', 'Net Amt': '10%',
         'GST%': '6%', 'Total': '12%',
       };
