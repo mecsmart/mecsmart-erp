@@ -19,6 +19,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 25 — Quotation/TI restored, PO matched to Quotation pattern, Inventory Config charges master — DONE ✅):**
+  1. **REVERTED Round 24** — Quotation & Tax Invoice Create/Edit forms restored to the original inline-grid-in-totals layout with ₹/% toggle. PDFs restored to inline per-charge rows directly in the totals table (with "HSN xxx, yy% GST" in parentheses next to charge name).
+  2. **PO Create/Edit Additional Charges now follow Quotation pattern** — Replaced the standalone Charge Type/HSN/GST/Amount/Tax/X table + simple totals stack with a Quotation-style 3-col grid totals box. Per-charge rows are inline (select | currency symbol | amount input | absolute-positioned X). "+ Add Additional Charge" link + running "Charges:" total inside the grid. Items Subtotal, Est. GST and Total rows all share the same 3-col alignment.
+  3. **PO Print/PDF Additional Charges = Quotation PDF** — Removed the separate "Additional Charges" table; charges now render as inline rows inside the totals-box table with format "ChargeName (HSN xxx, yy% GST) ₹amt" matching the customer-facing Quotation PDF exactly.
+  4. **Inventory Configuration → Additional Charges (Purchase Orders) card** — New `POChargeTypesCard` (`/app/frontend/src/components/POChargeTypesCard.jsx`) added between Item Groups and Default PO Terms. Provides CRUD on `/api/settings/po-charges`; same backend collection as Settings → PO Section, so any entry added here flows directly into the PO Create/Edit "Charge Type" dropdown.
+  5. Verified by testing_agent_v3_fork iteration_146 — **8/8 cases PASSED**, including regressions for Quotation Rate decimal persistence (Round 23) and PO print template styling (Round 24).
+
+
 - **2026-02-22 (Round 24 — PO print parity, repeating header & PO-style Additional Charges — DONE ✅):**
   1. **PO text brightness aligned with Quotation** — td text now `#0f172a`, info-block details `#475569`, font Helvetica Neue 11px.
   2. **PO doc-title bar** — `"Purchase Order: PO-XXX"` now renders as a filled navy bar with white text (was white-with-underline) — matches Quotation info-bar.
