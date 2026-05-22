@@ -52,8 +52,9 @@ function formatCurrency(v, currencyCode) {
   const n = parseFloat(v || 0);
   const sym = CURRENCY_SYMBOLS[(currencyCode || 'INR').toUpperCase()] || '₹';
   // For INR keep en-IN grouping; other currencies use plain en-US.
+  // Always show 2 decimals (₹1,000.00) — accounting docs need cent precision.
   const locale = (currencyCode || 'INR').toUpperCase() === 'INR' ? 'en-IN' : 'en-US';
-  return `${sym}${n.toLocaleString(locale, { maximumFractionDigits: 0 })}`;
+  return `${sym}${n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function formatDateTime(v) {
@@ -1077,6 +1078,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
           name: c.name || '',
           hsn_code: c.hsn_code || '',
           gst_rate: c.gst_rate ?? 18,
+          value_type: c.value_type || 'amount',
+          value: c.value != null ? c.value : (c.amount || 0),
           amount: c.amount || 0,
         })) : [],
         lines: (q.lines && q.lines.length)
@@ -1209,11 +1212,15 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     perLine.forEach(p => { gst += p.net * factor * (p.gstRate / 100); });
     // Additional charges (after global discount, before total GST). Each
     // charge carries its own GST% which is added to the running gst total.
+    // Each charge has value_type ('amount'|'percent') and value (raw input).
+    // % is computed against the subtotal AFTER line discounts (i.e. `sub`).
     const isExport = (form.currency || 'INR').toUpperCase() !== 'INR';
     let chargesTotal = 0;
     let chargesGst = 0;
     (form.additional_charges || []).forEach(c => {
-      const amt = parseFloat(c.amount) || 0;
+      const vt = c.value_type || 'amount';
+      const raw = parseFloat(c.value ?? c.amount) || 0;
+      const amt = vt === 'percent' ? sub * raw / 100 : raw;
       if (amt <= 0) return;
       chargesTotal += amt;
       if (!isExport) chargesGst += amt * (parseFloat(c.gst_rate) || 0) / 100;
@@ -1248,14 +1255,21 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
         global_discount_type: form.global_discount_type || 'amount',
         global_discount_value: parseFloat(form.global_discount_value) || 0,
         additional_charges: (form.additional_charges || [])
-          .filter(c => (parseFloat(c.amount) || 0) > 0)
-          .map(c => ({
-            charge_id: c.charge_id || '',
-            name: c.name || '',
-            hsn_code: c.hsn_code || '',
-            gst_rate: parseFloat(c.gst_rate) || 0,
-            amount: parseFloat(c.amount) || 0,
-          })),
+          .map(c => {
+            const vt = c.value_type || 'amount';
+            const raw = parseFloat(c.value ?? c.amount) || 0;
+            const amt = vt === 'percent' ? (totals.sub * raw / 100) : raw;
+            return {
+              charge_id: c.charge_id || '',
+              name: c.name || '',
+              hsn_code: c.hsn_code || '',
+              gst_rate: parseFloat(c.gst_rate) || 0,
+              value_type: vt,
+              value: raw,
+              amount: Math.round(amt * 100) / 100,
+            };
+          })
+          .filter(c => c.amount > 0),
         lines: form.lines.map(l => ({
           item_id: l.item_id || '',
           description: l.description || '',
@@ -1713,17 +1727,18 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                     <div className="flex justify-between"><span>Net Subtotal:</span><span className="mono">{formatCurrency(totals.netSub, form.currency)}</span></div>
                   )}
                   {/* ---- Additional Charges (after global discount, before GST) ----
-                      One INLINE row per charge — mirrors the Global Discount UI:
-                      [name dropdown] [₹/%] [value input] [✕]. % is computed from
-                      the post-line-discount subtotal (matches the "Subtotal" row
-                      shown above). */}
+                      Two-row card per charge: full-width dropdown (so the
+                      charge name is always fully visible) on top, ₹/% toggle
+                      + amount input + remove on the bottom — mirrors the
+                      Global Discount visual style. % is computed from the
+                      post-line-discount Subtotal shown above. */}
                   {(form.additional_charges || []).map((c, ci) => {
                     const vt = c.value_type || 'amount';
-                    const sym = CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹';
+                    const symC = CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹';
                     return (
-                    <div key={`ac-${ci}`} className="flex items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 gap-2" data-testid={`additional-charge-row-${ci}`}>
+                    <div key={`ac-${ci}`} className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1.5 space-y-1.5" data-testid={`additional-charge-row-${ci}`}>
                       <select
-                        className="input-field h-7 text-xs px-1.5 py-0 flex-1 min-w-0"
+                        className="input-field h-7 text-xs px-2 py-0 w-full"
                         value={c.charge_id || ''}
                         onChange={(e) => {
                           const m = additionalChargesMaster.find(x => x.id === e.target.value);
@@ -1739,58 +1754,60 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                           }));
                         }}
                         data-testid={`additional-charge-select-${ci}`}
-                        title={c.name || 'Select charge'}
                       >
                         <option value="">— select charge —</option>
                         {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
                           <option key={m.id} value={m.id}>{m.name} ({(m.gst_rate ?? 0)}% GST)</option>
                         ))}
                       </select>
-                      <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden shrink-0" role="tablist">
+                      <div className="flex items-center gap-2">
+                        <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden shrink-0" role="tablist">
+                          <button
+                            type="button"
+                            aria-selected={vt === 'amount'}
+                            onClick={() => setForm(f => ({
+                              ...f,
+                              additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'amount' } : row),
+                            }))}
+                            className={`h-7 w-8 text-xs font-semibold mono transition-colors ${vt === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                            data-testid={`additional-charge-mode-amount-${ci}`}
+                            title="Charge as currency amount"
+                          >{symC}</button>
+                          <button
+                            type="button"
+                            aria-selected={vt === 'percent'}
+                            onClick={() => setForm(f => ({
+                              ...f,
+                              additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'percent' } : row),
+                            }))}
+                            className={`h-7 w-8 text-xs font-semibold transition-colors ${vt === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                            data-testid={`additional-charge-mode-percent-${ci}`}
+                            title="Charge as % of subtotal (after line discount)"
+                          >%</button>
+                        </div>
+                        <input
+                          type="number" min="0" step="0.01"
+                          className="input-field h-7 text-xs px-2 py-0 flex-1 mono"
+                          style={{ textAlign: 'right' }}
+                          placeholder={vt === 'percent' ? '%' : 'Amount'}
+                          value={c.value ?? c.amount ?? 0}
+                          onChange={(e) => {
+                            const raw = parseFloat(e.target.value) || 0;
+                            setForm(f => ({
+                              ...f,
+                              additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value: raw } : row),
+                            }));
+                          }}
+                          data-testid={`additional-charge-amount-${ci}`}
+                        />
                         <button
                           type="button"
-                          aria-selected={vt === 'amount'}
-                          onClick={() => setForm(f => ({
-                            ...f,
-                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'amount' } : row),
-                          }))}
-                          className={`h-7 w-7 text-xs font-semibold mono transition-colors ${vt === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
-                          data-testid={`additional-charge-mode-amount-${ci}`}
-                          title="Charge as currency amount"
-                        >{sym}</button>
-                        <button
-                          type="button"
-                          aria-selected={vt === 'percent'}
-                          onClick={() => setForm(f => ({
-                            ...f,
-                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'percent' } : row),
-                          }))}
-                          className={`h-7 w-7 text-xs font-semibold transition-colors ${vt === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
-                          data-testid={`additional-charge-mode-percent-${ci}`}
-                          title="Charge as % of subtotal (after line discount)"
-                        >%</button>
+                          className="text-[#9B1C1C] p-1 hover:bg-[#FDE2E2] rounded shrink-0"
+                          onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
+                          title="Remove charge"
+                          data-testid={`additional-charge-remove-${ci}`}
+                        ><X className="w-3.5 h-3.5" /></button>
                       </div>
-                      <input
-                        type="number" min="0" step="0.01"
-                        className="input-field h-7 text-xs px-2 py-0 w-20 mono text-right shrink-0"
-                        placeholder={vt === 'percent' ? '%' : 'Amount'}
-                        value={c.value ?? c.amount ?? 0}
-                        onChange={(e) => {
-                          const raw = parseFloat(e.target.value) || 0;
-                          setForm(f => ({
-                            ...f,
-                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value: raw } : row),
-                          }));
-                        }}
-                        data-testid={`additional-charge-amount-${ci}`}
-                      />
-                      <button
-                        type="button"
-                        className="text-[#9B1C1C] p-1 hover:bg-[#FDE2E2] rounded shrink-0"
-                        onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
-                        title="Remove charge"
-                        data-testid={`additional-charge-remove-${ci}`}
-                      ><X className="w-3.5 h-3.5" /></button>
                     </div>
                     );
                   })}
@@ -3143,7 +3160,10 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
         ship_from_warehouse_id: ti.ship_from_warehouse_id || '',
         additional_charges: Array.isArray(ti.additional_charges) ? ti.additional_charges.map(c => ({
           charge_id: c.charge_id || '', name: c.name || '', hsn_code: c.hsn_code || '',
-          gst_rate: c.gst_rate ?? 18, amount: c.amount || 0,
+          gst_rate: c.gst_rate ?? 18,
+          value_type: c.value_type || 'amount',
+          value: c.value != null ? c.value : (c.amount || 0),
+          amount: c.amount || 0,
         })) : [],
         lines: (ti.lines || []).map(l => {
           // Auto-fill HSN / GST from item master when the saved line is
@@ -3280,10 +3300,13 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
       totalGst += gst;
     });
     // Additional charges contribute their own amount + GST.
+    // value_type='percent' resolves to subtotal*value/100; else value as-is.
     const isExport = (form.currency || 'INR').toUpperCase() !== 'INR';
     let chargesTotal = 0, chargesGst = 0;
     (form.additional_charges || []).forEach(c => {
-      const amt = parseFloat(c.amount) || 0;
+      const vt = c.value_type || 'amount';
+      const raw = parseFloat(c.value ?? c.amount) || 0;
+      const amt = vt === 'percent' ? subtotal * raw / 100 : raw;
       if (amt <= 0) return;
       chargesTotal += amt;
       if (!isExport) chargesGst += amt * (parseFloat(c.gst_rate) || 0) / 100;
@@ -3304,11 +3327,21 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
     setSaving(true);
     try {
       const charges = (form.additional_charges || [])
-        .filter(c => (parseFloat(c.amount) || 0) > 0)
-        .map(c => ({
-          charge_id: c.charge_id || '', name: c.name || '', hsn_code: c.hsn_code || '',
-          gst_rate: parseFloat(c.gst_rate) || 0, amount: parseFloat(c.amount) || 0,
-        }));
+        .map(c => {
+          const vt = c.value_type || 'amount';
+          const raw = parseFloat(c.value ?? c.amount) || 0;
+          const amt = vt === 'percent' ? (totals.subtotal * raw / 100) : raw;
+          return {
+            charge_id: c.charge_id || '',
+            name: c.name || '',
+            hsn_code: c.hsn_code || '',
+            gst_rate: parseFloat(c.gst_rate) || 0,
+            value_type: vt,
+            value: raw,
+            amount: Math.round(amt * 100) / 100,
+          };
+        })
+        .filter(c => c.amount > 0);
       const payload = {
         ...form,
         invoice_date: form.invoice_date ? new Date(form.invoice_date).toISOString() : null,
@@ -3787,12 +3820,17 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
 
             {/* Totals */}
             <div className="flex justify-end">
-              <div className="w-80 border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB] text-sm space-y-1">
+              <div className="w-96 border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB] text-sm space-y-1">
                 <div className="flex justify-between"><span className="text-[#4B5563]">Subtotal</span><span className="mono">{formatCurrency(totals.subtotal, form.currency)}</span></div>
                 {totals.totalDiscount > 0 && <div className="flex justify-between"><span className="text-[#4B5563]">Discount</span><span className="mono">-{formatCurrency(totals.totalDiscount, form.currency)}</span></div>}
-                {/* ---- Additional Charges (after global discount, before GST) ---- */}
-                {(form.additional_charges || []).map((c, ci) => (
-                  <div key={`ti-ac-${ci}`} className="border border-[#E5E7EB] bg-white rounded-sm px-2 py-1.5 space-y-1" data-testid={`ti-additional-charge-row-${ci}`}>
+                {/* ---- Additional Charges (after global discount, before GST) ----
+                    Two-row card per charge: full-width dropdown on top,
+                    ₹/% toggle + amount + remove inline below. */}
+                {(form.additional_charges || []).map((c, ci) => {
+                  const vt = c.value_type || 'amount';
+                  const symC = CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹';
+                  return (
+                  <div key={`ti-ac-${ci}`} className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1.5 space-y-1.5" data-testid={`ti-additional-charge-row-${ci}`}>
                     <select
                       className="input-field h-7 text-xs px-2 py-0 w-full"
                       value={c.charge_id || ''}
@@ -3817,34 +3855,63 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                       ))}
                     </select>
                     <div className="flex items-center gap-2">
+                      <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden shrink-0" role="tablist">
+                        <button
+                          type="button"
+                          aria-selected={vt === 'amount'}
+                          onClick={() => setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'amount' } : row),
+                          }))}
+                          className={`h-7 w-8 text-xs font-semibold mono transition-colors ${vt === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                          data-testid={`ti-additional-charge-mode-amount-${ci}`}
+                          title="Charge as currency amount"
+                        >{symC}</button>
+                        <button
+                          type="button"
+                          aria-selected={vt === 'percent'}
+                          onClick={() => setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'percent' } : row),
+                          }))}
+                          className={`h-7 w-8 text-xs font-semibold transition-colors ${vt === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                          data-testid={`ti-additional-charge-mode-percent-${ci}`}
+                          title="Charge as % of subtotal (after line discount)"
+                        >%</button>
+                      </div>
                       <input
                         type="number" min="0" step="0.01"
-                        className="input-field h-7 text-xs px-2 py-0 flex-1 mono text-right"
-                        placeholder="Amount"
-                        value={c.amount || 0}
-                        onChange={(e) => setForm(f => ({
-                          ...f,
-                          additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, amount: parseFloat(e.target.value) || 0 } : row),
-                        }))}
+                        className="input-field h-7 text-xs px-2 py-0 flex-1 mono"
+                        style={{ textAlign: 'right' }}
+                        placeholder={vt === 'percent' ? '%' : 'Amount'}
+                        value={c.value ?? c.amount ?? 0}
+                        onChange={(e) => {
+                          const raw = parseFloat(e.target.value) || 0;
+                          setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value: raw } : row),
+                          }));
+                        }}
                         data-testid={`ti-additional-charge-amount-${ci}`}
                       />
                       <button
                         type="button"
-                        className="text-[#9B1C1C] p-1 hover:bg-[#FDE2E2] rounded"
+                        className="text-[#9B1C1C] p-1 hover:bg-[#FDE2E2] rounded shrink-0"
                         onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
                         title="Remove charge"
                         data-testid={`ti-additional-charge-remove-${ci}`}
                       ><X className="w-3.5 h-3.5" /></button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 <div className="flex items-center justify-between text-[11px] pt-0.5">
                   <button
                     type="button"
                     className="text-[#1D3557] hover:underline font-medium"
                     onClick={() => setForm(f => ({
                       ...f,
-                      additional_charges: [...(f.additional_charges || []), { charge_id: '', name: '', hsn_code: '', gst_rate: 18, amount: 0 }],
+                      additional_charges: [...(f.additional_charges || []), { charge_id: '', name: '', hsn_code: '', gst_rate: 18, value_type: 'amount', value: 0, amount: 0 }],
                     }))}
                     data-testid="ti-add-additional-charge-btn"
                   >+ Add Additional Charge</button>
