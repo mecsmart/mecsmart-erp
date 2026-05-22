@@ -19,6 +19,17 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 21.2 — page numbers + Download PDF fallback hardening — DONE ✅):**
+  1. **Electron Desktop 1.0.4** — bumped version from 1.0.3 to 1.0.4 to force users to rebuild AND clearly mark which build contains the new `displayHeaderFooter + footerTemplate` config for `webContents.printToPDF()`. The 1.0.3 build users created in Round 21.1 was made BEFORE the `footerTemplate` was added to main.js, so it doesn't show page numbers. The 1.0.4 rebuild WILL show them.
+  2. **Client-side PDF fallback with jsPDF page-number overlay** — new `downloadHtmlAsPdfWithPageNumbers()` in `/app/frontend/src/utils/pdfPrint.js`. Renders the HTML into a hidden A4-width iframe, runs html2pdf to rasterise it, then uses jsPDF's `getNumberOfPages()` + `pdfObj.text()` to draw "Page X of Y" at the bottom-right of every page directly. Output is rasterised (lower quality than vector PDFs) but it works EVERYWHERE — no server Playwright, no Electron, no `@page` CSS support required.
+  3. **PreviewPdfDialog.handleDownload fallback chain** — now goes: Electron IPC → server Playwright → client-side html2pdf+jsPDF. So if your local dev backend doesn't have Chromium (the user's reported `localhost:3000` error), the download still works. Same chain applies to Electron failures.
+  4. **Why this matters:**
+     - User on local dev (`localhost:3000`) → no Playwright on their machine → server endpoint 500s → client fallback kicks in → PDF downloads with page numbers ✅
+     - User on production preview (cloud) → server endpoint works → vector PDF with page numbers (from footer_template) ✅
+     - User on Electron desktop (1.0.4 rebuild) → IPC bridge calls printToPDF with displayHeaderFooter+footerTemplate → vector PDF with page numbers ✅
+     - User on Electron desktop (1.0.3 OLD build) → IPC bridge still uses old config OR falls back to client-side → page numbers via jsPDF overlay ✅
+  5. **Print (browser native dialog)** — page numbers come from either Chrome's default footer OR CSS `@page @bottom-right`. The user confirmed Print is working on web URL. No code change needed here.
+
 - **2026-02-22 (Round 21.1 — bugfix follow-up to Round 21 — DONE ✅):**
   1. **Additional charge dropdown name hidden** — the `<select>` was 1fr-sized inside `grid-cols-[1fr_auto_auto]` next to a 112px amount input + remove button, which left no room for the charge name (only the `▼` arrow showed). Restructured each charge row to a vertical 2-row layout: full-width dropdown on top, amount + remove button below. Charge name now fully visible after selection.
   2. **"Only one additional charge allowed"** — actually a symptom of bug #1. Users were clicking `+ Add Additional Charge` repeatedly but all new rows looked empty/identical (collapsed dropdown showed only `▼`), so they couldn't tell rows were being added. Fixed by #1.

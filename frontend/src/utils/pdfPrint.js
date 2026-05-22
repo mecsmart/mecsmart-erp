@@ -111,6 +111,64 @@ function injectPrintCss(html /*, opts */) {
   return html.replace(/<body[^>]*>/i, m => `<head>${extra.replace('</head>', '')}</head>${m}`);
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Client-side PDF generation with page-number overlay.
+// Used by PreviewPdfDialog as a fallback when the server Playwright endpoint
+// fails (typically on local dev machines without Chromium installed) AND when
+// running outside Electron (so no IPC bridge available).
+//
+// Why this is the final fallback (not the primary path):
+//   - html2pdf rasterises the HTML via html2canvas → loses vector text quality
+//   - File size is ~3x larger than vector PDFs
+//   - But it works EVERYWHERE: no server deps, no Electron deps, just browser
+//
+// Page numbers are drawn via jsPDF AFTER html2pdf finishes rasterising every
+// page — guaranteed to appear regardless of @page CSS support.
+// ────────────────────────────────────────────────────────────────────────────
+export async function downloadHtmlAsPdfWithPageNumbers(html, filename) {
+  const safeName = sanitizeFilename(filename || 'document.pdf');
+  // Render the HTML into a hidden, A4-width iframe so html2canvas captures
+  // the layout at the correct paper width.
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.left = '-99999px';
+  iframe.style.top = '0';
+  iframe.style.width = `${A4_WIDTH_PX}px`;
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(iframe);
+  try {
+    const doc = iframe.contentDocument || iframe.contentWindow.document;
+    doc.open();
+    doc.write(injectPrintCss(html));
+    doc.close();
+    // Wait for fonts + images
+    await new Promise(r => setTimeout(r, 400));
+    if (doc.fonts && doc.fonts.ready) {
+      try { await doc.fonts.ready; } catch { /* noop */ }
+    }
+    const body = doc.body;
+    const merged = { ...DEFAULT_HTML2PDF_OPTS, filename: safeName, margin: [4, 4, 14, 4] };
+    const worker = html2pdf().set(merged).from(body).toPdf();
+    const pdfObj = await worker.get('pdf');
+    const total = pdfObj.internal.getNumberOfPages();
+    const pageW = pdfObj.internal.pageSize.getWidth();
+    const pageH = pdfObj.internal.pageSize.getHeight();
+    // Draw "Page X of Y" bottom-right on every page.
+    for (let p = 1; p <= total; p++) {
+      pdfObj.setPage(p);
+      pdfObj.setFont('helvetica', 'normal');
+      pdfObj.setFontSize(8);
+      pdfObj.setTextColor(100, 116, 139);  // #64748b
+      pdfObj.text(`Page ${p} of ${total}`, pageW - 6, pageH - 4, { align: 'right' });
+    }
+    pdfObj.save(safeName);
+  } finally {
+    try { document.body.removeChild(iframe); } catch { /* noop */ }
+  }
+}
+
 async function fallbackToHtml2Pdf(iframeBody, opts) {
   const merged = { ...DEFAULT_HTML2PDF_OPTS, ...opts };
   // ----- Running header support (every page) ------------------------------

@@ -20,7 +20,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 import { Printer, Download, X } from 'lucide-react';
-import { downloadHtmlAsPdf } from '../utils/pdfPrint';
+import { downloadHtmlAsPdfWithPageNumbers } from '../utils/pdfPrint';
 import { api } from '../context/AuthContext';
 
 // Global event bridge — callers anywhere in the app can pop the preview
@@ -120,20 +120,27 @@ export default function PreviewPdfDialog() {
         ipcError = (ipcErr && ipcErr.message) || String(ipcErr);
       }
       // The Electron IPC bridge IS available but the PDF generation
-      // itself failed. Don't silently fall through to the (known-broken)
-      // backend Playwright endpoint — surface the actual desktop error
-      // so the user / support team can debug. The native print dialog
-      // is always available as a manual fallback.
-      console.warn('[PreviewPdfDialog] Electron downloadPdf failed:', ipcError);
-      // eslint-disable-next-line no-alert
-      alert(`Download PDF failed (desktop):\n\n${ipcError}\n\nFallback: click "Print / Save as PDF" instead.`);
-      return;
+      // itself failed. Surface the error AND fall back to client-side
+      // html2pdf with jsPDF page numbers so the user still gets a file.
+      console.warn('[PreviewPdfDialog] Electron downloadPdf failed, trying client-side fallback:', ipcError);
+      try {
+        await downloadHtmlAsPdfWithPageNumbers(html, filename);
+        return;
+      } catch (clientErr) {
+        console.error('[PreviewPdfDialog] client-side fallback also failed:', clientErr);
+        // eslint-disable-next-line no-alert
+        alert(`Download PDF failed (desktop):\n\n${ipcError}\nClient fallback: ${clientErr?.message || clientErr}\n\nPlease use "Print / Save as PDF" instead.`);
+        return;
+      }
     }
 
     // FALLBACK — server-side Chromium PDF (browser users, dev preview).
     // Only reached when running OUTSIDE the desktop wrapper (e.g. in a
     // browser tab pointing at the dev server). The backend endpoint may
     // be unstable in production, but works in dev/test.
+    // If BOTH backends fail (no Playwright/Chromium on local dev), we
+    // fall back to a client-side rasteriser with page-number overlay
+    // (html2pdf + jsPDF) so the user always gets a downloadable PDF.
     try {
       const ifr = document.querySelector('[data-testid="pdf-preview-iframe"]');
       const srcHtml = (ifr && ifr.srcdoc) || html;
@@ -149,7 +156,6 @@ export default function PreviewPdfDialog() {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
       let msg = err?.message || 'Unknown error';
-      // Try to extract the detail from a Blob response (500 from server).
       try {
         const blob = err?.response?.data;
         if (blob && typeof blob.text === 'function') {
@@ -157,9 +163,19 @@ export default function PreviewPdfDialog() {
           try { msg = JSON.parse(txt).detail || txt; } catch { msg = txt; }
         }
       } catch { /* noop */ }
-      console.warn('[PreviewPdfDialog] server PDF failed:', msg);
-      // eslint-disable-next-line no-alert
-      alert(`Download PDF failed (server):\n\n${msg}\n\nFallback: click "Print / Save as PDF" instead.`);
+      console.warn('[PreviewPdfDialog] server PDF failed, trying client-side fallback:', msg);
+      // FINAL FALLBACK — client-side html2pdf with jsPDF page-number overlay.
+      // This works even when the local backend has no Chromium installed
+      // (e.g. user's localhost dev environment). Output is rasterised so
+      // quality is lower than the vector path, but every page DOES get a
+      // "Page X of Y" footer drawn directly via jsPDF.
+      try {
+        await downloadHtmlAsPdfWithPageNumbers(html, filename);
+      } catch (clientErr) {
+        console.error('[PreviewPdfDialog] client-side fallback also failed:', clientErr);
+        // eslint-disable-next-line no-alert
+        alert(`Download PDF failed.\n\nServer: ${msg}\nClient fallback: ${clientErr?.message || clientErr}\n\nPlease use "Print / Save as PDF" instead.`);
+      }
     }
   };
 
