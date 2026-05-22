@@ -19,6 +19,18 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 22 — Purchase Order print template overhaul to match Quotation styling — DONE ✅):**
+  1. **Rate column decimals** — already used `fa()` which delegates to `fmtAmtForCurrency` with 2dp. Verified ₹110.00 / ₹2,750.00 etc all render correctly.
+  2. **Plain background** — removed dark navy `<th>` bar + white text, replaced with white th cells + accent-colored text + accent top/bottom border (matches quotation). Removed `tbody tr:nth-child(even) { background:#f8f9fa }` zebra striping → all rows plain white.
+  3. **GST Amt column removed** — only "GST%" column remains in the items table. The schema for Net Amt + Total also changed per user spec:
+     - **Net Amt** = `unit_price - perUnitDiscount` (the after-discount per-unit price)
+     - **Total** = `Net Amt × Qty` (without GST). GST is summed separately in the totals box below.
+     - Verified: 25 × ₹110 unit price (no disc) → Net Amt ₹110.00, Total ₹2,750.00, IGST ₹495.00, Grand ₹3,245.00 ✅
+  4. **Font + margin match Quotation** — switched body font to `'Segoe UI','Helvetica Neue',Arial,sans-serif` 10px (was 10.5px), tightened `@page margin: 8mm 8mm 14mm 8mm` (was `25mm 6mm 15mm 6mm`), reduced page-level padding so logo + company info sit closer to top edge.
+  5. **Items table alignment** — accent-colored uppercase header text with `text-right` class explicitly added for ALL numeric columns (Qty, Rate, Discount, Net Amt, GST%, Total). Item column widened to 28% (was 24%). Header alignment now matches the Quotation print layout.
+  6. **Terms & Conditions box** — restyled to outlined rounded card (1px slate-300 border, 6px radius) matching the round-21 Quotation change. No more `border-top:1px dashed #ccc`.
+  7. **Standard/modern template** also updated with the same 4 schema changes (no GST Amt col, Net Amt = unit-after-disc, Total = Net × Qty). Both templates now follow the user's spec consistently.
+
 - **2026-02-22 (Round 21.7 — CSS Grid totals layout: ALL right edges aligned + toggles vertically aligned — DONE ✅):**
   1. **Restructured the entire totals area as a single CSS Grid** with `gridTemplateColumns: '1fr 78px 96px'`. ALL rows — Subtotal, Global Discount, Charges, GST, Grand Total — share the exact same 3-column structure. Result: every value/input right edge sits at the exact same x-position (matches the line items "Total" column).
   2. **₹/% toggles vertically aligned** — col 2 is fixed 78px on EVERY row, so the toggle pills on Global Discount, Insurance, P&F Charges line up vertically column-perfect.

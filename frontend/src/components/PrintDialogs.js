@@ -156,42 +156,42 @@ export function POPrintDialog({ po, open, onClose }) {
     const accentLight = '#E8EDF3';
 
     const baseStyles = `
-      @page { size: ${paper.w} ${paper.h}; margin: 25mm 6mm 15mm 6mm; }
+      /* Compact margins to match the Quotation print template. */
+      @page { size: ${paper.w} ${paper.h}; margin: 8mm 8mm 14mm 8mm; }
       * { margin:0; padding:0; box-sizing:border-box; }
-      body { font-family:'Segoe UI',Arial,sans-serif; font-size:10.5px; color:#222; line-height:1.5; }
-      .page { max-width:${paper.w}; margin:0 auto; padding:${isModern ? '15px' : '15px'}; padding-top:${isModern ? '22px' : '22px'}; }
-      ${isModern ? `.page { border:2px solid ${accent}; }` : ''}
+      body { font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif; font-size:10px; color:#1f2937; line-height:1.45; background:#fff; }
+      .page { max-width:${paper.w}; margin:0 auto; padding:0; padding-top:4px; background:#fff; }
       ${letterheadCSS(accent)}
-      .doc-title { font-size:14px; font-weight:700; color:${accent}; text-transform:uppercase; padding:8px 15px; ${isModern ? `background:${accentLight};` : `border-bottom:1px solid ${accent};`} margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; }
+      .doc-title { font-size:13px; font-weight:700; color:${accent}; text-transform:uppercase; padding:6px 0; border-bottom:1px solid ${accent}; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; }
       .doc-title .rev { font-size:10px; color:#666; font-weight:normal; }
-      .info-section { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:0 6px; margin-bottom:14px; }
-      .info-block { ${isModern ? `border-left:3px solid ${accent}; padding-left:10px;` : 'border:1px solid #ddd; padding:8px 10px; border-radius:2px;'} }
-      .info-block .label { font-size:8.5px; color:#888; text-transform:uppercase; letter-spacing:0.5px; font-weight:600; }
+      .info-section { display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:0; margin-bottom:12px; }
+      .info-block { border:1px solid #e5e7eb; padding:6px 8px; border-radius:2px; background:#fff; }
+      .info-block .label { font-size:8.5px; color:#6b7280; text-transform:uppercase; letter-spacing:0.5px; font-weight:600; }
       .info-block .value { font-size:11px; font-weight:600; color:#111; margin-top:1px; }
-      .info-block .detail { font-size:9.5px; color:#555; }
-      table { width:calc(100% - 12px); margin:0 6px 12px; border-collapse:collapse; table-layout:fixed; }
-      th { background:${isModern ? accent : '#2C3E50'}; color:white; padding:6px 4px; font-size:9px; text-transform:uppercase; letter-spacing:0.2px; text-align:left; word-break:break-word; }
-      td { padding:6px 4px; border-bottom:1px solid #e0e0e0; font-size:10px; vertical-align:top; word-break:break-word; overflow-wrap:anywhere; }
-      tbody tr:nth-child(even) { background:#f8f9fa; }
-      ${isModern ? 'tbody tr:hover { background:#eef1f5; }' : ''}
+      .info-block .detail { font-size:9.5px; color:#374151; }
+      /* Match Quotation: no row striping, plain white background. */
+      table { width:100%; margin:0 0 10px; border-collapse:collapse; table-layout:fixed; background:#fff; }
+      th { background:#fff; color:${accent}; padding:6px 4px; font-size:9px; text-transform:uppercase; letter-spacing:0.2px; text-align:left; word-break:break-word; border-bottom:1.5px solid ${accent}; border-top:1.5px solid ${accent}; font-weight:700; }
+      td { padding:5px 4px; border-bottom:1px solid #e5e7eb; font-size:10px; vertical-align:top; word-break:break-word; overflow-wrap:anywhere; background:#fff; }
+      tbody tr:last-child td { border-bottom:1.5px solid ${accent}; }
       .text-right { text-align:right; } .text-center { text-align:center; }
       .mono { font-family:'Courier New',monospace; font-size:9.5px; }
-      .total-row { background:${accentLight} !important; font-weight:700; }
+      .total-row { font-weight:700; }
       .grand-total { font-size:12px; color:${accent}; }
-      .section-title { font-size:11px; font-weight:700; color:${accent}; text-transform:uppercase; padding:4px 6px; margin:8px 0; ${isModern ? `border-left:3px solid ${accent};` : ''} }
-      .totals-box { width:280px; margin-left:auto; margin-right:6px; margin-bottom:15px; }
+      .section-title { font-size:10px; font-weight:700; color:${accent}; text-transform:uppercase; padding:2px 0; margin:6px 0 4px; letter-spacing:0.5px; }
+      .totals-box { width:280px; margin-left:auto; margin-bottom:12px; }
       .totals-box table { width:100%; margin:0; table-layout:auto; }
-      .totals-box td { padding:4px 8px; border:none; font-size:10.5px; }
-      .totals-box .label-cell { color:#555; text-align:right; }
+      .totals-box td { padding:3px 6px; border:none; font-size:10px; }
+      .totals-box .label-cell { color:#374151; text-align:right; }
       .totals-box .val-cell { text-align:right; font-weight:600; font-family:'Courier New',monospace; }
-      .totals-box .grand { border-top:2px solid ${accent}; }
-      .terms { padding:8px 6px; font-size:9.5px; color:#444; border-top:1px dashed #ccc; margin-top:10px; }
-      .terms strong { color:#222; }
-      .amount-words { padding:4px 6px; font-size:9.5px; color:#333; font-style:italic; margin-bottom:8px; }
-      .signatures { display:grid; grid-template-columns:1fr 1fr 1fr; gap:30px; padding:30px 6px 15px; margin-top:20px; }
+      .totals-box .grand { border-top:1.5px solid ${accent}; }
+      .terms { padding:8px 10px; font-size:9.5px; color:#475569; border:1px solid #cbd5e1; border-radius:6px; margin-top:8px; white-space:pre-line; }
+      .terms strong { color:${accent}; font-weight:700; }
+      .amount-words { padding:4px 0; font-size:9.5px; color:#333; font-style:italic; margin-bottom:6px; }
+      .signatures { display:grid; grid-template-columns:1fr 1fr 1fr; gap:30px; padding:20px 0 10px; margin-top:15px; }
       .sign-block { text-align:center; }
       .sign-line { border-top:1px solid #333; padding-top:5px; font-size:9px; color:#555; font-weight:600; }
-      .footer-note { text-align:center; font-size:8px; color:#aaa; padding:8px 0; ${isModern ? `border-top:2px solid ${accent};` : 'border-top:1px solid #eee;'} margin-top:10px; }
+      .footer-note { text-align:center; font-size:8px; color:#9ca3af; padding:6px 0; border-top:1px solid #e5e7eb; margin-top:8px; }
       @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
     `;
 
@@ -231,37 +231,44 @@ export function POPrintDialog({ po, open, onClose }) {
       cols.push('Qty','UOM','Rate');
       if (opts.showDiscount) cols.push('Discount');
       cols.push('Net Amt');
-      if (opts.showGSTBreakup) cols.push('GST%','GST Amt');
+      if (opts.showGSTBreakup) cols.push('GST%');
       cols.push('Total');
       // Explicit column widths so HSN, Discount, Rate, Total etc. don't get
-      // squashed when there are many columns. Percentages sum to 100% and the
-      // table uses `table-layout:fixed` (set in baseStyles) so the browser
-      // honours these widths instead of letting content-driven sizing
-      // collapse the narrow numeric columns. Order MUST match `cols` above.
+      // squashed. Order MUST match `cols` above. Note: GST Amt column was
+      // removed per user request (round 22) — only GST% shows; total is the
+      // pre-GST line total (net × qty).
       const colWidthMap = {
-        'SN': '3%', 'Item': '24%', 'HSN': '7%', 'Qty': '6%', 'UOM': '5%',
-        'Rate': '9%', 'Discount': '8%', 'Net Amt': '9%',
-        'GST%': '5%', 'GST Amt': '8%', 'Total': '10%',
+        'SN': '3%', 'Item': '28%', 'HSN': '7%', 'Qty': '6%', 'UOM': '5%',
+        'Rate': '10%', 'Discount': '9%', 'Net Amt': '10%',
+        'GST%': '6%', 'Total': '12%',
       };
       const colgroup = `<colgroup>${cols.map(c => `<col style="width:${colWidthMap[c] || 'auto'}">`).join('')}</colgroup>`;
-      tableHTML = `<table>${colgroup}<thead><tr>${cols.map((c,i) => `<th${i >= cols.length - 4 ? ' class="text-right"' : ''}>${c}</th>`).join('')}</tr></thead><tbody>`;
+      // Header alignment: numeric columns right-aligned (Qty, Rate, Discount,
+      // Net Amt, GST%, Total). UOM is left-aligned because it's a code label.
+      const rightCols = new Set(['Qty', 'Rate', 'Discount', 'Net Amt', 'GST%', 'Total']);
+      tableHTML = `<table>${colgroup}<thead><tr>${cols.map(c => `<th${rightCols.has(c) ? ' class="text-right"' : ''}>${c}</th>`).join('')}</tr></thead><tbody>`;
       lines.forEach((l, i) => {
-        const gross = (l.quantity||0) * (l.unit_price||0);
+        const qty = l.quantity || 0;
+        const unit = l.unit_price || 0;
+        const gross = qty * unit;
         const disc = l.discount_amount || (l.discount_type === 'percentage' ? gross * (l.discount_value||0)/100 : (l.discount_value||0));
-        const net = gross - disc;
-        const tax = l.tax_amount || (net * (l.gst_rate||0)/100);
+        // PER-UNIT discount derived from line discount (proportional to qty).
+        const unitDisc = qty > 0 ? disc / qty : 0;
+        // Net Amt = unit price after discount (per-unit value).
+        const netUnit = unit - unitDisc;
+        // Total = Net Amt × Qty (excluding GST). GST is summed in totals box.
+        const lineTotal = netUnit * qty;
         const extraDesc = (l.description || '').trim();
-        // Merged Item cell: part_number on top, item name + any extra description below.
         const itemCell = `<span class="mono">${l.item?.part_number||''}</span>` +
           `<div style="font-size:10px;margin-top:1px;">${l.item?.name||''}</div>` +
           (extraDesc ? `<div style="color:#444;font-size:9px;margin-top:2px;font-style:italic;">${extraDesc}</div>` : '');
         let row = `<td>${i+1}</td><td>${itemCell}</td>`;
         if (opts.showHSN) row += `<td class="mono">${l.hsn_code||''}</td>`;
-        row += `<td class="text-right mono">${l.quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${fa(l.unit_price||0)}</td>`;
+        row += `<td class="text-right mono">${qty}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${fa(unit)}</td>`;
         if (opts.showDiscount) row += `<td class="text-right mono">${disc > 0 ? fa(disc) : '-'}</td>`;
-        row += `<td class="text-right mono">${fa(net)}</td>`;
-        if (opts.showGSTBreakup) row += `<td class="text-right">${l.gst_rate||0}%</td><td class="text-right mono">${fa(tax)}</td>`;
-        row += `<td class="text-right mono">${fa(net+tax)}</td>`;
+        row += `<td class="text-right mono">${fa(netUnit)}</td>`;
+        if (opts.showGSTBreakup) row += `<td class="text-right">${l.gst_rate||0}%</td>`;
+        row += `<td class="text-right mono">${fa(lineTotal)}</td>`;
         tableHTML += `<tr>${row}</tr>`;
       });
       tableHTML += `</tbody></table>`;
@@ -270,22 +277,31 @@ export function POPrintDialog({ po, open, onClose }) {
       const cols = ['SN','Item'];
       if (opts.showHSN) cols.push('HSN');
       cols.push('Qty','UOM','Rate');
-      if (opts.showDiscount) cols.push('Disc');
-      cols.push('Amount');
-      tableHTML = `<table><thead><tr>${cols.map((c,i) => `<th${i >= cols.length - 2 ? ' class="text-right"' : ''}>${c}</th>`).join('')}</tr></thead><tbody>`;
+      if (opts.showDiscount) cols.push('Discount');
+      cols.push('Net Amt');
+      if (opts.showGSTBreakup) cols.push('GST%');
+      cols.push('Total');
+      const rightCols = new Set(['Qty', 'Rate', 'Discount', 'Net Amt', 'GST%', 'Total']);
+      tableHTML = `<table><thead><tr>${cols.map(c => `<th${rightCols.has(c) ? ' class="text-right"' : ''}>${c}</th>`).join('')}</tr></thead><tbody>`;
       lines.forEach((l, i) => {
-        const gross = (l.quantity||0) * (l.unit_price||0);
+        const qty = l.quantity || 0;
+        const unit = l.unit_price || 0;
+        const gross = qty * unit;
         const disc = l.discount_amount || (l.discount_type === 'percentage' ? gross * (l.discount_value||0)/100 : (l.discount_value||0));
-        const net = gross - disc;
+        const unitDisc = qty > 0 ? disc / qty : 0;
+        const netUnit = unit - unitDisc;
+        const lineTotal = netUnit * qty;
         const extraDesc = (l.description || '').trim();
         const itemCell = `<span class="mono">${l.item?.part_number||''}</span>` +
           `<div style="font-size:10px;margin-top:1px;">${l.item?.name||''}</div>` +
           (extraDesc ? `<div style="color:#444;font-size:9px;margin-top:2px;font-style:italic;">${extraDesc}</div>` : '');
         let row = `<td>${i+1}</td><td>${itemCell}</td>`;
         if (opts.showHSN) row += `<td class="mono">${l.hsn_code||''}</td>`;
-        row += `<td class="text-right mono">${l.quantity}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${fa(l.unit_price||0)}</td>`;
+        row += `<td class="text-right mono">${qty}</td><td>${l.uom||'pcs'}</td><td class="text-right mono">${fa(unit)}</td>`;
         if (opts.showDiscount) row += `<td class="text-right mono">${disc > 0 ? fa(disc) : '-'}</td>`;
-        row += `<td class="text-right mono">${fa(net)}</td>`;
+        row += `<td class="text-right mono">${fa(netUnit)}</td>`;
+        if (opts.showGSTBreakup) row += `<td class="text-right">${l.gst_rate||0}%</td>`;
+        row += `<td class="text-right mono">${fa(lineTotal)}</td>`;
         tableHTML += `<tr>${row}</tr>`;
       });
       tableHTML += `</tbody></table>`;
