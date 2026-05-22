@@ -159,41 +159,77 @@ export function POPrintDialog({ po, open, onClose }) {
       /* Compact margins to match the Quotation print template. */
       @page { size: ${paper.w} ${paper.h}; margin: 8mm 8mm 14mm 8mm; }
       * { margin:0; padding:0; box-sizing:border-box; }
-      /* Font stack now matches Quotation/Tax Invoice exactly. */
+      /* Font stack + body palette identical to Quotation. */
       body { font-family:'Helvetica Neue',Arial,sans-serif; font-size:11px; color:#111; line-height:1.45; background:#fff; }
       .page { max-width:${paper.w}; margin:0 auto; padding:0; padding-top:4px; background:#fff; }
       ${letterheadCSS(accent)}
-      .doc-title { font-size:13px; font-weight:700; color:${accent}; text-transform:uppercase; padding:6px 0; border-bottom:1px solid ${accent}; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; }
-      .doc-title .rev { font-size:10px; color:#666; font-weight:normal; }
+      /* Doc title is now a filled navy bar with white text — matches Quotation
+         info-bar styling so the document number is visually prominent. */
+      .doc-title { font-size:13px; font-weight:700; color:#fff; text-transform:uppercase; padding:8px 12px; background:${accent}; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; letter-spacing:0.5px; }
+      .doc-title .rev { font-size:10px; color:rgba(255,255,255,0.85); font-weight:normal; }
       .info-section { display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:0; margin-bottom:12px; }
-      .info-block { border:1px solid #e5e7eb; padding:6px 8px; border-radius:2px; background:#fff; }
+      .info-block { border:1px solid #e5e7eb; padding:6px 10px; border-radius:2px; background:#fff; }
       .info-block .label { font-size:9px; color:#6b7280; text-transform:uppercase; letter-spacing:1px; font-weight:600; }
       .info-block .value { font-size:13px; font-weight:700; color:#0f172a; margin-top:2px; }
       .info-block .detail { font-size:10px; color:#475569; line-height:1.5; }
-      /* Items table — sized & spaced to match the Quotation print template. */
+      /* Items table — typography matches Quotation: dark navy headings, slate
+         body text, accent grand-total color. */
       table { width:100%; margin:0 0 10px; border-collapse:collapse; table-layout:fixed; background:#fff; }
       th { background:${accent}; color:#fff; padding:6px 4px; font-size:10.5px; text-transform:uppercase; letter-spacing:0.3px; text-align:left; word-break:break-word; font-weight:600; border:none; }
-      td { padding:7px 5px; border-bottom:1px solid #e2e8f0; font-size:11px; vertical-align:top; word-break:break-word; overflow-wrap:anywhere; background:#fff; }
+      td { padding:7px 5px; border-bottom:1px solid #e2e8f0; font-size:11px; color:#0f172a; vertical-align:top; word-break:break-word; overflow-wrap:anywhere; background:#fff; }
+      td .desc, td .sub-detail { color:#475569; }
       tbody tr:last-child td { border-bottom:2px solid ${accent}; }
       .text-right { text-align:right; } .text-center { text-align:center; }
       .mono { font-family:'Courier New',monospace; }
       .total-row { font-weight:700; }
-      .grand-total { font-size:12px; color:${accent}; }
-      .section-title { font-size:10px; font-weight:700; color:${accent}; text-transform:uppercase; padding:2px 0; margin:10px 0 4px; letter-spacing:1px; }
+      .grand-total { font-size:13px; color:${accent}; font-weight:800; }
+      .section-title { font-size:10px; font-weight:700; color:${accent}; text-transform:uppercase; padding:2px 0; margin:14px 0 4px; letter-spacing:1px; }
       .totals-box { width:280px; margin-left:auto; margin-bottom:12px; }
       .totals-box table { width:100%; margin:0; table-layout:auto; }
-      .totals-box td { padding:4px 8px; border:none; font-size:11px; }
+      .totals-box td { padding:5px 8px; border:none; font-size:11px; color:#0f172a; }
       .totals-box .label-cell { color:#475569; text-align:right; }
       .totals-box .val-cell { text-align:right; font-weight:600; font-family:'Courier New',monospace; color:#0f172a; }
-      .totals-box .grand { border-top:1.5px solid ${accent}; }
-      .terms { padding:8px 10px; font-size:9.5px; color:#475569; border:1px solid #cbd5e1; border-radius:6px; margin-top:8px; white-space:pre-line; }
+      .totals-box .grand td { background:${accent}; color:#fff; }
+      .totals-box .grand .label-cell, .totals-box .grand .val-cell { color:#fff; }
+      .terms { padding:10px 14px; font-size:10px; color:#475569; line-height:1.6; border:1px solid #cbd5e1; border-radius:6px; margin-top:10px; white-space:pre-line; background:#fff; }
       .terms strong { color:${accent}; font-weight:700; }
-      .amount-words { padding:4px 0; font-size:9.5px; color:#333; font-style:italic; margin-bottom:6px; }
+      .amount-words { padding:6px 0; font-size:10px; color:#0f172a; font-style:italic; margin-bottom:6px; }
       .signatures { display:grid; grid-template-columns:1fr 1fr 1fr; gap:30px; padding:20px 0 10px; margin-top:15px; }
       .sign-block { text-align:center; }
-      .sign-line { border-top:1px solid #333; padding-top:5px; font-size:9px; color:#555; font-weight:600; }
-      .footer-note { text-align:center; font-size:8px; color:#9ca3af; padding:6px 0; border-top:1px solid #e5e7eb; margin-top:8px; }
-      @media print { body { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+      .sign-line { border-top:1px solid #0f172a; padding-top:5px; font-size:10px; color:#475569; font-weight:600; }
+      .footer-note { text-align:center; font-size:9px; color:#94a3b8; padding:6px 0; border-top:1px solid #e2e8f0; margin-top:10px; }
+      /* Page 2+ repeating header — uses the same <thead> running-band trick
+         as the Quotation/Tax Invoice prints. The full-size letterhead on
+         page 1 sits inside .page-one-cover (margin-top:-17mm) which masks
+         the band on page 1; pages 2+ show the band naturally. */
+      .print-doc { width:100%; border-collapse:collapse; }
+      .print-doc > thead { display: table-header-group; }
+      .print-doc > tbody > tr > td { padding:0; vertical-align:top; }
+      .print-doc > thead > tr > td { padding:0 0 3mm 0; vertical-align:top; }
+      .running-band { display:flex; align-items:center; gap:10px; padding:3px 10px; height:14mm; box-sizing:border-box; border-bottom:1px solid ${accent}; background:#fff; font-family:'Helvetica Neue',Arial,sans-serif; }
+      .running-band .rb-logo { height:28px; width:auto; max-width:72px; object-fit:contain; flex-shrink:0; }
+      .running-band .rb-center { flex:1; line-height:1.2; }
+      .running-band .rb-name { font-size:11px; font-weight:800; color:#0f172a; }
+      .running-band .rb-meta { font-size:8.5px; color:#475569; margin-top:1px; }
+      .running-band .rb-gst { font-size:8.5px; color:${accent}; font-weight:700; margin-top:1px; }
+      .running-band .rb-right { text-align:right; flex-shrink:0; }
+      .running-band .rb-title { font-size:10px; font-weight:800; color:${accent}; letter-spacing:0.3px; text-transform:uppercase; }
+      .running-band .rb-docno { font-size:9.5px; color:#0f172a; font-weight:700; margin-top:1px; }
+      .page-one-cover { margin-top:-17mm; background:#fff; position:relative; z-index:5; }
+      @media print {
+        @page {
+          size: ${paper.w} ${paper.h};
+          margin: 8mm 8mm 14mm 8mm;
+          @bottom-right {
+            content: "Page " counter(page) " of " counter(pages);
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            font-size: 9px;
+            color: #64748b;
+            padding-right: 4mm;
+          }
+        }
+        body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+      }
     `;
 
     // Build letterhead (new 2-col spec: logo+tagline left, company info right).
@@ -369,23 +405,45 @@ export function POPrintDialog({ po, open, onClose }) {
       </div>`;
     }
 
-    return `<!DOCTYPE html><html><head><title>PO ${d.po_number}</title><style>${baseStyles}</style></head><body>
-      <div class="page">
-        ${letterhead}
-        <div class="doc-title">
-          <span>Purchase Order: ${d.po_number}${(d.status || '').toLowerCase() === 'draft' ? `<span style="display:inline-block;margin-left:10px;padding:2px 10px;background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;border-radius:3px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;vertical-align:middle">Draft Copy</span>` : ''}</span>
-          ${d.revision > 0 ? `<span class="rev">Revision ${d.revision}</span>` : ''}
-        </div>
-        ${infoHTML}
-        <div class="section-title">Order Items</div>
-        ${tableHTML}
-        ${chargesHTML}
-        ${totalsHTML}
-        ${wordsHTML}
-        ${termsHTML}
-        ${sigHTML}
-        <div class="footer-note">This is a computer-generated document. Printed on ${new Date().toLocaleString()}</div>
+    // Running band (page 2+) — compact logo + company + GSTIN + doc title.
+    const cssEscape = (s) => String(s || '');
+    const rbHTML = `<div class="running-band">
+      ${company.logo_data ? `<img src="${cssEscape(company.logo_data)}" class="rb-logo" alt="logo"/>` : ''}
+      <div class="rb-center">
+        <div class="rb-name">${cssEscape(company.name)}</div>
+        ${companyAddr ? `<div class="rb-meta">${cssEscape(companyAddr)}</div>` : ''}
+        ${company.gstin ? `<div class="rb-gst">GSTIN: ${cssEscape(company.gstin)}</div>` : ''}
       </div>
+      <div class="rb-right">
+        <div class="rb-title">Purchase Order</div>
+        <div class="rb-docno">${cssEscape(d.po_number || '')}</div>
+      </div>
+    </div>`;
+
+    return `<!DOCTYPE html><html><head><title>PO ${d.po_number}</title><style>${baseStyles}</style></head><body>
+      <table class="print-doc">
+        <thead><tr><td>${rbHTML}</td></tr></thead>
+        <tbody><tr><td>
+        <div class="page-one-cover">
+        <div class="page">
+          ${letterhead}
+          <div class="doc-title">
+            <span>Purchase Order: ${d.po_number}${(d.status || '').toLowerCase() === 'draft' ? `<span style="display:inline-block;margin-left:10px;padding:2px 10px;background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;border-radius:3px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;vertical-align:middle">Draft Copy</span>` : ''}</span>
+            ${d.revision > 0 ? `<span class="rev">Revision ${d.revision}</span>` : ''}
+          </div>
+          ${infoHTML}
+          <div class="section-title">Order Items</div>
+          ${tableHTML}
+          ${chargesHTML}
+          ${totalsHTML}
+          ${wordsHTML}
+          ${termsHTML}
+          ${sigHTML}
+          <div class="footer-note">This is a computer-generated document. Printed on ${new Date().toLocaleString()}</div>
+        </div>
+        </div>
+        </td></tr></tbody>
+      </table>
     </body></html>`;
   };
 
