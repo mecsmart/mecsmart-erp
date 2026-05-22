@@ -19,6 +19,11 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 21.5 — right-edge alignment for all totals rows — DONE ✅):**
+  1. **Problem**: Input rows (Global Discount, Additional Charges) have X remove buttons at the far right which shifts the input field edge ~28px LEFT of the box right edge. Displayed values (Subtotal, GST, Grand Total) had no X button so they extended ALL the way to the box right edge → visual misalignment between input edges and displayed value edges.
+  2. **Fix**: Added `pr-7` (28px right padding = X button width + gap) to all displayed amount spans in BOTH the Quotation form AND Tax Invoice form: Subtotal, Global Discount Applied, Net Subtotal, Charges total, GST, Grand Total. Result: every value (whether an input or a label) ends at exactly the same x-position. The X buttons for chargeable rows sit cleanly beyond.
+  3. **Input widths**: Bumped Global Discount and Additional Charge amount inputs from `w-24` (96px) to `w-40` (160px) so they have enough room for ₹2,XX,XXX.XX values without overflow.
+
 - **2026-02-22 (Round 21.4 — inline single-row layout for additional charges + Rate column 2dp — DONE ✅):**
   1. **Inline single-row layout** — replaced the 2-row card with a single horizontal row matching the user's reference image: `[name dropdown] [(=X% sub-text)] [₹/% pill] [w-24 amount input] [✕]`. The select is borderless / transparent until focused, so it reads as a label but still allows changing the charge.
   2. **Conversion sub-text** — under the name, a small grey `(=50.00%)` or `(=₹20.00)` shows the equivalent value in the opposite mode (₹ when in % mode, % when in ₹ mode) — useful for accountants reviewing the quote.

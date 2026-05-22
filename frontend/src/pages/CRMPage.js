@@ -1675,13 +1675,12 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
               </div>
               <div className="flex justify-end mt-2 text-xs">
                 <div className="w-[520px] space-y-1">
-                  <div className="flex justify-between"><span>Subtotal (after line discount):</span><span className="mono">{formatCurrency(totals.sub, form.currency)}</span></div>
+                  <div className="flex justify-between"><span>Subtotal (after line discount):</span><span className="mono pr-7">{formatCurrency(totals.sub, form.currency)}</span></div>
                   {/* Global (footer) discount — % or absolute amount, applied AFTER line discounts and BEFORE GST.
                       UI: a clear two-button toggle (Currency / Percent) instead of a cramped <select> that truncated
                       the option label. The active mode's symbol also prefixes the input value for unambiguous reading. */}
-                  <div className="flex justify-between items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 my-1 gap-2">
-                    <span className="text-[#374151] font-semibold whitespace-nowrap">Global Discount:</span>
-                    <div className="flex items-center gap-2">
+                  <div className="flex items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 my-1 gap-2">
+                    <span className="text-[#374151] font-semibold whitespace-nowrap flex-1">Global Discount:</span>
                       <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden" role="tablist">
                         <button
                           type="button"
@@ -1710,21 +1709,21 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                         type="number"
                         min="0"
                         step="0.01"
-                        className="input-field h-7 text-xs px-2 py-0 w-24 mono text-right"
+                        className="input-field h-7 text-xs px-2 py-0 w-40 mono"
+                        style={{ textAlign: 'right' }}
                         value={form.global_discount_value || 0}
                         onChange={(e) => setForm(f => ({ ...f, global_discount_value: parseFloat(e.target.value) || 0 }))}
                         data-testid="quotation-global-discount-value"
                       />
-                    </div>
                   </div>
                   {totals.globalDiscount > 0 && (
                     <div className="flex justify-between text-[#9B1C1C]">
                       <span>Global Discount Applied:</span>
-                      <span className="mono">-{formatCurrency(totals.globalDiscount, form.currency)}</span>
+                      <span className="mono pr-7">-{formatCurrency(totals.globalDiscount, form.currency)}</span>
                     </div>
                   )}
                   {totals.globalDiscount > 0 && (
-                    <div className="flex justify-between"><span>Net Subtotal:</span><span className="mono">{formatCurrency(totals.netSub, form.currency)}</span></div>
+                    <div className="flex justify-between"><span>Net Subtotal:</span><span className="mono pr-7">{formatCurrency(totals.netSub, form.currency)}</span></div>
                   )}
                   {/* ---- Additional Charges (after global discount, before GST) ----
                       INLINE single-row layout matching Global Discount visually:
@@ -1803,7 +1802,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                         </div>
                         <input
                           type="number" min="0" step="0.01"
-                          className="input-field h-7 text-xs px-2 py-0 w-24 mono"
+                          className="input-field h-7 text-xs px-2 py-0 w-40 mono"
                           style={{ textAlign: 'right' }}
                           placeholder={vt === 'percent' ? '%' : 'Amount'}
                           value={c.value ?? c.amount ?? 0}
@@ -1838,13 +1837,13 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                       data-testid="add-additional-charge-btn"
                     >+ Add Additional Charge</button>
                     {totals.additionalCharges > 0 && (
-                      <span className="text-[#374151]">Charges total: <span className="mono">{formatCurrency(totals.additionalCharges, form.currency)}</span></span>
+                      <span className="text-[#374151] pr-7">Charges total: <span className="mono">{formatCurrency(totals.additionalCharges, form.currency)}</span></span>
                     )}
                   </div>
                   {(form.currency || 'INR') === 'INR' && (
-                    <div className="flex justify-between"><span>GST:</span><span className="mono">{formatCurrency(totals.gst, form.currency)}</span></div>
+                    <div className="flex justify-between"><span>GST:</span><span className="mono pr-7">{formatCurrency(totals.gst, form.currency)}</span></div>
                   )}
-                  <div className="flex justify-between font-semibold border-t border-[#E5E7EB] pt-1"><span>Grand Total:</span><span className="mono">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.total : (totals.netSub + (totals.additionalCharges || 0)), form.currency)}</span></div>
+                  <div className="flex justify-between font-semibold border-t border-[#E5E7EB] pt-1"><span>Grand Total:</span><span className="mono pr-7">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.total : (totals.netSub + (totals.additionalCharges || 0)), form.currency)}</span></div>
                   {(form.currency || 'INR') !== 'INR' && (
                     <div className="text-[10px] text-[#6B7280] italic">Export/Import — GST not applicable. Currency: {form.currency}</div>
                   )}
@@ -3837,8 +3836,8 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
             {/* Totals */}
             <div className="flex justify-end">
               <div className="w-[520px] border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB] text-sm space-y-1">
-                <div className="flex justify-between"><span className="text-[#4B5563]">Subtotal</span><span className="mono">{formatCurrency(totals.subtotal, form.currency)}</span></div>
-                {totals.totalDiscount > 0 && <div className="flex justify-between"><span className="text-[#4B5563]">Discount</span><span className="mono">-{formatCurrency(totals.totalDiscount, form.currency)}</span></div>}
+                <div className="flex justify-between"><span className="text-[#4B5563]">Subtotal</span><span className="mono pr-7">{formatCurrency(totals.subtotal, form.currency)}</span></div>
+                {totals.totalDiscount > 0 && <div className="flex justify-between"><span className="text-[#4B5563]">Discount</span><span className="mono pr-7">-{formatCurrency(totals.totalDiscount, form.currency)}</span></div>}
                 {/* ---- Additional Charges (after global discount, before GST) ----
                     INLINE single-row layout matching Global Discount. */}
                 {(form.additional_charges || []).map((c, ci) => {
@@ -3911,7 +3910,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                       </div>
                       <input
                         type="number" min="0" step="0.01"
-                        className="input-field h-7 text-xs px-2 py-0 w-24 mono"
+                        className="input-field h-7 text-xs px-2 py-0 w-40 mono"
                         style={{ textAlign: 'right' }}
                         placeholder={vt === 'percent' ? '%' : 'Amount'}
                         value={c.value ?? c.amount ?? 0}
@@ -3946,13 +3945,13 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                     data-testid="ti-add-additional-charge-btn"
                   >+ Add Additional Charge</button>
                   {totals.additionalCharges > 0 && (
-                    <span className="text-[#374151]">Charges: <span className="mono">{formatCurrency(totals.additionalCharges, form.currency)}</span></span>
+                    <span className="text-[#374151] pr-7">Charges: <span className="mono">{formatCurrency(totals.additionalCharges, form.currency)}</span></span>
                   )}
                 </div>
                 {(form.currency || 'INR') === 'INR' && (
-                  <div className="flex justify-between"><span className="text-[#4B5563]">GST</span><span className="mono">{formatCurrency(totals.totalGst, form.currency)}</span></div>
+                  <div className="flex justify-between"><span className="text-[#4B5563]">GST</span><span className="mono pr-7">{formatCurrency(totals.totalGst, form.currency)}</span></div>
                 )}
-                <div className="flex justify-between border-t border-[#E5E7EB] mt-1 pt-1 font-semibold"><span>Grand Total</span><span className="mono text-[#1D3557]">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.grandTotal : (totals.subtotal + (totals.additionalCharges || 0)), form.currency)}</span></div>
+                <div className="flex justify-between border-t border-[#E5E7EB] mt-1 pt-1 font-semibold"><span>Grand Total</span><span className="mono pr-7 text-[#1D3557]">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.grandTotal : (totals.subtotal + (totals.additionalCharges || 0)), form.currency)}</span></div>
                 {(form.currency || 'INR') !== 'INR' && (
                   <div className="text-[10px] text-[#6B7280] italic mt-1">Export/Import — GST not applicable. Currency: {form.currency}</div>
                 )}
