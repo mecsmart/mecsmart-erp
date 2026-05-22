@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { Cog, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { ItemGroupsCard } from '../components/ItemGroupsCard';
+import { POChargeTypesCard } from '../components/POChargeTypesCard';
 
 export default function InventoryConfigurationPage() {
   const { user, hasPermission } = useAuth();
@@ -58,6 +59,9 @@ export default function InventoryConfigurationPage() {
 
       {/* Item Groups */}
       <ItemGroupsCard isAdmin={isAdmin} />
+
+      {/* Additional Charges master for Purchase Orders */}
+      <POChargeTypesCard isAdmin={isAdmin} />
 
       {/* Default PO Terms & Conditions */}
       <div className="card-flat p-6" data-testid="po-terms-card">

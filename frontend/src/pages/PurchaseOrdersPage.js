@@ -657,57 +657,85 @@ export default function PurchaseOrdersPage() {
               )}
             </div>
 
-            {/* Additional Charges */}
-            <div className="border-t border-[#E5E7EB] pt-4">
-              <div className="flex items-center justify-between mb-3">
-                <label className="text-sm font-semibold text-[#111827]">Additional Charges</label>
-                <button type="button" onClick={addCharge} className="btn-secondary text-xs flex items-center space-x-1" data-testid="add-po-charge-btn">
-                  <Plus className="w-3 h-3" /><span>Add Charge</span>
-                </button>
-              </div>
-              {formData.additional_charges.length > 0 && (
-                <div className="space-y-0">
-                  <div className="grid grid-cols-[2fr_1.5fr_1fr_1fr_1fr_auto] gap-2 px-2 py-1 bg-[#374151] text-white text-xs font-semibold rounded-t-sm">
-                    <span>Charge Type</span><span>HSN Code</span><span>GST %</span><span>Amount</span><span className="text-right">Tax</span><span></span>
-                  </div>
-                  {formData.additional_charges.map((charge, i) => (
-                    <div key={i} className="grid grid-cols-[2fr_1.5fr_1fr_1fr_1fr_auto] gap-2 p-1 bg-[#F9FAFB] border-b border-[#E5E7EB] items-center">
-                      {chargeTypes.length > 0 ? (
-                        <Select value={charge.charge_type_id || undefined} onValueChange={(v) => updateCharge(i, 'charge_type_id', v)}>
-                          <SelectTrigger className="bg-white text-xs h-8"><SelectValue placeholder="Select type" /></SelectTrigger>
-                          <SelectContent>
-                            {chargeTypes.map(ct => <SelectItem key={ct.id} value={ct.id}>{ct.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <input type="text" value={charge.name} onChange={(e) => updateCharge(i, 'name', e.target.value)} className="input-field bg-white text-xs h-8" placeholder="Charge name" />
-                      )}
-                      <input type="text" value={charge.hsn_code} onChange={(e) => updateCharge(i, 'hsn_code', e.target.value)} className="input-field bg-white text-xs h-8 mono" />
-                      <Select value={String(charge.gst_rate)} onValueChange={(v) => updateCharge(i, 'gst_rate', parseFloat(v))}>
-                        <SelectTrigger className="bg-white text-xs h-8"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {[0,5,12,18,28].map(r => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                      <input type="number" min="0" step="0.01" value={charge.amount} onChange={(e) => updateCharge(i, 'amount', parseFloat(e.target.value) || 0)} className="input-field bg-white text-xs h-8 mono" />
-                      <div className="text-right mono text-xs font-medium">{formatCurrency((charge.amount || 0) * (charge.gst_rate || 0) / 100, formData.currency)}</div>
-                      <button type="button" onClick={() => removeCharge(i)} className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"><X className="w-3.5 h-3.5" /></button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Totals */}
-            {formData.lines.length > 0 && (
+            {/* Additional Charges + Totals — Quotation-style inline layout.
+                Each charge has a master-select (Charge Type), inline amount
+                input and X-remove button stacked vertically inside the totals
+                box. Master entries come from /api/settings/po-charges; manage
+                them in Inventory → Configuration → Additional Charges. */}
+            {(formData.lines.length > 0 || (formData.additional_charges || []).length > 0) && (
               <div className="flex justify-end pt-2">
-                <div className="text-right space-y-1 min-w-[220px]">
-                  <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Items Subtotal:</span><span className="mono font-medium">{formatCurrency(calcSubtotal(), formData.currency)}</span></div>
-                  {calcChargesTotal() > 0 && <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Charges:</span><span className="mono font-medium">{formatCurrency(calcChargesTotal(), formData.currency)}</span></div>}
-                  {(formData.currency || 'INR') === 'INR' && (
-                    <div className="flex justify-between"><span className="text-sm text-[#4B5563]">Est. GST:</span><span className="mono font-medium">{formatCurrency(calcGST(), formData.currency)}</span></div>
+                <div className="grid w-[440px] gap-x-2 gap-y-1 items-center text-xs" style={{ gridTemplateColumns: '1fr 78px 96px' }}>
+                  {/* Items Subtotal */}
+                  <span className="col-span-2 whitespace-nowrap text-[#4B5563]">Items Subtotal:</span>
+                  <span className="mono text-right">{formatCurrency(calcSubtotal(), formData.currency)}</span>
+
+                  {/* Inline Additional Charges rows — same 3-col grid */}
+                  {(formData.additional_charges || []).map((c, ci) => (
+                    <React.Fragment key={`po-ac-${ci}`}>
+                      <div className="col-start-1 bg-[#F9FAFB] border-l border-y border-[#E5E7EB] rounded-l-sm px-2 py-1 -mr-2 flex flex-col justify-center" data-testid={`po-additional-charge-row-${ci}`}>
+                        <select
+                          className="bg-transparent border-0 outline-none w-full text-[#374151] font-semibold text-xs cursor-pointer px-0 py-0 truncate focus:bg-white focus:border focus:border-[#D1D5DB] focus:rounded focus:px-1"
+                          value={c.charge_type_id || ''}
+                          onChange={(e) => updateCharge(ci, 'charge_type_id', e.target.value)}
+                          data-testid={`po-additional-charge-select-${ci}`}
+                          title={c.name || 'Select charge'}
+                        >
+                          <option value="">— select charge —</option>
+                          {chargeTypes.map(ct => (
+                            <option key={ct.id} value={ct.id}>{ct.name}</option>
+                          ))}
+                        </select>
+                        {c.hsn_code && (
+                          <div className="text-[10px] text-[#6B7280] mt-0.5 leading-none">HSN {c.hsn_code} · {c.gst_rate || 0}% GST</div>
+                        )}
+                      </div>
+                      <div className="bg-[#F9FAFB] border-y border-[#E5E7EB] py-1 flex items-center justify-center">
+                        <span className="h-7 w-9 text-sm font-semibold mono bg-[#1D3557] text-white flex items-center justify-center rounded-sm border border-[#1D3557]">
+                          {{ INR: '₹', USD: '$', EUR: '€', GBP: '£', AED: 'د.إ' }[(formData.currency || 'INR').toUpperCase()] || '₹'}
+                        </span>
+                      </div>
+                      <div className="relative bg-[#F9FAFB] border-r border-y border-[#E5E7EB] rounded-r-sm py-1 px-2 -ml-2 flex items-center">
+                        <input
+                          type="number" min="0" step="0.01"
+                          className="input-field h-7 text-xs px-2 py-0 w-full mono"
+                          style={{ textAlign: 'right' }}
+                          placeholder="Amount"
+                          value={c.amount || 0}
+                          onChange={(e) => updateCharge(ci, 'amount', parseFloat(e.target.value) || 0)}
+                          data-testid={`po-additional-charge-amount-${ci}`}
+                        />
+                        <button
+                          type="button"
+                          className="absolute top-1/2 left-full -translate-y-1/2 ml-1 text-[#9B1C1C] w-6 h-6 flex items-center justify-center hover:bg-[#FDE2E2] rounded"
+                          onClick={() => removeCharge(ci)}
+                          title="Remove charge"
+                          data-testid={`po-additional-charge-remove-${ci}`}
+                        ><X className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </React.Fragment>
+                  ))}
+
+                  {/* "+ Add Additional Charge" + running total */}
+                  <button
+                    type="button"
+                    className="col-span-2 text-left text-[#1D3557] hover:underline font-medium text-[11px]"
+                    onClick={addCharge}
+                    data-testid="add-po-charge-btn"
+                  >+ Add Additional Charge</button>
+                  <span className="text-right mono text-[11px] text-[#374151]">
+                    {calcChargesTotal() > 0 ? `Charges: ${formatCurrency(calcChargesTotal(), formData.currency)}` : '\u00A0'}
+                  </span>
+
+                  {/* Est. GST + Grand Total */}
+                  {(formData.currency || 'INR') === 'INR' && (<>
+                    <span className="col-span-2 whitespace-nowrap text-[#4B5563]">Est. GST:</span>
+                    <span className="mono text-right">{formatCurrency(calcGST(), formData.currency)}</span>
+                  </>)}
+                  <span className="col-span-2 whitespace-nowrap font-semibold border-t border-[#E5E7EB] pt-1">Total:</span>
+                  <span className="mono text-right font-bold text-base border-t border-[#E5E7EB] pt-1">{formatCurrency(calcSubtotal() + calcChargesTotal() + ((formData.currency || 'INR') === 'INR' ? calcGST() : 0), formData.currency)}</span>
+                  {(formData.currency || 'INR') !== 'INR' && (
+                    <div className="col-span-3 text-[10px] text-[#6B7280] italic mt-1 text-right">Export/Import — GST not applicable. Currency: {formData.currency}</div>
                   )}
-                  <div className="flex justify-between border-t border-[#D1D5DB] pt-1"><span className="text-sm font-semibold">Total:</span><span className="mono font-bold text-lg">{formatCurrency(calcSubtotal() + calcChargesTotal() + ((formData.currency || 'INR') === 'INR' ? calcGST() : 0), formData.currency)}</span></div>
                 </div>
               </div>
             )}

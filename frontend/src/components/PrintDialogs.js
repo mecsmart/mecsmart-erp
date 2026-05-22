@@ -344,22 +344,27 @@ export function POPrintDialog({ po, open, onClose }) {
       tableHTML += `</tbody></table>`;
     }
 
-    // Charges
+    // Charges — Quotation-style: per-charge inline rows go directly into
+    // the totals box (with HSN + GST% shown in parentheses next to the
+    // charge name). No separate standalone table — matches the customer-
+    // facing Quotation / Tax Invoice layout for visual consistency.
     let chargesHTML = '';
-    if (opts.showAdditionalCharges && charges.length > 0) {
-      chargesHTML = `<div class="section-title">Additional Charges</div>
-        <table><thead><tr><th>Charge</th><th>HSN</th><th class="text-right">Amount</th>${opts.showGSTBreakup ? '<th class="text-right">GST%</th><th class="text-right">GST Amt</th>' : ''}</tr></thead><tbody>`;
-      charges.forEach(c => {
-        chargesHTML += `<tr><td>${c.name||''}</td><td class="mono">${c.hsn_code||''}</td><td class="text-right mono">${fa(c.amount||0)}</td>${opts.showGSTBreakup ? `<td class="text-right">${c.gst_rate||0}%</td><td class="text-right mono">${fa(c.tax_amount||0)}</td>` : ''}</tr>`;
-      });
-      chargesHTML += `</tbody></table>`;
-    }
 
     // Totals — for export/import POs (non-INR), GST is not applicable.
     const isExportDoc = (d.currency || 'INR') !== 'INR';
     let totalsHTML = `<div class="totals-box"><table>
       <tr><td class="label-cell">Subtotal</td><td class="val-cell">${sym}${fa(d.subtotal||0)}</td></tr>`;
-    if ((d.charges_subtotal||0) > 0) totalsHTML += `<tr><td class="label-cell">Charges</td><td class="val-cell">${sym}${fa(d.charges_subtotal||0)}</td></tr>`;
+    // Inline per-charge rows — same format as Quotation/Tax Invoice PDFs.
+    if (opts.showAdditionalCharges && charges.length > 0) {
+      charges.forEach(c => {
+        const amt = c.amount || 0;
+        if (amt <= 0) return;
+        const hsnGstInfo = c.hsn_code
+          ? ` <span style="font-size:9px;color:#64748b">(HSN ${c.hsn_code}${(!isExportDoc && (c.gst_rate || 0) > 0) ? `, ${(c.gst_rate || 0)}% GST` : ''})</span>`
+          : '';
+        totalsHTML += `<tr><td class="label-cell">${c.name || 'Additional Charge'}${hsnGstInfo}</td><td class="val-cell">${sym}${fa(amt)}</td></tr>`;
+      });
+    }
     if (!isExportDoc) {
       if (opts.showGSTBreakup) {
         if (d.is_inter_state) {

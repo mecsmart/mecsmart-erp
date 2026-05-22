@@ -1,0 +1,61 @@
+{
+  "summary": "Round 25 testing complete - REVERT of Round 24 changes verified. Quotation/Tax Invoice Additional Charges restored to inline-rows-in-totals with ₹/% toggle. PO now matches Quotation's inline pattern. New 'Additional Charges (Purchase Orders)' master CRUD card added to Inventory Configuration. PO Print/PDF additional charges now use Quotation PDF format (inline per-charge rows in totals box).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_146.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only testing)",
+    "frontend": "100% (all test cases passed)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created 'Loading Charges' charge type (HSN: 996511, GST: 18%) in Inventory Configuration",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Round 25 REVERT verified: (1) Quotation Create/Edit has inline-grid-in-totals layout with ₹/% toggle for Additional Charges - click '+ Add Additional Charge' inside totals box, row appears with charge dropdown, ₹/% toggle buttons, amount input, X remove. (2) Tax Invoice Create/Edit has same inline layout with ₹/% toggle. (3) PO Create/Edit now matches Quotation's inline pattern - Additional Charges appear as inline rows inside totals box (not a separate table). (4) Inventory Configuration has new 'Additional Charges (Purchase Orders)' card between Item Groups and Default PO Terms - CRUD for charge types that appear in PO dropdown. (5) PO Print/PDF additional charges now inline in totals box with format 'ChargeName (HSN xxx, yy% GST)' matching Quotation PDF. (6) Quotation Rate 2-decimal persistence still working (100 → 100.00). (7) PO print template styling intact: navy (#1D3557) doc-title bar, white text, running-band header for page 2+, Helvetica Neue 11px body font.",
+  "tests_verified": {
+    "QUOTATION-CHARGES-REVERT-1": {
+      "status": "PASSED",
+      "details": "Quotation Create/Edit has inline-grid-in-totals layout with ₹/% toggle. Found data-testid='add-additional-charge-btn', 'additional-charge-mode-amount-0', 'additional-charge-mode-percent-0', 'additional-charge-select-0', 'additional-charge-amount-0', 'additional-charge-remove-0'"
+    },
+    "TAX-INVOICE-CHARGES-REVERT-1": {
+      "status": "PASSED",
+      "details": "Tax Invoice Create/Edit has same inline layout with ₹/% toggle. Found data-testid='ti-add-additional-charge-btn', 'ti-additional-charge-mode-amount-0', 'ti-additional-charge-mode-percent-0', 'ti-additional-charge-select-0', 'ti-additional-charge-amount-0', 'ti-additional-charge-remove-0'"
+    },
+    "QUOTATION-PDF-REVERT-1": {
+      "status": "PASSED",
+      "details": "Quotation PDF (QU0000119) shows additional charges as inline rows in totals table: 'Additional Charge (HSN 996511, 18% GST)' with amount ₹500.00 - NOT a separate table"
+    },
+    "PO-CHARGES-NEW-1": {
+      "status": "PASSED",
+      "details": "PO Create/Edit has inline Additional Charges inside totals box. Found data-testid='add-po-charge-btn', 'po-additional-charge-row-0', 'po-additional-charge-select-0', 'po-additional-charge-amount-0', 'po-additional-charge-remove-0'"
+    },
+    "PO-PDF-NEW-1": {
+      "status": "PASSED",
+      "details": "PO Print dialog found with 'Additional Charges Section' checkbox. Code review confirms chargesHTML is empty and charges are rendered as inline <tr> rows in totalsHTML with format: '${c.name}${hsnGstInfo}' where hsnGstInfo = '(HSN xxx, yy% GST)'"
+    },
+    "INVENTORY-CONFIG-NEW-1": {
+      "status": "PASSED",
+      "details": "Inventory Configuration page has 'Additional Charges (Purchase Orders)' card (data-testid='po-charges-card'). Add Charge Type button works. Created 'Loading Charges' with HSN 996511, GST 18%. Charge appears in table."
+    },
+    "RATE-REGRESSION-1": {
+      "status": "PASSED",
+      "details": "Quotation Rate field 2-decimal persistence working - type '100', blur → shows '100.00', re-focus → shows '100.00'"
+    },
+    "PO-PRINT-REGRESSION-1": {
+      "status": "PASSED",
+      "details": "PO print template styling intact: accent='#1D3557' (navy), .doc-title has background:${accent} color:#fff, .running-band header for page 2+, body font 'Helvetica Neue' 11px"
+    }
+  }
+}

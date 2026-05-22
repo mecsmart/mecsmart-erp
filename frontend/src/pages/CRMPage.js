@@ -1690,118 +1690,6 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   </tfoot>
                 </table>
               </div>
-
-              {/* Additional Charges — PO-style table (Charge | HSN | GST% | Amount | Tax | X).
-                  Replaces the previous inline grid inside the totals box; the
-                  totals box still shows a single "Additional Charges" summary
-                  line so the user can verify the running total. */}
-              <div className="mt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-semibold text-[#111827]">Additional Charges</label>
-                  <button
-                    type="button"
-                    onClick={() => setForm(f => ({
-                      ...f,
-                      additional_charges: [...(f.additional_charges || []), { charge_id: '', name: '', hsn_code: '', gst_rate: 18, value_type: 'amount', value: 0, amount: 0 }],
-                    }))}
-                    className="btn-secondary text-xs flex items-center space-x-1"
-                    data-testid="add-additional-charge-btn"
-                  >
-                    <Plus className="w-3 h-3" /><span>Add Charge</span>
-                  </button>
-                </div>
-                {(form.additional_charges || []).length > 0 && (
-                  <div className="space-y-0">
-                    <div className="grid grid-cols-[2fr_1.5fr_1fr_1fr_1fr_auto] gap-2 px-2 py-1 bg-[#1D3557] text-white text-xs font-semibold rounded-t-sm">
-                      <span>Charge Type</span><span>HSN Code</span><span>GST %</span><span>Amount</span><span className="text-right">Tax</span><span></span>
-                    </div>
-                    {(form.additional_charges || []).map((c, ci) => {
-                      const raw = parseFloat(c.value ?? c.amount) || 0;
-                      const vt = c.value_type || 'amount';
-                      const amt = vt === 'percent' ? (totals.sub * raw / 100) : raw;
-                      const taxAmt = amt * (parseFloat(c.gst_rate) || 0) / 100;
-                      return (
-                        <div key={ci} className="grid grid-cols-[2fr_1.5fr_1fr_1fr_1fr_auto] gap-2 p-1 bg-[#F9FAFB] border-b border-[#E5E7EB] items-center" data-testid={`additional-charge-row-${ci}`}>
-                          {additionalChargesMaster.length > 0 ? (
-                            <Select
-                              value={c.charge_id || undefined}
-                              onValueChange={(v) => {
-                                const m = additionalChargesMaster.find(x => x.id === v);
-                                setForm(f => ({
-                                  ...f,
-                                  additional_charges: f.additional_charges.map((row, i) => i === ci ? {
-                                    ...row,
-                                    charge_id: m?.id || '',
-                                    name: m?.name || row.name || '',
-                                    hsn_code: m?.hsn_code ?? row.hsn_code ?? '',
-                                    gst_rate: m?.gst_rate ?? row.gst_rate ?? 18,
-                                  } : row),
-                                }));
-                              }}
-                            >
-                              <SelectTrigger className="bg-white text-xs h-8" data-testid={`additional-charge-select-${ci}`}><SelectValue placeholder="Select type" /></SelectTrigger>
-                              <SelectContent>
-                                {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
-                                  <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <input type="text" value={c.name || ''} onChange={(e) => setForm(f => ({
-                              ...f,
-                              additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, name: e.target.value } : row),
-                            }))} className="input-field bg-white text-xs h-8" placeholder="Charge name" />
-                          )}
-                          <input type="text" value={c.hsn_code || ''} onChange={(e) => setForm(f => ({
-                            ...f,
-                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, hsn_code: e.target.value } : row),
-                          }))} className="input-field bg-white text-xs h-8 mono" data-testid={`additional-charge-hsn-${ci}`} />
-                          <Select
-                            value={String(c.gst_rate ?? 18)}
-                            onValueChange={(v) => setForm(f => ({
-                              ...f,
-                              additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, gst_rate: parseFloat(v) } : row),
-                            }))}
-                          >
-                            <SelectTrigger className="bg-white text-xs h-8" data-testid={`additional-charge-gst-${ci}`}><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {[0,5,12,18,28].map(r => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                          <input
-                            type="number" min="0" step="0.01"
-                            value={vt === 'percent' ? Math.round(amt * 100) / 100 : raw}
-                            onChange={(e) => {
-                              const raw2 = parseFloat(e.target.value) || 0;
-                              setForm(f => ({
-                                ...f,
-                                additional_charges: f.additional_charges.map((row, i) => i === ci ? {
-                                  ...row,
-                                  // Drop legacy percent type — store as raw amount.
-                                  value_type: 'amount',
-                                  value: raw2,
-                                  amount: raw2,
-                                } : row),
-                              }));
-                            }}
-                            className="input-field bg-white text-xs h-8 mono"
-                            data-testid={`additional-charge-amount-${ci}`}
-                          />
-                          <div className="text-right mono text-xs font-medium text-[#374151]">{formatCurrency(taxAmt, form.currency)}</div>
-                          <button
-                            type="button"
-                            onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
-                            className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"
-                            title="Remove charge"
-                            data-testid={`additional-charge-remove-${ci}`}
-                          ><X className="w-3.5 h-3.5" /></button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
               {/* All totals rows use the SAME 3-col CSS grid so every right
                   edge — values, inputs, X buttons — aligns at the line items
                   "Total" column. Col 1 = label/select (flex), Col 2 = ₹/%
@@ -1859,12 +1747,118 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                     <span className="mono text-right">{formatCurrency(totals.netSub, form.currency)}</span>
                   </>)}
 
-                  {/* Additional Charges summary — detailed entries are now in
-                      the PO-style table above the totals box. */}
-                  {totals.additionalCharges > 0 && (<>
-                    <span className="col-span-2 whitespace-nowrap">Additional Charges:</span>
-                    <span className="mono text-right">{formatCurrency(totals.additionalCharges, form.currency)}</span>
-                  </>)}
+                  {/* Additional Charges — same 3-col grid */}
+                  {(form.additional_charges || []).map((c, ci) => {
+                    const vt = c.value_type || 'amount';
+                    const raw = parseFloat(c.value ?? c.amount) || 0;
+                    const symC = CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹';
+                    const resolved = vt === 'percent' ? (totals.sub * raw / 100) : raw;
+                    const equivPct = (vt === 'amount' && totals.sub > 0 && raw > 0) ? (raw / totals.sub * 100) : null;
+                    const equivAmt = (vt === 'percent' && raw > 0) ? resolved : null;
+                    return (
+                    <React.Fragment key={`ac-${ci}`}>
+                      <div className="col-start-1 bg-[#F9FAFB] border-l border-y border-[#E5E7EB] rounded-l-sm px-2 py-1 -mr-2 flex flex-col justify-center" data-testid={`additional-charge-row-${ci}`}>
+                        <select
+                          className="bg-transparent border-0 outline-none w-full text-[#374151] font-semibold text-xs cursor-pointer px-0 py-0 truncate focus:bg-white focus:border focus:border-[#D1D5DB] focus:rounded focus:px-1"
+                          value={c.charge_id || ''}
+                          onChange={(e) => {
+                            const m = additionalChargesMaster.find(x => x.id === e.target.value);
+                            setForm(f => ({
+                              ...f,
+                              additional_charges: f.additional_charges.map((row, i) => i === ci ? {
+                                ...row,
+                                charge_id: m?.id || '',
+                                name: m?.name || row.name || '',
+                                hsn_code: m?.hsn_code ?? row.hsn_code ?? '',
+                                gst_rate: m?.gst_rate ?? row.gst_rate ?? 18,
+                              } : row),
+                            }));
+                          }}
+                          data-testid={`additional-charge-select-${ci}`}
+                          title={c.name || 'Select charge'}
+                        >
+                          <option value="">— select charge —</option>
+                          {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+                        {(equivPct != null || equivAmt != null) && (
+                          <div className="text-[10px] text-[#6B7280] mt-0.5 leading-none">
+                            {equivPct != null && <>(={equivPct.toFixed(2)}%)</>}
+                            {equivAmt != null && <>(={formatCurrency(equivAmt, form.currency)})</>}
+                          </div>
+                        )}
+                      </div>
+                      <div className="bg-[#F9FAFB] border-y border-[#E5E7EB] py-1 flex items-center justify-center">
+                        <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden" role="tablist">
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={vt === 'amount'}
+                            onClick={() => setForm(f => ({
+                              ...f,
+                              additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'amount' } : row),
+                            }))}
+                            className={`h-7 w-9 text-sm font-semibold mono transition-colors ${vt === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                            data-testid={`additional-charge-mode-amount-${ci}`}
+                            title="Charge as currency amount"
+                          >{symC}</button>
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={vt === 'percent'}
+                            onClick={() => setForm(f => ({
+                              ...f,
+                              additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'percent' } : row),
+                            }))}
+                            className={`h-7 w-9 text-sm font-semibold mono transition-colors border-l border-[#D1D5DB] ${vt === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                            data-testid={`additional-charge-mode-percent-${ci}`}
+                            title="Charge as % of subtotal (after line discount)"
+                          >%</button>
+                        </div>
+                      </div>
+                      <div className="relative bg-[#F9FAFB] border-r border-y border-[#E5E7EB] rounded-r-sm py-1 px-2 -ml-2 flex items-center">
+                        <input
+                          type="number" min="0" step="0.01"
+                          className="input-field h-7 text-xs px-2 py-0 w-full mono"
+                          style={{ textAlign: 'right' }}
+                          placeholder={vt === 'percent' ? '%' : 'Amount'}
+                          value={c.value ?? c.amount ?? 0}
+                          onChange={(e) => {
+                            const raw2 = parseFloat(e.target.value) || 0;
+                            setForm(f => ({
+                              ...f,
+                              additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value: raw2 } : row),
+                            }));
+                          }}
+                          data-testid={`additional-charge-amount-${ci}`}
+                        />
+                        {/* X button positioned ABSOLUTELY outside the right edge */}
+                        <button
+                          type="button"
+                          className="absolute top-1/2 left-full -translate-y-1/2 ml-1 text-[#9B1C1C] w-6 h-6 flex items-center justify-center hover:bg-[#FDE2E2] rounded"
+                          onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
+                          title="Remove charge"
+                          data-testid={`additional-charge-remove-${ci}`}
+                        ><X className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </React.Fragment>
+                    );
+                  })}
+
+                  {/* "+ Add Additional Charge" + running total */}
+                  <button
+                    type="button"
+                    className="col-span-2 text-left text-[#1D3557] hover:underline font-medium text-[11px]"
+                    onClick={() => setForm(f => ({
+                      ...f,
+                      additional_charges: [...(f.additional_charges || []), { charge_id: '', name: '', hsn_code: '', gst_rate: 18, value_type: 'amount', value: 0, amount: 0 }],
+                    }))}
+                    data-testid="add-additional-charge-btn"
+                  >+ Add Additional Charge</button>
+                  <span className="text-right mono text-[11px] text-[#374151]">
+                    {totals.additionalCharges > 0 ? `Charges: ${formatCurrency(totals.additionalCharges, form.currency)}` : '\u00A0'}
+                  </span>
 
                   {/* GST + Grand Total */}
                   {(form.currency || 'INR') === 'INR' && (<>
@@ -3862,125 +3856,121 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
               </div>
             </div>
 
-            {/* Additional Charges — PO-style table (Charge | HSN | GST% | Amount | Tax | X).
-                Replaces the inline rows inside the totals box for consistency
-                with the Purchase Order Create/Edit form. */}
-            <div className="mt-4">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-semibold text-[#111827]">Additional Charges</label>
-                <button
-                  type="button"
-                  onClick={() => setForm(f => ({
-                    ...f,
-                    additional_charges: [...(f.additional_charges || []), { charge_id: '', name: '', hsn_code: '', gst_rate: 18, value_type: 'amount', value: 0, amount: 0 }],
-                  }))}
-                  className="btn-secondary text-xs flex items-center space-x-1"
-                  data-testid="ti-add-additional-charge-btn"
-                >
-                  <Plus className="w-3 h-3" /><span>Add Charge</span>
-                </button>
-              </div>
-              {(form.additional_charges || []).length > 0 && (
-                <div className="space-y-0">
-                  <div className="grid grid-cols-[2fr_1.5fr_1fr_1fr_1fr_auto] gap-2 px-2 py-1 bg-[#1D3557] text-white text-xs font-semibold rounded-t-sm">
-                    <span>Charge Type</span><span>HSN Code</span><span>GST %</span><span>Amount</span><span className="text-right">Tax</span><span></span>
-                  </div>
-                  {(form.additional_charges || []).map((c, ci) => {
-                    const raw = parseFloat(c.value ?? c.amount) || 0;
-                    const vt = c.value_type || 'amount';
-                    const amt = vt === 'percent' ? (totals.subtotal * raw / 100) : raw;
-                    const taxAmt = amt * (parseFloat(c.gst_rate) || 0) / 100;
-                    return (
-                      <div key={`ti-ac-${ci}`} className="grid grid-cols-[2fr_1.5fr_1fr_1fr_1fr_auto] gap-2 p-1 bg-[#F9FAFB] border-b border-[#E5E7EB] items-center" data-testid={`ti-additional-charge-row-${ci}`}>
-                        {additionalChargesMaster.length > 0 ? (
-                          <Select
-                            value={c.charge_id || undefined}
-                            onValueChange={(v) => {
-                              const m = additionalChargesMaster.find(x => x.id === v);
-                              setForm(f => ({
-                                ...f,
-                                additional_charges: f.additional_charges.map((row, i) => i === ci ? {
-                                  ...row,
-                                  charge_id: m?.id || '',
-                                  name: m?.name || row.name || '',
-                                  hsn_code: m?.hsn_code ?? row.hsn_code ?? '',
-                                  gst_rate: m?.gst_rate ?? row.gst_rate ?? 18,
-                                } : row),
-                              }));
-                            }}
-                          >
-                            <SelectTrigger className="bg-white text-xs h-8" data-testid={`ti-additional-charge-select-${ci}`}><SelectValue placeholder="Select type" /></SelectTrigger>
-                            <SelectContent>
-                              {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
-                                <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : (
-                          <input type="text" value={c.name || ''} onChange={(e) => setForm(f => ({
-                            ...f,
-                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, name: e.target.value } : row),
-                          }))} className="input-field bg-white text-xs h-8" placeholder="Charge name" />
-                        )}
-                        <input type="text" value={c.hsn_code || ''} onChange={(e) => setForm(f => ({
-                          ...f,
-                          additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, hsn_code: e.target.value } : row),
-                        }))} className="input-field bg-white text-xs h-8 mono" data-testid={`ti-additional-charge-hsn-${ci}`} />
-                        <Select
-                          value={String(c.gst_rate ?? 18)}
-                          onValueChange={(v) => setForm(f => ({
-                            ...f,
-                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, gst_rate: parseFloat(v) } : row),
-                          }))}
-                        >
-                          <SelectTrigger className="bg-white text-xs h-8" data-testid={`ti-additional-charge-gst-${ci}`}><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {[0,5,12,18,28].map(r => <SelectItem key={r} value={String(r)}>{r}%</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                        <input
-                          type="number" min="0" step="0.01"
-                          value={vt === 'percent' ? Math.round(amt * 100) / 100 : raw}
-                          onChange={(e) => {
-                            const raw2 = parseFloat(e.target.value) || 0;
-                            setForm(f => ({
-                              ...f,
-                              additional_charges: f.additional_charges.map((row, i) => i === ci ? {
-                                ...row,
-                                value_type: 'amount',
-                                value: raw2,
-                                amount: raw2,
-                              } : row),
-                            }));
-                          }}
-                          className="input-field bg-white text-xs h-8 mono"
-                          data-testid={`ti-additional-charge-amount-${ci}`}
-                        />
-                        <div className="text-right mono text-xs font-medium text-[#374151]">{formatCurrency(taxAmt, form.currency)}</div>
-                        <button
-                          type="button"
-                          onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
-                          className="p-1 text-[#9B1C1C] hover:bg-[#FDE8E8] rounded"
-                          title="Remove charge"
-                          data-testid={`ti-additional-charge-remove-${ci}`}
-                        ><X className="w-3.5 h-3.5" /></button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
             {/* Totals */}
             <div className="flex justify-end">
               <div className="w-[480px] border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB] text-sm space-y-1">
                 <div className="flex justify-between"><span className="text-[#4B5563]">Subtotal</span><span className="mono pr-8">{formatCurrency(totals.subtotal, form.currency)}</span></div>
                 {totals.totalDiscount > 0 && <div className="flex justify-between"><span className="text-[#4B5563]">Discount</span><span className="mono pr-8">-{formatCurrency(totals.totalDiscount, form.currency)}</span></div>}
-                {/* Additional Charges summary — detailed entries are in the
-                    PO-style table above this totals box. */}
-                {totals.additionalCharges > 0 && (
-                  <div className="flex justify-between"><span className="text-[#4B5563]">Additional Charges</span><span className="mono pr-8">{formatCurrency(totals.additionalCharges, form.currency)}</span></div>
-                )}
+                {/* ---- Additional Charges (after global discount, before GST) ----
+                    INLINE single-row layout matching Global Discount. */}
+                {(form.additional_charges || []).map((c, ci) => {
+                  const vt = c.value_type || 'amount';
+                  const raw = parseFloat(c.value ?? c.amount) || 0;
+                  const symC = CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹';
+                  const resolved = vt === 'percent' ? (totals.subtotal * raw / 100) : raw;
+                  const equivPct = (vt === 'amount' && totals.subtotal > 0 && raw > 0) ? (raw / totals.subtotal * 100) : null;
+                  const equivAmt = (vt === 'percent' && raw > 0) ? resolved : null;
+                  return (
+                  <div key={`ti-ac-${ci}`} className="flex justify-between items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 my-1 gap-2" data-testid={`ti-additional-charge-row-${ci}`}>
+                    <div className="flex-1 min-w-0">
+                      <select
+                        className="bg-transparent border-0 outline-none w-full text-[#374151] font-semibold text-xs cursor-pointer px-0 py-0 truncate focus:bg-white focus:border focus:border-[#D1D5DB] focus:rounded focus:px-1"
+                        value={c.charge_id || ''}
+                        onChange={(e) => {
+                          const m = additionalChargesMaster.find(x => x.id === e.target.value);
+                          setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? {
+                              ...row,
+                              charge_id: m?.id || '',
+                              name: m?.name || row.name || '',
+                              hsn_code: m?.hsn_code ?? row.hsn_code ?? '',
+                              gst_rate: m?.gst_rate ?? row.gst_rate ?? 18,
+                            } : row),
+                          }));
+                        }}
+                        data-testid={`ti-additional-charge-select-${ci}`}
+                        title={c.name || 'Select charge'}
+                      >
+                        <option value="">— select charge —</option>
+                        {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </select>
+                      {(equivPct != null || equivAmt != null) && (
+                        <div className="text-[10px] text-[#6B7280] mt-0.5 leading-none">
+                          {equivPct != null && <>(={equivPct.toFixed(2)}%)</>}
+                          {equivAmt != null && <>(={formatCurrency(equivAmt, form.currency)})</>}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden" role="tablist">
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={vt === 'amount'}
+                          onClick={() => setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'amount' } : row),
+                          }))}
+                          className={`h-7 w-9 text-sm font-semibold mono transition-colors ${vt === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                          data-testid={`ti-additional-charge-mode-amount-${ci}`}
+                          title="Charge as currency amount"
+                        >{symC}</button>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={vt === 'percent'}
+                          onClick={() => setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'percent' } : row),
+                          }))}
+                          className={`h-7 w-9 text-sm font-semibold mono transition-colors border-l border-[#D1D5DB] ${vt === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                          data-testid={`ti-additional-charge-mode-percent-${ci}`}
+                          title="Charge as % of subtotal (after line discount)"
+                        >%</button>
+                      </div>
+                      <input
+                        type="number" min="0" step="0.01"
+                        className="input-field h-7 text-xs px-2 py-0 w-32 mono"
+                        style={{ textAlign: 'right' }}
+                        placeholder={vt === 'percent' ? '%' : 'Amount'}
+                        value={c.value ?? c.amount ?? 0}
+                        onChange={(e) => {
+                          const raw2 = parseFloat(e.target.value) || 0;
+                          setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value: raw2 } : row),
+                          }));
+                        }}
+                        data-testid={`ti-additional-charge-amount-${ci}`}
+                      />
+                      <button
+                        type="button"
+                        className="text-[#9B1C1C] w-6 h-7 flex items-center justify-center hover:bg-[#FDE2E2] rounded shrink-0"
+                        onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
+                        title="Remove charge"
+                        data-testid={`ti-additional-charge-remove-${ci}`}
+                      ><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  </div>
+                  );
+                })}
+                <div className="flex items-center justify-between text-[11px] pt-0.5">
+                  <button
+                    type="button"
+                    className="text-[#1D3557] hover:underline font-medium"
+                    onClick={() => setForm(f => ({
+                      ...f,
+                      additional_charges: [...(f.additional_charges || []), { charge_id: '', name: '', hsn_code: '', gst_rate: 18, value_type: 'amount', value: 0, amount: 0 }],
+                    }))}
+                    data-testid="ti-add-additional-charge-btn"
+                  >+ Add Additional Charge</button>
+                  {totals.additionalCharges > 0 && (
+                    <span className="text-[#374151] pr-8">Charges: <span className="mono">{formatCurrency(totals.additionalCharges, form.currency)}</span></span>
+                  )}
+                </div>
                 {(form.currency || 'INR') === 'INR' && (
                   <div className="flex justify-between"><span className="text-[#4B5563]">GST</span><span className="mono pr-8">{formatCurrency(totals.totalGst, form.currency)}</span></div>
                 )}
@@ -5156,44 +5146,6 @@ ${(isQuotation && opts.includeCover) ? `
     <tbody>${rows || '<tr><td colspan="9" style="text-align:center;padding:20px">No line items</td></tr>'}</tbody>
   </table>
 
-  ${(() => {
-    // PO-style Additional Charges table — separate, above totals.
-    // Columns: Charge | HSN | Amount | GST% | GST Amt (GST cols hidden for export docs).
-    const acRows = (Array.isArray(doc.additional_charges) ? doc.additional_charges : [])
-      .filter(c => (c.amount || 0) > 0);
-    if (acRows.length === 0) return '';
-    const showGSTCols = !isExportDoc;
-    const bodyRows = acRows.map(c => {
-      const amt = c.amount || 0;
-      const taxAmt = c.tax_amount != null ? c.tax_amount : (amt * (c.gst_rate || 0) / 100);
-      return `<tr>
-        <td>${esc(c.name || 'Additional Charge')}</td>
-        <td class="mono">${esc(c.hsn_code || '')}</td>
-        <td class="right mono">${sym}${fa(amt)}</td>
-        ${showGSTCols ? `<td class="right">${(c.gst_rate || 0)}%</td>
-        <td class="right mono">${sym}${fa(taxAmt)}</td>` : ''}
-      </tr>`;
-    }).join('');
-    return `<h4 class="section">Additional Charges</h4>
-    <table class="items charges-tbl">
-      <colgroup>
-        <col style="width:${showGSTCols ? '45%' : '60%'}">
-        <col style="width:${showGSTCols ? '15%' : '20%'}">
-        <col style="width:${showGSTCols ? '15%' : '20%'}">
-        ${showGSTCols ? '<col style="width:10%"><col style="width:15%">' : ''}
-      </colgroup>
-      <thead>
-        <tr>
-          <th>Charge</th>
-          <th class="center">HSN</th>
-          <th class="right">Amount</th>
-          ${showGSTCols ? '<th class="right">GST%</th><th class="right">GST Amt</th>' : ''}
-        </tr>
-      </thead>
-      <tbody>${bodyRows}</tbody>
-    </table>`;
-  })()}
-
   <!-- Bank + Totals -->
   <div class="bottom-row">
     <div class="bank-block">
@@ -5209,15 +5161,10 @@ ${(isQuotation && opts.includeCover) ? `
       <tr><td class="lbl">Subtotal (after line discount)</td><td class="val">${sym}${fa(doc.subtotal || 0)}</td></tr>
       ${doc.global_discount_amount ? `<tr><td class="lbl">Global Discount${doc.global_discount_type === 'percent' && doc.global_discount_value ? ` (${doc.global_discount_value}%)` : ''}</td><td class="val">-${sym}${fa(doc.global_discount_amount)}</td></tr>` : ''}
       ${doc.global_discount_amount ? `<tr><td class="lbl">Net Subtotal</td><td class="val">${sym}${fa(doc.net_subtotal || 0)}</td></tr>` : ''}
-      ${(() => {
-        // Single "Additional Charges" summary line (detailed breakdown is in the
-        // PO-style table above the totals box).
-        const totalCharges = (Array.isArray(doc.additional_charges) ? doc.additional_charges : [])
-          .reduce((s, c) => s + (c.amount || 0), 0);
-        return totalCharges > 0
-          ? `<tr><td class="lbl">Additional Charges</td><td class="val">${sym}${fa(totalCharges)}</td></tr>`
-          : '';
-      })()}
+      ${(Array.isArray(doc.additional_charges) ? doc.additional_charges : [])
+        .filter(c => (c.amount || 0) > 0)
+        .map(c => `<tr><td class="lbl">${esc(c.name || 'Additional Charge')}${c.hsn_code ? ` <span style="font-size:9px;color:#64748b">(HSN ${esc(c.hsn_code)}${(!isExportDoc && (c.gst_rate || 0) > 0) ? `, ${(c.gst_rate || 0)}% GST` : ''})</span>` : ''}</td><td class="val">${sym}${fa(c.amount || 0)}</td></tr>`)
+        .join('')}
       ${isExportDoc ? '' : (isInter
         ? `<tr><td class="lbl">IGST</td><td class="val">${sym}${fa(doc.igst || 0)}</td></tr>`
         : `<tr><td class="lbl">CGST</td><td class="val">${sym}${fa(doc.cgst || 0)}</td></tr><tr><td class="lbl">SGST</td><td class="val">${sym}${fa(doc.sgst || 0)}</td></tr>`)
