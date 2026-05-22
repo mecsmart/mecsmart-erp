@@ -1673,68 +1673,64 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   </tfoot>
                 </table>
               </div>
+              {/* All totals rows use the SAME 3-col CSS grid so every right
+                  edge — values, inputs, X buttons — aligns at the line items
+                  "Total" column. Col 1 = label/select (flex), Col 2 = ₹/%
+                  toggle (78px fixed), Col 3 = value/input (96px fixed, right-
+                  aligned). X buttons on charge rows are absolute-positioned
+                  outside the right edge so they don't push col 3 left. */}
               <div className="flex justify-end mt-2 text-xs">
-                <div className="w-[480px] space-y-1">
-                  <div className="flex justify-between"><span>Subtotal (after line discount):</span><span className="mono pr-8">{formatCurrency(totals.sub, form.currency)}</span></div>
+                <div className="grid w-[440px] gap-x-2 gap-y-1 items-center" style={{ gridTemplateColumns: '1fr 78px 96px' }}>
+                  {/* Subtotal row */}
+                  <span className="col-span-2 whitespace-nowrap">Subtotal (after line discount):</span>
+                  <span className="mono text-right">{formatCurrency(totals.sub, form.currency)}</span>
                   {/* Global (footer) discount — % or absolute amount, applied AFTER line discounts and BEFORE GST.
                       UI: a clear two-button toggle (Currency / Percent) instead of a cramped <select> that truncated
                       the option label. The active mode's symbol also prefixes the input value for unambiguous reading. */}
-                  <div className="flex items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 my-1 gap-2">
-                    <span className="text-[#374151] font-semibold whitespace-nowrap flex-1 text-xs">Global Discount:</span>
-                      <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden" role="tablist">
-                        <button
-                          type="button"
-                          role="tab"
-                          aria-selected={(form.global_discount_type || 'amount') === 'amount'}
-                          onClick={() => setForm(f => ({ ...f, global_discount_type: 'amount' }))}
-                          className={`h-7 w-9 text-sm font-semibold mono transition-colors ${(form.global_discount_type || 'amount') === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
-                          data-testid="quotation-global-discount-mode-amount"
-                          title="Discount as currency amount"
-                        >
-                          {CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'}
-                        </button>
-                        <button
-                          type="button"
-                          role="tab"
-                          aria-selected={form.global_discount_type === 'percent'}
-                          onClick={() => setForm(f => ({ ...f, global_discount_type: 'percent' }))}
-                          className={`h-7 w-9 text-sm font-semibold mono transition-colors border-l border-[#D1D5DB] ${form.global_discount_type === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
-                          data-testid="quotation-global-discount-mode-percent"
-                          title="Discount as percentage of subtotal"
-                        >
-                          %
-                        </button>
-                      </div>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="input-field h-7 text-xs px-2 py-0 w-32 mono"
-                        style={{ textAlign: 'right' }}
-                        value={form.global_discount_value || 0}
-                        onChange={(e) => setForm(f => ({ ...f, global_discount_value: parseFloat(e.target.value) || 0 }))}
-                        data-testid="quotation-global-discount-value"
-                      />
-                      {/* Phantom 24px spacer matching the X remove button on additional charge rows.
-                          Keeps Global Discount input edge perfectly aligned with the charge inputs' edges. */}
-                      <span className="w-6 h-7 shrink-0" aria-hidden="true" />
-                  </div>
-                  {totals.globalDiscount > 0 && (
-                    <div className="flex justify-between text-[#9B1C1C]">
-                      <span>Global Discount Applied:</span>
-                      <span className="mono pr-8">-{formatCurrency(totals.globalDiscount, form.currency)}</span>
+                  {/* Global Discount row — toggle in col 2, input in col 3 */}
+                  <span className="text-[#374151] font-semibold whitespace-nowrap text-xs col-start-1 bg-[#F9FAFB] border-l border-y border-[#E5E7EB] rounded-l-sm px-2 py-1 -mr-2 flex items-center">Global Discount:</span>
+                  <div className="bg-[#F9FAFB] border-y border-[#E5E7EB] py-1 flex items-center justify-center">
+                    <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden" role="tablist">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={(form.global_discount_type || 'amount') === 'amount'}
+                        onClick={() => setForm(f => ({ ...f, global_discount_type: 'amount' }))}
+                        className={`h-7 w-9 text-sm font-semibold mono transition-colors ${(form.global_discount_type || 'amount') === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                        data-testid="quotation-global-discount-mode-amount"
+                        title="Discount as currency amount"
+                      >{CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹'}</button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={form.global_discount_type === 'percent'}
+                        onClick={() => setForm(f => ({ ...f, global_discount_type: 'percent' }))}
+                        className={`h-7 w-9 text-sm font-semibold mono transition-colors border-l border-[#D1D5DB] ${form.global_discount_type === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                        data-testid="quotation-global-discount-mode-percent"
+                        title="Discount as percentage of subtotal"
+                      >%</button>
                     </div>
-                  )}
-                  {totals.globalDiscount > 0 && (
-                    <div className="flex justify-between"><span>Net Subtotal:</span><span className="mono pr-8">{formatCurrency(totals.netSub, form.currency)}</span></div>
-                  )}
-                  {/* ---- Additional Charges (after global discount, before GST) ----
-                      INLINE single-row layout matching Global Discount visually:
-                        [name label]  [₹/% toggle]  [w-24 amount input]  [✕]
-                      The name slot is a borderless `<select>` styled like text
-                      so it doesn't dominate the row but still allows changing
-                      the charge. Sub-text `(=X%)` / `(=₹X)` shows the
-                      conversion in the opposite unit for transparency. */}
+                  </div>
+                  <div className="bg-[#F9FAFB] border-r border-y border-[#E5E7EB] rounded-r-sm py-1 px-2 -ml-2 flex items-center">
+                    <input
+                      type="number" min="0" step="0.01"
+                      className="input-field h-7 text-xs px-2 py-0 w-full mono"
+                      style={{ textAlign: 'right' }}
+                      value={form.global_discount_value || 0}
+                      onChange={(e) => setForm(f => ({ ...f, global_discount_value: parseFloat(e.target.value) || 0 }))}
+                      data-testid="quotation-global-discount-value"
+                    />
+                  </div>
+
+                  {/* Global Discount Applied + Net Subtotal */}
+                  {totals.globalDiscount > 0 && (<>
+                    <span className="col-span-2 whitespace-nowrap text-[#9B1C1C]">Global Discount Applied:</span>
+                    <span className="mono text-right text-[#9B1C1C]">-{formatCurrency(totals.globalDiscount, form.currency)}</span>
+                    <span className="col-span-2 whitespace-nowrap">Net Subtotal:</span>
+                    <span className="mono text-right">{formatCurrency(totals.netSub, form.currency)}</span>
+                  </>)}
+
+                  {/* Additional Charges — same 3-col grid */}
                   {(form.additional_charges || []).map((c, ci) => {
                     const vt = c.value_type || 'amount';
                     const raw = parseFloat(c.value ?? c.amount) || 0;
@@ -1743,8 +1739,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                     const equivPct = (vt === 'amount' && totals.sub > 0 && raw > 0) ? (raw / totals.sub * 100) : null;
                     const equivAmt = (vt === 'percent' && raw > 0) ? resolved : null;
                     return (
-                    <div key={`ac-${ci}`} className="flex justify-between items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 my-1 gap-2" data-testid={`additional-charge-row-${ci}`}>
-                      <div className="flex-1 min-w-0">
+                    <React.Fragment key={`ac-${ci}`}>
+                      <div className="col-start-1 bg-[#F9FAFB] border-l border-y border-[#E5E7EB] rounded-l-sm px-2 py-1 -mr-2 flex flex-col justify-center" data-testid={`additional-charge-row-${ci}`}>
                         <select
                           className="bg-transparent border-0 outline-none w-full text-[#374151] font-semibold text-xs cursor-pointer px-0 py-0 truncate focus:bg-white focus:border focus:border-[#D1D5DB] focus:rounded focus:px-1"
                           value={c.charge_id || ''}
@@ -1776,7 +1772,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                           </div>
                         )}
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="bg-[#F9FAFB] border-y border-[#E5E7EB] py-1 flex items-center justify-center">
                         <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden" role="tablist">
                           <button
                             type="button"
@@ -1803,9 +1799,11 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                             title="Charge as % of subtotal (after line discount)"
                           >%</button>
                         </div>
+                      </div>
+                      <div className="relative bg-[#F9FAFB] border-r border-y border-[#E5E7EB] rounded-r-sm py-1 px-2 -ml-2 flex items-center">
                         <input
                           type="number" min="0" step="0.01"
-                          className="input-field h-7 text-xs px-2 py-0 w-32 mono"
+                          className="input-field h-7 text-xs px-2 py-0 w-full mono"
                           style={{ textAlign: 'right' }}
                           placeholder={vt === 'percent' ? '%' : 'Amount'}
                           value={c.value ?? c.amount ?? 0}
@@ -1818,37 +1816,42 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                           }}
                           data-testid={`additional-charge-amount-${ci}`}
                         />
+                        {/* X button positioned ABSOLUTELY outside the right edge */}
                         <button
                           type="button"
-                          className="text-[#9B1C1C] w-6 h-7 flex items-center justify-center hover:bg-[#FDE2E2] rounded shrink-0"
+                          className="absolute top-1/2 left-full -translate-y-1/2 ml-1 text-[#9B1C1C] w-6 h-6 flex items-center justify-center hover:bg-[#FDE2E2] rounded"
                           onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
                           title="Remove charge"
                           data-testid={`additional-charge-remove-${ci}`}
                         ><X className="w-3.5 h-3.5" /></button>
                       </div>
-                    </div>
+                    </React.Fragment>
                     );
                   })}
-                  <div className="flex items-center justify-between text-[11px]">
-                    <button
-                      type="button"
-                      className="text-[#1D3557] hover:underline font-medium"
-                      onClick={() => setForm(f => ({
-                        ...f,
-                        additional_charges: [...(f.additional_charges || []), { charge_id: '', name: '', hsn_code: '', gst_rate: 18, value_type: 'amount', value: 0, amount: 0 }],
-                      }))}
-                      data-testid="add-additional-charge-btn"
-                    >+ Add Additional Charge</button>
-                    {totals.additionalCharges > 0 && (
-                      <span className="text-[#374151] pr-8">Charges total: <span className="mono">{formatCurrency(totals.additionalCharges, form.currency)}</span></span>
-                    )}
-                  </div>
-                  {(form.currency || 'INR') === 'INR' && (
-                    <div className="flex justify-between"><span>GST:</span><span className="mono pr-8">{formatCurrency(totals.gst, form.currency)}</span></div>
-                  )}
-                  <div className="flex justify-between font-semibold border-t border-[#E5E7EB] pt-1"><span>Grand Total:</span><span className="mono pr-8">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.total : (totals.netSub + (totals.additionalCharges || 0)), form.currency)}</span></div>
+
+                  {/* "+ Add Additional Charge" + running total */}
+                  <button
+                    type="button"
+                    className="col-span-2 text-left text-[#1D3557] hover:underline font-medium text-[11px]"
+                    onClick={() => setForm(f => ({
+                      ...f,
+                      additional_charges: [...(f.additional_charges || []), { charge_id: '', name: '', hsn_code: '', gst_rate: 18, value_type: 'amount', value: 0, amount: 0 }],
+                    }))}
+                    data-testid="add-additional-charge-btn"
+                  >+ Add Additional Charge</button>
+                  <span className="text-right mono text-[11px] text-[#374151]">
+                    {totals.additionalCharges > 0 ? `Charges: ${formatCurrency(totals.additionalCharges, form.currency)}` : '\u00A0'}
+                  </span>
+
+                  {/* GST + Grand Total */}
+                  {(form.currency || 'INR') === 'INR' && (<>
+                    <span className="col-span-2 whitespace-nowrap">GST:</span>
+                    <span className="mono text-right">{formatCurrency(totals.gst, form.currency)}</span>
+                  </>)}
+                  <span className="col-span-2 whitespace-nowrap font-semibold border-t border-[#E5E7EB] pt-1">Grand Total:</span>
+                  <span className="mono text-right font-semibold border-t border-[#E5E7EB] pt-1">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.total : (totals.netSub + (totals.additionalCharges || 0)), form.currency)}</span>
                   {(form.currency || 'INR') !== 'INR' && (
-                    <div className="text-[10px] text-[#6B7280] italic">Export/Import — GST not applicable. Currency: {form.currency}</div>
+                    <span className="col-span-3 text-[10px] text-[#6B7280] italic">Export/Import — GST not applicable. Currency: {form.currency}</span>
                   )}
                 </div>
               </div>

@@ -19,6 +19,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 21.7 — CSS Grid totals layout: ALL right edges aligned + toggles vertically aligned — DONE ✅):**
+  1. **Restructured the entire totals area as a single CSS Grid** with `gridTemplateColumns: '1fr 78px 96px'`. ALL rows — Subtotal, Global Discount, Charges, GST, Grand Total — share the exact same 3-column structure. Result: every value/input right edge sits at the exact same x-position (matches the line items "Total" column).
+  2. **₹/% toggles vertically aligned** — col 2 is fixed 78px on EVERY row, so the toggle pills on Global Discount, Insurance, P&F Charges line up vertically column-perfect.
+  3. **Reduced amount input width** — from `w-32` (128px) to `w-full` inside a 96px grid column (~96px). The 32px space saved goes to col 1 (the name/label) which is `1fr` and grows.
+  4. **X buttons absolutely positioned** at `left-full ml-1` so they sit outside the input's right edge but don't shrink col 3 or break alignment. The pseudo-bordered group (left border + top/bottom border on cols, right border on col 3) gives the row a continuous "input field" look while keeping col widths consistent.
+  5. **No more `pr-X` hacks** — since every column is the same width on every row, displayed values (Subtotal/GST/Grand Total) just go in col 3 with `text-right` and naturally align with input edges. Removed the `pr-7`/`pr-8` padding workarounds.
+  6. **Totals box** width tightened to `w-[440px]` (was 480) — looks cleaner.
+
 - **2026-02-22 (Round 21.6 — Global Discount + Charge rows fully right-edge aligned, narrower amount column — DONE ✅):**
   1. **Phantom 24px spacer after Global Discount input** — added `<span className="w-6 h-7" aria-hidden="true" />` after the GD input so its right edge sits at the same x-position as the charge inputs (which have a 24px X-remove button after).
   2. **Reduced amount input width** from `w-40` (160px) to `w-32` (128px) on both Global Discount AND Additional Charge rows. Gives more space to the charge name dropdown / label.
