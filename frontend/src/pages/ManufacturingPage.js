@@ -2725,15 +2725,26 @@ export default function ManufacturingPage() {
                 {/* Recovery: re-evaluates the MO's overall status from the
                     current ops. Helps users unstick MOs whose status is
                     stuck on 'in_progress' even though all ops are done
-                    (legacy short-close paths that pre-date the auto-sync). */}
-                {jobCardWO.status === 'in_progress' && (jobCardWO.operations_status || []).every(o => o.status === 'completed') && (
+                    (legacy short-close paths that pre-date the auto-sync).
+                    Shown for ANY in-progress MO so users can also fix MOs
+                    that have short-closed (but status≠completed) ops. */}
+                {jobCardWO.status === 'in_progress' && (jobCardWO.operations_status || []).every(o => o.status === 'completed' || o.short_closed === true) && (
                   <button
                     onClick={async () => {
                       try {
                         const { data } = await api.post(`/api/work-orders/${jobCardWO.id}/sync-status`);
                         if (data.changed) {
                           toast.success(`MO status updated to ${data.new_status}`);
-                          setJobCardWO({ ...jobCardWO, status: data.new_status });
+                          // Re-fetch the WO so the dialog reflects the fresh
+                          // status, actual_end and healed operations (legacy
+                          // short-closed ops get their status flipped to
+                          // 'completed' on the server when promotion happens).
+                          try {
+                            const fresh = await api.get(`/api/work-orders/${jobCardWO.id}`);
+                            setJobCardWO(fresh.data);
+                          } catch {
+                            setJobCardWO({ ...jobCardWO, status: data.new_status });
+                          }
                           fetchWOs();
                         } else {
                           toast.info('MO status is already up-to-date');

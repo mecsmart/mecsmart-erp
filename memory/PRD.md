@@ -19,6 +19,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 28 — Sync MO Status now heals legacy short-closes + refreshes UI immediately — DONE ✅):**
+  1. **Legacy short-close ops weren't recognized** — `_recompute_wo_status_after_op_change` only treated ops with `status=='completed'` as terminal. Older short-close paths (pre-Round 27) had marked ops with `short_closed=True` but never flipped their status. Helper now also treats `short_closed=True` as effectively completed, and as part of the WO promotion it back-fills `status='completed'` on those legacy ops so they display consistently as Done.
+  2. **Job Card button visibility fixed** — Was only shown when every op had `status=='completed'`. Now also shown when ops have `short_closed=true` (the actual legacy stuck state).
+  3. **Immediate UI refresh after sync** — Frontend now re-fetches the WO (`GET /api/work-orders/{id}`) right after a successful sync and updates `jobCardWO` with the fresh data, so the dialog reflects the new status/actual_end/healed ops without requiring a page reload.
+  4. Verified end-to-end via curl simulation of the exact MO-000163 bug pattern (status=in_progress, ops with short_closed=true but status=in_progress) — `/sync-status` correctly promoted MO to `completed` AND healed both ops' status to `completed`.
+
+
 - **2026-02-22 (Round 27 — MO stuck in "in_progress" after short-close — FIXED ✅):**
   1. **Root cause** — The `/work-orders/{id}/operations/{seq}/short-close-no-grn` endpoint (both op-level path at line ~7053 and per-vendor path at line ~6993) was mutating `operations_status` and marking the target op as `completed`, but NEVER re-evaluating the parent WO's overall status. As a result, MOs whose last pending op was short-closed without a GRN stayed stuck on `in_progress` indefinitely. The user's MO-000163 was the visible symptom.
   2. **Fix — new shared helper `_recompute_wo_status_after_op_change(wo_id)`** (server.py ~line 6630). Mirrors the inline status-derivation logic from `PUT /work-orders/{id}/operations/{seq}` (line ~8463): when every op is `completed` AND no blockers (subcontract MO with un-fulfilled SC; or job-work op with `outsource_status="sent"`), the WO is auto-promoted to `completed` with `actual_end` and `quantity_completed` set. Wired into both short-close-no-grn branches.

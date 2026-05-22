@@ -6653,8 +6653,18 @@ async def _recompute_wo_status_after_op_change(wo_id: str) -> Optional[str]:
     if not operations:
         return None
     current = wo.get("status")
-    all_completed = all(op.get("status") == "completed" for op in operations)
-    any_active = any(op.get("status") in ("in_progress", "completed", "stopped") for op in operations)
+    # An op is "effectively completed" if its status is `completed` OR it
+    # was short-closed (short_closed=True). Legacy short-close paths used
+    # to leave the op status as 'in_progress' while flipping short_closed,
+    # so we treat both as terminal here when deciding the MO's overall
+    # status.
+    def _op_done(op):
+        return op.get("status") == "completed" or op.get("short_closed") is True
+    all_completed = all(_op_done(op) for op in operations)
+    any_active = any(
+        op.get("status") in ("in_progress", "completed", "stopped") or op.get("short_closed") is True
+        for op in operations
+    )
 
     new_status = current
     if all_completed:
@@ -6679,6 +6689,18 @@ async def _recompute_wo_status_after_op_change(wo_id: str) -> Optional[str]:
     if new_status == "completed":
         update_payload["actual_end"] = datetime.now(timezone.utc)
         update_payload["quantity_completed"] = wo.get("quantity", 0)
+        # Heal legacy short-closed ops whose status was never flipped to
+        # 'completed' by the old short-close paths — so the UI shows them
+        # consistently as Done.
+        healed_ops = []
+        any_healed = False
+        for op in operations:
+            if op.get("short_closed") and op.get("status") != "completed":
+                op = {**op, "status": "completed"}
+                any_healed = True
+            healed_ops.append(op)
+        if any_healed:
+            update_payload["operations_status"] = healed_ops
     await db.work_orders.update_one({"id": wo_id}, {"$set": update_payload})
     return new_status
 
