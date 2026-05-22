@@ -1660,7 +1660,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                 </table>
               </div>
               <div className="flex justify-end mt-2 text-xs">
-                <div className="w-72 space-y-1">
+                <div className="w-96 space-y-1">
                   <div className="flex justify-between"><span>Subtotal (after line discount):</span><span className="mono">{formatCurrency(totals.sub, form.currency)}</span></div>
                   {/* Global (footer) discount — % or absolute amount, applied AFTER line discounts and BEFORE GST.
                       UI: a clear two-button toggle (Currency / Percent) instead of a cramped <select> that truncated
@@ -1712,11 +1712,18 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   {totals.globalDiscount > 0 && (
                     <div className="flex justify-between"><span>Net Subtotal:</span><span className="mono">{formatCurrency(totals.netSub, form.currency)}</span></div>
                   )}
-                  {/* ---- Additional Charges (after global discount, before GST) ---- */}
-                  {(form.additional_charges || []).map((c, ci) => (
-                    <div key={`ac-${ci}`} className="border border-[#E5E7EB] bg-white rounded-sm px-2 py-1.5 space-y-1" data-testid={`additional-charge-row-${ci}`}>
+                  {/* ---- Additional Charges (after global discount, before GST) ----
+                      One INLINE row per charge — mirrors the Global Discount UI:
+                      [name dropdown] [₹/%] [value input] [✕]. % is computed from
+                      the post-line-discount subtotal (matches the "Subtotal" row
+                      shown above). */}
+                  {(form.additional_charges || []).map((c, ci) => {
+                    const vt = c.value_type || 'amount';
+                    const sym = CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹';
+                    return (
+                    <div key={`ac-${ci}`} className="flex items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 gap-2" data-testid={`additional-charge-row-${ci}`}>
                       <select
-                        className="input-field h-7 text-xs px-2 py-0 w-full"
+                        className="input-field h-7 text-xs px-1.5 py-0 flex-1 min-w-0"
                         value={c.charge_id || ''}
                         onChange={(e) => {
                           const m = additionalChargesMaster.find(x => x.id === e.target.value);
@@ -1732,41 +1739,68 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                           }));
                         }}
                         data-testid={`additional-charge-select-${ci}`}
+                        title={c.name || 'Select charge'}
                       >
                         <option value="">— select charge —</option>
                         {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
                           <option key={m.id} value={m.id}>{m.name} ({(m.gst_rate ?? 0)}% GST)</option>
                         ))}
                       </select>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number" min="0" step="0.01"
-                          className="input-field h-7 text-xs px-2 py-0 flex-1 mono text-right"
-                          placeholder="Amount"
-                          value={c.amount || 0}
-                          onChange={(e) => setForm(f => ({
-                            ...f,
-                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, amount: parseFloat(e.target.value) || 0 } : row),
-                          }))}
-                          data-testid={`additional-charge-amount-${ci}`}
-                        />
+                      <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden shrink-0" role="tablist">
                         <button
                           type="button"
-                          className="text-[#9B1C1C] p-1 hover:bg-[#FDE2E2] rounded"
-                          onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
-                          title="Remove charge"
-                          data-testid={`additional-charge-remove-${ci}`}
-                        ><X className="w-3.5 h-3.5" /></button>
+                          aria-selected={vt === 'amount'}
+                          onClick={() => setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'amount' } : row),
+                          }))}
+                          className={`h-7 w-7 text-xs font-semibold mono transition-colors ${vt === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                          data-testid={`additional-charge-mode-amount-${ci}`}
+                          title="Charge as currency amount"
+                        >{sym}</button>
+                        <button
+                          type="button"
+                          aria-selected={vt === 'percent'}
+                          onClick={() => setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'percent' } : row),
+                          }))}
+                          className={`h-7 w-7 text-xs font-semibold transition-colors ${vt === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                          data-testid={`additional-charge-mode-percent-${ci}`}
+                          title="Charge as % of subtotal (after line discount)"
+                        >%</button>
                       </div>
+                      <input
+                        type="number" min="0" step="0.01"
+                        className="input-field h-7 text-xs px-2 py-0 w-20 mono text-right shrink-0"
+                        placeholder={vt === 'percent' ? '%' : 'Amount'}
+                        value={c.value ?? c.amount ?? 0}
+                        onChange={(e) => {
+                          const raw = parseFloat(e.target.value) || 0;
+                          setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value: raw } : row),
+                          }));
+                        }}
+                        data-testid={`additional-charge-amount-${ci}`}
+                      />
+                      <button
+                        type="button"
+                        className="text-[#9B1C1C] p-1 hover:bg-[#FDE2E2] rounded shrink-0"
+                        onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
+                        title="Remove charge"
+                        data-testid={`additional-charge-remove-${ci}`}
+                      ><X className="w-3.5 h-3.5" /></button>
                     </div>
-                  ))}
+                    );
+                  })}
                   <div className="flex items-center justify-between text-[11px]">
                     <button
                       type="button"
                       className="text-[#1D3557] hover:underline font-medium"
                       onClick={() => setForm(f => ({
                         ...f,
-                        additional_charges: [...(f.additional_charges || []), { charge_id: '', name: '', hsn_code: '', gst_rate: 18, amount: 0 }],
+                        additional_charges: [...(f.additional_charges || []), { charge_id: '', name: '', hsn_code: '', gst_rate: 18, value_type: 'amount', value: 0, amount: 0 }],
                       }))}
                       data-testid="add-additional-charge-btn"
                     >+ Add Additional Charge</button>

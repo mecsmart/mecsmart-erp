@@ -13868,15 +13868,20 @@ class AdditionalChargeLine(BaseModel):
 
     `charge_id` (optional) is a soft FK to crm_additional_charges; the master
     name/hsn/gst is snapshotted onto the doc so future edits to the master
-    don't retroactively change historical docs. `amount` is the user-entered
-    pre-GST value. GST on the charge is computed at compute-time using the
-    snapshotted `gst_rate`.
+    don't retroactively change historical docs. `amount` is the resolved
+    pre-GST value used in all totals math. `value_type` + `value` are the
+    INPUT mode (₹ flat or % of post-line-discount subtotal) that the user
+    selected — persisted so the form can re-open in the original mode.
+    GST on the charge is computed at compute-time using the snapshotted
+    `gst_rate`.
     """
     charge_id: Optional[str] = ""
     name: str                                  # e.g. "Packing & Forwarding"
     hsn_code: Optional[str] = ""               # printed in the totals row
     gst_rate: Optional[float] = 18.0
-    amount: float = 0.0                        # pre-GST charge amount
+    value_type: Optional[str] = "amount"       # "amount" | "percent"
+    value: Optional[float] = 0.0               # raw input (₹ or %)
+    amount: float = 0.0                        # resolved pre-GST charge amount
 
 class QuotationCreate(BaseModel):
     lead_id: Optional[str] = ""
@@ -13966,7 +13971,9 @@ def _compute_quotation_totals(lines, global_discount_type: str = "amount", globa
 
 def _normalize_additional_charges(charges):
     """Sanitise the additional_charges list, dropping rows with non-positive
-    amounts. Returns the cleaned list of plain dicts (suitable for storage)."""
+    amounts. Returns the cleaned list of plain dicts (suitable for storage).
+    Preserves value_type / value if the frontend supplied them so the form
+    can re-open in the original ₹/% mode."""
     out = []
     for c in (charges or []):
         if hasattr(c, "model_dump"):
@@ -13981,6 +13988,8 @@ def _normalize_additional_charges(charges):
             "name": (c.get("name") or "").strip() or "Additional Charge",
             "hsn_code": (c.get("hsn_code") or "").strip(),
             "gst_rate": float(c.get("gst_rate") or 0),
+            "value_type": (c.get("value_type") or "amount") if c.get("value_type") in ("amount", "percent") else "amount",
+            "value": float(c.get("value") or amt),
             "amount": round(amt, 2),
         })
     return out
