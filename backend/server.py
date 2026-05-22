@@ -13691,6 +13691,83 @@ async def update_marketing_config(data: MarketingConfigUpdate, request: Request)
     )
     return await get_marketing_config(request)
 
+
+# ---- Additional Charges master (Packing/Forwarding/Insurance/...) ---------
+# These are user-defined named charges with HSN + GST% that can be selected
+# on Quotations/Proformas/Tax Invoices after the global discount. The charge
+# master is shared across all three CRM doc types.
+class AdditionalChargeCreate(BaseModel):
+    name: str
+    hsn_code: Optional[str] = ""
+    gst_rate: Optional[float] = 18.0
+    is_active: Optional[bool] = True
+    sort_order: Optional[int] = 100
+
+class AdditionalChargeUpdate(BaseModel):
+    name: Optional[str] = None
+    hsn_code: Optional[str] = None
+    gst_rate: Optional[float] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+@crm_router.get("/additional-charges")
+async def list_additional_charges(request: Request):
+    await get_current_user(request)
+    docs = await db.crm_additional_charges.find({}, {"_id": 0}).sort([("sort_order", 1), ("name", 1)]).to_list(500)
+    return docs
+
+@crm_router.post("/additional-charges", status_code=201)
+async def create_additional_charge(data: AdditionalChargeCreate, request: Request):
+    user = await get_current_user(request)
+    _require_access(user, ["admin"], module="marketing_configuration", action="create")
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "hsn_code": (data.hsn_code or "").strip(),
+        "gst_rate": float(data.gst_rate or 0),
+        "is_active": bool(data.is_active) if data.is_active is not None else True,
+        "sort_order": int(data.sort_order or 100),
+        "created_at": datetime.now(timezone.utc),
+        "created_by": user["id"],
+    }
+    await db.crm_additional_charges.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@crm_router.put("/additional-charges/{cid}")
+async def update_additional_charge(cid: str, data: AdditionalChargeUpdate, request: Request):
+    user = await get_current_user(request)
+    _require_access(user, ["admin"], module="marketing_configuration", action="edit")
+    existing = await db.crm_additional_charges.find_one({"id": cid})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Additional charge not found")
+    update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
+    if "name" in update:
+        update["name"] = (update["name"] or "").strip()
+        if not update["name"]:
+            raise HTTPException(status_code=400, detail="Name cannot be blank")
+    if "hsn_code" in update:
+        update["hsn_code"] = (update["hsn_code"] or "").strip()
+    if "gst_rate" in update:
+        update["gst_rate"] = float(update["gst_rate"] or 0)
+    update["updated_at"] = datetime.now(timezone.utc)
+    await db.crm_additional_charges.update_one({"id": cid}, {"$set": update})
+    fresh = await db.crm_additional_charges.find_one({"id": cid}, {"_id": 0})
+    return fresh
+
+@crm_router.delete("/additional-charges/{cid}")
+async def delete_additional_charge(cid: str, request: Request):
+    user = await get_current_user(request)
+    _require_access(user, ["admin"], module="marketing_configuration", action="delete")
+    res = await db.crm_additional_charges.delete_one({"id": cid})
+    if not res.deleted_count:
+        raise HTTPException(status_code=404, detail="Additional charge not found")
+    return {"message": "Additional charge deleted"}
+
+
 @crm_router.put("/pipeline-config/{pipeline_type}")
 async def update_pipeline_config(pipeline_type: str, data: CRMPipelineConfigUpdate, request: Request):
     await get_current_user(request)
@@ -13786,6 +13863,21 @@ class QuotationLine(BaseModel):
     gst_rate: Optional[float] = 18.0
     amount: Optional[float] = 0.0  # (qty * rate) * (1 - discount/100), excl. GST
 
+class AdditionalChargeLine(BaseModel):
+    """One additional charge attached to a Quotation / PI / TI.
+
+    `charge_id` (optional) is a soft FK to crm_additional_charges; the master
+    name/hsn/gst is snapshotted onto the doc so future edits to the master
+    don't retroactively change historical docs. `amount` is the user-entered
+    pre-GST value. GST on the charge is computed at compute-time using the
+    snapshotted `gst_rate`.
+    """
+    charge_id: Optional[str] = ""
+    name: str                                  # e.g. "Packing & Forwarding"
+    hsn_code: Optional[str] = ""               # printed in the totals row
+    gst_rate: Optional[float] = 18.0
+    amount: float = 0.0                        # pre-GST charge amount
+
 class QuotationCreate(BaseModel):
     lead_id: Optional[str] = ""
     customer_id: Optional[str] = ""
@@ -13805,6 +13897,9 @@ class QuotationCreate(BaseModel):
     # per document. type="percent" interprets value as % of subtotal.
     global_discount_type: Optional[str] = "amount"   # "amount" | "percent"
     global_discount_value: Optional[float] = 0.0
+    # User-defined additional charges (Packing/Forwarding/Insurance/etc.) added
+    # AFTER global discount, BEFORE GST. Each charge carries its own HSN + GST%.
+    additional_charges: Optional[List[AdditionalChargeLine]] = []
 
 class QuotationUpdate(BaseModel):
     lead_id: Optional[str] = None
@@ -13822,6 +13917,7 @@ class QuotationUpdate(BaseModel):
     currency: Optional[str] = None
     global_discount_type: Optional[str] = None
     global_discount_value: Optional[float] = None
+    additional_charges: Optional[List[AdditionalChargeLine]] = None
 
 def _compute_quotation_totals(lines, global_discount_type: str = "amount", global_discount_value: float = 0.0):
     subtotal = 0.0
@@ -13865,6 +13961,80 @@ def _compute_quotation_totals(lines, global_discount_type: str = "amount", globa
         "net_subtotal": round(net_subtotal, 2),
         "total_gst": round(total_gst, 2),
         "grand_total": round(net_subtotal + total_gst, 2),
+    }
+
+
+def _normalize_additional_charges(charges):
+    """Sanitise the additional_charges list, dropping rows with non-positive
+    amounts. Returns the cleaned list of plain dicts (suitable for storage)."""
+    out = []
+    for c in (charges or []):
+        if hasattr(c, "model_dump"):
+            c = c.model_dump()
+        if not isinstance(c, dict):
+            continue
+        amt = float(c.get("amount") or 0)
+        if amt <= 0:
+            continue
+        out.append({
+            "charge_id": (c.get("charge_id") or "").strip(),
+            "name": (c.get("name") or "").strip() or "Additional Charge",
+            "hsn_code": (c.get("hsn_code") or "").strip(),
+            "gst_rate": float(c.get("gst_rate") or 0),
+            "amount": round(amt, 2),
+        })
+    return out
+
+
+def _apply_additional_charges(totals, charges, is_inter_state, is_export=False):
+    """Merge additional-charge amounts and their GST into the running totals.
+
+    - `totals` MUST contain `net_subtotal`, `total_gst`, `grand_total` (mutated in place).
+    - `charges` is a list of pre-normalised dicts (see _normalize_additional_charges).
+    - `is_inter_state` decides CGST/SGST vs IGST split for the charge GST.
+    - When `is_export=True`, GST on charges is forced to zero (exports are tax-free).
+
+    Returns the per-charge GST split dict {"cgst": x, "sgst": y, "igst": z, "total_gst": w,
+    "charges_total": t} so callers can fold it into the document-level GST split.
+    """
+    charges_total = 0.0
+    charges_cgst = 0.0
+    charges_sgst = 0.0
+    charges_igst = 0.0
+    for c in (charges or []):
+        amt = float(c.get("amount") or 0)
+        if amt <= 0:
+            continue
+        rate = 0.0 if is_export else float(c.get("gst_rate") or 0)
+        tax = round(amt * rate / 100.0, 2)
+        charges_total += amt
+        if is_export or rate <= 0:
+            pass
+        elif is_inter_state:
+            charges_igst += tax
+        else:
+            half = round(tax / 2.0, 2)
+            charges_cgst += half
+            charges_sgst += half
+    charges_total = round(charges_total, 2)
+    charges_cgst = round(charges_cgst, 2)
+    charges_sgst = round(charges_sgst, 2)
+    charges_igst = round(charges_igst, 2)
+    charges_total_gst = round(charges_cgst + charges_sgst + charges_igst, 2)
+    # Fold into the running totals.
+    totals["additional_charges_total"] = charges_total
+    totals["additional_charges_gst"] = charges_total_gst
+    totals["total_gst"] = round(float(totals.get("total_gst") or 0) + charges_total_gst, 2)
+    totals["grand_total"] = round(
+        float(totals.get("net_subtotal") or 0) + charges_total + float(totals.get("total_gst") or 0),
+        2,
+    )
+    return {
+        "charges_total": charges_total,
+        "cgst": charges_cgst,
+        "sgst": charges_sgst,
+        "igst": charges_igst,
+        "total_gst": charges_total_gst,
     }
 
 
@@ -13959,6 +14129,7 @@ async def create_quotation(data: QuotationCreate, request: Request):
     if not (data.notes or "").strip() and mk_cfg.get("default_quotation_notes"):
         data.notes = mk_cfg["default_quotation_notes"]
     lines = [l.model_dump() for l in data.lines]
+    add_charges = _normalize_additional_charges(data.additional_charges)
     totals = _compute_quotation_totals(lines, data.global_discount_type or "amount", data.global_discount_value or 0)
     currency = (data.currency or "INR").upper()
     # Non-INR (export) → GST is not applicable. Otherwise compute CGST/SGST vs IGST.
@@ -13983,11 +14154,23 @@ async def create_quotation(data: QuotationCreate, request: Request):
                 hsn["sgst"] = round(hsn.get("sgst", 0) * scale, 2)
                 hsn["igst"] = round(hsn.get("igst", 0) * scale, 2)
                 hsn["taxable"] = round(hsn.get("taxable", 0) * scale, 2)
+    # Fold additional charges (amount + their own GST) into totals + split.
+    charges_split = _apply_additional_charges(
+        totals,
+        add_charges,
+        bool(gst_split.get("is_inter_state")),
+        is_export=(currency != "INR"),
+    )
+    gst_split["cgst"] = round(float(gst_split.get("cgst") or 0) + charges_split["cgst"], 2)
+    gst_split["sgst"] = round(float(gst_split.get("sgst") or 0) + charges_split["sgst"], 2)
+    gst_split["igst"] = round(float(gst_split.get("igst") or 0) + charges_split["igst"], 2)
+    gst_split["total_gst"] = round(gst_split["cgst"] + gst_split["sgst"] + gst_split["igst"], 2)
     doc = {
         "id": str(uuid.uuid4()),
         "quotation_no": q_no,
-        **data.model_dump(exclude={"lines"}, exclude_none=False),
+        **data.model_dump(exclude={"lines", "additional_charges"}, exclude_none=False),
         "lines": lines,
+        "additional_charges": add_charges,
         **totals,
         "is_inter_state": gst_split["is_inter_state"],
         "cgst": gst_split["cgst"],
@@ -14167,6 +14350,7 @@ async def update_quotation(qid: str, data: QuotationUpdate, request: Request):
     needs_recompute = (
         "lines" in update or "customer_id" in update or "currency" in update
         or "global_discount_type" in update or "global_discount_value" in update
+        or "additional_charges" in update
     )
     if "lines" in update:
         lines = [l if isinstance(l, dict) else l.model_dump() for l in update["lines"]]
@@ -14175,6 +14359,10 @@ async def update_quotation(qid: str, data: QuotationUpdate, request: Request):
     else:
         lines = None
     if lines is not None:
+        # Resolve effective additional charges (update value if provided, else existing).
+        raw_charges = update.get("additional_charges") if "additional_charges" in update else existing.get("additional_charges", [])
+        add_charges = _normalize_additional_charges(raw_charges)
+        update["additional_charges"] = add_charges
         totals = _compute_quotation_totals(lines, eff_gd_type, eff_gd_value or 0)
         update["lines"] = lines
         cust_id = update.get("customer_id") if "customer_id" in update else existing.get("customer_id")
@@ -14197,6 +14385,17 @@ async def update_quotation(qid: str, data: QuotationUpdate, request: Request):
                     hsn["sgst"] = round(hsn.get("sgst", 0) * scale, 2)
                     hsn["igst"] = round(hsn.get("igst", 0) * scale, 2)
                     hsn["taxable"] = round(hsn.get("taxable", 0) * scale, 2)
+        # Fold additional charges into totals + split.
+        charges_split = _apply_additional_charges(
+            totals,
+            add_charges,
+            bool(gst_split.get("is_inter_state")),
+            is_export=(currency != "INR"),
+        )
+        gst_split["cgst"] = round(float(gst_split.get("cgst") or 0) + charges_split["cgst"], 2)
+        gst_split["sgst"] = round(float(gst_split.get("sgst") or 0) + charges_split["sgst"], 2)
+        gst_split["igst"] = round(float(gst_split.get("igst") or 0) + charges_split["igst"], 2)
+        gst_split["total_gst"] = round(gst_split["cgst"] + gst_split["sgst"] + gst_split["igst"], 2)
         update.update(totals)
         update["is_inter_state"] = gst_split["is_inter_state"]
         update["cgst"] = gst_split["cgst"]
@@ -14599,6 +14798,7 @@ class ProformaCreate(BaseModel):
     terms: Optional[str] = ""
     status: Optional[str] = "draft"  # draft / sent / paid / cancelled / converted
     currency: Optional[str] = "INR"  # INR (default), USD, EUR, GBP, AED — non-INR = export (no GST)
+    additional_charges: Optional[List[AdditionalChargeLine]] = []
 
 class ProformaUpdate(BaseModel):
     status: Optional[str] = None
@@ -14614,6 +14814,7 @@ class ProformaUpdate(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     currency: Optional[str] = None
+    additional_charges: Optional[List[AdditionalChargeLine]] = None
 
 async def _finalize_invoice_lines(lines: List[dict]) -> dict:
     """Recompute per-line amount (net after discount) and aggregate totals.
@@ -14670,23 +14871,36 @@ async def create_proforma(data: ProformaCreate, request: Request):
         raise HTTPException(status_code=400, detail="At least one line is required")
     proforma_no = await _get_next_number("proforma")
     lines = [l.model_dump() for l in data.lines]
+    add_charges = _normalize_additional_charges(data.additional_charges)
     base = await _finalize_invoice_lines(lines)
     currency = (data.currency or "INR").upper()
     if currency != "INR":
         gst = _zero_gst_split_for_export(lines)
     else:
         gst = await _compute_gst_split(data.customer_id, lines)
+    # Fold additional charges + their GST.
+    totals = {"net_subtotal": base["subtotal"], "total_gst": gst["total_gst"], "grand_total": 0.0}
+    charges_split = _apply_additional_charges(
+        totals, add_charges, bool(gst.get("is_inter_state")), is_export=(currency != "INR"),
+    )
+    gst["cgst"] = round(float(gst.get("cgst") or 0) + charges_split["cgst"], 2)
+    gst["sgst"] = round(float(gst.get("sgst") or 0) + charges_split["sgst"], 2)
+    gst["igst"] = round(float(gst.get("igst") or 0) + charges_split["igst"], 2)
+    gst["total_gst"] = round(gst["cgst"] + gst["sgst"] + gst["igst"], 2)
     doc = {
         "id": str(uuid.uuid4()),
         "proforma_no": proforma_no,
-        **data.model_dump(exclude={"lines"}, exclude_none=False),
+        **data.model_dump(exclude={"lines", "additional_charges"}, exclude_none=False),
         "lines": lines,
+        "additional_charges": add_charges,
         **base,
+        "additional_charges_total": totals.get("additional_charges_total", 0),
+        "additional_charges_gst": totals.get("additional_charges_gst", 0),
         "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
         "total_gst": gst["total_gst"],
         "is_inter_state": gst["is_inter_state"],
         "hsn_summary": gst["hsn_summary"],
-        "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
+        "grand_total": totals["grand_total"],
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"],
     }
@@ -14704,37 +14918,38 @@ async def update_proforma(pid: str, data: ProformaUpdate, request: Request):
     if existing.get("status") == "converted":
         raise HTTPException(status_code=400, detail="Cannot edit a Proforma that has been converted to Tax Invoice")
     update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
-    if "lines" in update:
-        lines = [l if isinstance(l, dict) else l.model_dump() for l in update["lines"]]
+    need_recompute = ("lines" in update) or ("currency" in update) or ("additional_charges" in update)
+    if need_recompute:
+        if "lines" in update:
+            lines = [l if isinstance(l, dict) else l.model_dump() for l in update["lines"]]
+        else:
+            lines = existing.get("lines") or []
+        raw_charges = update.get("additional_charges") if "additional_charges" in update else existing.get("additional_charges", [])
+        add_charges = _normalize_additional_charges(raw_charges)
+        update["additional_charges"] = add_charges
         base = await _finalize_invoice_lines(lines)
         currency = (update.get("currency") or existing.get("currency") or "INR").upper()
         if currency != "INR":
             gst = _zero_gst_split_for_export(lines)
         else:
             gst = await _compute_gst_split(existing.get("customer_id"), lines)
+        totals = {"net_subtotal": base["subtotal"], "total_gst": gst["total_gst"], "grand_total": 0.0}
+        charges_split = _apply_additional_charges(
+            totals, add_charges, bool(gst.get("is_inter_state")), is_export=(currency != "INR"),
+        )
+        gst["cgst"] = round(float(gst.get("cgst") or 0) + charges_split["cgst"], 2)
+        gst["sgst"] = round(float(gst.get("sgst") or 0) + charges_split["sgst"], 2)
+        gst["igst"] = round(float(gst.get("igst") or 0) + charges_split["igst"], 2)
+        gst["total_gst"] = round(gst["cgst"] + gst["sgst"] + gst["igst"], 2)
         update["lines"] = lines
         update.update(base)
         update.update({
+            "additional_charges_total": totals.get("additional_charges_total", 0),
+            "additional_charges_gst": totals.get("additional_charges_gst", 0),
             "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
             "total_gst": gst["total_gst"], "is_inter_state": gst["is_inter_state"],
             "hsn_summary": gst["hsn_summary"],
-            "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
-        })
-    elif "currency" in update:
-        # Currency changed without line edits — re-split existing lines.
-        existing_lines = existing.get("lines") or []
-        currency = (update.get("currency") or "INR").upper()
-        if currency != "INR":
-            gst = _zero_gst_split_for_export(existing_lines)
-            update["lines"] = existing_lines
-        else:
-            gst = await _compute_gst_split(existing.get("customer_id"), existing_lines)
-        base_subtotal = float(existing.get("subtotal") or 0)
-        update.update({
-            "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
-            "total_gst": gst["total_gst"], "is_inter_state": gst["is_inter_state"],
-            "hsn_summary": gst["hsn_summary"],
-            "grand_total": round(base_subtotal + gst["total_gst"], 2),
+            "grand_total": totals["grand_total"],
         })
     update["updated_at"] = datetime.now(timezone.utc)
     await db.proforma_invoices.update_one({"id": pid}, {"$set": update})
@@ -14793,6 +15008,17 @@ async def convert_quotation_to_proforma(qid: str, payload: dict = Body(default={
         if c:
             billing = c.get("address", "") or ""
             shipping = c.get("address", "") or ""
+    # Carry additional charges from the source quotation so PI inherits
+    # Packing/Forwarding/Insurance/etc. without forcing the user to re-enter.
+    add_charges = _normalize_additional_charges(q.get("additional_charges") or [])
+    totals = {"net_subtotal": base["subtotal"], "total_gst": gst["total_gst"], "grand_total": 0.0}
+    charges_split = _apply_additional_charges(
+        totals, add_charges, bool(gst.get("is_inter_state")), is_export=(q_currency != "INR"),
+    )
+    gst["cgst"] = round(float(gst.get("cgst") or 0) + charges_split["cgst"], 2)
+    gst["sgst"] = round(float(gst.get("sgst") or 0) + charges_split["sgst"], 2)
+    gst["igst"] = round(float(gst.get("igst") or 0) + charges_split["igst"], 2)
+    gst["total_gst"] = round(gst["cgst"] + gst["sgst"] + gst["igst"], 2)
     doc = {
         "id": str(uuid.uuid4()),
         "proforma_no": proforma_no,
@@ -14808,14 +15034,17 @@ async def convert_quotation_to_proforma(qid: str, payload: dict = Body(default={
         "valid_until": q.get("valid_until"),
         "advance_percentage": float(payload.get("advance_percentage") or 0),
         "lines": pf_lines,
+        "additional_charges": add_charges,
         "notes": q.get("notes", ""),
         "terms": q.get("terms", ""),
         **base,
+        "additional_charges_total": totals.get("additional_charges_total", 0),
+        "additional_charges_gst": totals.get("additional_charges_gst", 0),
         "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
         "total_gst": gst["total_gst"],
         "is_inter_state": gst["is_inter_state"],
         "hsn_summary": gst["hsn_summary"],
-        "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
+        "grand_total": totals["grand_total"],
         "currency": q_currency,
         "status": "draft",
         "created_at": datetime.now(timezone.utc),
@@ -14863,6 +15092,7 @@ class TaxInvoiceCreate(BaseModel):
     status: Optional[str] = "draft"  # draft / issued / paid / cancelled
     currency: Optional[str] = "INR"  # INR (default), USD, EUR, GBP, AED — non-INR = export (no GST)
     ship_from_warehouse_id: Optional[str] = ""  # Source store — stock is decremented from this warehouse on save
+    additional_charges: Optional[List[AdditionalChargeLine]] = []
 
 class TaxInvoiceUpdate(BaseModel):
     status: Optional[str] = None
@@ -14876,6 +15106,7 @@ class TaxInvoiceUpdate(BaseModel):
     customer_po_number: Optional[str] = None
     currency: Optional[str] = None
     ship_from_warehouse_id: Optional[str] = None
+    additional_charges: Optional[List[AdditionalChargeLine]] = None
 
 async def _enrich_tax_invoice(t):
     t.pop("_id", None)
@@ -15035,24 +15266,37 @@ async def create_tax_invoice(data: TaxInvoiceCreate, request: Request):
         raise HTTPException(status_code=400, detail="At least one line is required")
     invoice_no = await _get_next_number("tax_invoice")
     lines = [l.model_dump() for l in data.lines]
+    add_charges = _normalize_additional_charges(data.additional_charges)
     base = await _finalize_invoice_lines(lines)
     currency = (data.currency or "INR").upper()
     if currency != "INR":
         gst = _zero_gst_split_for_export(lines)
     else:
         gst = await _compute_gst_split(data.customer_id, lines, place_of_supply=data.place_of_supply)
+    # Fold additional charges + their GST into totals.
+    totals = {"net_subtotal": base["subtotal"], "total_gst": gst["total_gst"], "grand_total": 0.0}
+    charges_split = _apply_additional_charges(
+        totals, add_charges, bool(gst.get("is_inter_state")), is_export=(currency != "INR"),
+    )
+    gst["cgst"] = round(float(gst.get("cgst") or 0) + charges_split["cgst"], 2)
+    gst["sgst"] = round(float(gst.get("sgst") or 0) + charges_split["sgst"], 2)
+    gst["igst"] = round(float(gst.get("igst") or 0) + charges_split["igst"], 2)
+    gst["total_gst"] = round(gst["cgst"] + gst["sgst"] + gst["igst"], 2)
     doc = {
         "id": str(uuid.uuid4()),
         "invoice_no": invoice_no,
-        **data.model_dump(exclude={"lines"}, exclude_none=False),
+        **data.model_dump(exclude={"lines", "additional_charges"}, exclude_none=False),
         "lines": lines,
+        "additional_charges": add_charges,
         **base,
+        "additional_charges_total": totals.get("additional_charges_total", 0),
+        "additional_charges_gst": totals.get("additional_charges_gst", 0),
         "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
         "total_gst": gst["total_gst"],
         "is_inter_state": gst["is_inter_state"],
         "hsn_summary": gst["hsn_summary"],
-        "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
-        "qr_code": f"UPI://pay?pa=machineworks@upi&pn=MachineWorksERP&am={round(base['subtotal'] + gst['total_gst'], 2)}&tn={invoice_no}",
+        "grand_total": totals["grand_total"],
+        "qr_code": f"UPI://pay?pa=machineworks@upi&pn=MachineWorksERP&am={totals['grand_total']}&tn={invoice_no}",
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"],
     }
@@ -15091,10 +15335,16 @@ async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request)
         if data.status is None and any(v is not None for v in (data.lines, data.billing_address, data.shipping_address, data.customer_po_number, data.due_date, data.place_of_supply)):
             raise HTTPException(status_code=400, detail="A paid invoice is locked — only status changes and notes/terms are allowed")
     update = {k: v for k, v in data.model_dump(exclude_none=True).items()}
-    # Recompute GST if lines OR place_of_supply OR currency changed
-    needs_gst_recompute = "lines" in update or "place_of_supply" in update or "currency" in update
+    # Recompute GST if lines OR place_of_supply OR currency OR additional_charges changed
+    needs_gst_recompute = (
+        "lines" in update or "place_of_supply" in update or "currency" in update
+        or "additional_charges" in update
+    )
     if needs_gst_recompute:
         lines = [l if isinstance(l, dict) else l.model_dump() for l in (update.get("lines") or existing.get("lines") or [])]
+        raw_charges = update.get("additional_charges") if "additional_charges" in update else existing.get("additional_charges", [])
+        add_charges = _normalize_additional_charges(raw_charges)
+        update["additional_charges"] = add_charges
         base = await _finalize_invoice_lines(lines)
         effective_pos = update.get("place_of_supply", existing.get("place_of_supply", ""))
         currency = (update.get("currency") or existing.get("currency") or "INR").upper()
@@ -15102,13 +15352,23 @@ async def update_tax_invoice(tid: str, data: TaxInvoiceUpdate, request: Request)
             gst = _zero_gst_split_for_export(lines)
         else:
             gst = await _compute_gst_split(existing.get("customer_id"), lines, place_of_supply=effective_pos)
+        totals = {"net_subtotal": base["subtotal"], "total_gst": gst["total_gst"], "grand_total": 0.0}
+        charges_split = _apply_additional_charges(
+            totals, add_charges, bool(gst.get("is_inter_state")), is_export=(currency != "INR"),
+        )
+        gst["cgst"] = round(float(gst.get("cgst") or 0) + charges_split["cgst"], 2)
+        gst["sgst"] = round(float(gst.get("sgst") or 0) + charges_split["sgst"], 2)
+        gst["igst"] = round(float(gst.get("igst") or 0) + charges_split["igst"], 2)
+        gst["total_gst"] = round(gst["cgst"] + gst["sgst"] + gst["igst"], 2)
         update["lines"] = lines
         update.update(base)
         update.update({
+            "additional_charges_total": totals.get("additional_charges_total", 0),
+            "additional_charges_gst": totals.get("additional_charges_gst", 0),
             "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
             "total_gst": gst["total_gst"], "is_inter_state": gst["is_inter_state"],
             "hsn_summary": gst["hsn_summary"],
-            "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
+            "grand_total": totals["grand_total"],
         })
         # Refresh UPI QR with current company settings + new grand total (only for INR)
         if currency == "INR":
@@ -15425,6 +15685,16 @@ async def convert_proforma_to_tax_invoice(pid: str, payload: dict = Body(default
         gst = _zero_gst_split_for_export(lines)
     else:
         gst = await _compute_gst_split(p.get("customer_id"), lines)
+    # Carry additional charges forward from the proforma.
+    add_charges = _normalize_additional_charges(p.get("additional_charges") or [])
+    totals = {"net_subtotal": base["subtotal"], "total_gst": gst["total_gst"], "grand_total": 0.0}
+    charges_split = _apply_additional_charges(
+        totals, add_charges, bool(gst.get("is_inter_state")), is_export=(p_currency != "INR"),
+    )
+    gst["cgst"] = round(float(gst.get("cgst") or 0) + charges_split["cgst"], 2)
+    gst["sgst"] = round(float(gst.get("sgst") or 0) + charges_split["sgst"], 2)
+    gst["igst"] = round(float(gst.get("igst") or 0) + charges_split["igst"], 2)
+    gst["total_gst"] = round(gst["cgst"] + gst["sgst"] + gst["igst"], 2)
     doc = {
         "id": str(uuid.uuid4()),
         "invoice_no": invoice_no,
@@ -15439,15 +15709,18 @@ async def convert_proforma_to_tax_invoice(pid: str, payload: dict = Body(default
         "invoice_date": datetime.now(timezone.utc),
         "place_of_supply": gst.get("customer_state", ""),
         "lines": lines,
+        "additional_charges": add_charges,
         "notes": p.get("notes", ""),
         "terms": p.get("terms", ""),
         **base,
+        "additional_charges_total": totals.get("additional_charges_total", 0),
+        "additional_charges_gst": totals.get("additional_charges_gst", 0),
         "cgst": gst["cgst"], "sgst": gst["sgst"], "igst": gst["igst"],
         "total_gst": gst["total_gst"],
         "is_inter_state": gst["is_inter_state"],
         "hsn_summary": gst["hsn_summary"],
-        "grand_total": round(base["subtotal"] + gst["total_gst"], 2),
-        "qr_code": f"UPI://pay?pa=machineworks@upi&pn=MachineWorksERP&am={round(base['subtotal'] + gst['total_gst'], 2)}&tn={invoice_no}",
+        "grand_total": totals["grand_total"],
+        "qr_code": f"UPI://pay?pa=machineworks@upi&pn=MachineWorksERP&am={totals['grand_total']}&tn={invoice_no}",
         "currency": p_currency,
         "status": "issued",
         "created_at": datetime.now(timezone.utc),

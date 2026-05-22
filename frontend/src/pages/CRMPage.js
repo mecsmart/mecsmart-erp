@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import {
   Plus, Edit2, Trash2, MessageSquare, UserCheck, AlertTriangle, Clock,
-  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload, GitBranch, Share2, Package2, Download, Eye
+  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload, GitBranch, Share2, Package2, Download, Eye, Pencil
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -1013,6 +1013,17 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
   const [waShare, setWaShare] = useState({ open: false, doc: null });
   const [dialog, setDialog] = useState(false);
   const [editing, setEditing] = useState(null);
+  // Additional Charges master — loaded from CRM config. Used as a dropdown
+  // source when the user clicks "+ Add Additional Charge" in the totals area.
+  const [additionalChargesMaster, setAdditionalChargesMaster] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await api.get('/api/crm/additional-charges');
+        setAdditionalChargesMaster(Array.isArray(data) ? data : []);
+      } catch (e) { /* non-fatal */ }
+    })();
+  }, []);
   const emptyForm = {
     lead_id: '',
     customer_id: '',
@@ -1028,6 +1039,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     currency: 'INR',
     global_discount_type: 'amount',
     global_discount_value: 0,
+    additional_charges: [],
     lines: [emptyQuotationLine()],
   };
   const [form, setForm] = useState(emptyForm);
@@ -1060,6 +1072,13 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
         currency: q.currency || 'INR',
         global_discount_type: q.global_discount_type || 'amount',
         global_discount_value: q.global_discount_value || 0,
+        additional_charges: Array.isArray(q.additional_charges) ? q.additional_charges.map(c => ({
+          charge_id: c.charge_id || '',
+          name: c.name || '',
+          hsn_code: c.hsn_code || '',
+          gst_rate: c.gst_rate ?? 18,
+          amount: c.amount || 0,
+        })) : [],
         lines: (q.lines && q.lines.length)
           ? q.lines.map(l => {
               // Auto-fill HSN / GST from the item master when the line was
@@ -1188,8 +1207,24 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     const netSub = sub - gdAmt;
     const factor = sub > 0 ? netSub / sub : 1;
     perLine.forEach(p => { gst += p.net * factor * (p.gstRate / 100); });
-    return { sub, gst, discount, globalDiscount: gdAmt, netSub, total: netSub + gst };
-  }, [form.lines, form.global_discount_type, form.global_discount_value]);
+    // Additional charges (after global discount, before total GST). Each
+    // charge carries its own GST% which is added to the running gst total.
+    const isExport = (form.currency || 'INR').toUpperCase() !== 'INR';
+    let chargesTotal = 0;
+    let chargesGst = 0;
+    (form.additional_charges || []).forEach(c => {
+      const amt = parseFloat(c.amount) || 0;
+      if (amt <= 0) return;
+      chargesTotal += amt;
+      if (!isExport) chargesGst += amt * (parseFloat(c.gst_rate) || 0) / 100;
+    });
+    return {
+      sub, gst: gst + chargesGst, discount,
+      globalDiscount: gdAmt, netSub,
+      additionalCharges: chargesTotal, additionalChargesGst: chargesGst,
+      total: netSub + chargesTotal + gst + chargesGst,
+    };
+  }, [form.lines, form.global_discount_type, form.global_discount_value, form.additional_charges, form.currency]);
 
   const save = async () => {
     try {
@@ -1212,6 +1247,15 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
         currency: form.currency || 'INR',
         global_discount_type: form.global_discount_type || 'amount',
         global_discount_value: parseFloat(form.global_discount_value) || 0,
+        additional_charges: (form.additional_charges || [])
+          .filter(c => (parseFloat(c.amount) || 0) > 0)
+          .map(c => ({
+            charge_id: c.charge_id || '',
+            name: c.name || '',
+            hsn_code: c.hsn_code || '',
+            gst_rate: parseFloat(c.gst_rate) || 0,
+            amount: parseFloat(c.amount) || 0,
+          })),
         lines: form.lines.map(l => ({
           item_id: l.item_id || '',
           description: l.description || '',
@@ -1523,7 +1567,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   </div>
                   <div className="text-xs text-[#111827] whitespace-pre-line leading-snug" data-testid="quotation-customer-address-text">
                     {addrParts.length ? addrParts.join('\n') : <span className="text-[#9CA3AF] italic">No address on file. Edit the Customer master to add one.</span>}
-                    {c.state_code && <div className="mt-1 text-[#4B5563]"><strong>State Code:</strong> <span className="mono">{c.state_code}</span></div>}
+                    {c.state_code && <div className="mt-1 text-[#4B5563]"><strong>State Code:</strong> <span className="mono">{c.state_code}</span>{c.state && <span className="ml-1">— {c.state}</span>}</div>}
                   </div>
                 </div>
               );
@@ -1668,10 +1712,70 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   {totals.globalDiscount > 0 && (
                     <div className="flex justify-between"><span>Net Subtotal:</span><span className="mono">{formatCurrency(totals.netSub, form.currency)}</span></div>
                   )}
+                  {/* ---- Additional Charges (after global discount, before GST) ---- */}
+                  {(form.additional_charges || []).map((c, ci) => (
+                    <div key={`ac-${ci}`} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center text-[12px]" data-testid={`additional-charge-row-${ci}`}>
+                      <select
+                        className="input-field h-7 text-xs px-2 py-0"
+                        value={c.charge_id || ''}
+                        onChange={(e) => {
+                          const m = additionalChargesMaster.find(x => x.id === e.target.value);
+                          setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? {
+                              ...row,
+                              charge_id: m?.id || '',
+                              name: m?.name || row.name || '',
+                              hsn_code: m?.hsn_code ?? row.hsn_code ?? '',
+                              gst_rate: m?.gst_rate ?? row.gst_rate ?? 18,
+                            } : row),
+                          }));
+                        }}
+                        data-testid={`additional-charge-select-${ci}`}
+                      >
+                        <option value="">— select charge —</option>
+                        {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
+                          <option key={m.id} value={m.id}>{m.name} ({(m.gst_rate ?? 0)}% GST)</option>
+                        ))}
+                      </select>
+                      <input
+                        type="number" min="0" step="0.01"
+                        className="input-field h-7 text-xs px-2 py-0 w-28 mono text-right"
+                        placeholder="Amount"
+                        value={c.amount || 0}
+                        onChange={(e) => setForm(f => ({
+                          ...f,
+                          additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, amount: parseFloat(e.target.value) || 0 } : row),
+                        }))}
+                        data-testid={`additional-charge-amount-${ci}`}
+                      />
+                      <button
+                        type="button"
+                        className="text-[#9B1C1C] p-1 hover:bg-[#FDE2E2] rounded"
+                        onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
+                        title="Remove charge"
+                        data-testid={`additional-charge-remove-${ci}`}
+                      ><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between text-[11px]">
+                    <button
+                      type="button"
+                      className="text-[#1D3557] hover:underline font-medium"
+                      onClick={() => setForm(f => ({
+                        ...f,
+                        additional_charges: [...(f.additional_charges || []), { charge_id: '', name: '', hsn_code: '', gst_rate: 18, amount: 0 }],
+                      }))}
+                      data-testid="add-additional-charge-btn"
+                    >+ Add Additional Charge</button>
+                    {totals.additionalCharges > 0 && (
+                      <span className="text-[#374151]">Charges total: <span className="mono">{formatCurrency(totals.additionalCharges, form.currency)}</span></span>
+                    )}
+                  </div>
                   {(form.currency || 'INR') === 'INR' && (
                     <div className="flex justify-between"><span>GST:</span><span className="mono">{formatCurrency(totals.gst, form.currency)}</span></div>
                   )}
-                  <div className="flex justify-between font-semibold border-t border-[#E5E7EB] pt-1"><span>Grand Total:</span><span className="mono">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.total : totals.netSub, form.currency)}</span></div>
+                  <div className="flex justify-between font-semibold border-t border-[#E5E7EB] pt-1"><span>Grand Total:</span><span className="mono">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.total : (totals.netSub + (totals.additionalCharges || 0)), form.currency)}</span></div>
                   {(form.currency || 'INR') !== 'INR' && (
                     <div className="text-[10px] text-[#6B7280] italic">Export/Import — GST not applicable. Currency: {form.currency}</div>
                   )}
@@ -1690,9 +1794,9 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
               </div>
             </div>
 
-            <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-3 bg-white border-t border-[#E5E7EB] shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.08)] flex justify-end gap-2 z-20 mt-3" data-testid="quotation-form-action-bar">
-              <button className="btn-secondary" onClick={() => { setDialog(false); setEditing(null); }} data-testid="quotation-cancel-btn">Cancel</button>
-              <button className="btn-primary" onClick={save} data-testid="quotation-save-btn">{editing ? 'Update' : 'Create'} Quotation</button>
+            <div className="sticky bottom-3 z-20 mt-3 flex justify-end gap-2 pointer-events-none" data-testid="quotation-form-action-bar">
+              <button className="pointer-events-auto px-4 py-2 text-sm font-semibold rounded-md bg-white text-[#4B5563] border border-[#D1D5DB] shadow-lg hover:bg-[#F3F4F6]" onClick={() => { setDialog(false); setEditing(null); }} data-testid="quotation-cancel-btn">Cancel</button>
+              <button className="pointer-events-auto px-4 py-2 text-sm font-semibold rounded-md bg-[#1D3557] text-white shadow-lg hover:bg-[#142849]" onClick={save} data-testid="quotation-save-btn">{editing ? 'Update' : 'Create'} Quotation</button>
             </div>
           </div>
         </DialogContent>
@@ -2205,6 +2309,7 @@ function PipelineConfigPanel({ pipelineType, onRefresh, canEdit }) {
       {pipelineType === 'marketing' && <QuotationCoverPageConfig canEdit={canEdit} />}
       {pipelineType === 'marketing' && <QuotationDefaultTermsConfig canEdit={canEdit} />}
       {pipelineType === 'marketing' && <InvoiceTermsConfig canEdit={canEdit} />}
+      {pipelineType === 'marketing' && <AdditionalChargesConfig canEdit={canEdit} />}
     </div>
   );
 }
@@ -2382,6 +2487,128 @@ function InvoiceTermsConfig({ canEdit }) {
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Additional Charges master — Packing/Forwarding/Insurance/Loading/etc.
+// User-configurable list with HSN + GST%, used as a dropdown source when
+// creating Quotations / Proformas / Tax Invoices.
+// ---------------------------------------------------------------------------
+function AdditionalChargesConfig({ canEdit }) {
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState({ name: '', hsn_code: '', gst_rate: 18 });
+  const [editingId, setEditingId] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/crm/additional-charges');
+      setRows(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.warn('Failed to load additional charges:', e);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const reset = () => { setForm({ name: '', hsn_code: '', gst_rate: 18 }); setEditingId(null); };
+
+  const save = async () => {
+    const name = (form.name || '').trim();
+    if (!name) { toast.error('Charge name is required'); return; }
+    const payload = {
+      name,
+      hsn_code: (form.hsn_code || '').trim(),
+      gst_rate: Number(form.gst_rate) || 0,
+    };
+    try {
+      if (editingId) {
+        await api.put(`/api/crm/additional-charges/${editingId}`, payload);
+        toast.success('Additional charge updated');
+      } else {
+        await api.post('/api/crm/additional-charges', payload);
+        toast.success('Additional charge added');
+      }
+      reset();
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Save failed');
+    }
+  };
+
+  const editRow = (r) => {
+    setEditingId(r.id);
+    setForm({ name: r.name || '', hsn_code: r.hsn_code || '', gst_rate: r.gst_rate ?? 18 });
+  };
+  const deleteRow = async (r) => {
+    if (!window.confirm(`Delete "${r.name}"? Existing documents that reference this charge will keep their snapshot — only future selection is affected.`)) return;
+    try {
+      await api.delete(`/api/crm/additional-charges/${r.id}`);
+      toast.success('Deleted');
+      if (editingId === r.id) reset();
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Delete failed');
+    }
+  };
+
+  return (
+    <div className="card-flat p-4 mt-6" data-testid="additional-charges-config">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-semibold text-[#1D3557]">Additional Charges</h3>
+      </div>
+      <p className="text-[11px] text-[#6B7280] mb-3">
+        Define named charges (e.g. <em>Packing &amp; Forwarding</em>, <em>Insurance</em>, <em>Loading Charges</em>)
+        with their own HSN code and GST rate. These can be added to any Quotation /
+        Proforma / Tax Invoice — they sit after the global discount and before GST,
+        and their GST contributes to the total GST row.
+      </p>
+      {canEdit && (
+        <div className="grid grid-cols-12 gap-2 items-end mb-3 p-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded">
+          <div className="col-span-5">
+            <label className="block text-[10px] font-semibold text-[#374151] uppercase tracking-wide mb-1">Charge Name *</label>
+            <input className="input-field" placeholder="e.g. Packing & Forwarding" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} data-testid="charge-name-input" />
+          </div>
+          <div className="col-span-3">
+            <label className="block text-[10px] font-semibold text-[#374151] uppercase tracking-wide mb-1">HSN / SAC</label>
+            <input className="input-field" placeholder="e.g. 998540" value={form.hsn_code} onChange={e => setForm(f => ({ ...f, hsn_code: e.target.value }))} data-testid="charge-hsn-input" />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-[10px] font-semibold text-[#374151] uppercase tracking-wide mb-1">GST %</label>
+            <input type="number" min="0" max="28" step="0.01" className="input-field" value={form.gst_rate} onChange={e => setForm(f => ({ ...f, gst_rate: e.target.value }))} data-testid="charge-gst-input" />
+          </div>
+          <div className="col-span-2 flex gap-2">
+            <button className="btn-primary flex-1" onClick={save} data-testid="charge-save-btn">{editingId ? 'Update' : 'Add'}</button>
+            {editingId && <button className="btn-secondary" onClick={reset} data-testid="charge-cancel-btn">Cancel</button>}
+          </div>
+        </div>
+      )}
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Name</th><th>HSN / SAC</th><th className="text-right">GST %</th><th className="w-20">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && <tr><td colSpan={4} className="text-center py-4 text-sm text-[#6B7280]">No additional charges configured.</td></tr>}
+          {rows.map(r => (
+            <tr key={r.id} data-testid={`charge-row-${r.id}`}>
+              <td className="font-medium">{r.name}</td>
+              <td className="mono text-xs">{r.hsn_code || '-'}</td>
+              <td className="text-right mono text-xs">{(r.gst_rate ?? 0).toFixed(2)}%</td>
+              <td>
+                {canEdit && (
+                  <div className="flex gap-1">
+                    <button className="p-1 text-[#1E429F] hover:bg-[#E1EFFE] rounded" onClick={() => editRow(r)} title="Edit" data-testid={`charge-edit-${r.id}`}><Pencil className="w-3.5 h-3.5" /></button>
+                    <button className="p-1 text-[#9B1C1C] hover:bg-[#FDE2E2] rounded" onClick={() => deleteRow(r)} title="Delete" data-testid={`charge-delete-${r.id}`}><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function SLAPanel({ tickets, search, stages }) {
   const TICKET_ST = (stages && stages.length) ? stages : TICKET_STAGES;
   const nonClosed = tickets.filter(t => t.stage !== 'closed');
@@ -2816,6 +3043,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
     terms: '',
     currency: 'INR',
     ship_from_warehouse_id: '',  // Source store for stock deduction on save
+    additional_charges: [],
     lines: [emptyTaxInvoiceLine()],
   };
   const [form, setForm] = useState(emptyForm);
@@ -2830,6 +3058,18 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
     try { const r = await api.get('/api/crm/tax-invoices'); setList(r.data || []); } catch (e) { console.error(e); }
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Additional charges master (Packing/Forwarding/Insurance/etc.) — used as
+  // a dropdown source in the totals section of the TI form.
+  const [additionalChargesMaster, setAdditionalChargesMaster] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await api.get('/api/crm/additional-charges');
+        setAdditionalChargesMaster(Array.isArray(data) ? data : []);
+      } catch (e) { /* non-fatal */ }
+    })();
+  }, []);
 
   // Fetch sales orders + items + warehouses when dialog opens
   const openDialog = async (ti) => {
@@ -2865,6 +3105,10 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
         terms: ti.terms || '',
         currency: ti.currency || 'INR',
         ship_from_warehouse_id: ti.ship_from_warehouse_id || '',
+        additional_charges: Array.isArray(ti.additional_charges) ? ti.additional_charges.map(c => ({
+          charge_id: c.charge_id || '', name: c.name || '', hsn_code: c.hsn_code || '',
+          gst_rate: c.gst_rate ?? 18, amount: c.amount || 0,
+        })) : [],
         lines: (ti.lines || []).map(l => {
           // Auto-fill HSN / GST from item master when the saved line is
           // missing them — same robustness as the Quotation editor.
@@ -2999,7 +3243,21 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
       totalDiscount += disc;
       totalGst += gst;
     });
-    return { subtotal, totalDiscount, totalGst, grandTotal: subtotal + totalGst };
+    // Additional charges contribute their own amount + GST.
+    const isExport = (form.currency || 'INR').toUpperCase() !== 'INR';
+    let chargesTotal = 0, chargesGst = 0;
+    (form.additional_charges || []).forEach(c => {
+      const amt = parseFloat(c.amount) || 0;
+      if (amt <= 0) return;
+      chargesTotal += amt;
+      if (!isExport) chargesGst += amt * (parseFloat(c.gst_rate) || 0) / 100;
+    });
+    return {
+      subtotal, totalDiscount,
+      totalGst: totalGst + chargesGst,
+      additionalCharges: chargesTotal,
+      grandTotal: subtotal + chargesTotal + totalGst + chargesGst,
+    };
   };
 
   const totals = computeTotals();
@@ -3009,10 +3267,17 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
     if (!form.lines.length || form.lines.every(l => !l.quantity || !l.rate)) { alert('At least one valid line is required'); return; }
     setSaving(true);
     try {
+      const charges = (form.additional_charges || [])
+        .filter(c => (parseFloat(c.amount) || 0) > 0)
+        .map(c => ({
+          charge_id: c.charge_id || '', name: c.name || '', hsn_code: c.hsn_code || '',
+          gst_rate: parseFloat(c.gst_rate) || 0, amount: parseFloat(c.amount) || 0,
+        }));
       const payload = {
         ...form,
         invoice_date: form.invoice_date ? new Date(form.invoice_date).toISOString() : null,
         due_date: form.due_date ? new Date(form.due_date).toISOString() : null,
+        additional_charges: charges,
       };
       if (editingTI) {
         // EDIT mode — PUT against existing
@@ -3026,6 +3291,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
           shipping_address: payload.shipping_address,
           customer_po_number: payload.customer_po_number,
           currency: payload.currency,
+          additional_charges: charges,
         });
       } else {
         await api.post('/api/crm/tax-invoices', payload);
@@ -3485,13 +3751,73 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
 
             {/* Totals */}
             <div className="flex justify-end">
-              <div className="w-64 border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB] text-sm">
+              <div className="w-80 border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB] text-sm space-y-1">
                 <div className="flex justify-between"><span className="text-[#4B5563]">Subtotal</span><span className="mono">{formatCurrency(totals.subtotal, form.currency)}</span></div>
                 {totals.totalDiscount > 0 && <div className="flex justify-between"><span className="text-[#4B5563]">Discount</span><span className="mono">-{formatCurrency(totals.totalDiscount, form.currency)}</span></div>}
+                {/* ---- Additional Charges (after global discount, before GST) ---- */}
+                {(form.additional_charges || []).map((c, ci) => (
+                  <div key={`ti-ac-${ci}`} className="grid grid-cols-[1fr_auto_auto] gap-1.5 items-center text-[12px]" data-testid={`ti-additional-charge-row-${ci}`}>
+                    <select
+                      className="input-field h-7 text-xs px-2 py-0"
+                      value={c.charge_id || ''}
+                      onChange={(e) => {
+                        const m = additionalChargesMaster.find(x => x.id === e.target.value);
+                        setForm(f => ({
+                          ...f,
+                          additional_charges: f.additional_charges.map((row, i) => i === ci ? {
+                            ...row,
+                            charge_id: m?.id || '',
+                            name: m?.name || row.name || '',
+                            hsn_code: m?.hsn_code ?? row.hsn_code ?? '',
+                            gst_rate: m?.gst_rate ?? row.gst_rate ?? 18,
+                          } : row),
+                        }));
+                      }}
+                      data-testid={`ti-additional-charge-select-${ci}`}
+                    >
+                      <option value="">— select charge —</option>
+                      {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
+                        <option key={m.id} value={m.id}>{m.name} ({(m.gst_rate ?? 0)}% GST)</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number" min="0" step="0.01"
+                      className="input-field h-7 text-xs px-2 py-0 w-24 mono text-right"
+                      placeholder="Amount"
+                      value={c.amount || 0}
+                      onChange={(e) => setForm(f => ({
+                        ...f,
+                        additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, amount: parseFloat(e.target.value) || 0 } : row),
+                      }))}
+                      data-testid={`ti-additional-charge-amount-${ci}`}
+                    />
+                    <button
+                      type="button"
+                      className="text-[#9B1C1C] p-1 hover:bg-[#FDE2E2] rounded"
+                      onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
+                      title="Remove charge"
+                      data-testid={`ti-additional-charge-remove-${ci}`}
+                    ><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between text-[11px] pt-0.5">
+                  <button
+                    type="button"
+                    className="text-[#1D3557] hover:underline font-medium"
+                    onClick={() => setForm(f => ({
+                      ...f,
+                      additional_charges: [...(f.additional_charges || []), { charge_id: '', name: '', hsn_code: '', gst_rate: 18, amount: 0 }],
+                    }))}
+                    data-testid="ti-add-additional-charge-btn"
+                  >+ Add Additional Charge</button>
+                  {totals.additionalCharges > 0 && (
+                    <span className="text-[#374151]">Charges: <span className="mono">{formatCurrency(totals.additionalCharges, form.currency)}</span></span>
+                  )}
+                </div>
                 {(form.currency || 'INR') === 'INR' && (
                   <div className="flex justify-between"><span className="text-[#4B5563]">GST</span><span className="mono">{formatCurrency(totals.totalGst, form.currency)}</span></div>
                 )}
-                <div className="flex justify-between border-t border-[#E5E7EB] mt-1 pt-1 font-semibold"><span>Grand Total</span><span className="mono text-[#1D3557]">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.grandTotal : totals.subtotal, form.currency)}</span></div>
+                <div className="flex justify-between border-t border-[#E5E7EB] mt-1 pt-1 font-semibold"><span>Grand Total</span><span className="mono text-[#1D3557]">{formatCurrency((form.currency || 'INR') === 'INR' ? totals.grandTotal : (totals.subtotal + (totals.additionalCharges || 0)), form.currency)}</span></div>
                 {(form.currency || 'INR') !== 'INR' && (
                   <div className="text-[10px] text-[#6B7280] italic mt-1">Export/Import — GST not applicable. Currency: {form.currency}</div>
                 )}
@@ -4347,6 +4673,8 @@ function printInvoiceDoc(doc, opts) {
   .bank-block h4{font-size:10px;color:${accentColor};text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;font-weight:700}
   .bank-block .row{display:grid;grid-template-columns:90px 1fr;gap:6px;margin-bottom:4px;line-height:1.5}
   .bank-block .row strong{color:#0f172a}
+  /* A/c No. + IFSC font matches Rate column in items table (11px, body font, no mono). */
+  .bank-block .row .acno-val{font-size:11px;font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;font-weight:600;letter-spacing:0.2px}
   .totals{border-collapse:collapse;width:100%}
   .totals td{padding:6px 10px;font-size:11px;border-bottom:1px solid #e2e8f0}
   .totals td.lbl{color:#64748b;text-align:left}
@@ -4360,8 +4688,8 @@ function printInvoiceDoc(doc, opts) {
   table.hsn{width:100%;border-collapse:collapse;font-size:10px}
   table.hsn th{background:#e0e7ff;color:${accentColor};padding:6px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:0.5px}
   table.hsn td{padding:6px;border-bottom:1px solid #e2e8f0}
-  /* Terms */
-  .terms{margin-top:18px;padding:12px 14px;background:#f8fafc;border-left:3px solid ${accentColor};font-size:10px;color:#475569;line-height:1.6;white-space:pre-line}
+  /* Terms — outlined card with rounded corners, no fill / no left strip */
+  .terms{margin-top:18px;padding:12px 14px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:10px;color:#475569;line-height:1.6;white-space:pre-line}
   .terms h4{font-size:10px;color:${accentColor};text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;font-weight:700}
   /* QR */
   .qr-block{margin-top:14px;display:flex;gap:12px;align-items:center;font-size:9px;color:#475569;page-break-inside:avoid}
@@ -4607,7 +4935,7 @@ ${(isQuotation && opts.includeCover) ? `
       })()}
       ${doc.email ? `<div class="line">${esc(doc.email)}</div>` : ''}
       ${doc.phone ? `<div class="line">${esc(doc.phone)}</div>` : ''}
-      ${doc.customer?.state_code ? `<div class="line"><strong>State Code:</strong> <span class="mono">${esc(doc.customer.state_code)}</span></div>` : ''}
+      ${doc.customer?.state_code ? `<div class="line"><strong>State Code:</strong> <span class="mono">${esc(doc.customer.state_code)}${doc.customer?.state ? ` — ${esc(doc.customer.state)}` : ''}</span></div>` : (doc.customer?.state ? `<div class="line"><strong>State:</strong> ${esc(doc.customer.state)}</div>` : '')}
       ${doc.customer?.gstin ? `<div class="line"><strong>GSTIN:</strong> <span class="mono">${esc(doc.customer.gstin)}</span></div>` : ''}
     </div>
     ${isTaxInvoice && doc.customer_po_number ? `
@@ -4627,7 +4955,7 @@ ${(isQuotation && opts.includeCover) ? `
         const lines = [doc.shipping_address || doc.billing_address || c.address || '', cityStatePin].filter(Boolean);
         return lines.length ? lines.map(ln => `<div class="line">${esc(ln)}</div>`).join('') : '<div class="line">-</div>';
       })()}
-      ${doc.customer?.state_code ? `<div class="line"><strong>State Code:</strong> <span class="mono">${esc(doc.customer.state_code)}</span></div>` : ''}
+      ${doc.customer?.state_code ? `<div class="line"><strong>State Code:</strong> <span class="mono">${esc(doc.customer.state_code)}${doc.customer?.state ? ` — ${esc(doc.customer.state)}` : ''}</span></div>` : (doc.customer?.state ? `<div class="line"><strong>State:</strong> ${esc(doc.customer.state)}</div>` : '')}
     </div>
     `}
   </div>
@@ -4667,15 +4995,19 @@ ${(isQuotation && opts.includeCover) ? `
       <h4>Bank Details</h4>
       ${cfg.bank_name ? `<div class="row"><strong>Bank:</strong><span>${esc(cfg.bank_name)}</span></div>` : ''}
       ${cfg.bank_branch ? `<div class="row"><strong>Branch:</strong><span>${esc(cfg.bank_branch)}</span></div>` : ''}
-      ${cfg.bank_account ? `<div class="row"><strong>A/C No:</strong><span class="mono">${esc(cfg.bank_account)}</span></div>` : ''}
-      ${cfg.bank_ifsc ? `<div class="row"><strong>IFSC:</strong><span class="mono">${esc(cfg.bank_ifsc)}</span></div>` : ''}
-      ${cfg.bank_upi ? `<div class="row"><strong>UPI:</strong><span class="mono">${esc(cfg.bank_upi)}</span></div>` : ''}
+      ${cfg.bank_account ? `<div class="row"><strong>A/C No:</strong><span class="acno-val">${esc(cfg.bank_account)}</span></div>` : ''}
+      ${cfg.bank_ifsc ? `<div class="row"><strong>IFSC:</strong><span class="acno-val">${esc(cfg.bank_ifsc)}</span></div>` : ''}
+      ${cfg.bank_upi ? `<div class="row"><strong>UPI:</strong><span class="acno-val">${esc(cfg.bank_upi)}</span></div>` : ''}
       ${(!cfg.bank_name && !cfg.bank_account) ? '<div style="font-size:10px;color:#94a3b8">Bank details not configured. Set them in Settings → Company Details.</div>' : ''}
     </div>
     <table class="totals">
       <tr><td class="lbl">Subtotal (after line discount)</td><td class="val">${sym}${fa(doc.subtotal || 0)}</td></tr>
       ${doc.global_discount_amount ? `<tr><td class="lbl">Global Discount${doc.global_discount_type === 'percent' && doc.global_discount_value ? ` (${doc.global_discount_value}%)` : ''}</td><td class="val">-${sym}${fa(doc.global_discount_amount)}</td></tr>` : ''}
       ${doc.global_discount_amount ? `<tr><td class="lbl">Net Subtotal</td><td class="val">${sym}${fa(doc.net_subtotal || 0)}</td></tr>` : ''}
+      ${(Array.isArray(doc.additional_charges) ? doc.additional_charges : [])
+        .filter(c => (c.amount || 0) > 0)
+        .map(c => `<tr><td class="lbl">${esc(c.name || 'Additional Charge')}${c.hsn_code ? ` <span style="font-size:9px;color:#64748b">(HSN ${esc(c.hsn_code)}${(!isExportDoc && (c.gst_rate || 0) > 0) ? `, ${(c.gst_rate || 0)}% GST` : ''})</span>` : ''}</td><td class="val">${sym}${fa(c.amount || 0)}</td></tr>`)
+        .join('')}
       ${isExportDoc ? '' : (isInter
         ? `<tr><td class="lbl">IGST</td><td class="val">${sym}${fa(doc.igst || 0)}</td></tr>`
         : `<tr><td class="lbl">CGST</td><td class="val">${sym}${fa(doc.cgst || 0)}</td></tr><tr><td class="lbl">SGST</td><td class="val">${sym}${fa(doc.sgst || 0)}</td></tr>`)

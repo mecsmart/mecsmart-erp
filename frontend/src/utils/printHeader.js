@@ -5,6 +5,21 @@
 
 export function letterheadCSS(accentColor = '#1D3557') {
   return `
+    /* GLOBAL: Page X of Y on every printed page — supported by Chrome's
+       native print pipeline AND Electron's printToPDF (via preferCSSPageSize).
+       html2pdf rasterisation ignores @page margin-boxes, but it draws its
+       own page numbers separately in /app/frontend/src/utils/pdfPrint.js.
+       NOTE: margins are NOT set here — each template defines its own
+       @page margin so we don't override their layout. */
+    @page {
+      @bottom-right {
+        content: "Page " counter(page) " of " counter(pages);
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        font-size: 9px;
+        color: #64748b;
+        padding-right: 4mm;
+      }
+    }
     .lh-wrap { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; border-bottom:2px solid ${accentColor}; padding-bottom:14px; margin-bottom:16px; }
     .lh-left { flex:0 0 auto; display:flex; flex-direction:column; align-items:flex-start; }
     .lh-left img { max-height:78px; max-width:210px; object-fit:contain; }

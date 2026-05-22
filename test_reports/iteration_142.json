@@ -1,0 +1,90 @@
+{
+  "summary": "Round 21 Testing Complete - Additional Charges Feature. All 11 backend tests passed (BACKEND-1 through BACKEND-7). Frontend tests verified FE-1 through FE-6. The additional charges feature is fully functional across Quotations, Proformas, and Tax Invoices with correct GST math including export currency (USD) zeroing out GST.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Quotation form action bar",
+        "issues": ["Action bar has 'pointer-events-none' class which may affect button clickability - verify buttons are still clickable"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_additional_charges_round21.py",
+    "/app/test_reports/pytest/pytest_iteration_142.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_additional_charges_round21.py"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 tests passed)",
+    "frontend": "100% (FE-1 through FE-6 verified)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created test customers with unique GSTINs, test quotations, proformas, and tax invoices during backend testing. Created 'TEST_Packing_Playwright' additional charge during frontend testing.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Round 21 Additional Charges feature fully tested. Backend CRUD for /api/crm/additional-charges works. Quotation/Proforma/TaxInvoice create/update with additional_charges computes GST correctly. Convert flows (quotation→proforma→tax_invoice) carry additional_charges forward. Export currency (USD) zeros out GST on charges. Frontend AdditionalChargesConfig UI at /crm?tab=marketing&sub=configuration works with add/edit/delete. Quotation and Tax Invoice forms have '+ Add Additional Charge' button with dropdown and amount inputs.",
+  "tests_verified": {
+    "BACKEND-1": {
+      "status": "PASSED",
+      "details": "Additional Charges Master CRUD - POST creates charge with {name, hsn_code, gst_rate}, GET lists, PUT updates, DELETE removes"
+    },
+    "BACKEND-2": {
+      "status": "PASSED",
+      "details": "Quotation with additional_charges - POST creates quotation with charges, response has additional_charges_total=500, additional_charges_gst=90, total_gst includes +90 over item GST"
+    },
+    "BACKEND-3": {
+      "status": "PASSED",
+      "details": "Quotation update preserves & recomputes additional_charges - PUT with new charges list recomputes totals correctly"
+    },
+    "BACKEND-4": {
+      "status": "PASSED",
+      "details": "Convert quotation→proforma carries additional_charges forward - POST /api/crm/quotations/{qid}/convert-to-proforma preserves charges and totals"
+    },
+    "BACKEND-5": {
+      "status": "PASSED",
+      "details": "Convert proforma→tax_invoice carries additional_charges forward - POST /api/crm/proformas/{pid}/convert-to-tax-invoice preserves charges and totals"
+    },
+    "BACKEND-6": {
+      "status": "PASSED",
+      "details": "Tax Invoice direct create + update with additional_charges - POST and PUT support additional_charges field with correct GST math"
+    },
+    "BACKEND-7": {
+      "status": "PASSED",
+      "details": "Export currency (USD) zeros out charges GST - POST quotation with currency:'USD' and additional_charges returns additional_charges_gst=0"
+    },
+    "FE-1": {
+      "status": "PASSED",
+      "details": "AdditionalChargesConfig UI at /crm?tab=marketing&sub=configuration - Section found with data-testid='additional-charges-config', inputs for charge-name-input, charge-hsn-input, charge-gst-input, charge-save-btn. Table shows charges with mono HSN and right-aligned GST%. Edit/delete buttons work."
+    },
+    "FE-2": {
+      "status": "PASSED",
+      "details": "Quotation form additional charges - '+ Add Additional Charge' button (data-testid='add-additional-charge-btn') found. Clicking adds dropdown (additional-charge-select-0) and amount input (additional-charge-amount-0)."
+    },
+    "FE-3": {
+      "status": "PASSED",
+      "details": "Tax Invoice form additional charges - '+ Add Additional Charge' button (data-testid='ti-add-additional-charge-btn') found. Dropdown (ti-additional-charge-select-0) and amount input (ti-additional-charge-amount-0) present."
+    },
+    "FE-4": {
+      "status": "PASSED",
+      "details": "Floating Cancel/Save buttons (Quotation) - Action bar (data-testid='quotation-form-action-bar') found with classes 'sticky bottom-3 z-20 mt-3 flex justify-end gap-2 pointer-events-none'. Cancel (quotation-cancel-btn) and Save (quotation-save-btn) buttons present."
+    },
+    "FE-5": {
+      "status": "PASSED",
+      "details": "PDF Print template - PDF preview dialog opens with iframe. Print/Save as PDF and Download PDF buttons present."
+    },
+    "FE-6": {
+      "status": "VERIFIED",
+      "details": "Page X of Y globally - CSS rule @page { @bottom-right { content: 'Page ' counter(page) ' of ' counter(pages); } } present in /app/frontend/src/utils/printHeader.js letterheadCSS function. Note: visible only in actual print preview (Ctrl+P), not in iframe preview."
+    }
+  },
+  "regression_notes": "Existing PDF generation works for quotation/proforma/tax invoice. Floating buttons don't block clickable form content (buttons have pointer-events-auto). Quotation total math is correct with both global discount AND additional charges combined."
+}
