@@ -436,6 +436,16 @@ ipcMain.handle('mecsmart:download-pdf', async (_event, { html, filename } = {}) 
       printBackground: true,
       preferCSSPageSize: true,
       margins: { marginType: 'default' },
+      // Render Chromium's built-in page-number footer. Without this the
+      // @page @bottom-right CSS margin-box is silently dropped by Electron's
+      // printToPDF (same behavior as Playwright's page.pdf()).
+      displayHeaderFooter: true,
+      headerTemplate: '<div></div>',
+      footerTemplate:
+        '<div style="font-family:Helvetica,Arial,sans-serif;font-size:8px;' +
+        'color:#64748b;width:100%;text-align:right;padding:0 8mm 0 0;">' +
+        'Page <span class="pageNumber"></span> of <span class="totalPages"></span>' +
+        '</div>',
     });
     console.log('[mecsmart:download-pdf] printToPDF ok', { pdfBytes: pdfBuffer.length });
 

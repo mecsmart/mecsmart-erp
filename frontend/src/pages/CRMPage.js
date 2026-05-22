@@ -1714,9 +1714,9 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                   )}
                   {/* ---- Additional Charges (after global discount, before GST) ---- */}
                   {(form.additional_charges || []).map((c, ci) => (
-                    <div key={`ac-${ci}`} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center text-[12px]" data-testid={`additional-charge-row-${ci}`}>
+                    <div key={`ac-${ci}`} className="border border-[#E5E7EB] bg-white rounded-sm px-2 py-1.5 space-y-1" data-testid={`additional-charge-row-${ci}`}>
                       <select
-                        className="input-field h-7 text-xs px-2 py-0"
+                        className="input-field h-7 text-xs px-2 py-0 w-full"
                         value={c.charge_id || ''}
                         onChange={(e) => {
                           const m = additionalChargesMaster.find(x => x.id === e.target.value);
@@ -1738,24 +1738,26 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                           <option key={m.id} value={m.id}>{m.name} ({(m.gst_rate ?? 0)}% GST)</option>
                         ))}
                       </select>
-                      <input
-                        type="number" min="0" step="0.01"
-                        className="input-field h-7 text-xs px-2 py-0 w-28 mono text-right"
-                        placeholder="Amount"
-                        value={c.amount || 0}
-                        onChange={(e) => setForm(f => ({
-                          ...f,
-                          additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, amount: parseFloat(e.target.value) || 0 } : row),
-                        }))}
-                        data-testid={`additional-charge-amount-${ci}`}
-                      />
-                      <button
-                        type="button"
-                        className="text-[#9B1C1C] p-1 hover:bg-[#FDE2E2] rounded"
-                        onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
-                        title="Remove charge"
-                        data-testid={`additional-charge-remove-${ci}`}
-                      ><X className="w-3.5 h-3.5" /></button>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number" min="0" step="0.01"
+                          className="input-field h-7 text-xs px-2 py-0 flex-1 mono text-right"
+                          placeholder="Amount"
+                          value={c.amount || 0}
+                          onChange={(e) => setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, amount: parseFloat(e.target.value) || 0 } : row),
+                          }))}
+                          data-testid={`additional-charge-amount-${ci}`}
+                        />
+                        <button
+                          type="button"
+                          className="text-[#9B1C1C] p-1 hover:bg-[#FDE2E2] rounded"
+                          onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
+                          title="Remove charge"
+                          data-testid={`additional-charge-remove-${ci}`}
+                        ><X className="w-3.5 h-3.5" /></button>
+                      </div>
                     </div>
                   ))}
                   <div className="flex items-center justify-between text-[11px]">
@@ -3756,9 +3758,9 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                 {totals.totalDiscount > 0 && <div className="flex justify-between"><span className="text-[#4B5563]">Discount</span><span className="mono">-{formatCurrency(totals.totalDiscount, form.currency)}</span></div>}
                 {/* ---- Additional Charges (after global discount, before GST) ---- */}
                 {(form.additional_charges || []).map((c, ci) => (
-                  <div key={`ti-ac-${ci}`} className="grid grid-cols-[1fr_auto_auto] gap-1.5 items-center text-[12px]" data-testid={`ti-additional-charge-row-${ci}`}>
+                  <div key={`ti-ac-${ci}`} className="border border-[#E5E7EB] bg-white rounded-sm px-2 py-1.5 space-y-1" data-testid={`ti-additional-charge-row-${ci}`}>
                     <select
-                      className="input-field h-7 text-xs px-2 py-0"
+                      className="input-field h-7 text-xs px-2 py-0 w-full"
                       value={c.charge_id || ''}
                       onChange={(e) => {
                         const m = additionalChargesMaster.find(x => x.id === e.target.value);
@@ -3780,24 +3782,26 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                         <option key={m.id} value={m.id}>{m.name} ({(m.gst_rate ?? 0)}% GST)</option>
                       ))}
                     </select>
-                    <input
-                      type="number" min="0" step="0.01"
-                      className="input-field h-7 text-xs px-2 py-0 w-24 mono text-right"
-                      placeholder="Amount"
-                      value={c.amount || 0}
-                      onChange={(e) => setForm(f => ({
-                        ...f,
-                        additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, amount: parseFloat(e.target.value) || 0 } : row),
-                      }))}
-                      data-testid={`ti-additional-charge-amount-${ci}`}
-                    />
-                    <button
-                      type="button"
-                      className="text-[#9B1C1C] p-1 hover:bg-[#FDE2E2] rounded"
-                      onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
-                      title="Remove charge"
-                      data-testid={`ti-additional-charge-remove-${ci}`}
-                    ><X className="w-3.5 h-3.5" /></button>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number" min="0" step="0.01"
+                        className="input-field h-7 text-xs px-2 py-0 flex-1 mono text-right"
+                        placeholder="Amount"
+                        value={c.amount || 0}
+                        onChange={(e) => setForm(f => ({
+                          ...f,
+                          additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, amount: parseFloat(e.target.value) || 0 } : row),
+                        }))}
+                        data-testid={`ti-additional-charge-amount-${ci}`}
+                      />
+                      <button
+                        type="button"
+                        className="text-[#9B1C1C] p-1 hover:bg-[#FDE2E2] rounded"
+                        onClick={() => setForm(f => ({ ...f, additional_charges: f.additional_charges.filter((_, i) => i !== ci) }))}
+                        title="Remove charge"
+                        data-testid={`ti-additional-charge-remove-${ci}`}
+                      ><X className="w-3.5 h-3.5" /></button>
+                    </div>
                   </div>
                 ))}
                 <div className="flex items-center justify-between text-[11px] pt-0.5">

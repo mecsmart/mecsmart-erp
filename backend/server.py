@@ -16237,7 +16237,31 @@ async def print_html_to_pdf(payload: dict = Body(...), user: dict = Depends(get_
             ctx = await browser.new_context()
             page = await ctx.new_page()
             await page.set_content(html, wait_until="networkidle", timeout=20000)
-            data = await page.pdf(format="A4", print_background=True, prefer_css_page_size=True)
+            # Page X of Y footer — Playwright's pdf() does NOT render
+            # @page @bottom-right margin-boxes from CSS, so we have to
+            # supply a Chromium footer_template. The page number tokens
+            # `<span class="pageNumber"></span>` / `<span class="totalPages"></span>`
+            # are special — Chrome substitutes them at print time.
+            # display_header_footer with margins ensures the footer doesn't
+            # crop the body content; top margin matches the existing CSS @page.
+            footer_html = (
+                '<div style="font-family:Helvetica,Arial,sans-serif;font-size:8px;'
+                'color:#64748b;width:100%;text-align:right;padding:0 8mm 0 0;">'
+                'Page <span class="pageNumber"></span> of <span class="totalPages"></span>'
+                '</div>'
+            )
+            data = await page.pdf(
+                format="A4",
+                print_background=True,
+                prefer_css_page_size=True,
+                display_header_footer=True,
+                # Empty header so only the footer shows.
+                header_template='<div></div>',
+                footer_template=footer_html,
+                # Override CSS margins so the footer has room (the CRM @page
+                # rule uses 4mm/4mm/6mm/4mm which is too tight for footer).
+                margin={"top": "4mm", "right": "4mm", "bottom": "12mm", "left": "4mm"},
+            )
             await browser.close()
             return data
 

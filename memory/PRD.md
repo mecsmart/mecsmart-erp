@@ -19,6 +19,11 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 21.1 — bugfix follow-up to Round 21 — DONE ✅):**
+  1. **Additional charge dropdown name hidden** — the `<select>` was 1fr-sized inside `grid-cols-[1fr_auto_auto]` next to a 112px amount input + remove button, which left no room for the charge name (only the `▼` arrow showed). Restructured each charge row to a vertical 2-row layout: full-width dropdown on top, amount + remove button below. Charge name now fully visible after selection.
+  2. **"Only one additional charge allowed"** — actually a symptom of bug #1. Users were clicking `+ Add Additional Charge` repeatedly but all new rows looked empty/identical (collapsed dropdown showed only `▼`), so they couldn't tell rows were being added. Fixed by #1.
+  3. **Page numbers not showing in downloaded PDF** — root cause: Playwright's `page.pdf()` (and Electron's `webContents.printToPDF`) silently DROP CSS `@page @bottom-right` margin-boxes. The `letterheadCSS` rule worked for native browser print (Ctrl+P) but not the server-side PDF endpoint. Fixed by switching both pipelines to `display_header_footer=True` with a Chromium `footer_template` containing the special `<span class="pageNumber">/<span class="totalPages">` tokens. Verified — multi-page PDFs now show "Page 1 of 2", "Page 2 of 2", etc.
+
 - **2026-02-22 (Round 21 — Quotation UX polish + Additional Charges feature — DONE ✅):**
   1. **Terms & Conditions** restyled — removed the left accent strip + bg fill, added rounded outline (1px slate-300, 6px radius). Looks like a clean outlined card now.
   2. **Bank A/c No. + IFSC** font normalised — dropped the Courier `.mono` class and matched the Rate-column body font (Segoe UI 11px, weight 600). Far more readable on print.
