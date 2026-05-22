@@ -19,6 +19,15 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 21.6 — Global Discount + Charge rows fully right-edge aligned, narrower amount column — DONE ✅):**
+  1. **Phantom 24px spacer after Global Discount input** — added `<span className="w-6 h-7" aria-hidden="true" />` after the GD input so its right edge sits at the same x-position as the charge inputs (which have a 24px X-remove button after).
+  2. **Reduced amount input width** from `w-40` (160px) to `w-32` (128px) on both Global Discount AND Additional Charge rows. Gives more space to the charge name dropdown / label.
+  3. **Standardised X-remove button** to a fixed `w-6 h-7` (24px square) instead of the previous `p-1` so the spacer-vs-button widths match precisely.
+  4. **Text size match** — Global Discount label now explicitly uses `text-xs font-semibold` matching the Additional Charge name `<select>` styling (was relying on parent inheritance which sometimes rendered slightly larger).
+  5. **Updated `pr-7` → `pr-8`** on all displayed amount values (Subtotal, Net Subtotal, GD Applied, Charges total, GST, Grand Total) so the right padding matches the new w-6 X-button + 2px breathing space = 32px.
+  6. **Totals box width** reduced from `w-[520px]` to `w-[480px]` to compensate for the narrower input.
+  7. Applied identically to Quotation form AND Tax Invoice form so they share the visual language.
+
 - **2026-02-22 (Round 21.5 — right-edge alignment for all totals rows — DONE ✅):**
   1. **Problem**: Input rows (Global Discount, Additional Charges) have X remove buttons at the far right which shifts the input field edge ~28px LEFT of the box right edge. Displayed values (Subtotal, GST, Grand Total) had no X button so they extended ALL the way to the box right edge → visual misalignment between input edges and displayed value edges.
   2. **Fix**: Added `pr-7` (28px right padding = X button width + gap) to all displayed amount spans in BOTH the Quotation form AND Tax Invoice form: Subtotal, Global Discount Applied, Net Subtotal, Charges total, GST, Grand Total. Result: every value (whether an input or a label) ends at exactly the same x-position. The X buttons for chargeable rows sit cleanly beyond.
