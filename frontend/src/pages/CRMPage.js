@@ -1755,6 +1755,14 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                     const resolved = vt === 'percent' ? (totals.sub * raw / 100) : raw;
                     const equivPct = (vt === 'amount' && totals.sub > 0 && raw > 0) ? (raw / totals.sub * 100) : null;
                     const equivAmt = (vt === 'percent' && raw > 0) ? resolved : null;
+                    // Hide charge IDs already used in OTHER rows so each
+                    // master entry can only be picked once per quotation.
+                    const usedIds = new Set(
+                      (form.additional_charges || [])
+                        .map((x, j) => (j !== ci && x.charge_id ? x.charge_id : null))
+                        .filter(Boolean)
+                    );
+                    const availableMasters = additionalChargesMaster.filter(m => m.is_active !== false && !usedIds.has(m.id));
                     return (
                     <React.Fragment key={`ac-${ci}`}>
                       <div className="col-start-1 bg-[#F9FAFB] border-l border-y border-[#E5E7EB] rounded-l-sm px-2 py-1 -mr-2 flex flex-col justify-center" data-testid={`additional-charge-row-${ci}`}>
@@ -1778,7 +1786,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                           title={c.name || 'Select charge'}
                         >
                           <option value="">— select charge —</option>
-                          {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
+                          {availableMasters.map(m => (
                             <option key={m.id} value={m.id}>{m.name}</option>
                           ))}
                         </select>
@@ -3870,6 +3878,14 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                   const resolved = vt === 'percent' ? (totals.subtotal * raw / 100) : raw;
                   const equivPct = (vt === 'amount' && totals.subtotal > 0 && raw > 0) ? (raw / totals.subtotal * 100) : null;
                   const equivAmt = (vt === 'percent' && raw > 0) ? resolved : null;
+                  // Hide charge IDs already used in OTHER rows so each
+                  // master entry can only be picked once per invoice.
+                  const usedIds = new Set(
+                    (form.additional_charges || [])
+                      .map((x, j) => (j !== ci && x.charge_id ? x.charge_id : null))
+                      .filter(Boolean)
+                  );
+                  const availableMasters = additionalChargesMaster.filter(m => m.is_active !== false && !usedIds.has(m.id));
                   return (
                   <div key={`ti-ac-${ci}`} className="flex justify-between items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 my-1 gap-2" data-testid={`ti-additional-charge-row-${ci}`}>
                     <div className="flex-1 min-w-0">
@@ -3893,7 +3909,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                         title={c.name || 'Select charge'}
                       >
                         <option value="">— select charge —</option>
-                        {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
+                        {availableMasters.map(m => (
                           <option key={m.id} value={m.id}>{m.name}</option>
                         ))}
                       </select>

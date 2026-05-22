@@ -25,7 +25,7 @@ const statusOptions = [
 ];
 
 const emptyLine = { item_id: '', description: '', quantity: 1, unit_price: 0, uom: 'pcs', hsn_code: '', gst_rate: 18, discount_type: 'percentage', discount_value: 0, notes: '' };
-const emptyCharge = { charge_type_id: '', name: '', hsn_code: '', gst_rate: 18, amount: 0 };
+const emptyCharge = { charge_type_id: '', name: '', hsn_code: '', gst_rate: 18, value_type: 'amount', value: 0, amount: 0 };
 
 const emptyForm = {
   supplier_id: '', expected_date: '', delivery_warehouse_id: '', 
@@ -142,6 +142,11 @@ export default function PurchaseOrdersPage() {
         name: c.name || '',
         hsn_code: c.hsn_code || '',
         gst_rate: c.gst_rate != null ? c.gst_rate : 18,
+        // Backend persists only the resolved `amount`. On load, default
+        // value_type → 'amount' and copy amount into `value` so the
+        // ₹/% toggle UI works with existing data without a schema migration.
+        value_type: c.value_type || 'amount',
+        value: c.value != null ? c.value : (c.amount || 0),
         amount: c.amount || 0,
       })),
       notes: po.notes || '',
@@ -155,8 +160,27 @@ export default function PurchaseOrdersPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
+      // Resolve each charge's percentage to a concrete amount before sending
+      // to the backend (which only persists the resolved `amount`).
+      const sub = calcSubtotal();
+      const resolvedCharges = (formData.additional_charges || []).map(c => {
+        const amt = resolveChargeAmount(c, sub);
+        return {
+          charge_type_id: c.charge_type_id || '',
+          name: c.name || '',
+          hsn_code: c.hsn_code || '',
+          gst_rate: parseFloat(c.gst_rate) || 0,
+          // Preserve value_type / value so re-opening the PO keeps the user's
+          // original % intent. Backend stores these alongside `amount` even
+          // though `amount` is the only field the totals math uses.
+          value_type: c.value_type || 'amount',
+          value: parseFloat(c.value ?? c.amount) || 0,
+          amount: Math.round(amt * 100) / 100,
+        };
+      });
       const payload = {
         ...formData,
+        additional_charges: resolvedCharges,
         expected_date: new Date(formData.expected_date).toISOString(),
         quotation_date: formData.quotation_date ? new Date(formData.quotation_date).toISOString() : null,
       };
@@ -248,10 +272,22 @@ export default function PurchaseOrdersPage() {
   };
 
   const calcSubtotal = () => formData.lines.reduce((s, l) => s + calcLineAmount(l), 0);
-  const calcChargesTotal = () => formData.additional_charges.reduce((s, c) => s + (c.amount || 0), 0);
+  // Resolve a charge's effective amount based on its value_type. Percent
+  // charges are computed against the items subtotal (matches Quotation
+  // behaviour). Amount charges use the raw value.
+  const resolveChargeAmount = (c, sub) => {
+    const raw = parseFloat(c.value ?? c.amount) || 0;
+    const vt = c.value_type || 'amount';
+    return vt === 'percent' ? sub * raw / 100 : raw;
+  };
+  const calcChargesTotal = () => {
+    const sub = calcSubtotal();
+    return formData.additional_charges.reduce((s, c) => s + resolveChargeAmount(c, sub), 0);
+  };
   const calcGST = () => {
+    const sub = calcSubtotal();
     const lineGST = formData.lines.reduce((s, l) => s + calcLineAmount(l) * (l.gst_rate || 0) / 100, 0);
-    const chargeGST = formData.additional_charges.reduce((s, c) => s + (c.amount || 0) * (c.gst_rate || 0) / 100, 0);
+    const chargeGST = formData.additional_charges.reduce((s, c) => s + resolveChargeAmount(c, sub) * (c.gst_rate || 0) / 100, 0);
     return lineGST + chargeGST;
   };
 
@@ -670,7 +706,23 @@ export default function PurchaseOrdersPage() {
                   <span className="mono text-right">{formatCurrency(calcSubtotal(), formData.currency)}</span>
 
                   {/* Inline Additional Charges rows — same 3-col grid */}
-                  {(formData.additional_charges || []).map((c, ci) => (
+                  {(formData.additional_charges || []).map((c, ci) => {
+                    const vt = c.value_type || 'amount';
+                    const raw = parseFloat(c.value ?? c.amount) || 0;
+                    const symC = { INR: '₹', USD: '$', EUR: '€', GBP: '£', AED: 'د.إ' }[(formData.currency || 'INR').toUpperCase()] || '₹';
+                    const sub = calcSubtotal();
+                    const equivPct = (vt === 'amount' && sub > 0 && raw > 0) ? (raw / sub * 100) : null;
+                    const equivAmt = (vt === 'percent' && raw > 0) ? (sub * raw / 100) : null;
+                    // Exclude charges already selected in OTHER rows so each
+                    // charge type can only be picked once per PO. The row's
+                    // own current selection stays visible.
+                    const usedIds = new Set(
+                      (formData.additional_charges || [])
+                        .map((x, j) => (j !== ci && x.charge_type_id ? x.charge_type_id : null))
+                        .filter(Boolean)
+                    );
+                    const availableCharges = chargeTypes.filter(ct => !usedIds.has(ct.id));
+                    return (
                     <React.Fragment key={`po-ac-${ci}`}>
                       <div className="col-start-1 bg-[#F9FAFB] border-l border-y border-[#E5E7EB] rounded-l-sm px-2 py-1 -mr-2 flex flex-col justify-center" data-testid={`po-additional-charge-row-${ci}`}>
                         <select
@@ -681,27 +733,53 @@ export default function PurchaseOrdersPage() {
                           title={c.name || 'Select charge'}
                         >
                           <option value="">— select charge —</option>
-                          {chargeTypes.map(ct => (
+                          {availableCharges.map(ct => (
                             <option key={ct.id} value={ct.id}>{ct.name}</option>
                           ))}
                         </select>
+                        {(equivPct != null || equivAmt != null) && (
+                          <div className="text-[10px] text-[#6B7280] mt-0.5 leading-none">
+                            {equivPct != null && <>(={equivPct.toFixed(2)}%)</>}
+                            {equivAmt != null && <>(={formatCurrency(equivAmt, formData.currency)})</>}
+                          </div>
+                        )}
                         {c.hsn_code && (
                           <div className="text-[10px] text-[#6B7280] mt-0.5 leading-none">HSN {c.hsn_code} · {c.gst_rate || 0}% GST</div>
                         )}
                       </div>
                       <div className="bg-[#F9FAFB] border-y border-[#E5E7EB] py-1 flex items-center justify-center">
-                        <span className="h-7 w-9 text-sm font-semibold mono bg-[#1D3557] text-white flex items-center justify-center rounded-sm border border-[#1D3557]">
-                          {{ INR: '₹', USD: '$', EUR: '€', GBP: '£', AED: 'د.إ' }[(formData.currency || 'INR').toUpperCase()] || '₹'}
-                        </span>
+                        {/* ₹/% toggle — matches Quotation/Tax Invoice. % is
+                            computed against the Items Subtotal (line totals
+                            after line discounts). */}
+                        <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden" role="tablist">
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={vt === 'amount'}
+                            onClick={() => updateCharge(ci, 'value_type', 'amount')}
+                            className={`h-7 w-9 text-sm font-semibold mono transition-colors ${vt === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                            data-testid={`po-additional-charge-mode-amount-${ci}`}
+                            title="Charge as currency amount"
+                          >{symC}</button>
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={vt === 'percent'}
+                            onClick={() => updateCharge(ci, 'value_type', 'percent')}
+                            className={`h-7 w-9 text-sm font-semibold mono transition-colors border-l border-[#D1D5DB] ${vt === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                            data-testid={`po-additional-charge-mode-percent-${ci}`}
+                            title="Charge as % of items subtotal"
+                          >%</button>
+                        </div>
                       </div>
                       <div className="relative bg-[#F9FAFB] border-r border-y border-[#E5E7EB] rounded-r-sm py-1 px-2 -ml-2 flex items-center">
                         <input
                           type="number" min="0" step="0.01"
                           className="input-field h-7 text-xs px-2 py-0 w-full mono"
                           style={{ textAlign: 'right' }}
-                          placeholder="Amount"
-                          value={c.amount || 0}
-                          onChange={(e) => updateCharge(ci, 'amount', parseFloat(e.target.value) || 0)}
+                          placeholder={vt === 'percent' ? '%' : 'Amount'}
+                          value={c.value ?? c.amount ?? 0}
+                          onChange={(e) => updateCharge(ci, 'value', parseFloat(e.target.value) || 0)}
                           data-testid={`po-additional-charge-amount-${ci}`}
                         />
                         <button
@@ -713,7 +791,8 @@ export default function PurchaseOrdersPage() {
                         ><X className="w-3.5 h-3.5" /></button>
                       </div>
                     </React.Fragment>
-                  ))}
+                    );
+                  })}
 
                   {/* "+ Add Additional Charge" + running total */}
                   <button

@@ -1,0 +1,57 @@
+{
+  "summary": "Round 26 testing complete - All features verified: (1) PO Create/Edit Additional Charges now has ₹/% toggle matching Quotation behaviour, (2) Dropdown dedup working for Quotation, Tax Invoice, and Purchase Order - selected charge types are hidden from subsequent row dropdowns.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_147.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only testing)",
+    "frontend": "100% (all test cases passed)"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Used existing charge types: Transportation Charges, Loading Charges (PO), Packing & Forwarding (Quotation/TI)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Round 26 verified: (1) PO Create/Edit has ₹/% toggle for Additional Charges - data-testid='po-additional-charge-mode-amount-0' and 'po-additional-charge-mode-percent-0' both exist. ₹ is default selected (navy bg #1D3557), clicking % switches selection. % computed against Items Subtotal. (2) Dropdown dedup working for all three document types - when a charge type is selected in row 1, it is NOT available in row 2's dropdown. Verified for PO (Transportation Charges), Quotation (Packing & Forwarding), Tax Invoice (Packing & Forwarding). (3) Quotation Rate 2-decimal persistence still working (100 → 100.00 on blur, stays 100.00 on re-focus). (4) PO PDF preview dialog has 'Additional Charges Section' checkbox option. (5) Code review confirms value_type/value fields are preserved on PO save and re-open.",
+  "tests_verified": {
+    "PO-TOGGLE-1": {
+      "status": "PASSED",
+      "details": "PO Create/Edit has ₹/% toggle for Additional Charges. Found data-testid='po-additional-charge-mode-amount-0' (₹) and 'po-additional-charge-mode-percent-0' (%). ₹ button has class 'bg-[#1D3557] text-white' (navy bg, white text) by default. % button has class 'bg-white text-[#374151]' (white bg). After clicking %, the classes swap correctly."
+    },
+    "PO-TOGGLE-2": {
+      "status": "PASSED",
+      "details": "PO % toggle switches correctly. Amount button text: '₹', Percent button text: '%'. After clicking %, percent button becomes navy (bg-[#1D3557]) and amount button becomes white."
+    },
+    "PO-DEDUP-1": {
+      "status": "PASSED",
+      "details": "PO dropdown dedup working. First dropdown has 7 options including 'Transportation Charges'. After selecting 'Transportation Charges' in row 1, second dropdown has 6 options - 'Transportation Charges' is NOT present (dedup working)."
+    },
+    "QUOTATION-DEDUP-1": {
+      "status": "PASSED",
+      "details": "Quotation dropdown dedup working. First dropdown has 'Packing & Forwarding' and 'TEST_Packing_Playwright'. After selecting 'Packing & Forwarding' in row 1, second dropdown only has 'TEST_Packing_Playwright' - 'Packing & Forwarding' is NOT present (dedup working)."
+    },
+    "TAX-INVOICE-DEDUP-1": {
+      "status": "PASSED",
+      "details": "Tax Invoice dropdown dedup working. Same as Quotation - 'Packing & Forwarding' selected in row 1 is NOT available in row 2's dropdown (dedup working)."
+    },
+    "RATE-REGRESSION-1": {
+      "status": "PASSED",
+      "details": "Quotation Rate 2-decimal persistence working - type '100', blur → shows '100.00', re-focus → still shows '100.00'"
+    },
+    "PO-PDF-REGRESSION-1": {
+      "status": "PASSED",
+      "details": "PO Print dialog has 'Additional Charges Section' checkbox option. PDF preview shows totals box with Subtotal, GST, Grand Total. Code review confirms charges are rendered as inline <tr> rows in totalsHTML."
+    }
+  }
+}
