@@ -19,6 +19,17 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 24 — PO print parity, repeating header & PO-style Additional Charges — DONE ✅):**
+  1. **PO text brightness aligned with Quotation** — td text now `#0f172a`, info-block details `#475569`, font Helvetica Neue 11px.
+  2. **PO doc-title bar** — `"Purchase Order: PO-XXX"` now renders as a filled navy bar with white text (was white-with-underline) — matches Quotation info-bar.
+  3. **PO running header on page 2+** — wrapped body in `<table class="print-doc">` with `<thead>` running-band (logo + company + GSTIN + PO# repeated on every page). Page 1 masked via `.page-one-cover { margin-top:-17mm }`. Same proven trick used in Quotation. Page numbers added via `@page @bottom-right` counter.
+  4. **PO Grand Total row** — filled navy bg with white text (was just navy text on white).
+  5. **PO Additional Charges table** — fixed font color (was inheriting wrong palette).
+  6. **Quotation & Tax Invoice Create/Edit — PO-style Additional Charges table** — Inline grid in totals box replaced with separate table OUTSIDE totals area. Columns: Charge Type | HSN | GST% | Amount | Tax | X. Navy header bg, white text, alternating body rows. `value_type` percent toggle dropped from UI (data still loads, but new entries store as amount).
+  7. **Quotation & Tax Invoice Print/PDF — PO-style charges table** — Inline per-charge rows in totals removed; a separate `<table class="items charges-tbl">` with columns Charge | HSN | Amount | GST% | GST Amt is rendered between the items table and the totals/bank block. Totals box now shows a single "Additional Charges" summary line.
+  8. Verified by testing_agent_v3_fork iteration_145 — **14/14 cases PASSED**, including a regression check on the Round 23 Rate decimal persistence fix.
+
+
 - **2026-02-22 (Round 23 — Quotation Rate decimal persistence + PO print template restored — DONE ✅):**
   1. **`RateInput` 2-decimal persistence (CRMPage.js line 927)** — On blur, the stored line.rate value is now normalised via `num.toFixed(2)` so "100" becomes "100.00" and the formatted display sticks even after re-focus or re-render. Empty input stays empty (no spurious "0.00"). Fixes the long-standing recurring complaint about Quotation rate column missing decimals after edit.
   2. **PO print template now exactly matches Quotation (PrintDialogs.js baseStyles)** —
