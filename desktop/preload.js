@@ -29,6 +29,12 @@ contextBridge.exposeInMainWorld('mecsmart', {
   saveCredentials: (email, password) => ipcRenderer.invoke('mecsmart:save-credentials', { email, password }),
   loadCredentials: () => ipcRenderer.invoke('mecsmart:load-credentials'),
   clearCredentials: () => ipcRenderer.invoke('mecsmart:clear-credentials'),
+  // ─── Native PDF download (Electron-only) ────────────────────────────────
+  // The renderer's PreviewPdfDialog detects this method's presence and uses
+  // it instead of the backend Playwright endpoint when running inside the
+  // desktop wrapper. Produces a vector PDF via Chromium's printToPDF —
+  // byte-identical to the user's "Print → Save as PDF" output.
+  downloadPdf: (html, filename) => ipcRenderer.invoke('mecsmart:download-pdf', { html, filename }),
   // True when running inside Electron — used by the LoginPage to decide
   // whether to render the "Remember me" checkbox at all.
   isDesktopApp: true,

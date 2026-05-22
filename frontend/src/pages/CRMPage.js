@@ -1690,8 +1690,8 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t">
-              <button className="btn-secondary" onClick={() => { setDialog(false); setEditing(null); }}>Cancel</button>
+            <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-3 bg-white border-t border-[#E5E7EB] shadow-[0_-4px_12px_-4px_rgba(0,0,0,0.08)] flex justify-end gap-2 z-20 mt-3" data-testid="quotation-form-action-bar">
+              <button className="btn-secondary" onClick={() => { setDialog(false); setEditing(null); }} data-testid="quotation-cancel-btn">Cancel</button>
               <button className="btn-primary" onClick={save} data-testid="quotation-save-btn">{editing ? 'Update' : 'Create'} Quotation</button>
             </div>
           </div>
@@ -4438,8 +4438,12 @@ function printInvoiceDoc(doc, opts) {
   .repeat-head { display: none !important; }
   .print-doc { width: 100%; border-collapse: collapse; }
   .print-doc > thead { display: table-header-group; }
-  .print-doc > tbody > tr > td,
-  .print-doc > thead > tr > td { padding: 0; vertical-align: top; }
+  .print-doc > tbody > tr > td { padding: 0; vertical-align: top; }
+  /* Extra 3mm bottom-padding on thead cells so the repeating running-band
+     doesn't visually collide with the item table header on pages 2+. The
+     padding sits BELOW the band's border, creating a clean gutter before
+     the body content begins on each page. */
+  .print-doc > thead > tr > td { padding: 0 0 3mm 0; vertical-align: top; }
   .running-band {
     display: flex; align-items: center; gap: 10px;
     padding: 3px 10px 3px 10px;
@@ -4460,10 +4464,10 @@ function printInvoiceDoc(doc, opts) {
   .running-band .rb-title { font-size: 10px; font-weight: 800; color: ${accentColor}; letter-spacing: 0.3px; text-transform: uppercase; }
   .running-band .rb-docno { font-size: 9.5px; color: #0f172a; font-weight: 700; margin-top: 1px; }
   /* The page-1 cover: pulls the first tbody child UP by the running
-     band's height with a solid white background to mask the band on
-     page 1 only. Updated to 14mm to match the shrunk running-band. */
+     band's height + thead bottom-padding (14mm + 3mm = 17mm) with a
+     solid white background to mask the band on page 1 only. */
   .page-one-cover {
-    margin-top: -14mm;
+    margin-top: -17mm;
     background: #fff;
     position: relative;
     z-index: 5;
@@ -4482,7 +4486,7 @@ function printInvoiceDoc(doc, opts) {
     }
     body { padding: 0; }
     .print-doc > thead { display: table-header-group; }
-    .page-one-cover { margin-top: -22mm; background: #fff; position: relative; z-index: 5; }
+    .page-one-cover { margin-top: -25mm; background: #fff; position: relative; z-index: 5; }
   }
 </style></head><body>
 <!-- Cross-browser repeating header: <thead> repeats on every page in

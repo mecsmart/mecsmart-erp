@@ -102,14 +102,27 @@ export default function PreviewPdfDialog() {
   };
 
   const handleDownload = async () => {
-    // Server-side Chromium PDF — true direct file download, no print
-    // dialog. Static-imported `api` (was dynamic import which threw
-    // Script error in Electron production builds).
-    //
-    // Error handling: when the server returns 500 the response body is
-    // JSON ({"detail": "..."}) but we asked for responseType:'blob' so
-    // axios won't parse it. We catch and read the Blob as text to
-    // surface a useful message instead of just "Network Error".
+    // PRIMARY PATH — Electron desktop wrapper (production users).
+    // When running inside the desktop app, use the native
+    // webContents.printToPDF() IPC bridge. Produces a vector PDF
+    // identical to the user's "Print → Save as PDF" output and
+    // bypasses the unstable backend Playwright endpoint entirely.
+    const desktop = typeof window !== 'undefined' ? window.mecsmart : null;
+    if (desktop && typeof desktop.downloadPdf === 'function') {
+      try {
+        const res = await desktop.downloadPdf(html, filename);
+        if (res?.ok) return;                  // saved to disk
+        if (res?.canceled) return;            // user cancelled the save dialog
+        // Surface IPC errors so we know the desktop path failed before
+        // falling back to the server endpoint.
+        console.warn('[PreviewPdfDialog] Electron downloadPdf failed:', res?.error);
+        // Fall through to the server fallback below.
+      } catch (ipcErr) {
+        console.warn('[PreviewPdfDialog] Electron IPC threw, falling back:', ipcErr);
+      }
+    }
+
+    // FALLBACK — server-side Chromium PDF (browser users, dev preview).
     try {
       const ifr = document.querySelector('[data-testid="pdf-preview-iframe"]');
       const srcHtml = (ifr && ifr.srcdoc) || html;

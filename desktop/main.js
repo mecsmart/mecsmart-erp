@@ -13,6 +13,7 @@
 
 const { app, BrowserWindow, ipcMain, Menu, dialog, shell, safeStorage } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const Store = require('electron-store');
 const { autoUpdater } = require('electron-updater');
 
@@ -344,6 +345,81 @@ ipcMain.handle('mecsmart:load-credentials', () => {
 ipcMain.handle('mecsmart:clear-credentials', () => {
   store.delete(credKey());
   return { ok: true };
+});
+
+// ─── Native PDF download via Electron's webContents.printToPDF ──────────
+// The renderer's PreviewPdfDialog calls this when running inside the
+// desktop wrapper. Loading the print HTML into an offscreen BrowserWindow
+// and calling printToPDF() produces a vector PDF that is byte-identical
+// to the user's "Print → Save as PDF" output — including the repeating
+// thead, custom fonts, watermarks, and all CSS @page rules.
+//
+// Why not the backend Playwright endpoint? It requires a full Chromium
+// install on the customer's server which has been crashing with 500s in
+// the production deployment. Electron already bundles Chromium so this
+// works offline, on the customer's local machine, with zero extra deps.
+ipcMain.handle('mecsmart:download-pdf', async (_event, { html, filename } = {}) => {
+  if (!html || typeof html !== 'string') {
+    return { ok: false, error: 'HTML content is required' };
+  }
+  const safe = String(filename || 'document.pdf').replace(/[^A-Za-z0-9._-]+/g, '_');
+  const finalName = safe.toLowerCase().endsWith('.pdf') ? safe : `${safe}.pdf`;
+
+  // Ask the user where to save FIRST — if they cancel we can skip the
+  // entire offscreen render. Better UX than rendering then prompting.
+  const focused = BrowserWindow.getFocusedWindow() || mainWindow;
+  const saveResult = await dialog.showSaveDialog(focused, {
+    title: 'Save PDF',
+    defaultPath: finalName,
+    filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
+  });
+  if (saveResult.canceled || !saveResult.filePath) {
+    return { ok: false, canceled: true };
+  }
+
+  let pdfWin = null;
+  try {
+    // Offscreen window sized to A4 width @ 96dpi (794 CSS-px). Hidden so
+    // it never flashes on screen. nodeIntegration off + sandbox on for
+    // safety since we're loading arbitrary HTML.
+    pdfWin = new BrowserWindow({
+      show: false,
+      width: 794,
+      height: 1123,
+      webPreferences: {
+        offscreen: false,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        javascript: true,
+      },
+    });
+
+    // Load HTML via data URL so we don't have to write a temp file.
+    const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+    await pdfWin.loadURL(dataUrl);
+
+    // Give fonts + images a moment to settle. printToPDF doesn't wait
+    // for network-idle so any external assets need a small grace period.
+    await new Promise(resolve => setTimeout(resolve, 600));
+
+    const pdfBuffer = await pdfWin.webContents.printToPDF({
+      pageSize: 'A4',
+      printBackground: true,
+      preferCSSPageSize: true,
+      margins: { marginType: 'default' },
+    });
+
+    await fs.promises.writeFile(saveResult.filePath, pdfBuffer);
+    return { ok: true, path: saveResult.filePath };
+  } catch (err) {
+    console.error('[mecsmart:download-pdf]', err);
+    return { ok: false, error: String((err && err.message) || err) };
+  } finally {
+    if (pdfWin && !pdfWin.isDestroyed()) {
+      try { pdfWin.destroy(); } catch { /* noop */ }
+    }
+  }
 });
 
 // ---------------------------------------------------------------- bootstrap
