@@ -19,6 +19,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 26 — PO ₹/% toggle + dropdown dedup across all docs — DONE ✅):**
+  1. **PO Create/Edit ₹/% toggle** — Added the missing two-button toggle to PO Additional Charges, matching Quotation/Tax Invoice. % is computed against Items Subtotal (line totals after line discounts). `emptyCharge` extended with `value_type` ('amount' default) + `value`; `resolveChargeAmount()` helper feeds both `calcChargesTotal` and `calcGST`. `handleSubmit` resolves percent → concrete `amount` before posting so the backend continues to receive a flat number (no schema migration).
+  2. **Dropdown deduplication across all three documents** — Once a charge type (Quotation/TI) or PO charge type is selected in a row, it disappears from the dropdown of all OTHER rows on the same document. The current row's own selection stays visible so the user can change it. Implemented via `availableMasters` / `availableCharges` filters that exclude `usedIds` from sibling rows.
+  3. Existing PO data loads correctly — when a saved charge has no `value_type`, it's defaulted to 'amount' and `value` is back-filled from `amount`.
+  4. Verified by testing_agent_v3_fork iteration_147 — **7/7 cases PASSED**, including regressions on Quotation Rate decimal persistence and PO PDF charges layout.
+
+
 - **2026-02-22 (Round 25 — Quotation/TI restored, PO matched to Quotation pattern, Inventory Config charges master — DONE ✅):**
   1. **REVERTED Round 24** — Quotation & Tax Invoice Create/Edit forms restored to the original inline-grid-in-totals layout with ₹/% toggle. PDFs restored to inline per-charge rows directly in the totals table (with "HSN xxx, yy% GST" in parentheses next to charge name).
   2. **PO Create/Edit Additional Charges now follow Quotation pattern** — Replaced the standalone Charge Type/HSN/GST/Amount/Tax/X table + simple totals stack with a Quotation-style 3-col grid totals box. Per-charge rows are inline (select | currency symbol | amount input | absolute-positioned X). "+ Add Additional Charge" link + running "Charges:" total inside the grid. Items Subtotal, Est. GST and Total rows all share the same 3-col alignment.
