@@ -19,6 +19,18 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 23 — Quotation Rate decimal persistence + PO print template restored — DONE ✅):**
+  1. **`RateInput` 2-decimal persistence (CRMPage.js line 927)** — On blur, the stored line.rate value is now normalised via `num.toFixed(2)` so "100" becomes "100.00" and the formatted display sticks even after re-focus or re-render. Empty input stays empty (no spurious "0.00"). Fixes the long-standing recurring complaint about Quotation rate column missing decimals after edit.
+  2. **PO print template now exactly matches Quotation (PrintDialogs.js baseStyles)** —
+     - Restored navy `#1D3557` header background with white text on `<th>` cells (user reversed Round 22's plain-white headers).
+     - Body font swapped from `'Segoe UI'…10px` → `'Helvetica Neue',Arial,sans-serif 11px` (Quotation parity).
+     - Cell padding bumped to `7px 5px`, last-row border `2px solid accent` matching Quotation.
+     - HSN column widened from 7% → 11% (Item column reduced 28% → 24% to compensate).
+     - `.section-title` letter-spacing/margin tightened to match Quotation's `h4.section`.
+     - All other typography (`.mono`, `.totals-box td`, label/value blocks) bumped to 11px / 0f172a / 475569 palette.
+  3. Verified by testing_agent_v3_fork iteration_144 — 6/6 cases passed (RATE-1/2/3 + PO-PRINT-1/2/3).
+
+
 - **2026-02-22 (Round 22 — Purchase Order print template overhaul to match Quotation styling — DONE ✅):**
   1. **Rate column decimals** — already used `fa()` which delegates to `fmtAmtForCurrency` with 2dp. Verified ₹110.00 / ₹2,750.00 etc all render correctly.
   2. **Plain background** — removed dark navy `<th>` bar + white text, replaced with white th cells + accent-colored text + accent top/bottom border (matches quotation). Removed `tbody tr:nth-child(even) { background:#f8f9fa }` zebra striping → all rows plain white.
