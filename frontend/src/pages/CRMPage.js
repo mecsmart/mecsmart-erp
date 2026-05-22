@@ -929,7 +929,7 @@ const RateInput = ({ value, onChange, testId }) => {
   const num = Number(value || 0);
   const display = focused
     ? (value === '' || value === null || value === undefined ? '' : String(value))
-    : (Number.isFinite(num) && Number(value || 0) !== 0 ? num.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : (value === '' ? '' : '0'));
+    : (Number.isFinite(num) && Number(value || 0) !== 0 ? num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : (value === '' ? '' : '0.00'));
   return (
     <input
       type="text"
@@ -1674,7 +1674,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                 </table>
               </div>
               <div className="flex justify-end mt-2 text-xs">
-                <div className="w-96 space-y-1">
+                <div className="w-[520px] space-y-1">
                   <div className="flex justify-between"><span>Subtotal (after line discount):</span><span className="mono">{formatCurrency(totals.sub, form.currency)}</span></div>
                   {/* Global (footer) discount — % or absolute amount, applied AFTER line discounts and BEFORE GST.
                       UI: a clear two-button toggle (Currency / Percent) instead of a cramped <select> that truncated
@@ -1727,75 +1727,91 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
                     <div className="flex justify-between"><span>Net Subtotal:</span><span className="mono">{formatCurrency(totals.netSub, form.currency)}</span></div>
                   )}
                   {/* ---- Additional Charges (after global discount, before GST) ----
-                      Two-row card per charge: full-width dropdown (so the
-                      charge name is always fully visible) on top, ₹/% toggle
-                      + amount input + remove on the bottom — mirrors the
-                      Global Discount visual style. % is computed from the
-                      post-line-discount Subtotal shown above. */}
+                      INLINE single-row layout matching Global Discount visually:
+                        [name label]  [₹/% toggle]  [w-24 amount input]  [✕]
+                      The name slot is a borderless `<select>` styled like text
+                      so it doesn't dominate the row but still allows changing
+                      the charge. Sub-text `(=X%)` / `(=₹X)` shows the
+                      conversion in the opposite unit for transparency. */}
                   {(form.additional_charges || []).map((c, ci) => {
                     const vt = c.value_type || 'amount';
+                    const raw = parseFloat(c.value ?? c.amount) || 0;
                     const symC = CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹';
+                    const resolved = vt === 'percent' ? (totals.sub * raw / 100) : raw;
+                    const equivPct = (vt === 'amount' && totals.sub > 0 && raw > 0) ? (raw / totals.sub * 100) : null;
+                    const equivAmt = (vt === 'percent' && raw > 0) ? resolved : null;
                     return (
-                    <div key={`ac-${ci}`} className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1.5 space-y-1.5" data-testid={`additional-charge-row-${ci}`}>
-                      <select
-                        className="input-field h-7 text-xs px-2 py-0 w-full"
-                        value={c.charge_id || ''}
-                        onChange={(e) => {
-                          const m = additionalChargesMaster.find(x => x.id === e.target.value);
-                          setForm(f => ({
-                            ...f,
-                            additional_charges: f.additional_charges.map((row, i) => i === ci ? {
-                              ...row,
-                              charge_id: m?.id || '',
-                              name: m?.name || row.name || '',
-                              hsn_code: m?.hsn_code ?? row.hsn_code ?? '',
-                              gst_rate: m?.gst_rate ?? row.gst_rate ?? 18,
-                            } : row),
-                          }));
-                        }}
-                        data-testid={`additional-charge-select-${ci}`}
-                      >
-                        <option value="">— select charge —</option>
-                        {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
-                          <option key={m.id} value={m.id}>{m.name} ({(m.gst_rate ?? 0)}% GST)</option>
-                        ))}
-                      </select>
+                    <div key={`ac-${ci}`} className="flex justify-between items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 my-1 gap-2" data-testid={`additional-charge-row-${ci}`}>
+                      <div className="flex-1 min-w-0">
+                        <select
+                          className="bg-transparent border-0 outline-none w-full text-[#374151] font-semibold text-xs cursor-pointer px-0 py-0 truncate focus:bg-white focus:border focus:border-[#D1D5DB] focus:rounded focus:px-1"
+                          value={c.charge_id || ''}
+                          onChange={(e) => {
+                            const m = additionalChargesMaster.find(x => x.id === e.target.value);
+                            setForm(f => ({
+                              ...f,
+                              additional_charges: f.additional_charges.map((row, i) => i === ci ? {
+                                ...row,
+                                charge_id: m?.id || '',
+                                name: m?.name || row.name || '',
+                                hsn_code: m?.hsn_code ?? row.hsn_code ?? '',
+                                gst_rate: m?.gst_rate ?? row.gst_rate ?? 18,
+                              } : row),
+                            }));
+                          }}
+                          data-testid={`additional-charge-select-${ci}`}
+                          title={c.name || 'Select charge'}
+                        >
+                          <option value="">— select charge —</option>
+                          {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+                        {(equivPct != null || equivAmt != null) && (
+                          <div className="text-[10px] text-[#6B7280] mt-0.5 leading-none">
+                            {equivPct != null && <>(={equivPct.toFixed(2)}%)</>}
+                            {equivAmt != null && <>(={formatCurrency(equivAmt, form.currency)})</>}
+                          </div>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2">
-                        <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden shrink-0" role="tablist">
+                        <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden" role="tablist">
                           <button
                             type="button"
+                            role="tab"
                             aria-selected={vt === 'amount'}
                             onClick={() => setForm(f => ({
                               ...f,
                               additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'amount' } : row),
                             }))}
-                            className={`h-7 w-8 text-xs font-semibold mono transition-colors ${vt === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                            className={`h-7 w-9 text-sm font-semibold mono transition-colors ${vt === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
                             data-testid={`additional-charge-mode-amount-${ci}`}
                             title="Charge as currency amount"
                           >{symC}</button>
                           <button
                             type="button"
+                            role="tab"
                             aria-selected={vt === 'percent'}
                             onClick={() => setForm(f => ({
                               ...f,
                               additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'percent' } : row),
                             }))}
-                            className={`h-7 w-8 text-xs font-semibold transition-colors ${vt === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                            className={`h-7 w-9 text-sm font-semibold mono transition-colors border-l border-[#D1D5DB] ${vt === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
                             data-testid={`additional-charge-mode-percent-${ci}`}
                             title="Charge as % of subtotal (after line discount)"
                           >%</button>
                         </div>
                         <input
                           type="number" min="0" step="0.01"
-                          className="input-field h-7 text-xs px-2 py-0 flex-1 mono"
+                          className="input-field h-7 text-xs px-2 py-0 w-24 mono"
                           style={{ textAlign: 'right' }}
                           placeholder={vt === 'percent' ? '%' : 'Amount'}
                           value={c.value ?? c.amount ?? 0}
                           onChange={(e) => {
-                            const raw = parseFloat(e.target.value) || 0;
+                            const raw2 = parseFloat(e.target.value) || 0;
                             setForm(f => ({
                               ...f,
-                              additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value: raw } : row),
+                              additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value: raw2 } : row),
                             }));
                           }}
                           data-testid={`additional-charge-amount-${ci}`}
@@ -3781,7 +3797,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                             type="text"
                             inputMode="decimal"
                             className="grid-input mono num"
-                            value={l._rateFormatted ?? (l.rate === '' || l.rate === undefined || l.rate === null ? '' : Number(l.rate).toLocaleString('en-IN', { maximumFractionDigits: 2 }))}
+                            value={l._rateFormatted ?? (l.rate === '' || l.rate === undefined || l.rate === null ? '' : Number(l.rate).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))}
                             onChange={e => {
                               const raw = e.target.value.replace(/,/g, '');
                               if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
@@ -3820,76 +3836,90 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
 
             {/* Totals */}
             <div className="flex justify-end">
-              <div className="w-96 border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB] text-sm space-y-1">
+              <div className="w-[520px] border border-[#E5E7EB] rounded-sm p-3 bg-[#F9FAFB] text-sm space-y-1">
                 <div className="flex justify-between"><span className="text-[#4B5563]">Subtotal</span><span className="mono">{formatCurrency(totals.subtotal, form.currency)}</span></div>
                 {totals.totalDiscount > 0 && <div className="flex justify-between"><span className="text-[#4B5563]">Discount</span><span className="mono">-{formatCurrency(totals.totalDiscount, form.currency)}</span></div>}
                 {/* ---- Additional Charges (after global discount, before GST) ----
-                    Two-row card per charge: full-width dropdown on top,
-                    ₹/% toggle + amount + remove inline below. */}
+                    INLINE single-row layout matching Global Discount. */}
                 {(form.additional_charges || []).map((c, ci) => {
                   const vt = c.value_type || 'amount';
+                  const raw = parseFloat(c.value ?? c.amount) || 0;
                   const symC = CURRENCY_SYMBOLS[(form.currency || 'INR').toUpperCase()] || '₹';
+                  const resolved = vt === 'percent' ? (totals.subtotal * raw / 100) : raw;
+                  const equivPct = (vt === 'amount' && totals.subtotal > 0 && raw > 0) ? (raw / totals.subtotal * 100) : null;
+                  const equivAmt = (vt === 'percent' && raw > 0) ? resolved : null;
                   return (
-                  <div key={`ti-ac-${ci}`} className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1.5 space-y-1.5" data-testid={`ti-additional-charge-row-${ci}`}>
-                    <select
-                      className="input-field h-7 text-xs px-2 py-0 w-full"
-                      value={c.charge_id || ''}
-                      onChange={(e) => {
-                        const m = additionalChargesMaster.find(x => x.id === e.target.value);
-                        setForm(f => ({
-                          ...f,
-                          additional_charges: f.additional_charges.map((row, i) => i === ci ? {
-                            ...row,
-                            charge_id: m?.id || '',
-                            name: m?.name || row.name || '',
-                            hsn_code: m?.hsn_code ?? row.hsn_code ?? '',
-                            gst_rate: m?.gst_rate ?? row.gst_rate ?? 18,
-                          } : row),
-                        }));
-                      }}
-                      data-testid={`ti-additional-charge-select-${ci}`}
-                    >
-                      <option value="">— select charge —</option>
-                      {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
-                        <option key={m.id} value={m.id}>{m.name} ({(m.gst_rate ?? 0)}% GST)</option>
-                      ))}
-                    </select>
+                  <div key={`ti-ac-${ci}`} className="flex justify-between items-center bg-[#F9FAFB] border border-[#E5E7EB] rounded-sm px-2 py-1 my-1 gap-2" data-testid={`ti-additional-charge-row-${ci}`}>
+                    <div className="flex-1 min-w-0">
+                      <select
+                        className="bg-transparent border-0 outline-none w-full text-[#374151] font-semibold text-xs cursor-pointer px-0 py-0 truncate focus:bg-white focus:border focus:border-[#D1D5DB] focus:rounded focus:px-1"
+                        value={c.charge_id || ''}
+                        onChange={(e) => {
+                          const m = additionalChargesMaster.find(x => x.id === e.target.value);
+                          setForm(f => ({
+                            ...f,
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? {
+                              ...row,
+                              charge_id: m?.id || '',
+                              name: m?.name || row.name || '',
+                              hsn_code: m?.hsn_code ?? row.hsn_code ?? '',
+                              gst_rate: m?.gst_rate ?? row.gst_rate ?? 18,
+                            } : row),
+                          }));
+                        }}
+                        data-testid={`ti-additional-charge-select-${ci}`}
+                        title={c.name || 'Select charge'}
+                      >
+                        <option value="">— select charge —</option>
+                        {additionalChargesMaster.filter(m => m.is_active !== false).map(m => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </select>
+                      {(equivPct != null || equivAmt != null) && (
+                        <div className="text-[10px] text-[#6B7280] mt-0.5 leading-none">
+                          {equivPct != null && <>(={equivPct.toFixed(2)}%)</>}
+                          {equivAmt != null && <>(={formatCurrency(equivAmt, form.currency)})</>}
+                        </div>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2">
-                      <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden shrink-0" role="tablist">
+                      <div className="inline-flex border border-[#D1D5DB] rounded-sm overflow-hidden" role="tablist">
                         <button
                           type="button"
+                          role="tab"
                           aria-selected={vt === 'amount'}
                           onClick={() => setForm(f => ({
                             ...f,
                             additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'amount' } : row),
                           }))}
-                          className={`h-7 w-8 text-xs font-semibold mono transition-colors ${vt === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                          className={`h-7 w-9 text-sm font-semibold mono transition-colors ${vt === 'amount' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
                           data-testid={`ti-additional-charge-mode-amount-${ci}`}
                           title="Charge as currency amount"
                         >{symC}</button>
                         <button
                           type="button"
+                          role="tab"
                           aria-selected={vt === 'percent'}
                           onClick={() => setForm(f => ({
                             ...f,
                             additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value_type: 'percent' } : row),
                           }))}
-                          className={`h-7 w-8 text-xs font-semibold transition-colors ${vt === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
+                          className={`h-7 w-9 text-sm font-semibold mono transition-colors border-l border-[#D1D5DB] ${vt === 'percent' ? 'bg-[#1D3557] text-white' : 'bg-white text-[#374151] hover:bg-[#F3F4F6]'}`}
                           data-testid={`ti-additional-charge-mode-percent-${ci}`}
                           title="Charge as % of subtotal (after line discount)"
                         >%</button>
                       </div>
                       <input
                         type="number" min="0" step="0.01"
-                        className="input-field h-7 text-xs px-2 py-0 flex-1 mono"
+                        className="input-field h-7 text-xs px-2 py-0 w-24 mono"
                         style={{ textAlign: 'right' }}
                         placeholder={vt === 'percent' ? '%' : 'Amount'}
                         value={c.value ?? c.amount ?? 0}
                         onChange={(e) => {
-                          const raw = parseFloat(e.target.value) || 0;
+                          const raw2 = parseFloat(e.target.value) || 0;
                           setForm(f => ({
                             ...f,
-                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value: raw } : row),
+                            additional_charges: f.additional_charges.map((row, i) => i === ci ? { ...row, value: raw2 } : row),
                           }));
                         }}
                         data-testid={`ti-additional-charge-amount-${ci}`}

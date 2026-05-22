@@ -19,6 +19,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 21.4 — inline single-row layout for additional charges + Rate column 2dp — DONE ✅):**
+  1. **Inline single-row layout** — replaced the 2-row card with a single horizontal row matching the user's reference image: `[name dropdown] [(=X% sub-text)] [₹/% pill] [w-24 amount input] [✕]`. The select is borderless / transparent until focused, so it reads as a label but still allows changing the charge.
+  2. **Conversion sub-text** — under the name, a small grey `(=50.00%)` or `(=₹20.00)` shows the equivalent value in the opposite mode (₹ when in % mode, % when in ₹ mode) — useful for accountants reviewing the quote.
+  3. **Widened totals box** to `w-[520px]` (was w-96 = 384px) so the full charge name "Packing & Forwarding" fits without truncation. Dropped the `(GST%)` suffix from option labels since GST is already implicit and was making the row too cramped.
+  4. **Reduced amount column** to `w-24` (96px) so it matches the Global Discount input width — visually consistent.
+  5. **Rate column 2 decimals** — `RateInput` was using `maximumFractionDigits: 2` without `minimumFractionDigits: 2`, so values like `7,90,000` rendered without `.00`. Fixed both Quotation (`RateInput`) and Tax Invoice (inline format on line 3800) to use `{minimumFractionDigits: 2, maximumFractionDigits: 2}`.
+
 - **2026-02-22 (Round 21.3 — Additional Charges visual polish: heading visibility + right-align + 2dp + ₹/% toggle — DONE ✅):**
   1. **Charge name dropdown fully visible** — restructured each charge row from a single squeezed inline grid (where the dropdown collapsed to just `▼`) into a 2-row card layout: full-width `<select>` on top (charge name + GST% always readable, width 340–366px), and a bottom row with the ₹/% toggle + amount input + remove button.
   2. **Amount input right-aligned** — added explicit `style={{ textAlign: 'right' }}` to the `<input type="number">` (some Tailwind builds don't apply `text-right` on number inputs). Verified via Playwright `style="text-align: right"`.
