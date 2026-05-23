@@ -1626,7 +1626,7 @@ export default function BOMPage() {
               <div className="flex items-center justify-between bg-yellow-50 border border-yellow-300 rounded-sm px-3 py-2 text-xs" data-testid="recent-imports-banner">
                 <div className="text-yellow-900">
                   <span className="font-semibold">{recentImportedIds.size}</span>
-                  &nbsp;recently imported / created BOM{recentImportedIds.size === 1 ? '' : 's'} pinned to the top of the list.
+                  &nbsp;BOM{recentImportedIds.size === 1 ? '' : 's'} recently imported / created. Parent FG groups containing them are floated to the top of the list — expand a group to inspect the imported sub-BOMs nested inside.
                 </div>
                 <button
                   onClick={() => setRecentImportedIds(new Set())}
@@ -1648,14 +1648,15 @@ export default function BOMPage() {
               });
 
               // Group BOMs by parent_item_id, suppressing rows whose
-              // parent is nested elsewhere — UNLESS the BOM was just
-              // imported (we never hide imports so the user can verify
-              // them right after the toast).
+              // parent is nested elsewhere so a single BOM never renders
+              // twice (once inside the FG tree AND as its own top-level
+              // row). For sort order, we still float groups to the top if
+              // any of their descendants was recently imported — see the
+              // `aRecent`/`bRecent` block below.
               const grouped = {};
               const orderedCats = ['finished_good', 'sub_assembly', 'component', 'raw_material'];
               boms.forEach(bom => {
-                const isRecent = recentImportedIds.has(bom.id);
-                if (!isRecent && childItemIds.has(bom.parent_item_id)) return;
+                if (childItemIds.has(bom.parent_item_id)) return;
                 const pid = bom.parent_item_id || 'x';
                 if (!grouped[pid]) grouped[pid] = { item: bom.parent_item, boms: [] };
                 grouped[pid].boms.push(bom);
@@ -1795,11 +1796,26 @@ export default function BOMPage() {
                 return exp ? searchNodes(exp.explosion) : false;
               }).sort(([, a], [, b]) => {
                 // Imported BOMs come FIRST so users immediately see what
-                // they just brought in. We mark a group as "recent" if any
-                // of its BOMs is in recentImportedIds (covers both create
-                // and update import flows).
-                const aRecent = (a.boms || []).some(x => recentImportedIds.has(x.id));
-                const bRecent = (b.boms || []).some(x => recentImportedIds.has(x.id));
+                // they just brought in. A group is "recent" if any of its
+                // BOMs is in recentImportedIds OR any node in its explosion
+                // tree (child_bom_id) is. Latter is important after a bulk
+                // import: only the FG's group is shown, but the recent set
+                // tracks every nested child too — we need to detect that.
+                const treeHasRecent = (nodes) => {
+                  for (const n of (nodes || [])) {
+                    if (n.child_bom_id && recentImportedIds.has(n.child_bom_id)) return true;
+                    if (n.children && treeHasRecent(n.children)) return true;
+                  }
+                  return false;
+                };
+                const isGroupRecent = (g) => {
+                  if ((g.boms || []).some(x => recentImportedIds.has(x.id))) return true;
+                  const ab = g.boms?.find(b => b.status === 'active') || g.boms?.[0];
+                  const exp = allExplosions[ab?.id];
+                  return exp ? treeHasRecent(exp.explosion) : false;
+                };
+                const aRecent = isGroupRecent(a);
+                const bRecent = isGroupRecent(b);
                 if (aRecent !== bRecent) return aRecent ? -1 : 1;
                 // Then FG → SG → CP → RM order, then numeric-aware sort by
                 // part_number within each category so 'FG-2' comes BEFORE
@@ -1813,9 +1829,18 @@ export default function BOMPage() {
                 const parentItem = group.item;
                 const activeBom = group.boms.find(b => b.status === 'active') || group.boms[0];
                 // Detect newly-imported groups so we can visually highlight
-                // them with a yellow ring + auto-expand below.
-                const isRecentlyImported = (group.boms || []).some(x => recentImportedIds.has(x.id));
+                // them with a yellow ring + auto-expand below. Same logic
+                // as the sort-order recent check.
+                const treeHasRecentMark = (nodes) => {
+                  for (const n of (nodes || [])) {
+                    if (n.child_bom_id && recentImportedIds.has(n.child_bom_id)) return true;
+                    if (n.children && treeHasRecentMark(n.children)) return true;
+                  }
+                  return false;
+                };
+                const ownRecent = (group.boms || []).some(x => recentImportedIds.has(x.id));
                 const explosion = allExplosions[activeBom?.id];
+                const isRecentlyImported = ownRecent || (explosion ? treeHasRecentMark(explosion.explosion) : false);
                 const allRows = explosion ? flattenRows(explosion.explosion) : [];
                 const pSearch = (panelSearch[pid] || '').trim().toLowerCase();
                 const explosionRows = !pSearch ? allRows : allRows.filter(r => (

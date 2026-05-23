@@ -19,6 +19,13 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 31 — BOM list duplicate rows after bulk import — FIXED ✅):**
+  1. **Root cause** — Round 30's recent-imports pinning bypass (`if (!isRecent && childItemIds.has(...)) return;`) lifted EVERY imported BOM to top-level, even SG/CP BOMs that were already nested under their parent FG. After a 103-BOM bulk import the same Boot Assembly / Head Assembly / etc. appeared BOTH nested inside the FG explosion tree AND as separate top-level rows, plus the banner mis-said "103 BOMs pinned to top".
+  2. **Fix** — Dropped the bypass. The nested-suppression `childItemIds.has(bom.parent_item_id) → skip` now applies uniformly; nested children never duplicate at top-level.
+  3. **Sort still floats parent FGs** — `isGroupRecent()` now recursively walks the FG's explosion tree and returns true if any descendant's `child_bom_id` is in `recentImportedIds`. So a freshly imported sub-BOM still surfaces its parent FG to the top of the list (with the yellow ring), but doesn't render itself as a duplicate row.
+  4. **Banner text** updated to "X BOMs recently imported / created. Parent FG groups containing them are floated to the top — expand a group to inspect the imported sub-BOMs nested inside." Sets clearer expectations vs. the previous misleading "pinned to top" phrasing.
+
+
 - **2026-02-22 (Round 30 — BOM Import "Created but not visible" — FIXED ✅):**
   1. **Root cause** — `items_by_pn` lookup in `/api/bom/import/excel` was strict-equal (case-sensitive, no trim). When the user's Excel had `cgf0g0000093` while the master had `CGF0G0000093` (or vice-versa, or with trailing whitespace), parent/component lookups silently produced "not found in items" errors. These errors were `console.warn`-ed only — the toast just said "BOM import complete: 1 created" so the user thought N BOMs landed when only 1 actually did.
   2. **Backend fix** — New `_lookup_item()` helper builds BOTH a case-sensitive map AND a `pn.strip().lower()` fallback. Parent + component lookups now match Excel content even when case/whitespace drifts.
