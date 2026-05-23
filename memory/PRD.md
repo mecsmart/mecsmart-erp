@@ -19,6 +19,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 30 — BOM Import "Created but not visible" — FIXED ✅):**
+  1. **Root cause** — `items_by_pn` lookup in `/api/bom/import/excel` was strict-equal (case-sensitive, no trim). When the user's Excel had `cgf0g0000093` while the master had `CGF0G0000093` (or vice-versa, or with trailing whitespace), parent/component lookups silently produced "not found in items" errors. These errors were `console.warn`-ed only — the toast just said "BOM import complete: 1 created" so the user thought N BOMs landed when only 1 actually did.
+  2. **Backend fix** — New `_lookup_item()` helper builds BOTH a case-sensitive map AND a `pn.strip().lower()` fallback. Parent + component lookups now match Excel content even when case/whitespace drifts.
+  3. **Backend response — `imported_part_numbers`** list added so the frontend can list exactly which BOMs landed (no more guessing).
+  4. **Frontend — Import Results dialog** — Every import now opens a modal showing Created / Updated / Errors counters, the full list of saved BOM part numbers (✓ checklist), and the full error list with actionable text. Console-only error reporting is gone.
+  5. **Toast** — Shows the first 3 imported part numbers in the success line so verification is one glance.
+
+
 - **2026-02-22 (Round 29 — Short-closed OS ops were blocking MO completion — FIXED ✅):**
   1. **Root cause for MO-000188 (and similar)** — When a job-work (OS) operation is short-closed, the legacy short-close paths set `short_closed=True` and `status='completed'` but never cleared `outsource_status` (still `'sent'`). The WO-status guard "any op still sent to job-worker → can't complete" then refused to promote the MO. Result: all 3 ops showing `completed` in the UI, but MO stuck on `in_progress`.
   2. **Fix #1** — Both `_recompute_wo_status_after_op_change` AND the inline auto-status logic in `PUT /work-orders/{id}/operations/{seq}` now skip short-closed ops when checking the `outsource_status=='sent'` guard. A short-closed OS leg is settled regardless of the stale field.

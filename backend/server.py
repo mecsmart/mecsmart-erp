@@ -9417,11 +9417,28 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
     wb = load_workbook(io.BytesIO(content))
     ws = wb.active
 
-    results = {"created": 0, "updated": 0, "errors": [], "imported_bom_ids": []}
+    results = {"created": 0, "updated": 0, "errors": [], "imported_bom_ids": [], "imported_part_numbers": []}
 
     items_by_pn = {}
+    # Build BOTH a case-sensitive lookup AND a case-insensitive / trimmed
+    # fallback. The Excel that the user fills in commonly has subtle whitespace
+    # or case drift (e.g. `cgf0g0000093` vs the master's `CGF0G0000093`) that
+    # used to fail silently with "Parent X not found in items" — even when the
+    # item clearly exists in the catalogue.
+    items_by_pn_ci = {}
     async for item in db.items.find({}, {"_id": 0}):
-        items_by_pn[item.get("part_number", "")] = item
+        pn = item.get("part_number", "") or ""
+        items_by_pn[pn] = item
+        items_by_pn_ci[pn.strip().lower()] = item
+
+    def _lookup_item(pn: str):
+        """Find an item by part number, tolerant of whitespace + case."""
+        if pn is None:
+            return None
+        s = str(pn).strip()
+        if s in items_by_pn:
+            return items_by_pn[s]
+        return items_by_pn_ci.get(s.lower())
 
     # Read header row → map of normalized name → column index
     headers = {}
@@ -9546,8 +9563,8 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
         is_alt_raw = col(row, "Is Alternate") or ""
         is_alt = str(is_alt_raw).strip().lower() in ("yes", "true", "1")
 
-        parent_item = items_by_pn.get(parent_pn)
-        comp_item = items_by_pn.get(comp_pn)
+        parent_item = _lookup_item(parent_pn)
+        comp_item = _lookup_item(comp_pn)
         if not parent_item:
             results["errors"].append(f"Row {row_num}: Parent '{parent_pn}' not found in items")
             continue
@@ -9597,6 +9614,7 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
             )
             results["updated"] += 1
             results["imported_bom_ids"].append(existing["id"])
+            results["imported_part_numbers"].append(parent_pn)
         else:
             bom_doc = {
                 "id": str(uuid.uuid4()),
@@ -9613,6 +9631,7 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
             await db.boms.insert_one(bom_doc)
             results["created"] += 1
             results["imported_bom_ids"].append(bom_doc["id"])
+            results["imported_part_numbers"].append(parent_pn)
 
     return results
 

@@ -93,6 +93,11 @@ export default function BOMPage() {
     } catch { /* noop */ }
   }, [recentImportedIds]);
   const [allExplosions, setAllExplosions] = useState({});
+  // Last BOM import result — opens a dialog so the user can see exactly
+  // which BOMs were created/updated and which rows errored out. Without
+  // this the success toast was ambiguous (e.g. "5 created" but the user
+  // had imported 12 — the 7 errors were silently logged to console only).
+  const [bomImportResult, setBomImportResult] = useState(null);
   const [bomSearch, setBomSearch] = useState('');
   // Per-FG (per-parent-pid) search input shown in the BOM panel header.
   // Filters the explosion rows of that FG against part number / name.
@@ -693,11 +698,22 @@ export default function BOMPage() {
           return next;
         });
       }
+      // Always open the result dialog (even on success-only) so the user
+      // gets explicit confirmation of which BOMs landed in the list.
+      setBomImportResult({
+        created,
+        updated,
+        errors: data.errors || [],
+        imported_part_numbers: data.imported_part_numbers || [],
+        total_attempted: created + updated + errCount,
+      });
       if (errCount > 0) {
-        toast.warning(`BOM import partial: ${created} created, ${updated} updated, ${errCount} errors (see console)`, { id: toastId, duration: 8000 });
+        toast.warning(`BOM import: ${created} created, ${updated} updated, ${errCount} errors — see the details dialog`, { id: toastId, duration: 6000 });
         console.warn('BOM import errors:', data.errors);
       } else {
-        toast.success(`BOM import complete: ${created} created, ${updated} updated. Imported BOMs are pinned to the top of the list — refresh to re-group.`, { id: toastId, duration: 6000 });
+        const pns = (data.imported_part_numbers || []).slice(0, 3).join(', ');
+        const more = (data.imported_part_numbers || []).length > 3 ? ` (+${data.imported_part_numbers.length - 3} more)` : '';
+        toast.success(`BOM import complete: ${created} created, ${updated} updated${pns ? ` — ${pns}${more}` : ''}`, { id: toastId, duration: 6000 });
       }
       // Make absolutely sure the imported BOMs are visible:
       //   1. Clear status filter — if user had 'active' selected and the
@@ -2086,6 +2102,68 @@ export default function BOMPage() {
                   </table>
                 </div>
               )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* BOM Import Result Dialog — opens after every Excel import so the
+          user has unambiguous confirmation of what was created/updated and
+          which rows (if any) errored out. */}
+      <Dialog open={bomImportResult !== null} onOpenChange={(open) => { if (!open) setBomImportResult(null); }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto" data-testid="bom-import-result-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-[Chivo] text-[#1D3557]">BOM Import Results</DialogTitle>
+          </DialogHeader>
+          {bomImportResult && (
+            <div className="space-y-4 mt-2 text-sm">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="border border-[#D1FAE5] bg-[#ECFDF5] rounded-sm p-3 text-center">
+                  <div className="text-2xl font-bold text-[#047857]">{bomImportResult.created}</div>
+                  <div className="text-xs text-[#065F46] uppercase tracking-wide">Created</div>
+                </div>
+                <div className="border border-[#DBEAFE] bg-[#EFF6FF] rounded-sm p-3 text-center">
+                  <div className="text-2xl font-bold text-[#1D4ED8]">{bomImportResult.updated}</div>
+                  <div className="text-xs text-[#1E40AF] uppercase tracking-wide">Updated</div>
+                </div>
+                <div className={`border rounded-sm p-3 text-center ${bomImportResult.errors.length > 0 ? 'border-[#FECACA] bg-[#FEF2F2]' : 'border-[#E5E7EB] bg-[#F9FAFB]'}`}>
+                  <div className={`text-2xl font-bold ${bomImportResult.errors.length > 0 ? 'text-[#B91C1C]' : 'text-[#6B7280]'}`}>{bomImportResult.errors.length}</div>
+                  <div className={`text-xs uppercase tracking-wide ${bomImportResult.errors.length > 0 ? 'text-[#7F1D1D]' : 'text-[#4B5563]'}`}>Errors</div>
+                </div>
+              </div>
+
+              {bomImportResult.imported_part_numbers.length > 0 && (
+                <div>
+                  <h4 className="font-semibold text-[#111827] mb-2">BOMs Saved ({bomImportResult.imported_part_numbers.length})</h4>
+                  <div className="border border-[#E5E7EB] rounded-sm bg-[#F9FAFB] p-2 max-h-48 overflow-y-auto" data-testid="bom-import-saved-list">
+                    <ul className="space-y-1 text-xs mono">
+                      {bomImportResult.imported_part_numbers.map((pn, i) => (
+                        <li key={i} className="flex items-center text-[#065F46]">
+                          <span className="mr-2">✓</span><span>{pn}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {bomImportResult.errors.length > 0 && (
+                <div>
+                  <h4 className="font-semibold text-[#B91C1C] mb-2">Errors ({bomImportResult.errors.length})</h4>
+                  <div className="border border-[#FECACA] rounded-sm bg-[#FEF2F2] p-2 max-h-60 overflow-y-auto" data-testid="bom-import-errors-list">
+                    <ul className="space-y-1 text-xs">
+                      {bomImportResult.errors.map((err, i) => (
+                        <li key={i} className="text-[#7F1D1D]">• {err}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <p className="text-xs text-[#6B7280] mt-2">Tip: Part numbers are now matched case-insensitively. If an error still says "not found", verify the part number really exists in the Items master (Inventory → Items).</p>
+                </div>
+              )}
+
+              <div className="flex justify-end pt-3 border-t border-[#E5E7EB]">
+                <button onClick={() => setBomImportResult(null)} className="btn-primary" data-testid="close-bom-import-result-btn">Close</button>
+              </div>
             </div>
           )}
         </DialogContent>
