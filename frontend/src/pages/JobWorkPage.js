@@ -571,9 +571,12 @@ export default function JobWorkPage() {
     const isJobOS = scType === 'without_material' && hasJobParts;
     let dcTitle = 'Delivery Challan';
     if (scType === 'with_material') {
-      dcTitle = 'Job Order Cum Delivery Challan';
+      dcTitle = 'Job Order Cum DC';
     } else if (scType === 'without_material' && hasJobParts) {
-      dcTitle = 'Job Work Order Cum Delivery Challan';
+      // Short form per user — "Job Work Order Cum DC" instead of the full
+      // "Job Work Order Cum Delivery Challan" so it fits on one line in
+      // the info-bar's narrow column.
+      dcTitle = 'Job Work Order Cum DC';
     }
     
     const accent = '#1D3557';
@@ -606,64 +609,45 @@ export default function JobWorkPage() {
     <style>
       *{box-sizing:border-box}
       body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:#111;margin:0;padding:0}
-      /* Body width + top padding pulled from the Quotation template so all
-         printed documents share the same canvas. 780px @ 96dpi keeps the
-         layout safely inside an A4 portrait page with 8mm side margins. */
-      /* Body width — 820px (slightly wider than the Quotation's 780) so the
-         9-column DC items table can fit all money values on one line each
-         without truncation. */
-      .page{max-width:820px;margin:0 auto;padding:32px 8px 20px;box-sizing:border-box}
+      /* Page canvas — EXACT match to Quotation: 780px max-width, 28px top
+         + 24px side padding. Same A4 footprint, same vertical rhythm. */
+      .page{max-width:780px;margin:0 auto;padding:28px 24px}
       /* Header — left brand block + right doc-info, just like Quotation. */
-      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
-      .brand-left{flex:1;display:flex;gap:12px;align-items:flex-start}
-      .logo-wrap{flex-shrink:0;display:flex;align-items:center;justify-content:center}
+      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+      .brand{display:flex;gap:12px;align-items:flex-start}
       .logo-img{max-height:72px;max-width:180px;object-fit:contain}
-      .logo-fallback{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,${accent},#64748b);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;letter-spacing:-0.5px}
-      /* Company name — large single-line, mirrors Quotation's 22px brand
-         heading. white-space:nowrap keeps long company names on one line. */
-      .brand-block .company-name{font-size:22px;font-weight:800;color:#0f172a;margin:0 0 2px;white-space:nowrap;letter-spacing:-0.3px}
-      .brand-block .tagline{font-size:10px;color:${accent};font-style:italic;margin-bottom:4px;letter-spacing:0.3px}
-      .brand-block .company-addr{font-size:10px;color:#475569;line-height:1.5}
-      .doc-right{text-align:right}
-      /* Doc title — small two-line block so "Job Work Order Cum / Delivery
-         Challan" prints across two lines without dominating the header. */
-      .doc-right .title{font-size:11px;font-weight:800;color:${accent};letter-spacing:0.4px;margin:0;text-transform:uppercase;line-height:1.25;max-width:160px;margin-left:auto;text-align:right}
-      .doc-right .docno{font-size:12px;font-weight:700;color:#0f172a;margin-top:3px}
-      .doc-right .quoref{font-size:9.5px;color:#475569;margin-top:2px}
-      /* Info bar — compact 4-col band. Smaller labels & values + reduced
-         padding so the band sits tightly between header and address-row. */
-      .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:${accent};color:#fff;margin-top:10px;border-radius:2px;overflow:hidden}
-      .info-bar .col{padding:5px 10px;border-right:1px solid rgba(255,255,255,0.15)}
+      .logo-fb{width:60px;height:60px;border-radius:50%;background:${accent};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px}
+      /* Company name 17px (Quotation parity — NOT 22px). */
+      .cn{font-size:17px;font-weight:800;color:#0f172a;margin:0}
+      .tg{font-size:10px;color:${accent};font-style:italic}
+      .addr{font-size:10px;color:#475569;line-height:1.5}
+      /* Document title — small two-line block, less prominent than
+         Quotation's 22px since DC doc names are long ("Job Work Order Cum
+         DC" is the short form per user). */
+      .title{font-size:13px;font-weight:800;color:${accent};letter-spacing:1px;text-align:right;margin:0;line-height:1.25}
+      .docno{font-size:12px;color:#334155;font-family:'Courier New',monospace;text-align:right;margin-top:4px}
+      .meta{font-size:10px;color:#475569;text-align:right;margin-top:2px}
+      /* Info bar — Quotation parity: padding 8x12, label 9px, value 12px. */
+      .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:${accent};color:#fff;margin:14px 0;border-radius:2px;overflow:hidden}
+      .info-bar .col{padding:8px 12px;border-right:1px solid rgba(255,255,255,0.15)}
       .info-bar .col:last-child{border-right:none}
-      .info-bar .label{font-size:8px;text-transform:uppercase;letter-spacing:0.8px;color:rgba(255,255,255,0.78);margin-bottom:1px;white-space:nowrap}
-      .info-bar .value{font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      /* Subcontractor / Reference cards — match Quotation's Bill-To / Ship-To
-         address-row block. */
-      .address-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0}
-      .addr-box h3{font-size:10px;color:#0f172a;text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;border-bottom:2px solid ${accent};padding-bottom:4px;display:inline-block}
-      .addr-box .name{font-size:13px;font-weight:700;color:#0f172a;margin-bottom:2px}
-      .addr-box .line{font-size:10px;color:#475569;line-height:1.5;white-space:pre-line}
-      /* Section heading + items table — Quotation parity. Items table uses
-         table-layout:fixed + explicit colgroup so HSN, Charges, Totals stay
-         on a single line (header text is also explicitly word-wrap allowed
-         instead of single-line nowrap, per user request — long phrases like
-         "Charges/Unit" wrap nicely across two lines if they need to). */
+      .info-bar .lab{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.75);margin-bottom:2px}
+      .info-bar .val{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .addr-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:12px 0}
+      .box h4{font-size:10px;text-transform:uppercase;letter-spacing:1px;margin:0 0 4px;color:#0f172a;border-bottom:2px solid ${accent};padding-bottom:3px;display:inline-block}
+      .box .name{font-size:13px;font-weight:700;color:#0f172a}
+      .box .line{font-size:10px;color:#475569;line-height:1.5;white-space:pre-line}
       h4.section{font-size:10px;color:${accent};text-transform:uppercase;letter-spacing:1px;margin:18px 0 6px;font-weight:700}
       table.dc-items{width:100%;border-collapse:collapse;margin-top:6px;table-layout:fixed}
-      /* Items table header — center-aligned per user request so multi-line
-         headers ("Total\nCharges") read symmetrically. Money/HSN body cells
-         keep nowrap so currency/HSN strings don't get truncated. */
-      table.dc-items thead th{background:${accent};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:0.3px;padding:8px 5px;font-weight:600;border:none;text-align:center;word-break:break-word;line-height:1.25;vertical-align:middle}
-      table.dc-items tbody td{border-bottom:1px solid #e2e8f0;padding:7px 5px;font-size:11px;color:#0f172a;vertical-align:top;word-break:break-word;overflow-wrap:anywhere}
+      table.dc-items thead th{background:${accent};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;padding:8px 6px;font-weight:600;border:none;text-align:center;word-break:break-word;line-height:1.25;vertical-align:middle}
+      table.dc-items tbody td{border-bottom:1px solid #e2e8f0;padding:8px 6px;font-size:11px;color:#0f172a;vertical-align:top;word-break:break-word;overflow-wrap:anywhere}
       table.dc-items tbody tr:last-child td{border-bottom:2px solid ${accent}}
-      table.dc-items tbody tr.total-row td{background:#f1f5f9;font-weight:700;color:#0f172a;border-bottom:2px solid ${accent}}
+      table.dc-items tbody tr.total-row td{background:#f8fafc;font-weight:700;color:#0f172a;border-bottom:2px solid ${accent}}
       td .sub-text{color:#475569}
       .mono{font-family:'Courier New',monospace}
       .text-right{text-align:right}
       .text-center{text-align:center}
-      /* Page-2+ running header — same trick as Quotation: full-size cover
-         on page 1 with margin-top:-17mm masks the band, pages 2+ show the
-         compact band naturally. */
+      /* Page-2+ running-band — EXACT copy of PO/Quotation's running header. */
       .print-doc{width:100%;border-collapse:collapse}
       .print-doc > thead{display:table-header-group}
       .print-doc > tbody > tr > td{padding:0;vertical-align:top}
@@ -681,12 +665,11 @@ export default function JobWorkPage() {
       /* Terms */
       .terms{margin-top:18px;padding:12px 14px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:10px;color:#475569;line-height:1.6;white-space:pre-line}
       .terms h4{font-size:10px;color:${accent};text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;font-weight:700}
-      /* Signature footer */
       .footer{margin-top:30px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;font-size:10px}
       .sign-box{border-top:1px solid #0f172a;padding-top:4px;text-align:center;margin-top:40px;color:#475569}
       @media print{
-        @page{size:A4;margin:8mm 8mm 14mm 8mm}
-        body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+        @page{size:A4;margin:10mm;@bottom-right{content:"Page " counter(page) " of " counter(pages);font-family:'Helvetica Neue',Arial,sans-serif;font-size:9px;color:#64748b;padding-right:4mm}}
+        body{-webkit-print-color-adjust:exact;print-color-adjust:exact;padding:0}
         .page{padding-top:10px}
       }
     </style></head><body>
@@ -697,57 +680,45 @@ export default function JobWorkPage() {
     <div class="page">
     <!-- Header: logo + company on left, doc title on right -->
     <div class="header">
-      <div class="brand-left">
-        <div class="logo-wrap">
-          ${cs.logo_data ? `<img src="${esc(cs.logo_data)}" class="logo-img"/>` : `<div class="logo-fallback">${esc((cs.name || 'C').charAt(0).toUpperCase())}</div>`}
-        </div>
-        <div class="brand-block">
-          <div class="company-name">${esc(cs.name || cs.company_name || 'Company')}</div>
-          ${cs.tagline ? `<div class="tagline">${esc(cs.tagline)}</div>` : ''}
-          ${cs.address ? `<div class="company-addr">${esc(cs.address)}</div>` : ''}
-          ${cs.address_line2 ? `<div class="company-addr">${esc(cs.address_line2)}</div>` : ''}
-          ${(cs.city || cs.state || cs.pin_code) ? `<div class="company-addr">${esc([cs.city, cs.state, cs.pin_code].filter(Boolean).join(', '))}</div>` : ''}
-          ${(cs.phone || cs.email) ? `<div class="company-addr">${cs.phone ? 'Phone: ' + esc(cs.phone) : ''}${cs.phone && cs.email ? ' | ' : ''}${cs.email ? esc(cs.email) : ''}</div>` : ''}
-          ${cs.gstin ? `<div class="company-addr"><strong>GSTIN: ${esc(cs.gstin)}</strong></div>` : ''}
+      <div class="brand">
+        ${cs.logo_data ? `<img src="${esc(cs.logo_data)}" class="logo-img"/>` : `<div class="logo-fb">${esc((cs.name || cs.company_name || 'C').charAt(0).toUpperCase())}</div>`}
+        <div>
+          <div class="cn">${esc(cs.name || cs.company_name || 'Company')}</div>
+          ${cs.tagline ? `<div class="tg">${esc(cs.tagline)}</div>` : ''}
+          ${cs.address ? `<div class="addr">${esc(cs.address)}</div>` : ''}
+          ${cs.address_line2 ? `<div class="addr">${esc(cs.address_line2)}</div>` : ''}
+          ${(cs.city || cs.state || cs.pin_code) ? `<div class="addr">${esc([cs.city, cs.state, cs.pin_code].filter(Boolean).join(', '))}</div>` : ''}
+          ${(cs.phone || cs.email) ? `<div class="addr">${cs.phone ? 'Phone: ' + esc(cs.phone) : ''}${cs.phone && cs.email ? ' | ' : ''}${cs.email ? esc(cs.email) : ''}</div>` : ''}
+          ${cs.gstin ? `<div class="addr"><strong>GSTIN: ${esc(cs.gstin)}</strong></div>` : ''}
         </div>
       </div>
-      <div class="doc-right">
-        ${(() => {
-          // Two-line doc title: split on "Cum" so "Job Work Order Cum / Delivery
-          // Challan" reads as two balanced lines. Plain DC (no "Cum") just
-          // shows the full title on one line.
-          const t = String(dcTitle || '');
-          const idx = t.toLowerCase().indexOf(' cum ');
-          if (idx > 0) {
-            return `<div class="title">${esc(t.slice(0, idx + 4))}<br/>${esc(t.slice(idx + 5))}</div>`;
-          }
-          return `<div class="title">${esc(t)}</div>`;
-        })()}
+      <div>
+        <div class="title">${esc(dcTitle.toUpperCase())}</div>
         <div class="docno">${esc(dc.dc_number)}</div>
-        ${dc.order?.order_number ? `<div class="quoref">JW Order: <strong>${esc(dc.order.order_number)}</strong></div>` : ''}
+        ${dc.order?.order_number ? `<div class="meta">JW Order: <strong>${esc(dc.order.order_number)}</strong></div>` : ''}
         ${(dc.status || '').toLowerCase() === 'draft' ? `<div style="display:inline-block;margin-top:4px;padding:2px 10px;background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;border-radius:3px;font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Draft</div>` : ''}
       </div>
     </div>
 
     <!-- Info bar: DC No · Date · Expected Receive · Created By -->
     <div class="info-bar">
-      <div class="col"><div class="label">${esc(dcTitle)} No</div><div class="value">${esc(dc.dc_number)}</div></div>
-      <div class="col"><div class="label">Date</div><div class="value">${docDate ? new Date(docDate).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-'}</div></div>
-      <div class="col"><div class="label">Expected Receive</div><div class="value">${expectedReturn ? new Date(expectedReturn).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-'}</div></div>
-      <div class="col"><div class="label">Created By</div><div class="value">${esc(createdBy)}</div></div>
+      <div class="col"><div class="lab">${esc(dcTitle)} No</div><div class="val">${esc(dc.dc_number)}</div></div>
+      <div class="col"><div class="lab">Date</div><div class="val">${docDate ? new Date(docDate).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-'}</div></div>
+      <div class="col"><div class="lab">Expected Receive</div><div class="val">${expectedReturn ? new Date(expectedReturn).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-'}</div></div>
+      <div class="col"><div class="lab">Created By</div><div class="val">${esc(createdBy)}</div></div>
     </div>
 
-    <!-- Subcontractor + Reference cards (compact: only JW Order, Type, Status) -->
-    <div class="address-row">
-      <div class="addr-box">
-        <h3>Subcontractor / Vendor</h3>
+    <!-- Subcontractor + Reference cards -->
+    <div class="addr-row">
+      <div class="box">
+        <h4>Subcontractor / Vendor</h4>
         <div class="name">${esc(supplier.name || '-')}</div>
         ${supplierAddrLines.length ? supplierAddrLines.map(l => `<div class="line">${esc(l)}</div>`).join('') : ''}
         ${supplier.gstin ? `<div class="line"><strong>GSTIN:</strong> <span class="mono">${esc(supplier.gstin)}</span></div>` : ''}
         ${supplier.phone ? `<div class="line">Ph: ${esc(supplier.phone)}</div>` : ''}
       </div>
-      <div class="addr-box">
-        <h3>Reference</h3>
+      <div class="box">
+        <h4>Reference</h4>
         <div class="name">JW Order ${esc(dc.order?.order_number || '-')}</div>
         ${dc.order?.subcontract_type ? `<div class="line">Type: ${esc(dc.order.subcontract_type.replace('_',' ').toUpperCase())}</div>` : ''}
         <div class="line">DC Status: <strong>${esc((dc.status || '').toUpperCase())}</strong></div>
@@ -814,9 +785,9 @@ export default function JobWorkPage() {
         const grandAmount = rows.reduce((s, r) => s + r.qty * r.rmCost, 0);
         const totalRow = `<tr class="total-row">
           <td colspan="5" class="text-right" style="font-weight:700">Totals</td>
-          <td class="text-center mono" style="font-weight:700;white-space:nowrap">&mdash;</td>
+          <td class="text-center mono" style="font-weight:700">&mdash;</td>
           <td class="text-right mono" style="font-weight:700;white-space:nowrap">${currencySymbol}${fmtAmt(grandCharges)}</td>
-          <td class="text-center mono" style="font-weight:700;white-space:nowrap">&mdash;</td>
+          <td class="text-center mono" style="font-weight:700">&mdash;</td>
           <td class="text-right mono" style="font-weight:700;white-space:nowrap">${currencySymbol}${fmtAmt(grandAmount)}</td>
         </tr>`;
         return body + totalRow;
