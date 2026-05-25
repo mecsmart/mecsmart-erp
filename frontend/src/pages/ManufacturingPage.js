@@ -3264,19 +3264,28 @@ export default function ManufacturingPage() {
                     onClick={async () => {
                       if (!matReqDialog.wo?.id) return;
                       if (!window.confirm('This will issue the missing fractional quantities from stock and update this MO\'s consumption record. Continue?')) return;
+                      let reconcileOk = false;
                       try {
                         const { data } = await api.post(`/api/work-orders/${matReqDialog.wo.id}/reconcile-consumption`);
+                        reconcileOk = true;
                         const healed = data.healed_count || 0;
                         const skipped = (data.skipped_due_to_stock || []).length;
                         if (healed > 0) toast.success(`Reconciled ${healed} component${healed === 1 ? '' : 's'}`);
                         if (skipped > 0) toast.warning(`${skipped} component${skipped === 1 ? '' : 's'} couldn\'t be reconciled — insufficient stock`);
                         if (healed === 0 && skipped === 0) toast.info('Nothing to reconcile');
-                        // Re-fetch materials so the dialog reflects healed totals.
-                        const fresh = await api.get(`/api/work-orders/${matReqDialog.wo.id}/material-requirements`);
-                        setMatReqDialog(prev => ({ ...prev, materials: fresh.data.materials || [] }));
-                        fetchWOs();
                       } catch (e) {
                         toast.error(e.response?.data?.detail || 'Failed to reconcile');
+                        return;
+                      }
+                      // Best-effort UI refresh AFTER the success toast — wrap
+                      // independently so a failed refresh never overwrites the
+                      // success message with "Failed to reconcile".
+                      if (reconcileOk) {
+                        try {
+                          const fresh = await api.get(`/api/work-orders/${matReqDialog.wo.id}/material-requirements`);
+                          setMatReqDialog(prev => ({ ...prev, materials: fresh.data.materials || [] }));
+                        } catch { /* dialog refresh failure is non-fatal */ }
+                        try { fetchWOs(); } catch { /* list refresh failure is non-fatal */ }
                       }
                     }}
                     className="btn-secondary text-sm flex items-center gap-1"
