@@ -19,6 +19,15 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 40 — DC PDF: 5 layout polish fixes — DONE ✅):**
+  1. **Company name single-line, larger** — `.company-name` bumped 17 → 22px with `white-space:nowrap` so long brand names stay on one line (mirrors Quotation's 22px brand heading).
+  2. **Doc title in two lines + smaller** — Title (e.g. "Job Work Order Cum Delivery Challan") is auto-split on "Cum" → "Job Work Order Cum / Delivery Challan". Font reduced 13 → 11px and max-width 160px right-aligned so it stays compact.
+  3. **Info-bar compact** — 4-col band labels 9 → 8px, values 13 → 10.5px, padding 10×14 → 5×10. Every label + value also `white-space:nowrap`; values get text-overflow ellipsis if longer than the column. Whole band ≈45% shorter.
+  4. **Vendor address multi-line** — Replaced the comma-joined `supplierAddr` with a `supplierAddrLines` array (street / address line 2 / city·state / PIN). Each line renders on its own `<div class="line">` so postal-style addresses read cleanly.
+  5. **Running-band company name** — Added `|| cs.company_name` fallback so the page-2+ overlay header shows the brand even when only `company_name` (not `name`) is populated.
+  6. **Body width bumped 780 → 820px** so the 9-column items table fits all money values on one line each — fixes the "Total RM Cost going out of box" overflow.
+
+
 - **2026-02-22 (Round 39 — DC PDF: 6 polish fixes — DONE ✅):**
   1. **Company name** — Hardened the company name render with `cs.name || cs.company_name || 'Company'` fallback so the brand block never appears blank even if `companySettings` is partially hydrated.
   2. **Document title font size reduced** — `.title` shrunk from 16px → 13px so the doc-right column doesn't visually dominate the header.

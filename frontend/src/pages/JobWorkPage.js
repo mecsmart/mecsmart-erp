@@ -527,7 +527,14 @@ export default function JobWorkPage() {
 
   const printDC = (dc, customTerms) => {
     const supplier = dc.supplier || {};
-    const supplierAddr = [supplier.address, supplier.city, supplier.state].filter(Boolean).join(', ') + (supplier.pin_code ? ` - ${supplier.pin_code}` : '');
+    // Multi-line supplier address (one component per line) — vendors prefer
+    // street/city/state/pin on separate lines for postal labels.
+    const supplierAddrLines = [
+      supplier.address,
+      supplier.address_line2,
+      [supplier.city, supplier.state].filter(Boolean).join(', '),
+      supplier.pin_code ? `PIN: ${supplier.pin_code}` : '',
+    ].filter(Boolean);
     const cs = companySettings || {};
     const companyAddr = [cs.address, cs.address_line2, cs.city, cs.state].filter(Boolean).join(', ') + (cs.pin_code ? ` - ${cs.pin_code}` : '');
     
@@ -585,7 +592,7 @@ export default function JobWorkPage() {
     const rbHTML = `<div class="running-band">
       ${cs.logo_data ? `<img src="${esc(cs.logo_data)}" class="rb-logo" alt="logo"/>` : ''}
       <div class="rb-center">
-        <div class="rb-name">${esc(cs.name || 'Company')}</div>
+        <div class="rb-name">${esc(cs.name || cs.company_name || 'Company')}</div>
         ${companyAddr ? `<div class="rb-meta">${esc(companyAddr)}</div>` : ''}
         ${cs.gstin ? `<div class="rb-gst">GSTIN: ${esc(cs.gstin)}</div>` : ''}
       </div>
@@ -602,26 +609,34 @@ export default function JobWorkPage() {
       /* Body width + top padding pulled from the Quotation template so all
          printed documents share the same canvas. 780px @ 96dpi keeps the
          layout safely inside an A4 portrait page with 8mm side margins. */
-      .page{max-width:780px;margin:0 auto;padding:32px 8px 20px;box-sizing:border-box}
+      /* Body width — 820px (slightly wider than the Quotation's 780) so the
+         9-column DC items table can fit all money values on one line each
+         without truncation. */
+      .page{max-width:820px;margin:0 auto;padding:32px 8px 20px;box-sizing:border-box}
       /* Header — left brand block + right doc-info, just like Quotation. */
       .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
       .brand-left{flex:1;display:flex;gap:12px;align-items:flex-start}
       .logo-wrap{flex-shrink:0;display:flex;align-items:center;justify-content:center}
       .logo-img{max-height:72px;max-width:180px;object-fit:contain}
       .logo-fallback{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,${accent},#64748b);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;letter-spacing:-0.5px}
-      .brand-block .company-name{font-size:17px;font-weight:800;color:#0f172a;margin:0 0 2px}
+      /* Company name — large single-line, mirrors Quotation's 22px brand
+         heading. white-space:nowrap keeps long company names on one line. */
+      .brand-block .company-name{font-size:22px;font-weight:800;color:#0f172a;margin:0 0 2px;white-space:nowrap;letter-spacing:-0.3px}
       .brand-block .tagline{font-size:10px;color:${accent};font-style:italic;margin-bottom:4px;letter-spacing:0.3px}
       .brand-block .company-addr{font-size:10px;color:#475569;line-height:1.5}
       .doc-right{text-align:right}
-      .doc-right .title{font-size:13px;font-weight:800;color:${accent};letter-spacing:0.5px;margin:0;text-transform:uppercase;line-height:1.2}
-      .doc-right .docno{font-size:14px;font-weight:700;color:#0f172a;margin-top:2px}
-      .doc-right .quoref{font-size:10px;color:#475569;margin-top:2px}
-      /* Info bar — same 4-col navy band as Quotation. */
-      .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:${accent};color:#fff;margin-top:14px;border-radius:2px;overflow:hidden}
-      .info-bar .col{padding:10px 14px;border-right:1px solid rgba(255,255,255,0.15)}
+      /* Doc title — small two-line block so "Job Work Order Cum / Delivery
+         Challan" prints across two lines without dominating the header. */
+      .doc-right .title{font-size:11px;font-weight:800;color:${accent};letter-spacing:0.4px;margin:0;text-transform:uppercase;line-height:1.25;max-width:160px;margin-left:auto;text-align:right}
+      .doc-right .docno{font-size:12px;font-weight:700;color:#0f172a;margin-top:3px}
+      .doc-right .quoref{font-size:9.5px;color:#475569;margin-top:2px}
+      /* Info bar — compact 4-col band. Smaller labels & values + reduced
+         padding so the band sits tightly between header and address-row. */
+      .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:${accent};color:#fff;margin-top:10px;border-radius:2px;overflow:hidden}
+      .info-bar .col{padding:5px 10px;border-right:1px solid rgba(255,255,255,0.15)}
       .info-bar .col:last-child{border-right:none}
-      .info-bar .label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.75);margin-bottom:2px}
-      .info-bar .value{font-size:13px;font-weight:700}
+      .info-bar .label{font-size:8px;text-transform:uppercase;letter-spacing:0.8px;color:rgba(255,255,255,0.78);margin-bottom:1px;white-space:nowrap}
+      .info-bar .value{font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       /* Subcontractor / Reference cards — match Quotation's Bill-To / Ship-To
          address-row block. */
       .address-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0}
@@ -697,7 +712,17 @@ export default function JobWorkPage() {
         </div>
       </div>
       <div class="doc-right">
-        <div class="title">${esc(dcTitle)}</div>
+        ${(() => {
+          // Two-line doc title: split on "Cum" so "Job Work Order Cum / Delivery
+          // Challan" reads as two balanced lines. Plain DC (no "Cum") just
+          // shows the full title on one line.
+          const t = String(dcTitle || '');
+          const idx = t.toLowerCase().indexOf(' cum ');
+          if (idx > 0) {
+            return `<div class="title">${esc(t.slice(0, idx + 4))}<br/>${esc(t.slice(idx + 5))}</div>`;
+          }
+          return `<div class="title">${esc(t)}</div>`;
+        })()}
         <div class="docno">${esc(dc.dc_number)}</div>
         ${dc.order?.order_number ? `<div class="quoref">JW Order: <strong>${esc(dc.order.order_number)}</strong></div>` : ''}
         ${(dc.status || '').toLowerCase() === 'draft' ? `<div style="display:inline-block;margin-top:4px;padding:2px 10px;background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;border-radius:3px;font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Draft</div>` : ''}
@@ -717,7 +742,7 @@ export default function JobWorkPage() {
       <div class="addr-box">
         <h3>Subcontractor / Vendor</h3>
         <div class="name">${esc(supplier.name || '-')}</div>
-        ${supplierAddr ? `<div class="line">${esc(supplierAddr)}</div>` : ''}
+        ${supplierAddrLines.length ? supplierAddrLines.map(l => `<div class="line">${esc(l)}</div>`).join('') : ''}
         ${supplier.gstin ? `<div class="line"><strong>GSTIN:</strong> <span class="mono">${esc(supplier.gstin)}</span></div>` : ''}
         ${supplier.phone ? `<div class="line">Ph: ${esc(supplier.phone)}</div>` : ''}
       </div>
