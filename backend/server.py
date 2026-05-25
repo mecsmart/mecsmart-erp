@@ -2951,7 +2951,7 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
     
     rm_demand = {}
     
-    async def explode_all_rm(parent_item_id: str, parent_qty: float, order_info: dict, variant_selection: Optional[Dict[str, str]] = None, visited: set = None):
+    async def explode_all_rm(parent_item_id: str, parent_qty: float, order_info: dict, variant_selection: Optional[Dict[str, str]] = None, visited: set = None, consumed_by_item: Optional[Dict[str, float]] = None):
         if visited is None:
             visited = set()
         if parent_item_id in visited:
@@ -2980,6 +2980,18 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                 comp_item = variant_child
                 # Refresh cache with the variant child so later lookups are consistent.
                 item_cache[comp_item_id] = variant_child
+
+            # Net off any qty already consumed by THIS MO so MRP doesn't
+            # re-order what's already been issued. The consumed_by_item map
+            # is only present at the top-level explode call (per-MO);
+            # children inherit an empty map so each consumed entry is
+            # subtracted ONCE.
+            already_consumed = float((consumed_by_item or {}).get(comp_item_id, 0))
+            if already_consumed > 0:
+                qty_needed = max(0.0, qty_needed - already_consumed)
+                if qty_needed <= 0:
+                    # Skip this component entirely — already fully consumed.
+                    continue
             
             if comp_item.get("category") == "raw_material":
                 if comp_item_id not in rm_demand:
@@ -3003,7 +3015,10 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
                 })
             else:
                 child_visited = set(visited)
-                await explode_all_rm(comp_item_id, qty_needed, order_info, variant_selection, child_visited)
+                # Children inherit no consumed_by_item — the parent-level
+                # netting was already applied above. Pass {} explicitly to
+                # avoid double-subtracting.
+                await explode_all_rm(comp_item_id, qty_needed, order_info, variant_selection, child_visited, consumed_by_item={})
     
     # ---- Step 2: explode UNRESERVED open MOs (MTS + MTO) ----
     # Reserved MOs are already accounted for via total_allocated / total_shortfall.
@@ -3028,7 +3043,18 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
             "order_number": mo.get("wo_number") or mo.get("mo_number") or mo.get("id"),
             "due_date": mo.get("scheduled_end") or mo.get("scheduled_start"),
         }
-        await explode_all_rm(item_id, qty, order_info, mo.get("variant_selection"))
+        # When an MO has already consumed materials (e.g. operation 1
+        # completed and consumed the parts), those quantities must be
+        # subtracted from MRP's gross demand — otherwise MRP keeps showing
+        # the full BOM requirement and over-purchases. We pass a
+        # `consumed_by_item` map down the explosion so the leaf RM
+        # calculation can net-off what's already been issued.
+        consumed_map = {}
+        for cm in (mo.get("consumed_materials") or []):
+            cid_c = cm.get("item_id")
+            if cid_c:
+                consumed_map[cid_c] = consumed_map.get(cid_c, 0) + float(cm.get("quantity") or 0)
+        await explode_all_rm(item_id, qty, order_info, mo.get("variant_selection"), consumed_by_item=consumed_map)
     
     # ---- Step 3: Compute net requirement ----
     for item_id, data in rm_demand.items():
@@ -6573,6 +6599,15 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
                 rid = rm.get("item_id")
                 if rid:
                     allocated_by_others[rid] = allocated_by_others.get(rid, 0) + (rm.get("allocated_qty") or 0)
+        # Materials this MO has ALREADY consumed (from WO /start path).
+        # Without this, partially-completed MOs kept showing the full BOM
+        # requirement even after their first operation had consumed the
+        # parts — confusing planners and double-counting in MRP.
+        consumed_by_item: dict = {}
+        for cm in (wo.get("consumed_materials") or []):
+            cid_c = cm.get("item_id")
+            if cid_c:
+                consumed_by_item[cid_c] = consumed_by_item.get(cid_c, 0) + float(cm.get("quantity") or 0)
         for comp in bom.get("components", []) or []:
             if comp.get("is_alternate"):
                 continue
@@ -6580,13 +6615,17 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
             if not cid:
                 continue
             comp_qty = float(comp.get("quantity") or 0) * wo_qty
+            consumed_qty = float(consumed_by_item.get(cid, 0))
+            outstanding = max(0.0, comp_qty - consumed_qty)
             citem = await db.items.find_one({"id": cid}, {"_id": 0})
             if not citem:
                 continue
             on_hand = float(citem.get("current_stock") or 0)
             allocated = float(allocated_by_others.get(cid, 0))
             available = max(0.0, on_hand - allocated)
-            shortage = max(0.0, comp_qty - available)
+            # Shortage now reflects only what's STILL OUTSTANDING — what
+            # we've already consumed is no longer "required".
+            shortage = max(0.0, outstanding - available)
             uom_code = (citem.get("unit_of_measure") or citem.get("uom") or "pcs")
             collected.append({
                 "item_id": cid,
@@ -6594,6 +6633,8 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
                 "name": citem.get("name", ""),
                 "category": citem.get("category", ""),
                 "quantity": comp_qty,
+                "consumed_qty": consumed_qty,
+                "outstanding_qty": outstanding,
                 "uom": uom_code,
                 "uom_decimal_places": uom_decimal_map.get((uom_code or "").strip().lower(), 2),
                 "unit_cost": float(citem.get("purchase_price") or 0),
@@ -6612,6 +6653,11 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
             seen_order.append(key)
         else:
             bucket[key]["quantity"] += r["quantity"]
+            # consumed/outstanding columns must also be summed when the same
+            # component appears twice in the same BOM (legacy multi-line).
+            bucket[key]["consumed_qty"] = bucket[key].get("consumed_qty", 0) + r.get("consumed_qty", 0)
+            bucket[key]["outstanding_qty"] = bucket[key].get("outstanding_qty", 0) + r.get("outstanding_qty", 0)
+            bucket[key]["shortage"] = max(0.0, bucket[key]["outstanding_qty"] - bucket[key]["available_stock"])
     materials = [bucket[k] for k in seen_order]
     return {
         "wo_number": wo.get("wo_number"),

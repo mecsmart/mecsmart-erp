@@ -926,12 +926,18 @@ export default function ManufacturingPage() {
     <table>
       <thead><tr>
         <th>Part No.</th><th>Material</th>
-        <th class="text-right">Required</th><th>UOM</th>
+        <th class="text-right">Required</th>
+        <th class="text-right">Consumed</th>
+        <th class="text-right">Outstanding</th>
+        <th>UOM</th>
         <th class="text-right">Available Stock</th>
         <th class="text-right">Shortage</th>
       </tr></thead>
       <tbody>${materials.map(m => {
         const short = m.shortage || 0;
+        const consumed = m.consumed_qty || 0;
+        const outstanding = m.outstanding_qty != null ? m.outstanding_qty : Math.max(0, (m.quantity || 0) - consumed);
+        const fullyConsumed = consumed > 0 && outstanding <= 0;
         // Use UOM master decimal_places (set by backend) so "3.36" not "3.3600000000000003".
         const dp = Number.isFinite(m.uom_decimal_places) ? m.uom_decimal_places : 2;
         const fmt = (v) => {
@@ -939,13 +945,17 @@ export default function ManufacturingPage() {
           if (!Number.isFinite(n)) return '0';
           return n.toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
         };
-        return `<tr>
-        <td class="mono">${m.item || ''}</td><td>${m.name || ''}</td>
-        <td class="text-right mono">${fmt(m.quantity)}</td><td>${m.uom || 'pcs'}</td>
+        return `<tr${fullyConsumed ? ' style="opacity:0.7"' : ''}>
+        <td class="mono">${m.item || ''}</td>
+        <td>${m.name || ''}${fullyConsumed ? ' <span style="padding:1px 4px;font-size:8px;background:#D1FAE5;color:#065F46;font-weight:bold;text-transform:uppercase;">Consumed</span>' : ''}</td>
+        <td class="text-right mono">${fmt(m.quantity)}</td>
+        <td class="text-right mono ${consumed > 0 ? 'ok' : ''}">${consumed > 0 ? fmt(consumed) : '-'}</td>
+        <td class="text-right mono">${outstanding > 0 ? fmt(outstanding) : '0'}</td>
+        <td>${m.uom || 'pcs'}</td>
         <td class="text-right mono">${fmt(m.available_stock || 0)}</td>
         <td class="text-right mono ${short > 0 ? 'short' : 'ok'}">${short > 0 ? fmt(short) : '-'}</td>
       </tr>`;}).join('')}
-      <tr class="total-row"><td colspan="5" class="text-right">Total Shortage</td><td class="text-right mono ${totalShortage > 0 ? 'short' : 'ok'}">${totalShortage > 0 ? fmtAmt(totalShortage) : '-'}</td></tr>
+      <tr class="total-row"><td colspan="7" class="text-right">Total Shortage</td><td class="text-right mono ${totalShortage > 0 ? 'short' : 'ok'}">${totalShortage > 0 ? fmtAmt(totalShortage) : '-'}</td></tr>
       </tbody>
     </table>` : '<p style="color:#888;margin:10px 0;">No material requirements (no active BOM or zero-quantity components).</p>'}
     </body></html>`;
@@ -3200,6 +3210,8 @@ export default function ManufacturingPage() {
                         <th className="text-left px-2 py-1.5">Part No.</th>
                         <th className="text-left px-2 py-1.5">Material</th>
                         <th className="text-right px-2 py-1.5">Required</th>
+                        <th className="text-right px-2 py-1.5" title="Already consumed by this MO">Consumed</th>
+                        <th className="text-right px-2 py-1.5" title="Required minus already consumed">Outstanding</th>
                         <th className="text-left px-2 py-1.5">UOM</th>
                         <th className="text-right px-2 py-1.5">Available Stock</th>
                         <th className="text-right px-2 py-1.5">Shortage</th>
@@ -3208,6 +3220,8 @@ export default function ManufacturingPage() {
                     <tbody>
                       {matReqDialog.materials.map((m, i) => {
                         const shortage = m.shortage || 0;
+                        const consumed = m.consumed_qty || 0;
+                        const outstanding = m.outstanding_qty != null ? m.outstanding_qty : Math.max(0, (m.quantity || 0) - consumed);
                         // Use UOM master's decimal_places (sent by backend) so the
                         // Required column shows e.g. "3.36" for kgs (2 dp) instead
                         // of the raw IEEE-754 "3.3600000000000003".
@@ -3217,11 +3231,17 @@ export default function ManufacturingPage() {
                           if (!Number.isFinite(n)) return '0';
                           return n.toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
                         };
+                        const fullyConsumed = consumed > 0 && outstanding <= 0;
                         return (
-                          <tr key={i} className={i % 2 ? 'bg-[#F9FAFB]' : ''}>
+                          <tr key={i} className={`${i % 2 ? 'bg-[#F9FAFB]' : ''} ${fullyConsumed ? 'opacity-60' : ''}`}>
                             <td className="px-2 py-1 font-mono">{m.item || ''}</td>
-                            <td className="px-2 py-1">{m.name || ''}</td>
+                            <td className="px-2 py-1">
+                              {m.name || ''}
+                              {fullyConsumed && <span className="ml-2 px-1.5 py-0.5 text-[10px] uppercase rounded bg-[#D1FAE5] text-[#065F46] font-semibold">Consumed</span>}
+                            </td>
                             <td className="px-2 py-1 text-right font-mono">{fmt(m.quantity)}</td>
+                            <td className={`px-2 py-1 text-right font-mono ${consumed > 0 ? 'text-[#065F46] font-semibold' : 'text-[#9CA3AF]'}`}>{consumed > 0 ? fmt(consumed) : '-'}</td>
+                            <td className={`px-2 py-1 text-right font-mono ${outstanding > 0 ? 'text-[#1D3557] font-semibold' : 'text-[#9CA3AF]'}`}>{outstanding > 0 ? fmt(outstanding) : '0'}</td>
                             <td className="px-2 py-1">{m.uom || 'pcs'}</td>
                             <td className="px-2 py-1 text-right font-mono">{fmt(m.available_stock || 0)}</td>
                             <td className={`px-2 py-1 text-right font-mono ${shortage > 0 ? 'text-[#9B1C1C] font-semibold' : 'text-[#03543F]'}`}>{shortage > 0 ? fmt(shortage) : '-'}</td>

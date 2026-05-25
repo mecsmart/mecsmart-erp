@@ -19,6 +19,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 32 — Material Requirement & MRP now respect already-consumed qtys — FIXED ✅):**
+  1. **Root cause** — `/work-orders/{id}/material-requirements` (and the parent MRP `/api/mrp/demand`) computed the requirement purely from the BOM × WO quantity, ignoring `wo.consumed_materials`. So even after operation 1 consumed the parts, the Material Requirement dialog still showed the full BOM qty and MRP kept re-ordering material that had already been issued.
+  2. **Fix #1 — Material Requirement endpoint** — Reads `wo.consumed_materials`, builds a `consumed_by_item` map, and per row emits new fields `consumed_qty` and `outstanding_qty` (= max(0, required − consumed)). Shortage is now computed against `outstanding_qty`, not full required.
+  3. **Fix #2 — Frontend dialog + PDF** — Added `Consumed` and `Outstanding` columns. Fully consumed rows show a green "CONSUMED" badge and the row is dimmed. Shortage column reflects the new outstanding figure.
+  4. **Fix #3 — MRP `/demand`** — When exploding open MOs, the per-MO `consumed_materials` map is passed into `explode_all_rm()` and the top-level component demand is netted off (`qty_needed = max(0, qty_needed − already_consumed)`). Children inherit an empty map to avoid double-subtracting. Net effect: MRP no longer suggests POs for material that's already been issued to a running MO.
+  5. **Verified via curl** for MO-000306 (qty=1, consumed=1, BOM=1): endpoint returned `consumed_qty=1, outstanding_qty=0, shortage=0` (previously returned the full requirement with no consumed info).
+
+
 - **2026-02-22 (Round 31 — BOM list duplicate rows after bulk import — FIXED ✅):**
   1. **Root cause** — Round 30's recent-imports pinning bypass (`if (!isRecent && childItemIds.has(...)) return;`) lifted EVERY imported BOM to top-level, even SG/CP BOMs that were already nested under their parent FG. After a 103-BOM bulk import the same Boot Assembly / Head Assembly / etc. appeared BOTH nested inside the FG explosion tree AND as separate top-level rows, plus the banner mis-said "103 BOMs pinned to top".
   2. **Fix** — Dropped the bypass. The nested-suppression `childItemIds.has(bom.parent_item_id) → skip` now applies uniformly; nested children never duplicate at top-level.
