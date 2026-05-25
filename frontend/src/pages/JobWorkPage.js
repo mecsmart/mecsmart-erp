@@ -609,31 +609,31 @@ export default function JobWorkPage() {
     <style>
       *{box-sizing:border-box}
       body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:#111;margin:0;padding:0}
-      /* Page canvas — EXACT match to Quotation: 780px max-width, 28px top
-         + 24px side padding. Same A4 footprint, same vertical rhythm. */
-      .page{max-width:780px;margin:0 auto;padding:28px 24px}
+      /* Page canvas — EXACT match to Quotation: 780px max-width with
+         32px top, 8px side, 20px bottom padding. Combined with @page
+         4mm margin below, the content uses nearly the full A4 width. */
+      .page{max-width:780px;margin:0 auto;padding:32px 8px 20px;box-sizing:border-box}
       /* Header — left brand block + right doc-info, just like Quotation. */
-      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
-      .brand{display:flex;gap:12px;align-items:flex-start}
+      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+      .brand{flex:1;display:flex;gap:12px;align-items:flex-start}
+      .logo-wrap{flex-shrink:0;display:flex;align-items:center;justify-content:center}
       .logo-img{max-height:72px;max-width:180px;object-fit:contain}
       .logo-fb{width:60px;height:60px;border-radius:50%;background:${accent};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px}
-      /* Company name 17px (Quotation parity — NOT 22px). */
-      .cn{font-size:17px;font-weight:800;color:#0f172a;margin:0}
-      .tg{font-size:10px;color:${accent};font-style:italic}
+      /* Company name 17px (Quotation parity). */
+      .cn{font-size:17px;font-weight:800;color:#0f172a;margin:0 0 2px}
+      .tg{font-size:10px;color:${accent};font-style:italic;margin-bottom:4px;letter-spacing:0.3px}
       .addr{font-size:10px;color:#475569;line-height:1.5}
-      /* Document title — small two-line block, less prominent than
-         Quotation's 22px since DC doc names are long ("Job Work Order Cum
-         DC" is the short form per user). */
-      .title{font-size:13px;font-weight:800;color:${accent};letter-spacing:1px;text-align:right;margin:0;line-height:1.25}
-      .docno{font-size:12px;color:#334155;font-family:'Courier New',monospace;text-align:right;margin-top:4px}
+      /* Document title — EXACT Quotation parity: 16px uppercase, accent. */
+      .title{font-size:16px;font-weight:800;color:${accent};letter-spacing:0.5px;text-align:right;margin:0;text-transform:uppercase}
+      .docno{font-size:14px;font-weight:700;color:#0f172a;text-align:right;margin-top:2px}
       .meta{font-size:10px;color:#475569;text-align:right;margin-top:2px}
-      /* Info bar — Quotation parity: padding 8x12, label 9px, value 12px. */
-      .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:${accent};color:#fff;margin:14px 0;border-radius:2px;overflow:hidden}
-      .info-bar .col{padding:8px 12px;border-right:1px solid rgba(255,255,255,0.15)}
+      /* Info bar — Quotation parity: padding 10x14, label 9px, value 13px. */
+      .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:${accent};color:#fff;margin-top:14px;border-radius:2px;overflow:hidden}
+      .info-bar .col{padding:10px 14px;border-right:1px solid rgba(255,255,255,0.15)}
       .info-bar .col:last-child{border-right:none}
       .info-bar .lab{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.75);margin-bottom:2px}
-      .info-bar .val{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .addr-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:12px 0}
+      .info-bar .val{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .addr-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0}
       .box h4{font-size:10px;text-transform:uppercase;letter-spacing:1px;margin:0 0 4px;color:#0f172a;border-bottom:2px solid ${accent};padding-bottom:3px;display:inline-block}
       .box .name{font-size:13px;font-weight:700;color:#0f172a}
       .box .line{font-size:10px;color:#475569;line-height:1.5;white-space:pre-line}
@@ -668,9 +668,9 @@ export default function JobWorkPage() {
       .footer{margin-top:30px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;font-size:10px}
       .sign-box{border-top:1px solid #0f172a;padding-top:4px;text-align:center;margin-top:40px;color:#475569}
       @media print{
-        @page{size:A4;margin:10mm;@bottom-right{content:"Page " counter(page) " of " counter(pages);font-family:'Helvetica Neue',Arial,sans-serif;font-size:9px;color:#64748b;padding-right:4mm}}
+        @page{size:A4;margin:4mm 4mm 6mm 4mm;@bottom-right{content:"Page " counter(page) " of " counter(pages);font-family:'Helvetica Neue',Arial,sans-serif;font-size:9px;color:#64748b;padding-right:4mm}}
         body{-webkit-print-color-adjust:exact;print-color-adjust:exact;padding:0}
-        .page{padding-top:10px}
+        .page-one-cover{margin-top:-25mm;background:#fff;position:relative;z-index:5}
       }
     </style></head><body>
     <table class="print-doc">
