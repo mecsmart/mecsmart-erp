@@ -734,6 +734,11 @@ class ManualDCLineItem(BaseModel):
     unit_price: Optional[float] = 0  # Per-unit value of the goods being shipped (for value declaration on the DC)
     processing_charges: Optional[float] = 0
     notes: Optional[str] = ""
+    # User-editable per-line description that prints under the part number/
+    # name on the DC. Separate from `notes` so the description (a spec /
+    # variant / colour) stays on the items table while notes are line-level
+    # comments.
+    item_description: Optional[str] = ""
 
 class ManualDCCreate(BaseModel):
     """Standalone DC not tied to any Subcontract Order. Used for direct
@@ -12864,7 +12869,8 @@ async def create_manual_delivery_challan(data: ManualDCCreate, request: Request)
             "unit": line.unit or (item.get("unit_of_measure") if item else "pcs"),
             "unit_price": float(line.unit_price or (item.get("unit_cost") if item else 0) or 0),
             "processing_charges": float(line.processing_charges or 0),
-            "notes": line.notes or ""
+            "notes": line.notes or "",
+            "item_description": line.item_description or "",
         }
         dc_lines.append(line_doc)
         # Deduct stock
@@ -13014,6 +13020,7 @@ async def update_manual_delivery_challan(dc_id: str, data: ManualDCCreate, reque
             "unit_price": float(line.unit_price or (item.get("unit_cost") if item else 0) or 0),
             "processing_charges": float(line.processing_charges or 0),
             "notes": line.notes or "",
+            "item_description": line.item_description or "",
         })
 
     await db.delivery_challans.update_one(

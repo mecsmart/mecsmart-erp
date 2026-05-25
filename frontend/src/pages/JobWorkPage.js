@@ -63,7 +63,7 @@ export default function JobWorkPage() {
   const [manualDcForm, setManualDcForm] = useState({
     id: null,  // present => edit mode
     supplier_id: '', dc_purpose: 'subcontract', warehouse_id: '', notes: '',
-    lines: [{ item_id: '', item_search: '', quantity: 1, unit_price: 0, processing_charges: 0, notes: '' }]
+    lines: [{ item_id: '', item_search: '', quantity: 1, unit_price: 0, processing_charges: 0, notes: '', item_description: '' }]
   });
   // BOM preview cache keyed by item_id — populates the expandable "show RM
   // detail" sub-table beneath each selected Manual DC line. We fetch lazily
@@ -357,7 +357,7 @@ export default function JobWorkPage() {
       id: null,
       supplier_id: '', dc_purpose: 'subcontract', warehouse_id: '', notes: '',
       dc_date: new Date().toISOString().slice(0, 10),
-      lines: [{ item_id: '', item_search: '', quantity: 1, unit_price: 0, processing_charges: 0, notes: '' }]
+      lines: [{ item_id: '', item_search: '', quantity: 1, unit_price: 0, processing_charges: 0, notes: '', item_description: '' }]
     });
     setManualDcDialog(true);
   };
@@ -382,13 +382,14 @@ export default function JobWorkPage() {
         unit_price: l.unit_price || (items.find(i => i.id === l.item_id)?.unit_cost) || 0,
         processing_charges: l.processing_charges || 0,
         notes: l.notes || '',
+        item_description: l.item_description || '',
       })),
     });
     setManualDcDialog(true);
   };
 
   const addManualDcLine = () => {
-    setManualDcForm(prev => ({ ...prev, lines: [...prev.lines, { item_id: '', item_search: '', quantity: 1, unit_price: 0, processing_charges: 0, notes: '' }] }));
+    setManualDcForm(prev => ({ ...prev, lines: [...prev.lines, { item_id: '', item_search: '', quantity: 1, unit_price: 0, processing_charges: 0, notes: '', item_description: '' }] }));
   };
 
   const removeManualDcLine = (idx) => {
@@ -415,7 +416,8 @@ export default function JobWorkPage() {
           quantity: parseFloat(l.quantity),
           unit_price: parseFloat(l.unit_price || 0),
           processing_charges: parseFloat(l.processing_charges || 0),
-          notes: l.notes || ''
+          notes: l.notes || '',
+          item_description: l.item_description || '',
         }))
       };
       const isEdit = !!manualDcForm.id;
@@ -673,7 +675,7 @@ export default function JobWorkPage() {
     
     <div class="section-title">Raw Material Issued</div>
     <table>
-      <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>HSN</th><th class="text-right">QTY</th><th>UOM</th><th class="text-right">Rate/Unit</th><th class="text-right">Total RM Cost</th></tr></thead>
+      <thead><tr><th>Sl. No.</th><th>Part No., Name &amp; Description</th><th>HSN</th><th class="text-right">QTY</th><th>UOM</th><th class="text-right">Rate/Unit</th><th class="text-right">Total RM Cost</th></tr></thead>
       <tbody>
       ${dc.lines.map((l, i) => {
         const it = l.item || items.find(x => x.id === l.item_id) || {};
@@ -683,7 +685,12 @@ export default function JobWorkPage() {
         const rate = l.unit_price || it.unit_cost || l.rate || 0;
         const uom = l.unit || it.unit_of_measure || 'pcs';
         const cost = l.quantity * rate;
-        return `<tr><td>${i+1}</td><td>${it.part_number || '-'}, ${it.name || '-'}</td><td>${it.hsn_code || '-'}</td><td class="text-right mono">${l.quantity}</td><td>${uom}</td><td class="text-right mono">${currencySymbol}${fmtAmt(rate)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(cost)}</td></tr>`;
+        // Description goes UNDER the Part No., Name line so the table stays
+        // narrow (mirrors the JW-OS table style above).
+        const desc = l.item_description || it.description || '';
+        const partCell = `${it.part_number || '-'}, ${it.name || '-'}` +
+          (desc ? `<br/><span class="sub-text" style="font-size:9px;color:#475569;">${desc}</span>` : '');
+        return `<tr><td>${i+1}</td><td>${partCell}</td><td>${it.hsn_code || '-'}</td><td class="text-right mono">${l.quantity}</td><td>${uom}</td><td class="text-right mono">${currencySymbol}${fmtAmt(rate)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(cost)}</td></tr>`;
       }).join('')}
       <tr class="total-row"><td colspan="6" class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalRMCost)}</td></tr>
       </tbody>
@@ -1271,28 +1278,40 @@ export default function JobWorkPage() {
                           <td>
                             <div className="px-1 py-1">
                               {selected ? (
-                                <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-2 py-1" data-testid={`manual-dc-selected-${idx}`}>
-                                  <div className="text-xs truncate flex items-center gap-1">
-                                    {/* BOM preview chevron — opens an inline
-                                        sub-table beneath this row showing the
-                                        selected item's BOM children (Parts
-                                        of an SG, or RMs of a Part) with each
-                                        child's quantity + unit cost. */}
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleBomPreview(idx, selected.id)}
-                                      className="text-[#1D3557] hover:bg-[#E1EFFE] rounded px-0.5"
-                                      title={bomPreviewOpen[idx] ? 'Hide BOM detail' : 'Show BOM detail (constituent parts / RMs)'}
-                                      data-testid={`manual-dc-bom-toggle-${idx}`}
-                                    >
-                                      {bomPreviewOpen[idx] ? '▼' : '▶'}
-                                    </button>
-                                    <span className="mono font-semibold">{selected.part_number}</span>
-                                    <span className="mx-1">—</span>
-                                    <span>{selected.name}</span>
-                                    <span className="ml-2 text-[#6B7280]">Stock: {selected.current_stock || 0}</span>
+                                <div className="space-y-1" data-testid={`manual-dc-selected-${idx}`}>
+                                  <div className="flex items-center justify-between bg-[#F0FDF4] border border-[#03543F] rounded-sm px-2 py-1">
+                                    <div className="text-xs truncate flex items-center gap-1">
+                                      {/* BOM preview chevron — opens an inline
+                                          sub-table beneath this row showing the
+                                          selected item's BOM children (Parts
+                                          of an SG, or RMs of a Part) with each
+                                          child's quantity + unit cost. */}
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleBomPreview(idx, selected.id)}
+                                        className="text-[#1D3557] hover:bg-[#E1EFFE] rounded px-0.5"
+                                        title={bomPreviewOpen[idx] ? 'Hide BOM detail' : 'Show BOM detail (constituent parts / RMs)'}
+                                        data-testid={`manual-dc-bom-toggle-${idx}`}
+                                      >
+                                        {bomPreviewOpen[idx] ? '▼' : '▶'}
+                                      </button>
+                                      <span className="mono font-semibold">{selected.part_number}</span>
+                                      <span className="mx-1">—</span>
+                                      <span>{selected.name}</span>
+                                      <span className="ml-2 text-[#6B7280]">Stock: {selected.current_stock || 0}</span>
+                                    </div>
+                                    <button type="button" className="text-[10px] text-[#9B1C1C] hover:underline ml-2" onClick={() => updateManualDcLine(idx, { item_id: '', item_search: '' })} data-testid={`manual-dc-clear-${idx}`}>Clear</button>
                                   </div>
-                                  <button type="button" className="text-[10px] text-[#9B1C1C] hover:underline ml-2" onClick={() => updateManualDcLine(idx, { item_id: '', item_search: '' })} data-testid={`manual-dc-clear-${idx}`}>Clear</button>
+                                  {/* Item description — separate from notes;
+                                      prints under the part name on the DC. */}
+                                  <input
+                                    type="text"
+                                    value={line.item_description || ''}
+                                    onChange={(e) => updateManualDcLine(idx, { item_description: e.target.value })}
+                                    placeholder="Description / spec / colour (prints under part name)"
+                                    className="grid-input text-xs"
+                                    data-testid={`manual-dc-description-${idx}`}
+                                  />
                                 </div>
                               ) : (
                                 <>

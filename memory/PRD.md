@@ -19,6 +19,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 36 — DC Item Description across Create, Edit, Preview & Print — DONE ✅):**
+  1. **JW-OS Create/Edit form** — already had a dedicated `item_description` input under each part row; verified persistence (already wired).
+  2. **JW-OS Print/PDF** — "Job Work Part Details" table already prints `r.description` under the part name; verified.
+  3. **Manual DC backend** — `ManualDCLineItem` model + create/update handlers extended with optional `item_description` so it persists separately from the existing `notes` field.
+  4. **Manual DC Create/Edit form** — Added an inline `Description / spec / colour` input directly under the green selected-item pill (same UX pattern as JW-OS). Initial state, addManualDcLine, openEditManualDC, and the create/update payload all carry `item_description`.
+  5. **DC Print template — "Raw Material Issued" table** (used by Manual DC + SC-with-material RM section) now renders the description as a sub-text line under the Part No., Name (mirrors the JW-OS section's styling). Column header renamed to "Part No., Name & Description".
+
+
 - **2026-02-22 (Round 34 — Reconcile Consumption admin action for historical MOs — DONE ✅):**
   1. Round 33 fixed the float-truncation bug for FUTURE MO starts. For MOs ALREADY in flight (e.g. MO-000235: required 9.96, consumed 9, outstanding 0.96 stuck forever), this round adds a one-click healer.
   2. **New endpoint** — `POST /api/work-orders/{wo_id}/reconcile-consumption` (admin or manufacturing-edit only). For each BOM component:
