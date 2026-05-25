@@ -591,6 +591,48 @@ export default function JobWorkPage() {
     const expectedReturn = dc.order?.expected_return_date;
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
+    // Shipping-From warehouse — resolved client-side from the warehouses
+    // already loaded in component state. Falls back to the company's own
+    // address (registered office) when no warehouse was tagged on the DC.
+    const shipWh = (dc.warehouse_id && warehouses.find(w => w.id === dc.warehouse_id)) || null;
+    const shipFromLines = shipWh ? [
+      shipWh.name,
+      shipWh.location,
+      shipWh.address,
+    ].filter(Boolean) : [
+      cs.name || cs.company_name,
+      cs.address,
+      cs.address_line2,
+      [cs.city, cs.state, cs.pin_code].filter(Boolean).join(', '),
+      cs.gstin ? `GSTIN: ${cs.gstin}` : '',
+    ].filter(Boolean);
+
+    // Inline number-to-words (Indian numbering — Lakh/Crore). Used to
+    // print the Total RM Cost in words on the DC totals block.
+    const numberToWords = (num) => {
+      if (!num || num <= 0) return 'Zero Rupees Only';
+      const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen'];
+      const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+      const scales = ['','Thousand','Lakh','Crore'];
+      const convertGroup = (g) => {
+        if (g === 0) return '';
+        if (g < 20) return ones[g];
+        if (g < 100) return tens[Math.floor(g / 10)] + (g % 10 ? ' ' + ones[g % 10] : '');
+        return ones[Math.floor(g / 100)] + ' Hundred' + (g % 100 ? ' and ' + convertGroup(g % 100) : '');
+      };
+      let n = Math.floor(num);
+      const groups = [];
+      groups.push(n % 1000); n = Math.floor(n / 1000);
+      while (n > 0) { groups.push(n % 100); n = Math.floor(n / 100); }
+      const parts = groups.map((g, i) => g ? convertGroup(g) + (scales[i] ? ' ' + scales[i] : '') : '').filter(Boolean).reverse();
+      const main = parts.join(' ');
+      const decimal = Math.round((num - Math.floor(num)) * 100);
+      return main + ' Rupees' + (decimal > 0 ? ' and ' + convertGroup(decimal) + ' Paise' : '') + ' Only';
+    };
+    // Aggregate qty across all RM lines for the "Total Qty" footer cell.
+    const totalRMQty = (dc.lines || []).reduce((s, l) => s + (parseFloat(l.quantity) || 0), 0);
+    const totalRMCostInWords = numberToWords(totalRMCost);
+
     // Compact running-band — appears on page 2+ (page 1 masks it via
     // .page-one-cover {margin-top:-17mm}). Same trick as the Quotation /
     // Tax Invoice / PO prints.
@@ -626,10 +668,10 @@ export default function JobWorkPage() {
       .tg{font-size:10px;color:${accent};font-style:italic;margin-bottom:4px;letter-spacing:0.3px}
       .addr{font-size:10px;color:#475569;line-height:1.5}
       /* Document title — full long form, wraps to TWO lines on the right
-         of the header. Reduced to 13px so "Job Work Order Cum Delivery
-         Challan" fits on two compact lines without crowding the brand
-         block. max-width prevents it from stealing horizontal space. */
-      .title{font-size:13px;font-weight:800;color:${accent};letter-spacing:0.5px;text-align:right;margin:0;text-transform:uppercase;line-height:1.25;max-width:170px;margin-left:auto;white-space:normal;word-spacing:2px}
+         of the header. Reduced to 11px so "Job Work Order Cum Delivery
+         Challan" fits as a compact two-line label without crowding the
+         brand block. max-width prevents it from stealing horizontal space. */
+      .title{font-size:11px;font-weight:800;color:${accent};letter-spacing:0.5px;text-align:right;margin:0;text-transform:uppercase;line-height:1.3;max-width:150px;margin-left:auto;white-space:normal}
       .docno{font-size:14px;font-weight:700;color:#0f172a;text-align:right;margin-top:2px}
       .meta{font-size:10px;color:#475569;text-align:right;margin-top:2px}
       /* Info bar — Quotation parity: padding 10x14, label 9px, value 13px. */
@@ -638,7 +680,7 @@ export default function JobWorkPage() {
       .info-bar .col:last-child{border-right:none}
       .info-bar .lab{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.75);margin-bottom:2px}
       .info-bar .val{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .addr-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0}
+      .addr-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin:16px 0}
       .box h4{font-size:10px;text-transform:uppercase;letter-spacing:1px;margin:0 0 4px;color:#0f172a;border-bottom:2px solid ${accent};padding-bottom:3px;display:inline-block}
       .box .name{font-size:13px;font-weight:700;color:#0f172a}
       .box .line{font-size:10px;color:#475569;line-height:1.5;white-space:pre-line}
@@ -648,6 +690,11 @@ export default function JobWorkPage() {
       table.dc-items tbody td{border-bottom:1px solid #e2e8f0;padding:8px 6px;font-size:11px;color:#0f172a;vertical-align:top;word-break:break-word;overflow-wrap:anywhere}
       table.dc-items tbody tr:last-child td{border-bottom:2px solid ${accent}}
       table.dc-items tbody tr.total-row td{background:#f8fafc;font-weight:700;color:#0f172a;border-bottom:2px solid ${accent}}
+      /* Numeric / amount columns — darker + bolder so quantities, rates and
+         amounts pop out from the lighter description text. Applies to all
+         .mono cells inside dc-items body. */
+      table.dc-items tbody td.mono{color:#000;font-weight:600}
+      table.dc-items tbody tr.total-row td.mono{color:#000;font-weight:800}
       td .sub-text{color:#475569}
       .mono{font-family:'Courier New',monospace}
       .text-right{text-align:right}
@@ -713,8 +760,12 @@ export default function JobWorkPage() {
       <div class="col"><div class="lab">Created By</div><div class="val">${esc(createdBy)}</div></div>
     </div>
 
-    <!-- Subcontractor + Reference cards -->
+    <!-- Shipping From + Subcontractor + Reference cards (3 cols) -->
     <div class="addr-row">
+      <div class="box">
+        <h4>Shipping From</h4>
+        ${shipFromLines.length ? `<div class="name">${esc(shipFromLines[0] || '-')}</div>${shipFromLines.slice(1).map(l => `<div class="line">${esc(l)}</div>`).join('')}` : `<div class="line">-</div>`}
+      </div>
       <div class="box">
         <h4>Subcontractor / Vendor</h4>
         <div class="name">${esc(supplier.name || '-')}</div>
@@ -788,12 +839,20 @@ export default function JobWorkPage() {
         }).join('');
         const grandCharges = rows.reduce((s, r) => s + r.qty * r.charges, 0);
         const grandAmount = rows.reduce((s, r) => s + r.qty * r.rmCost, 0);
+        const grandQty = rows.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
         const totalRow = `<tr class="total-row">
-          <td colspan="5" class="text-right" style="font-weight:700">Totals</td>
-          <td class="text-center mono" style="font-weight:700">&mdash;</td>
-          <td class="text-right mono" style="font-weight:700;white-space:nowrap">${currencySymbol}${fmtAmt(grandCharges)}</td>
-          <td class="text-center mono" style="font-weight:700">&mdash;</td>
-          <td class="text-right mono" style="font-weight:700;white-space:nowrap">${currencySymbol}${fmtAmt(grandAmount)}</td>
+          <td colspan="3" class="text-right" style="font-weight:700">Totals</td>
+          <td class="text-right mono" style="font-weight:800;white-space:nowrap">${grandQty}</td>
+          <td></td>
+          <td></td>
+          <td class="text-right mono" style="font-weight:800;white-space:nowrap">${currencySymbol}${fmtAmt(grandCharges)}</td>
+          <td></td>
+          <td class="text-right mono" style="font-weight:800;white-space:nowrap">${currencySymbol}${fmtAmt(grandAmount)}</td>
+        </tr>
+        <tr class="amt-words-row">
+          <td colspan="9" style="background:#f8fafc;padding:8px 10px;border-bottom:2px solid ${accent};font-size:10px;color:#0f172a;font-style:italic">
+            <strong style="color:${accent};font-style:normal;text-transform:uppercase;letter-spacing:0.5px;font-size:9px;margin-right:6px">Total Amount in Words:</strong>${esc(numberToWords(grandAmount))}
+          </td>
         </tr>`;
         return body + totalRow;
       })()}
@@ -849,8 +908,16 @@ export default function JobWorkPage() {
         return `<tr><td class="text-center mono">${i+1}</td><td>${partCell}</td><td class="mono" style="white-space:nowrap">${it.hsn_code || '-'}</td><td class="text-right mono">${l.quantity}</td><td class="text-center">${uom}</td><td class="text-right mono" style="white-space:nowrap">${currencySymbol}${fmtAmt(rate)}</td><td class="text-right mono" style="white-space:nowrap">${currencySymbol}${fmtAmt(cost)}</td></tr>`;
       }).join('')}
       <tr class="total-row">
-        <td colspan="6" class="text-right" style="font-weight:700">Total RM Cost</td>
-        <td class="text-right mono" style="font-weight:700;white-space:nowrap">${currencySymbol}${fmtAmt(totalRMCost)}</td>
+        <td colspan="3" class="text-right" style="font-weight:700">Totals</td>
+        <td class="text-right mono" style="font-weight:800;white-space:nowrap">${totalRMQty}</td>
+        <td></td>
+        <td class="text-right" style="font-weight:700">Total RM Cost</td>
+        <td class="text-right mono" style="font-weight:800;white-space:nowrap">${currencySymbol}${fmtAmt(totalRMCost)}</td>
+      </tr>
+      <tr class="amt-words-row">
+        <td colspan="7" style="background:#f8fafc;padding:8px 10px;border-bottom:2px solid ${accent};font-size:10px;color:#0f172a;font-style:italic">
+          <strong style="color:${accent};font-style:normal;text-transform:uppercase;letter-spacing:0.5px;font-size:9px;margin-right:6px">Total RM Cost in Words:</strong>${esc(totalRMCostInWords)}
+        </td>
       </tr>
       </tbody>
     </table>`}
