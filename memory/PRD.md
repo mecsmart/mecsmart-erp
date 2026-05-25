@@ -19,6 +19,14 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 33 — Decimal material consumption + MRP reserved-MO consumed netting — FIXED ✅):**
+  1. **Root cause for "1.68 required but only 1.00 consumed"** — `/work-orders/{id}/start` and the pre-start reservation check both did `int(component.get("quantity", 1) * wo_qty)`. For a BOM line "0.07 kgs per piece × 24 pieces = 1.68 kgs", `int(1.68)` silently truncated to 1, so only 1 kg was issued from stock and the consumed_materials record stored 1. Mat. Req. dialog then correctly showed `Required 1.68 / Consumed 1.00 / Outstanding 0.68` — but the user expected the FULL 1.68 to be consumed.
+  2. **Fix #1 (server.py line ~7807, 7758)** — Switched both casts from `int(...)` to `float(...)` so fractional BOM quantities are consumed exactly. Per-stock guard now also uses `float(current_stock)`.
+  3. **Root cause for MRP not subtracting consumed qty for reserved MOs** — Round 32 only handled un-reserved MOs (Step 2). Reserved MOs (Step 1) still added the FULL `allocated_qty` to `total_allocated`, ignoring `consumed_materials`. So MRP kept thinking the material was still committed even after issue.
+  4. **Fix #2 (MRP `/demand` Step 1)** — Builds per-MO `consumed_for_mo` map; subtracts it from each `rm.allocated_qty` before aggregating into `total_allocated`. Now `available_for_new = on_hand − allocated − safety_stock` correctly excludes already-issued material.
+  5. **Verified**: Backend healthy (200), Material Requirement endpoint still emits `consumed_qty`/`outstanding_qty`, MRP /demand returns 13 items with correct net figures.
+
+
 - **2026-02-22 (Round 32 — Material Requirement & MRP now respect already-consumed qtys — FIXED ✅):**
   1. **Root cause** — `/work-orders/{id}/material-requirements` (and the parent MRP `/api/mrp/demand`) computed the requirement purely from the BOM × WO quantity, ignoring `wo.consumed_materials`. So even after operation 1 consumed the parts, the Material Requirement dialog still showed the full BOM qty and MRP kept re-ordering material that had already been issued.
   2. **Fix #1 — Material Requirement endpoint** — Reads `wo.consumed_materials`, builds a `consumed_by_item` map, and per row emits new fields `consumed_qty` and `outstanding_qty` (= max(0, required − consumed)). Shortage is now computed against `outstanding_qty`, not full required.

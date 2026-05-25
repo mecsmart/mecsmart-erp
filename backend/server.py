@@ -2922,7 +2922,7 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
     # ---- Step 1: aggregate reserved-MO shortfalls (same as before) ----
     reserved_mos = await db.work_orders.find(
         {"materials_reserved": True, "status": {"$in": ["pending", "in_progress"]}},
-        {"_id": 0, "reserved_materials": 1, "production_order_id": 1, "quantity": 1}
+        {"_id": 0, "reserved_materials": 1, "consumed_materials": 1, "production_order_id": 1, "quantity": 1}
     ).to_list(5000)
     
     total_allocated = {}
@@ -2930,10 +2930,20 @@ async def calculate_demand(request: Request, production_order_id: Optional[str] 
     for mo in reserved_mos:
         if so_filter_ids and mo.get("production_order_id") not in so_filter_ids:
             continue
+        # Already-consumed quantities are no longer allocated demand —
+        # they've already left stores. Subtract them from this MO's
+        # reservation contribution so MRP doesn't double-count or
+        # re-suggest POs for material that's already been issued.
+        consumed_for_mo = {}
+        for cm in (mo.get("consumed_materials") or []):
+            cid_c = cm.get("item_id")
+            if cid_c:
+                consumed_for_mo[cid_c] = consumed_for_mo.get(cid_c, 0) + float(cm.get("quantity") or 0)
         for rm in mo.get("reserved_materials", []):
             rid = rm.get("item_id")
             if rid:
-                total_allocated[rid] = total_allocated.get(rid, 0) + rm.get("allocated_qty", 0)
+                alloc = max(0.0, float(rm.get("allocated_qty", 0) or 0) - float(consumed_for_mo.get(rid, 0)))
+                total_allocated[rid] = total_allocated.get(rid, 0) + alloc
                 total_shortfall[rid] = total_shortfall.get(rid, 0) + rm.get("shortfall_qty", 0)
     
     # ---- Caches ----
@@ -7755,7 +7765,11 @@ async def start_work_order(wo_id: str, request: Request, preview: bool = False):
                 comp_item = await db.items.find_one({"id": comp_item_id}, {"_id": 0})
                 if not comp_item or comp_item.get("category") not in ["raw_material", "component", "sub_assembly"]:
                     continue
-                required_qty = int(component.get("quantity", 1) * wo_qty_check)
+                # Use float so fractional BOM quantities (e.g. 1.68 kgs of
+                # HR sheet for a 24-piece batch) survive the reserved-stock
+                # check. The `int(...)` cast would round 1.68 → 1, silently
+                # consuming less than the BOM specifies.
+                required_qty = float(component.get("quantity", 1) * wo_qty_check)
                 current_stock = comp_item.get("current_stock", 0)
                 reserved_info = reserved_by_others.get(comp_item_id)
                 if reserved_info:
@@ -7804,8 +7818,12 @@ async def start_work_order(wo_id: str, request: Request, preview: bool = False):
             
             # Consume ALL BOM components (RM, components, sub-assemblies) from stock
             if comp_item.get("category") in ["raw_material", "component", "sub_assembly"]:
-                required_qty = int(component.get("quantity", 1) * wo_qty)
-                current_stock = comp_item.get("current_stock", 0)
+                # Use float so fractional BOM quantities (e.g. 1.68 kgs of HR
+                # sheet) are consumed exactly. Previously this was `int(...)`
+                # which silently truncated 1.68 → 1, leaving 0.68 outstanding
+                # forever and skewing MRP.
+                required_qty = float(component.get("quantity", 1) * wo_qty)
+                current_stock = float(comp_item.get("current_stock") or 0)
                 
                 if current_stock < required_qty:
                     insufficient_materials.append({
