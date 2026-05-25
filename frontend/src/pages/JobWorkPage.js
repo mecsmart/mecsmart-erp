@@ -290,7 +290,10 @@ export default function JobWorkPage() {
         charges_per_unit: l.charges_per_unit || 0,
         rm_cost_per_unit: l.rm_cost_per_unit || 0,
         item: l.item,
-        item_description: l.item_description || '',
+        // Fallback chain: server-provided override → item master description
+        // → empty. So a part with a master-level "SFT: 0.37" description
+        // shows up in the DC dialog without any retyping.
+        item_description: l.item_description || (l.item?.description) || '',
         process_name: l.process_name || '',
         type: 'part',
       })));
@@ -582,8 +585,16 @@ export default function JobWorkPage() {
       .info-box .sub-text { font-weight:normal; font-size:10px; color:#555; }
       .section-title { font-size:13px; font-weight:700; color:#1D3557; margin:15px 0 8px; border-bottom:1px solid #1D3557; padding-bottom:4px; }
       table { width:100%; border-collapse:collapse; margin-bottom:10px; }
-      th { background:#333; color:white; padding:6px 8px; text-align:left; font-size:10px; text-transform:uppercase; }
-      td { padding:6px 8px; border-bottom:1px solid #ddd; font-size:11px; }
+      /* The items table uses table-layout:fixed + explicit colgroup widths so
+         long header text like "Charges/Unit" stays on a single line instead
+         of breaking mid-word ("CHARGES/U NIT"). Padding is also trimmed to
+         fit 9 columns on portrait A4 with 8mm margins. */
+      table.dc-items { table-layout:fixed; }
+      table.dc-items th, table.dc-items td { padding:5px 4px; word-break:break-word; }
+      th { background:#1D3557; color:white; padding:6px 8px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px; font-weight:600; }
+      td { padding:6px 8px; border-bottom:1px solid #E2E8F0; font-size:11px; color:#0f172a; vertical-align:top; }
+      td .sub-text { color:#475569; }
+      .text-center { text-align:center; }
       .mono { font-family:'Courier New',monospace; }
       .text-right { text-align:right; }
       .total-row { font-weight:700; background:#f0f0f0; }
@@ -619,39 +630,63 @@ export default function JobWorkPage() {
     
     ${isJobOS ? `
     <div class="section-title">Job Work Part Details</div>
-    <table>
-      <thead><tr><th>Sl. No.</th><th>Part No. &amp; Name</th><th>HSN</th><th class="text-right">Qty</th><th>UOM</th><th class="text-right">Charges/Unit</th><th class="text-right">Total Charges</th><th class="text-right">RM Cost/Unit</th><th class="text-right">Total Amount</th></tr></thead>
+    <table class="dc-items">
+      <colgroup>
+        <col style="width:5%">
+        <col style="width:34%">
+        <col style="width:9%">
+        <col style="width:6%">
+        <col style="width:6%">
+        <col style="width:9%">
+        <col style="width:10%">
+        <col style="width:10%">
+        <col style="width:11%">
+      </colgroup>
+      <thead><tr>
+        <th style="white-space:nowrap">Sl.</th>
+        <th>Part No., Name &amp; Description</th>
+        <th style="white-space:nowrap">HSN</th>
+        <th class="text-right" style="white-space:nowrap">Qty</th>
+        <th style="white-space:nowrap">UOM</th>
+        <th class="text-right" style="white-space:nowrap">Charges/Unit</th>
+        <th class="text-right" style="white-space:nowrap">Total Charges</th>
+        <th class="text-right" style="white-space:nowrap">RM Cost/Unit</th>
+        <th class="text-right" style="white-space:nowrap">Total Amount</th>
+      </tr></thead>
       <tbody>
       ${(() => {
         // Build Part lookup from SC.job_work_parts so older DC lines (created before
         // processing_charges was persisted on DC lines) can still show Charges/Unit.
         const jwByItem = {};
         (dc.order?.job_work_parts || []).forEach(p => { jwByItem[p.item_id] = p; });
-        // Prefer DC line-level values; fall back to SC job_work_parts by item_id.
+        // Prefer DC line-level values; fall back to SC job_work_parts by item_id;
+        // and finally fall back to the item master's `description` so items that
+        // have a master-level spec (e.g. "SFT: 0.37") always print without
+        // needing the user to retype it on every DC line.
         const rows = (dc.lines && dc.lines.length) ? dc.lines.map(l => {
           const it = l.item || items.find(i => i.id === l.item_id) || {};
           const qty = l.quantity || 0;
           const fallback = jwByItem[l.item_id] || {};
           const charges = l.processing_charges || fallback.charges || 0;
           const rmCost = l.rate || fallback.bom_rollup_cost || 0;
-          const description = l.item_description || fallback.item_description || '';
+          const description = l.item_description || fallback.item_description || it.description || '';
           const processName = l.process_name || fallback.process_name || '';
           return { it, qty, charges, rmCost, description, processName };
         }) : jwParts.map(p => {
           const pit = p.item || items.find(it => it.id === p.item_id) || {};
-          return { it: pit, qty: p.quantity || 0, charges: p.charges || 0, rmCost: p.bom_rollup_cost || pit.unit_cost || 0, description: p.item_description || '', processName: p.process_name || '' };
+          return { it: pit, qty: p.quantity || 0, charges: p.charges || 0, rmCost: p.bom_rollup_cost || pit.unit_cost || 0, description: p.item_description || pit.description || '', processName: p.process_name || '' };
         });
         const body = rows.map((r, i) => {
           const totalCharges = r.qty * r.charges;
           const totalAmount = r.qty * r.rmCost;
-          const partCell = `${r.it.part_number || '-'}, ${r.it.name || '-'}` +
-            (r.processName ? `<br/><span class="sub-text" style="font-size:9px;color:#723B13;">Op: ${r.processName}</span>` : '') +
-            (r.description ? `<br/><span class="sub-text" style="font-size:9px;">${r.description}</span>` : '');
-          return `<tr><td>${i+1}</td><td>${partCell}</td><td>${r.it.hsn_code || '-'}</td><td class="text-right mono">${r.qty}</td><td>${r.it.unit_of_measure || 'Nos'}</td><td class="text-right mono">${currencySymbol}${fmtAmt(r.charges)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalCharges)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(r.rmCost)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalAmount)}</td></tr>`;
+          const partCell = `<div style="font-weight:600">${r.it.part_number || '-'}, ${r.it.name || '-'}</div>` +
+            (r.processName ? `<div class="sub-text" style="font-size:9px;color:#723B13;">Op: ${r.processName}</div>` : '') +
+            (r.description ? `<div class="sub-text" style="font-size:9px;color:#475569;">${r.description}</div>` : '');
+          return `<tr><td class="text-center mono">${i+1}</td><td>${partCell}</td><td class="mono" style="white-space:nowrap">${r.it.hsn_code || '-'}</td><td class="text-right mono">${r.qty}</td><td class="text-center">${r.it.unit_of_measure || 'Nos'}</td><td class="text-right mono" style="white-space:nowrap">${currencySymbol}${fmtAmt(r.charges)}</td><td class="text-right mono" style="white-space:nowrap">${currencySymbol}${fmtAmt(totalCharges)}</td><td class="text-right mono" style="white-space:nowrap">${currencySymbol}${fmtAmt(r.rmCost)}</td><td class="text-right mono" style="white-space:nowrap">${currencySymbol}${fmtAmt(totalAmount)}</td></tr>`;
         }).join('');
         const grandCharges = rows.reduce((s, r) => s + r.qty * r.charges, 0);
         const grandAmount = rows.reduce((s, r) => s + r.qty * r.rmCost, 0);
-        const totalRow = `<tr class="total-row"><td colspan="6" class="text-right">Total Process Charges</td><td class="text-right mono">${currencySymbol}${fmtAmt(grandCharges)}</td><td class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${fmtAmt(grandAmount)}</td></tr>`;
+        const totalRow = `<tr class="total-row"><td colspan="6" class="text-right" style="font-weight:700">Total Process Charges</td><td class="text-right mono" style="white-space:nowrap;font-weight:700">${currencySymbol}${fmtAmt(grandCharges)}</td><td class="text-right" style="font-weight:700">Total RM Cost</td><td class="text-right mono" style="white-space:nowrap;font-weight:700">${currencySymbol}${fmtAmt(grandAmount)}</td></tr>`;
         return body + totalRow;
       })()}
       </tbody>
@@ -674,25 +709,38 @@ export default function JobWorkPage() {
     ` : ''}
     
     <div class="section-title">Raw Material Issued</div>
-    <table>
-      <thead><tr><th>Sl. No.</th><th>Part No., Name &amp; Description</th><th>HSN</th><th class="text-right">QTY</th><th>UOM</th><th class="text-right">Rate/Unit</th><th class="text-right">Total RM Cost</th></tr></thead>
+    <table class="dc-items">
+      <colgroup>
+        <col style="width:5%">
+        <col style="width:42%">
+        <col style="width:10%">
+        <col style="width:8%">
+        <col style="width:6%">
+        <col style="width:13%">
+        <col style="width:16%">
+      </colgroup>
+      <thead><tr>
+        <th style="white-space:nowrap">Sl.</th>
+        <th>Part No., Name &amp; Description</th>
+        <th style="white-space:nowrap">HSN</th>
+        <th class="text-right" style="white-space:nowrap">Qty</th>
+        <th style="white-space:nowrap">UOM</th>
+        <th class="text-right" style="white-space:nowrap">Rate/Unit</th>
+        <th class="text-right" style="white-space:nowrap">Total RM Cost</th>
+      </tr></thead>
       <tbody>
       ${dc.lines.map((l, i) => {
         const it = l.item || items.find(x => x.id === l.item_id) || {};
-        // Prefer the line-level unit_price persisted on manual DCs; fall back
-        // to the item master unit cost for SC-linked DCs that never had a
-        // per-line price captured.
         const rate = l.unit_price || it.unit_cost || l.rate || 0;
         const uom = l.unit || it.unit_of_measure || 'pcs';
         const cost = l.quantity * rate;
-        // Description goes UNDER the Part No., Name line so the table stays
-        // narrow (mirrors the JW-OS table style above).
+        // Fallback chain: line override → item master description.
         const desc = l.item_description || it.description || '';
-        const partCell = `${it.part_number || '-'}, ${it.name || '-'}` +
-          (desc ? `<br/><span class="sub-text" style="font-size:9px;color:#475569;">${desc}</span>` : '');
-        return `<tr><td>${i+1}</td><td>${partCell}</td><td>${it.hsn_code || '-'}</td><td class="text-right mono">${l.quantity}</td><td>${uom}</td><td class="text-right mono">${currencySymbol}${fmtAmt(rate)}</td><td class="text-right mono">${currencySymbol}${fmtAmt(cost)}</td></tr>`;
+        const partCell = `<div style="font-weight:600">${it.part_number || '-'}, ${it.name || '-'}</div>` +
+          (desc ? `<div class="sub-text" style="font-size:9px;color:#475569;">${desc}</div>` : '');
+        return `<tr><td class="text-center mono">${i+1}</td><td>${partCell}</td><td class="mono" style="white-space:nowrap">${it.hsn_code || '-'}</td><td class="text-right mono">${l.quantity}</td><td class="text-center">${uom}</td><td class="text-right mono" style="white-space:nowrap">${currencySymbol}${fmtAmt(rate)}</td><td class="text-right mono" style="white-space:nowrap">${currencySymbol}${fmtAmt(cost)}</td></tr>`;
       }).join('')}
-      <tr class="total-row"><td colspan="6" class="text-right">Total RM Cost</td><td class="text-right mono">${currencySymbol}${fmtAmt(totalRMCost)}</td></tr>
+      <tr class="total-row"><td colspan="6" class="text-right" style="font-weight:700">Total RM Cost</td><td class="text-right mono" style="white-space:nowrap;font-weight:700">${currencySymbol}${fmtAmt(totalRMCost)}</td></tr>
       </tbody>
     </table>`}
     
@@ -1320,7 +1368,7 @@ export default function JobWorkPage() {
                                     <div className="mt-1 border border-[#E5E7EB] rounded-sm max-h-32 overflow-auto bg-white">
                                       {filtered.length === 0 && <div className="px-2 py-2 text-[10px] text-center text-[#6B7280]">No matching items</div>}
                                       {filtered.slice(0, 50).map(it => (
-                                        <button key={it.id} type="button" onClick={() => updateManualDcLine(idx, { item_id: it.id, item_search: '', unit_price: it.unit_cost || 0 })} data-testid={`manual-dc-option-${idx}-${it.id}`} className="w-full text-left px-2 py-1 text-[11px] border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]">
+                                        <button key={it.id} type="button" onClick={() => updateManualDcLine(idx, { item_id: it.id, item_search: '', unit_price: it.unit_cost || 0, item_description: it.description || '' })} data-testid={`manual-dc-option-${idx}-${it.id}`} className="w-full text-left px-2 py-1 text-[11px] border-b border-[#F3F4F6] last:border-0 hover:bg-[#F9FAFB]">
                                           <span className="mono font-semibold">{it.part_number}</span>
                                           <span className="mx-1">—</span>
                                           <span>{it.name}</span>

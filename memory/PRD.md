@@ -19,6 +19,15 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 37 — DC: item-master description auto-fallback + table layout fix — DONE ✅):**
+  1. **Item master `description` auto-fallback** — All three DC paths now fall back to the Item Master's `description` field when no per-line override is typed:
+     • JW-OS DC dialog: when lines load from `/api/job-work/.../dc-lines`, `item_description` is back-filled from `l.item?.description` so items like CGF0F0000082 ("SFT: 0.37") show up immediately.
+     • Manual DC: clicking an item suggestion now also seeds `item_description` from the item master into the line.
+     • Print template (both JW-OS and RM Issued sections): chain is `line.item_description → fallback → it.description`.
+  2. **Table layout — no more "QT Y" / "CHARGES/U NIT" wrapping** — Items table got `table-layout: fixed`, an explicit `<colgroup>` with percent widths (FG col gets ~34%, money cols ~10–11%), and `white-space: nowrap` on every header + every money/HSN cell. Header background switched from grey `#333` to brand navy `#1D3557` to match the rest of the print system.
+  3. **Polished totals row** — Total Process Charges / Total RM Cost now bolded and wrapped in nowrap so they sit cleanly on one line each. Smaller header font (9.5px) + tighter padding (5px×4px) gives 9 columns room to breathe on A4 portrait.
+
+
 - **2026-02-22 (Round 36 — DC Item Description across Create, Edit, Preview & Print — DONE ✅):**
   1. **JW-OS Create/Edit form** — already had a dedicated `item_description` input under each part row; verified persistence (already wired).
   2. **JW-OS Print/PDF** — "Job Work Part Details" table already prints `r.description` under the part name; verified.
