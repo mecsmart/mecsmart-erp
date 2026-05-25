@@ -562,22 +562,24 @@ export default function JobWorkPage() {
       return s + (l.quantity * rate);
     }, 0);
     
-    // Rename title based on SC type:
-    //  • "with_material" (SC with RM) → "Job Order Cum Delivery Challan"
-    //  • "without_material" (Job OS — only processing) → "Job Work Order Cum Delivery Challan"
-    //  • Fallback for pure material transfer DCs → "Delivery Challan"
+    // Rename title based on SC type. We track BOTH a full long form (for
+    // the prominent two-line header at top-right of the print) and a
+    // short single-line form (for the narrow info-bar column where
+    // wrapping is not allowed).
     const scType = dc.order?.subcontract_type;
     const hasJobParts = (dc.order?.job_work_parts || []).length > 0;
     const isJobOS = scType === 'without_material' && hasJobParts;
-    let dcTitle = 'Delivery Challan';
+    let dcTitleFull = 'Delivery Challan';
+    let dcTitleShort = 'Delivery Challan';
     if (scType === 'with_material') {
-      dcTitle = 'Job Order Cum DC';
+      dcTitleFull = 'Job Order Cum Delivery Challan';
+      dcTitleShort = 'Job Order Cum DC';
     } else if (scType === 'without_material' && hasJobParts) {
-      // Short form per user — "Job Work Order Cum DC" instead of the full
-      // "Job Work Order Cum Delivery Challan" so it fits on one line in
-      // the info-bar's narrow column.
-      dcTitle = 'Job Work Order Cum DC';
+      dcTitleFull = 'Job Work Order Cum Delivery Challan';
+      dcTitleShort = 'Job Order Cum DC';
     }
+    // Back-compat alias used by some downstream strings (PDF filename etc.)
+    const dcTitle = dcTitleShort;
     
     const accent = '#1D3557';
     // Created-by — show ONLY the persisted creator (resolved server-side
@@ -600,7 +602,7 @@ export default function JobWorkPage() {
         ${cs.gstin ? `<div class="rb-gst">GSTIN: ${esc(cs.gstin)}</div>` : ''}
       </div>
       <div class="rb-right">
-        <div class="rb-title">${esc(dcTitle)}</div>
+        <div class="rb-title">${esc(dcTitleShort)}</div>
         <div class="rb-docno">${esc(dc.dc_number)}</div>
       </div>
     </div>`;
@@ -623,8 +625,11 @@ export default function JobWorkPage() {
       .cn{font-size:17px;font-weight:800;color:#0f172a;margin:0 0 2px}
       .tg{font-size:10px;color:${accent};font-style:italic;margin-bottom:4px;letter-spacing:0.3px}
       .addr{font-size:10px;color:#475569;line-height:1.5}
-      /* Document title — EXACT Quotation parity: 16px uppercase, accent. */
-      .title{font-size:16px;font-weight:800;color:${accent};letter-spacing:0.5px;text-align:right;margin:0;text-transform:uppercase}
+      /* Document title — full long form, wraps to TWO lines on the right
+         of the header. Reduced to 13px so "Job Work Order Cum Delivery
+         Challan" fits on two compact lines without crowding the brand
+         block. max-width prevents it from stealing horizontal space. */
+      .title{font-size:13px;font-weight:800;color:${accent};letter-spacing:0.5px;text-align:right;margin:0;text-transform:uppercase;line-height:1.25;max-width:170px;margin-left:auto;white-space:normal;word-spacing:2px}
       .docno{font-size:14px;font-weight:700;color:#0f172a;text-align:right;margin-top:2px}
       .meta{font-size:10px;color:#475569;text-align:right;margin-top:2px}
       /* Info bar — Quotation parity: padding 10x14, label 9px, value 13px. */
@@ -693,7 +698,7 @@ export default function JobWorkPage() {
         </div>
       </div>
       <div>
-        <div class="title">${esc(dcTitle.toUpperCase())}</div>
+        <div class="title">${esc(dcTitleFull)}</div>
         <div class="docno">${esc(dc.dc_number)}</div>
         ${dc.order?.order_number ? `<div class="meta">JW Order: <strong>${esc(dc.order.order_number)}</strong></div>` : ''}
         ${(dc.status || '').toLowerCase() === 'draft' ? `<div style="display:inline-block;margin-top:4px;padding:2px 10px;background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;border-radius:3px;font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Draft</div>` : ''}
@@ -702,7 +707,7 @@ export default function JobWorkPage() {
 
     <!-- Info bar: DC No · Date · Expected Receive · Created By -->
     <div class="info-bar">
-      <div class="col"><div class="lab">${esc(dcTitle)} No</div><div class="val">${esc(dc.dc_number)}</div></div>
+      <div class="col"><div class="lab">${esc(dcTitleShort)} No</div><div class="val">${esc(dc.dc_number)}</div></div>
       <div class="col"><div class="lab">Date</div><div class="val">${docDate ? new Date(docDate).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-'}</div></div>
       <div class="col"><div class="lab">Expected Receive</div><div class="val">${expectedReturn ? new Date(expectedReturn).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-'}</div></div>
       <div class="col"><div class="lab">Created By</div><div class="val">${esc(createdBy)}</div></div>
@@ -844,8 +849,7 @@ export default function JobWorkPage() {
         return `<tr><td class="text-center mono">${i+1}</td><td>${partCell}</td><td class="mono" style="white-space:nowrap">${it.hsn_code || '-'}</td><td class="text-right mono">${l.quantity}</td><td class="text-center">${uom}</td><td class="text-right mono" style="white-space:nowrap">${currencySymbol}${fmtAmt(rate)}</td><td class="text-right mono" style="white-space:nowrap">${currencySymbol}${fmtAmt(cost)}</td></tr>`;
       }).join('')}
       <tr class="total-row">
-        <td colspan="5" class="text-right" style="font-weight:700">Total RM Cost</td>
-        <td class="text-center mono" style="font-weight:700;white-space:nowrap">&mdash;</td>
+        <td colspan="6" class="text-right" style="font-weight:700">Total RM Cost</td>
         <td class="text-right mono" style="font-weight:700;white-space:nowrap">${currencySymbol}${fmtAmt(totalRMCost)}</td>
       </tr>
       </tbody>
