@@ -570,13 +570,30 @@ export default function JobWorkPage() {
     }
     
     const accent = '#1D3557';
-    // Created-by — prefer the user name attached to the DC; fall back to the
-    // currently logged-in user. Used for the "Created By" column in the
-    // navy info-bar (mirrors Quotation's Salesperson column).
-    const createdBy = dc.created_by_name || dc.creator_name || user?.name || user?.email || 'Stores Team';
+    // Created-by — show ONLY the persisted creator (resolved server-side
+    // into `dc.created_by_name`). Never fall back to the user currently
+    // taking the print, since that would mislabel who actually issued
+    // this DC.
+    const createdBy = dc.created_by_name || dc.creator_name || '-';
     const docDate = dc.dc_date || dc.created_at;
     const expectedReturn = dc.order?.expected_return_date;
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    // Compact running-band — appears on page 2+ (page 1 masks it via
+    // .page-one-cover {margin-top:-17mm}). Same trick as the Quotation /
+    // Tax Invoice / PO prints.
+    const rbHTML = `<div class="running-band">
+      ${cs.logo_data ? `<img src="${esc(cs.logo_data)}" class="rb-logo" alt="logo"/>` : ''}
+      <div class="rb-center">
+        <div class="rb-name">${esc(cs.name || 'Company')}</div>
+        ${companyAddr ? `<div class="rb-meta">${esc(companyAddr)}</div>` : ''}
+        ${cs.gstin ? `<div class="rb-gst">GSTIN: ${esc(cs.gstin)}</div>` : ''}
+      </div>
+      <div class="rb-right">
+        <div class="rb-title">${esc(dcTitle)}</div>
+        <div class="rb-docno">${esc(dc.dc_number)}</div>
+      </div>
+    </div>`;
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${dcTitle} - ${dc.dc_number}</title>
     <style>
@@ -596,7 +613,7 @@ export default function JobWorkPage() {
       .brand-block .tagline{font-size:10px;color:${accent};font-style:italic;margin-bottom:4px;letter-spacing:0.3px}
       .brand-block .company-addr{font-size:10px;color:#475569;line-height:1.5}
       .doc-right{text-align:right}
-      .doc-right .title{font-size:16px;font-weight:800;color:${accent};letter-spacing:0.5px;margin:0;text-transform:uppercase}
+      .doc-right .title{font-size:13px;font-weight:800;color:${accent};letter-spacing:0.5px;margin:0;text-transform:uppercase;line-height:1.2}
       .doc-right .docno{font-size:14px;font-weight:700;color:#0f172a;margin-top:2px}
       .doc-right .quoref{font-size:10px;color:#475569;margin-top:2px}
       /* Info bar — same 4-col navy band as Quotation. */
@@ -618,16 +635,34 @@ export default function JobWorkPage() {
          "Charges/Unit" wrap nicely across two lines if they need to). */
       h4.section{font-size:10px;color:${accent};text-transform:uppercase;letter-spacing:1px;margin:18px 0 6px;font-weight:700}
       table.dc-items{width:100%;border-collapse:collapse;margin-top:6px;table-layout:fixed}
-      table.dc-items thead th{background:${accent};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:0.3px;padding:8px 5px;font-weight:600;border:none;text-align:left;word-break:break-word;line-height:1.25;vertical-align:middle}
-      table.dc-items thead th.text-right{text-align:right}
-      table.dc-items thead th.text-center{text-align:center}
+      /* Items table header — center-aligned per user request so multi-line
+         headers ("Total\nCharges") read symmetrically. Money/HSN body cells
+         keep nowrap so currency/HSN strings don't get truncated. */
+      table.dc-items thead th{background:${accent};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:0.3px;padding:8px 5px;font-weight:600;border:none;text-align:center;word-break:break-word;line-height:1.25;vertical-align:middle}
       table.dc-items tbody td{border-bottom:1px solid #e2e8f0;padding:7px 5px;font-size:11px;color:#0f172a;vertical-align:top;word-break:break-word;overflow-wrap:anywhere}
       table.dc-items tbody tr:last-child td{border-bottom:2px solid ${accent}}
-      table.dc-items tbody tr.total-row td{background:#f1f5f9;font-weight:700;color:#0f172a}
+      table.dc-items tbody tr.total-row td{background:#f1f5f9;font-weight:700;color:#0f172a;border-bottom:2px solid ${accent}}
       td .sub-text{color:#475569}
       .mono{font-family:'Courier New',monospace}
       .text-right{text-align:right}
       .text-center{text-align:center}
+      /* Page-2+ running header — same trick as Quotation: full-size cover
+         on page 1 with margin-top:-17mm masks the band, pages 2+ show the
+         compact band naturally. */
+      .print-doc{width:100%;border-collapse:collapse}
+      .print-doc > thead{display:table-header-group}
+      .print-doc > tbody > tr > td{padding:0;vertical-align:top}
+      .print-doc > thead > tr > td{padding:0 0 3mm 0;vertical-align:top}
+      .running-band{display:flex;align-items:center;gap:10px;padding:3px 10px;height:14mm;box-sizing:border-box;border-bottom:1px solid ${accent};background:#fff;font-family:'Helvetica Neue',Arial,sans-serif}
+      .running-band .rb-logo{height:28px;width:auto;max-width:72px;object-fit:contain;flex-shrink:0}
+      .running-band .rb-center{flex:1;line-height:1.2}
+      .running-band .rb-name{font-size:11px;font-weight:800;color:#0f172a}
+      .running-band .rb-meta{font-size:8.5px;color:#475569;margin-top:1px}
+      .running-band .rb-gst{font-size:8.5px;color:${accent};font-weight:700;margin-top:1px}
+      .running-band .rb-right{text-align:right;flex-shrink:0}
+      .running-band .rb-title{font-size:10px;font-weight:800;color:${accent};letter-spacing:0.3px;text-transform:uppercase}
+      .running-band .rb-docno{font-size:9.5px;color:#0f172a;font-weight:700;margin-top:1px}
+      .page-one-cover{margin-top:-17mm;background:#fff;position:relative;z-index:5}
       /* Terms */
       .terms{margin-top:18px;padding:12px 14px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:10px;color:#475569;line-height:1.6;white-space:pre-line}
       .terms h4{font-size:10px;color:${accent};text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;font-weight:700}
@@ -640,6 +675,10 @@ export default function JobWorkPage() {
         .page{padding-top:10px}
       }
     </style></head><body>
+    <table class="print-doc">
+      <thead><tr><td>${rbHTML}</td></tr></thead>
+      <tbody><tr><td>
+    <div class="page-one-cover">
     <div class="page">
     <!-- Header: logo + company on left, doc title on right -->
     <div class="header">
@@ -648,7 +687,7 @@ export default function JobWorkPage() {
           ${cs.logo_data ? `<img src="${esc(cs.logo_data)}" class="logo-img"/>` : `<div class="logo-fallback">${esc((cs.name || 'C').charAt(0).toUpperCase())}</div>`}
         </div>
         <div class="brand-block">
-          <div class="company-name">${esc(cs.name || 'Company')}</div>
+          <div class="company-name">${esc(cs.name || cs.company_name || 'Company')}</div>
           ${cs.tagline ? `<div class="tagline">${esc(cs.tagline)}</div>` : ''}
           ${cs.address ? `<div class="company-addr">${esc(cs.address)}</div>` : ''}
           ${cs.address_line2 ? `<div class="company-addr">${esc(cs.address_line2)}</div>` : ''}
@@ -673,7 +712,7 @@ export default function JobWorkPage() {
       <div class="col"><div class="label">Created By</div><div class="value">${esc(createdBy)}</div></div>
     </div>
 
-    <!-- Subcontractor + Reference cards -->
+    <!-- Subcontractor + Reference cards (compact: only JW Order, Type, Status) -->
     <div class="address-row">
       <div class="addr-box">
         <h3>Subcontractor / Vendor</h3>
@@ -687,8 +726,6 @@ export default function JobWorkPage() {
         <div class="name">JW Order ${esc(dc.order?.order_number || '-')}</div>
         ${dc.order?.subcontract_type ? `<div class="line">Type: ${esc(dc.order.subcontract_type.replace('_',' ').toUpperCase())}</div>` : ''}
         <div class="line">DC Status: <strong>${esc((dc.status || '').toUpperCase())}</strong></div>
-        ${partTitle ? `<div class="line">Parts: ${esc(partTitle)}</div>` : ''}
-        ${parentItemName ? `<div class="line">Parent: ${esc(parentItemName)}${parentItemQty ? ` (Qty: ${parentItemQty})` : ''}</div>` : ''}
       </div>
     </div>
     
@@ -750,7 +787,13 @@ export default function JobWorkPage() {
         }).join('');
         const grandCharges = rows.reduce((s, r) => s + r.qty * r.charges, 0);
         const grandAmount = rows.reduce((s, r) => s + r.qty * r.rmCost, 0);
-        const totalRow = `<tr class="total-row"><td colspan="6" class="text-right" style="font-weight:700">Total Process Charges</td><td class="text-right mono" style="white-space:nowrap;font-weight:700">${currencySymbol}${fmtAmt(grandCharges)}</td><td class="text-right" style="font-weight:700">Total RM Cost</td><td class="text-right mono" style="white-space:nowrap;font-weight:700">${currencySymbol}${fmtAmt(grandAmount)}</td></tr>`;
+        const totalRow = `<tr class="total-row">
+          <td colspan="5" class="text-right" style="font-weight:700">Totals</td>
+          <td class="text-center mono" style="font-weight:700;white-space:nowrap">&mdash;</td>
+          <td class="text-right mono" style="font-weight:700;white-space:nowrap">${currencySymbol}${fmtAmt(grandCharges)}</td>
+          <td class="text-center mono" style="font-weight:700;white-space:nowrap">&mdash;</td>
+          <td class="text-right mono" style="font-weight:700;white-space:nowrap">${currencySymbol}${fmtAmt(grandAmount)}</td>
+        </tr>`;
         return body + totalRow;
       })()}
       </tbody>
@@ -804,7 +847,11 @@ export default function JobWorkPage() {
           (desc ? `<div class="sub-text" style="font-size:9px;color:#475569;">${desc}</div>` : '');
         return `<tr><td class="text-center mono">${i+1}</td><td>${partCell}</td><td class="mono" style="white-space:nowrap">${it.hsn_code || '-'}</td><td class="text-right mono">${l.quantity}</td><td class="text-center">${uom}</td><td class="text-right mono" style="white-space:nowrap">${currencySymbol}${fmtAmt(rate)}</td><td class="text-right mono" style="white-space:nowrap">${currencySymbol}${fmtAmt(cost)}</td></tr>`;
       }).join('')}
-      <tr class="total-row"><td colspan="6" class="text-right" style="font-weight:700">Total RM Cost</td><td class="text-right mono" style="white-space:nowrap;font-weight:700">${currencySymbol}${fmtAmt(totalRMCost)}</td></tr>
+      <tr class="total-row">
+        <td colspan="5" class="text-right" style="font-weight:700">Total RM Cost</td>
+        <td class="text-center mono" style="font-weight:700;white-space:nowrap">&mdash;</td>
+        <td class="text-right mono" style="font-weight:700;white-space:nowrap">${currencySymbol}${fmtAmt(totalRMCost)}</td>
+      </tr>
       </tbody>
     </table>`}
     
@@ -822,6 +869,9 @@ export default function JobWorkPage() {
     </div>
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
     </div>
+    </div>
+    </td></tr></tbody>
+    </table>
     </body></html>`;
     downloadHtmlAsPdf(html, `${dcTitle.replace(/\s+/g, '-')}-${dc.dc_number || 'document'}.pdf`, { preview: true, draft: (dc.status || '').toLowerCase() === 'draft' });
   };

@@ -12739,6 +12739,14 @@ async def get_delivery_challans(request: Request):
     if item_ids:
         async for it in db.items.find({"id": {"$in": list(item_ids)}}, {"_id": 0}):
             items_map[it["id"]] = it
+    # Resolve creator name for each DC so the print template can show the
+    # ORIGINAL creator (not the user currently taking the print). Fetch
+    # once per user_id.
+    creator_ids = {dc.get("created_by") for dc in challans if dc.get("created_by")}
+    creators_map = {}
+    if creator_ids:
+        async for u in db.users.find({"id": {"$in": list(creator_ids)}}, {"_id": 0, "id": 1, "name": 1, "email": 1}):
+            creators_map[u["id"]] = u.get("name") or u.get("email") or ""
 
     for dc in challans:
         order = scs_map.get(dc.get("subcontract_order_id"))
@@ -12748,6 +12756,9 @@ async def get_delivery_challans(request: Request):
         dc_supplier_id = dc.get("supplier_id") or (order.get("supplier_id") if order else None)
         dc["supplier"] = suppliers_map.get(dc_supplier_id) if dc_supplier_id else None
         dc["is_manual"] = bool(dc.get("is_manual"))
+        # Surface the creator's display name so the print template doesn't
+        # have to fall back to the currently-logged-in user.
+        dc["created_by_name"] = creators_map.get(dc.get("created_by"), "")
         # For Job Card OS DCs that are still UNSENT (status=draft), override the
         # stored per-line processing_charges with the SPECIFIC outsourced
         # routing's cost computed from the parent SC's job_work_parts +

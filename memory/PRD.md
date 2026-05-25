@@ -19,6 +19,16 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 39 — DC PDF: 6 polish fixes — DONE ✅):**
+  1. **Company name** — Hardened the company name render with `cs.name || cs.company_name || 'Company'` fallback so the brand block never appears blank even if `companySettings` is partially hydrated.
+  2. **Document title font size reduced** — `.title` shrunk from 16px → 13px so the doc-right column doesn't visually dominate the header.
+  3. **Reference card simplified** — Removed `Parts: …` and `Parent: …` lines. Reference card now shows ONLY: `JW Order JW-000014` / `Type: WITHOUT MATERIAL` / `DC Status: SENT`.
+  4. **Item-table headers centred** — `table.dc-items thead th` switched from `text-align:left` → `text-align:center`. Long multi-line headers ("Total\nCharges", "RM Cost/\nUnit") now read symmetrically.
+  5. **Totals row stays inside the table** — Replaced the awkward colspan=6 + 1-col-label + 1-col-value layout with a clean single row: `colspan=5` "Totals" label + per-column mono values aligned UNDER each money column. Both JW-OS (Charges + RM Total) and RM-Issued (single RM Cost) sections use the same pattern; values can't overflow because every value cell is now `white-space:nowrap` and width-constrained by the colgroup.
+  6. **"Created By" = original creator, not the printer** — Backend `list_delivery_challans` now resolves `created_by` user_ids into a `creators_map` and attaches `dc.created_by_name` to each DC. Frontend `printDC()` shows ONLY `dc.created_by_name` (no fallback to currently-logged-in user). So whoever takes the print sees the actual issuer's name.
+  7. **Page-2+ running header** — Wrapped the body inside `<table class="print-doc"><thead>…running-band…</thead><tbody>…content…</tbody></table>` with `.page-one-cover {margin-top:-17mm}` masking the band on page 1. Multi-page DCs now show a compact `[logo · company · GSTIN | Doc Title · DC#]` band at the top of every subsequent page (same trick used by Quotation / Tax Invoice / PO prints).
+
+
 - **2026-02-22 (Round 38 — DC PDF re-skinned to match Quotation template — DONE ✅):**
   1. **Layout parity with Quotation** — DC's print template now uses the same 780px max-width body, 32px top padding, and Helvetica Neue 11px base font as the Quotation/Tax Invoice print.
   2. **Header block** — Logo + company name (with tagline, address, GSTIN) on left, doc title + DC number + JW Order ref + draft tag on right. Mirrors Quotation's `.header` + `.doc-right` blocks exactly.
