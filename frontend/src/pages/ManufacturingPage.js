@@ -3254,6 +3254,38 @@ export default function ManufacturingPage() {
               )}
               <div className="flex justify-end gap-2 pt-2">
                 <button onClick={() => setMatReqDialog({ open: false, loading: false, wo: null, materials: [], company: null })} className="btn-secondary text-sm" data-testid="material-req-close">Close</button>
+                {/* Reconcile — top-up any components whose consumed qty was
+                    truncated by the legacy int() consumption bug. Only shown
+                    when there's at least one row with outstanding > 0 AND
+                    some consumed (truly fresh MOs that haven't started yet
+                    don't need reconciliation). */}
+                {(matReqDialog.materials || []).some(m => (m.consumed_qty || 0) > 0 && (m.outstanding_qty || 0) > 0) && (
+                  <button
+                    onClick={async () => {
+                      if (!matReqDialog.wo?.id) return;
+                      if (!window.confirm('This will issue the missing fractional quantities from stock and update this MO\'s consumption record. Continue?')) return;
+                      try {
+                        const { data } = await api.post(`/api/work-orders/${matReqDialog.wo.id}/reconcile-consumption`);
+                        const healed = data.healed_count || 0;
+                        const skipped = (data.skipped_due_to_stock || []).length;
+                        if (healed > 0) toast.success(`Reconciled ${healed} component${healed === 1 ? '' : 's'}`);
+                        if (skipped > 0) toast.warning(`${skipped} component${skipped === 1 ? '' : 's'} couldn\'t be reconciled — insufficient stock`);
+                        if (healed === 0 && skipped === 0) toast.info('Nothing to reconcile');
+                        // Re-fetch materials so the dialog reflects healed totals.
+                        const fresh = await api.get(`/api/work-orders/${matReqDialog.wo.id}/material-requirements`);
+                        setMatReqDialog(prev => ({ ...prev, materials: fresh.data.materials || [] }));
+                        fetchWOs();
+                      } catch (e) {
+                        toast.error(e.response?.data?.detail || 'Failed to reconcile');
+                      }
+                    }}
+                    className="btn-secondary text-sm flex items-center gap-1"
+                    data-testid="material-req-reconcile"
+                    title="Heal decimal-truncation from the legacy int() bug — issues the missing fraction from stock"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Reconcile
+                  </button>
+                )}
                 <button
                   onClick={() => printMaterialReq(matReqDialog.wo, matReqDialog.materials, matReqDialog.company)}
                   className="btn-primary text-sm flex items-center gap-1"

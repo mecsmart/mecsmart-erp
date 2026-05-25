@@ -19,6 +19,17 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 34 — Reconcile Consumption admin action for historical MOs — DONE ✅):**
+  1. Round 33 fixed the float-truncation bug for FUTURE MO starts. For MOs ALREADY in flight (e.g. MO-000235: required 9.96, consumed 9, outstanding 0.96 stuck forever), this round adds a one-click healer.
+  2. **New endpoint** — `POST /api/work-orders/{wo_id}/reconcile-consumption` (admin or manufacturing-edit only). For each BOM component:
+     • Computes expected = bom.qty × wo.qty.
+     • If consumed < expected AND stock can cover the delta → issues the delta from stock, creates a `stock_movements` audit entry (transaction_type=issue, reference=work_order, notes mention reconciliation), and appends a `reconciliation: true` entry to `consumed_materials`.
+     • If stock can't cover the delta → returns the component in `skipped_due_to_stock` (no mutation).
+     • Fully consumed components are no-ops (idempotent).
+  3. **Frontend** — Material Requirement dialog now shows a **Reconcile** button (with confirm prompt) when any row has `consumed > 0` AND `outstanding > 0`. Click → calls endpoint → re-fetches the materials list → dialog reflects healed totals. Skipped components show as a warning toast.
+  4. **Verified** — backend restarts cleanly, endpoint returns 404 for unknown WO, real MO-000001 had its truncated-history detected correctly (BOM 4.0 vs consumed 1 for SA-002 Control Panel) without mutation.
+
+
 - **2026-02-22 (Round 33 — Decimal material consumption + MRP reserved-MO consumed netting — FIXED ✅):**
   1. **Root cause for "1.68 required but only 1.00 consumed"** — `/work-orders/{id}/start` and the pre-start reservation check both did `int(component.get("quantity", 1) * wo_qty)`. For a BOM line "0.07 kgs per piece × 24 pieces = 1.68 kgs", `int(1.68)` silently truncated to 1, so only 1 kg was issued from stock and the consumed_materials record stored 1. Mat. Req. dialog then correctly showed `Required 1.68 / Consumed 1.00 / Outstanding 0.68` — but the user expected the FULL 1.68 to be consumed.
   2. **Fix #1 (server.py line ~7807, 7758)** — Switched both casts from `int(...)` to `float(...)` so fractional BOM quantities are consumed exactly. Per-stock guard now also uses `float(current_stock)`.

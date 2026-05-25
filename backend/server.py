@@ -6679,6 +6679,133 @@ async def get_wo_material_requirements(wo_id: str, request: Request):
     }
 
 
+@work_orders_router.post("/{wo_id}/reconcile-consumption")
+async def reconcile_wo_consumption(wo_id: str, request: Request):
+    """Heal the decimal-truncation bug on already-started MOs.
+
+    Compares each BOM component's expected consumption (`bom.qty × wo.qty`)
+    against what's actually stored in `consumed_materials`. For every
+    component whose stored qty is short:
+      • Issues the delta from stock (creates a stock_movement audit row).
+      • Updates `consumed_materials` so the new total matches expected.
+      • Decrements the item's `current_stock`.
+
+    Safe-by-design:
+      • Only runs against the FG/SG MO's *direct* BOM (no recursion).
+      • Skips components that aren't short.
+      • If stock is insufficient for the delta, that component is reported
+        in the response but NOT touched (caller can issue the missing qty
+        via Inventory → Adjustment first, then re-run reconciliation).
+      • Idempotent — calling twice on a healed MO is a no-op.
+    """
+    user = await get_current_user(request)
+    role = user.get("role")
+    perms = ((user.get("permissions") or {}).get("manufacturing") or [])
+    if role != "admin" and "edit" not in perms:
+        raise HTTPException(status_code=403, detail="You don't have permission to reconcile consumption")
+
+    wo = await db.work_orders.find_one({"id": wo_id}, {"_id": 0})
+    if not wo:
+        raise HTTPException(status_code=404, detail="Work order not found")
+
+    fg_item_id = wo.get("item_id")
+    if not fg_item_id:
+        raise HTTPException(status_code=400, detail="MO has no item_id")
+
+    bom = await db.boms.find_one({"parent_item_id": fg_item_id, "status": "active"}, {"_id": 0})
+    if not bom:
+        raise HTTPException(status_code=400, detail="No active BOM for this MO's item")
+
+    wo_qty = float(wo.get("quantity") or 0)
+    consumed_now: dict = {}
+    for cm in (wo.get("consumed_materials") or []):
+        cid_c = cm.get("item_id")
+        if cid_c:
+            consumed_now[cid_c] = consumed_now.get(cid_c, 0) + float(cm.get("quantity") or 0)
+
+    healed = []           # components we successfully topped-up
+    skipped_no_stock = []  # components we couldn't heal due to insufficient stock
+    now = datetime.now(timezone.utc)
+    new_consumed_entries = []
+
+    for comp in bom.get("components", []) or []:
+        if comp.get("is_alternate"):
+            continue
+        cid = comp.get("item_id")
+        if not cid:
+            continue
+        expected = float(comp.get("quantity") or 0) * wo_qty
+        already = float(consumed_now.get(cid, 0))
+        delta = round(expected - already, 6)
+        if delta <= 0:
+            continue  # nothing to heal
+
+        citem = await db.items.find_one({"id": cid})
+        if not citem:
+            continue
+        on_hand = float(citem.get("current_stock") or 0)
+        if on_hand < delta:
+            skipped_no_stock.append({
+                "item_id": cid,
+                "part_number": citem.get("part_number", ""),
+                "name": citem.get("name", ""),
+                "delta_required": delta,
+                "available": on_hand,
+            })
+            continue
+
+        # Decrement stock + create audit movement.
+        new_stock = on_hand - delta
+        await db.items.update_one({"id": cid}, {"$set": {"current_stock": new_stock}})
+        await db.stock_movements.insert_one({
+            "id": str(uuid.uuid4()),
+            "item_id": cid,
+            "transaction_type": "issue",
+            "quantity": delta,
+            "reference_type": "work_order",
+            "reference_id": wo_id,
+            "reference_number": wo.get("wo_number", ""),
+            "notes": f"Reconciliation top-up for {wo.get('wo_number', '')} (decimal truncation healing)",
+            "performed_by": user.get("id"),
+            "created_at": now,
+        })
+        new_consumed_entries.append({
+            "item_id": cid,
+            "item_code": citem.get("part_number", ""),
+            "item_name": citem.get("name", ""),
+            "quantity": delta,
+            "uom": citem.get("unit_of_measure") or citem.get("uom") or "pcs",
+            "unit_cost": float(citem.get("purchase_price") or 0),
+            "consumed_at": now,
+            "reconciliation": True,
+        })
+        healed.append({
+            "item_id": cid,
+            "part_number": citem.get("part_number", ""),
+            "name": citem.get("name", ""),
+            "delta_consumed": delta,
+            "new_total_consumed": already + delta,
+        })
+
+    if new_consumed_entries:
+        # Append the top-up entries instead of overwriting the existing
+        # consumed_materials list — keeps the original issue history intact
+        # while the rolled-up total now matches the BOM expectation.
+        await db.work_orders.update_one(
+            {"id": wo_id},
+            {"$push": {"consumed_materials": {"$each": new_consumed_entries}}},
+        )
+
+    return {
+        "ok": True,
+        "wo_id": wo_id,
+        "wo_number": wo.get("wo_number"),
+        "healed_components": healed,
+        "skipped_due_to_stock": skipped_no_stock,
+        "healed_count": len(healed),
+    }
+
+
 class RevokeOpPayload(BaseModel):
     run_number: Optional[int] = None  # When provided, revoke ONLY that vendor's run/SC line
     reason: Optional[str] = ""
