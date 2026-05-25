@@ -19,6 +19,16 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-22 (Round 38 — DC PDF re-skinned to match Quotation template — DONE ✅):**
+  1. **Layout parity with Quotation** — DC's print template now uses the same 780px max-width body, 32px top padding, and Helvetica Neue 11px base font as the Quotation/Tax Invoice print.
+  2. **Header block** — Logo + company name (with tagline, address, GSTIN) on left, doc title + DC number + JW Order ref + draft tag on right. Mirrors Quotation's `.header` + `.doc-right` blocks exactly.
+  3. **4-column navy info-bar** between header & address-row: `DC No`, `Date`, `Expected Receive` (from `dc.order.expected_return_date`), `Created By` (from `dc.created_by_name` or current user). Same `bg:#1D3557 white-text uppercase 9px label + 13px value` styling as Quotation.
+  4. **Address-row cards** — Subcontractor (with address + GSTIN + phone) on left, Reference (JW Order / Type / Status / Parts / Parent) on right. Same `.addr-box h3 + .addr-box .name + .addr-box .line` typography.
+  5. **Items table header wrap** — User explicitly asked for "warped text" on headers (i.e. allow wrap). Removed all `white-space:nowrap` from `<th>` cells; only money/HSN `<td>` cells keep nowrap to prevent number truncation. Long headers like "Charges/Unit" / "RM Cost/Unit" now wrap cleanly across two lines.
+  6. **Section titles** rewritten from `<div class="section-title">` (border-bottom underline) to `<h4 class="section">` (uppercase 10px navy heading, no border) — same as Quotation.
+  7. Lint clean, app preview healthy.
+
+
 - **2026-02-22 (Round 37 — DC: item-master description auto-fallback + table layout fix — DONE ✅):**
   1. **Item master `description` auto-fallback** — All three DC paths now fall back to the Item Master's `description` field when no per-line override is typed:
      • JW-OS DC dialog: when lines load from `/api/job-work/.../dc-lines`, `item_description` is back-filled from `l.item?.description` so items like CGF0F0000082 ("SFT: 0.37") show up immediately.

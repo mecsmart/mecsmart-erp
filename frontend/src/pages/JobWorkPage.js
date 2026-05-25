@@ -569,67 +569,131 @@ export default function JobWorkPage() {
       dcTitle = 'Job Work Order Cum Delivery Challan';
     }
     
+    const accent = '#1D3557';
+    // Created-by — prefer the user name attached to the DC; fall back to the
+    // currently logged-in user. Used for the "Created By" column in the
+    // navy info-bar (mirrors Quotation's Salesperson column).
+    const createdBy = dc.created_by_name || dc.creator_name || user?.name || user?.email || 'Stores Team';
+    const docDate = dc.dc_date || dc.created_at;
+    const expectedReturn = dc.order?.expected_return_date;
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${dcTitle} - ${dc.dc_number}</title>
     <style>
-      * { margin:0; padding:0; box-sizing:border-box; }
-      body { font-family:'Segoe UI',Arial,sans-serif; font-size:11px; color:#111; padding:20px; }
-      ${letterheadCSS('#1D3557')}
-      .dc-meta { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; margin-bottom:15px; }
-      .dc-meta .dc-title { font-size:16px; font-weight:700; color:#1D3557; text-transform:uppercase; letter-spacing:0.5px; }
-      .dc-meta .dc-number { font-size:12px; font-family:'Courier New',monospace; color:#333; }
-      .dc-meta .dc-date { font-size:10px; color:#666; margin-top:2px; }
-      .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:15px; }
-      .info-box { border:1px solid #ddd; padding:8px 10px; border-radius:2px; }
-      .info-box label { font-size:9px; color:#888; text-transform:uppercase; display:block; margin-bottom:2px; }
-      .info-box span { font-weight:600; font-size:11px; }
-      .info-box .sub-text { font-weight:normal; font-size:10px; color:#555; }
-      .section-title { font-size:13px; font-weight:700; color:#1D3557; margin:15px 0 8px; border-bottom:1px solid #1D3557; padding-bottom:4px; }
-      table { width:100%; border-collapse:collapse; margin-bottom:10px; }
-      /* The items table uses table-layout:fixed + explicit colgroup widths so
-         long header text like "Charges/Unit" stays on a single line instead
-         of breaking mid-word ("CHARGES/U NIT"). Padding is also trimmed to
-         fit 9 columns on portrait A4 with 8mm margins. */
-      table.dc-items { table-layout:fixed; }
-      table.dc-items th, table.dc-items td { padding:5px 4px; word-break:break-word; }
-      th { background:#1D3557; color:white; padding:6px 8px; text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:0.3px; font-weight:600; }
-      td { padding:6px 8px; border-bottom:1px solid #E2E8F0; font-size:11px; color:#0f172a; vertical-align:top; }
-      td .sub-text { color:#475569; }
-      .text-center { text-align:center; }
-      .mono { font-family:'Courier New',monospace; }
-      .text-right { text-align:right; }
-      .total-row { font-weight:700; background:#f0f0f0; }
-      .terms-box { border:1px solid #ddd; padding:10px; margin-top:10px; margin-bottom:20px; border-radius:2px; }
-      .terms-box h3 { font-size:10px; text-transform:uppercase; color:#1D3557; margin-bottom:6px; font-weight:700; }
-      .terms-box ol { padding-left:18px; font-size:10px; color:#444; line-height:1.7; }
-      .footer { margin-top:30px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; font-size:10px; }
-      .sign-box { border-top:1px solid #333; padding-top:4px; text-align:center; margin-top:40px; }
-      @media print { body { padding:10px; } }
+      *{box-sizing:border-box}
+      body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:#111;margin:0;padding:0}
+      /* Body width + top padding pulled from the Quotation template so all
+         printed documents share the same canvas. 780px @ 96dpi keeps the
+         layout safely inside an A4 portrait page with 8mm side margins. */
+      .page{max-width:780px;margin:0 auto;padding:32px 8px 20px;box-sizing:border-box}
+      /* Header — left brand block + right doc-info, just like Quotation. */
+      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+      .brand-left{flex:1;display:flex;gap:12px;align-items:flex-start}
+      .logo-wrap{flex-shrink:0;display:flex;align-items:center;justify-content:center}
+      .logo-img{max-height:72px;max-width:180px;object-fit:contain}
+      .logo-fallback{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,${accent},#64748b);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;letter-spacing:-0.5px}
+      .brand-block .company-name{font-size:17px;font-weight:800;color:#0f172a;margin:0 0 2px}
+      .brand-block .tagline{font-size:10px;color:${accent};font-style:italic;margin-bottom:4px;letter-spacing:0.3px}
+      .brand-block .company-addr{font-size:10px;color:#475569;line-height:1.5}
+      .doc-right{text-align:right}
+      .doc-right .title{font-size:16px;font-weight:800;color:${accent};letter-spacing:0.5px;margin:0;text-transform:uppercase}
+      .doc-right .docno{font-size:14px;font-weight:700;color:#0f172a;margin-top:2px}
+      .doc-right .quoref{font-size:10px;color:#475569;margin-top:2px}
+      /* Info bar — same 4-col navy band as Quotation. */
+      .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:${accent};color:#fff;margin-top:14px;border-radius:2px;overflow:hidden}
+      .info-bar .col{padding:10px 14px;border-right:1px solid rgba(255,255,255,0.15)}
+      .info-bar .col:last-child{border-right:none}
+      .info-bar .label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.75);margin-bottom:2px}
+      .info-bar .value{font-size:13px;font-weight:700}
+      /* Subcontractor / Reference cards — match Quotation's Bill-To / Ship-To
+         address-row block. */
+      .address-row{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0}
+      .addr-box h3{font-size:10px;color:#0f172a;text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;border-bottom:2px solid ${accent};padding-bottom:4px;display:inline-block}
+      .addr-box .name{font-size:13px;font-weight:700;color:#0f172a;margin-bottom:2px}
+      .addr-box .line{font-size:10px;color:#475569;line-height:1.5;white-space:pre-line}
+      /* Section heading + items table — Quotation parity. Items table uses
+         table-layout:fixed + explicit colgroup so HSN, Charges, Totals stay
+         on a single line (header text is also explicitly word-wrap allowed
+         instead of single-line nowrap, per user request — long phrases like
+         "Charges/Unit" wrap nicely across two lines if they need to). */
+      h4.section{font-size:10px;color:${accent};text-transform:uppercase;letter-spacing:1px;margin:18px 0 6px;font-weight:700}
+      table.dc-items{width:100%;border-collapse:collapse;margin-top:6px;table-layout:fixed}
+      table.dc-items thead th{background:${accent};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:0.3px;padding:8px 5px;font-weight:600;border:none;text-align:left;word-break:break-word;line-height:1.25;vertical-align:middle}
+      table.dc-items thead th.text-right{text-align:right}
+      table.dc-items thead th.text-center{text-align:center}
+      table.dc-items tbody td{border-bottom:1px solid #e2e8f0;padding:7px 5px;font-size:11px;color:#0f172a;vertical-align:top;word-break:break-word;overflow-wrap:anywhere}
+      table.dc-items tbody tr:last-child td{border-bottom:2px solid ${accent}}
+      table.dc-items tbody tr.total-row td{background:#f1f5f9;font-weight:700;color:#0f172a}
+      td .sub-text{color:#475569}
+      .mono{font-family:'Courier New',monospace}
+      .text-right{text-align:right}
+      .text-center{text-align:center}
+      /* Terms */
+      .terms{margin-top:18px;padding:12px 14px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:10px;color:#475569;line-height:1.6;white-space:pre-line}
+      .terms h4{font-size:10px;color:${accent};text-transform:uppercase;letter-spacing:1px;margin:0 0 6px;font-weight:700}
+      /* Signature footer */
+      .footer{margin-top:30px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;font-size:10px}
+      .sign-box{border-top:1px solid #0f172a;padding-top:4px;text-align:center;margin-top:40px;color:#475569}
+      @media print{
+        @page{size:A4;margin:8mm 8mm 14mm 8mm}
+        body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+        .page{padding-top:10px}
+      }
     </style></head><body>
-    ${buildLetterheadHTML(cs)}
-    <div class="dc-meta">
-      <div class="dc-title">${dcTitle}</div>
-      <div style="text-align:right;">
-        <div class="dc-number">${dc.dc_number}</div>
-        <div class="dc-date">${dc.dc_date ? new Date(dc.dc_date + 'T00:00:00').toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : (dc.created_at ? new Date(dc.created_at).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-')}</div>
+    <div class="page">
+    <!-- Header: logo + company on left, doc title on right -->
+    <div class="header">
+      <div class="brand-left">
+        <div class="logo-wrap">
+          ${cs.logo_data ? `<img src="${esc(cs.logo_data)}" class="logo-img"/>` : `<div class="logo-fallback">${esc((cs.name || 'C').charAt(0).toUpperCase())}</div>`}
+        </div>
+        <div class="brand-block">
+          <div class="company-name">${esc(cs.name || 'Company')}</div>
+          ${cs.tagline ? `<div class="tagline">${esc(cs.tagline)}</div>` : ''}
+          ${cs.address ? `<div class="company-addr">${esc(cs.address)}</div>` : ''}
+          ${cs.address_line2 ? `<div class="company-addr">${esc(cs.address_line2)}</div>` : ''}
+          ${(cs.city || cs.state || cs.pin_code) ? `<div class="company-addr">${esc([cs.city, cs.state, cs.pin_code].filter(Boolean).join(', '))}</div>` : ''}
+          ${(cs.phone || cs.email) ? `<div class="company-addr">${cs.phone ? 'Phone: ' + esc(cs.phone) : ''}${cs.phone && cs.email ? ' | ' : ''}${cs.email ? esc(cs.email) : ''}</div>` : ''}
+          ${cs.gstin ? `<div class="company-addr"><strong>GSTIN: ${esc(cs.gstin)}</strong></div>` : ''}
+        </div>
+      </div>
+      <div class="doc-right">
+        <div class="title">${esc(dcTitle)}</div>
+        <div class="docno">${esc(dc.dc_number)}</div>
+        ${dc.order?.order_number ? `<div class="quoref">JW Order: <strong>${esc(dc.order.order_number)}</strong></div>` : ''}
+        ${(dc.status || '').toLowerCase() === 'draft' ? `<div style="display:inline-block;margin-top:4px;padding:2px 10px;background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;border-radius:3px;font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Draft</div>` : ''}
       </div>
     </div>
-    <div class="info-grid">
-      <div class="info-box">
-        <label>Subcontractor / Vendor</label>
-        <span>${supplier.name || '-'}</span>
-        ${supplierAddr ? `<br/><span class="sub-text">${supplierAddr}</span>` : ''}
-        ${supplier.gstin ? `<br/><span class="sub-text">GSTIN: ${supplier.gstin}</span>` : ''}
-        ${supplier.phone ? `<br/><span class="sub-text">Ph: ${supplier.phone}</span>` : ''}
+
+    <!-- Info bar: DC No · Date · Expected Receive · Created By -->
+    <div class="info-bar">
+      <div class="col"><div class="label">${esc(dcTitle)} No</div><div class="value">${esc(dc.dc_number)}</div></div>
+      <div class="col"><div class="label">Date</div><div class="value">${docDate ? new Date(docDate).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-'}</div></div>
+      <div class="col"><div class="label">Expected Receive</div><div class="value">${expectedReturn ? new Date(expectedReturn).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '-'}</div></div>
+      <div class="col"><div class="label">Created By</div><div class="value">${esc(createdBy)}</div></div>
+    </div>
+
+    <!-- Subcontractor + Reference cards -->
+    <div class="address-row">
+      <div class="addr-box">
+        <h3>Subcontractor / Vendor</h3>
+        <div class="name">${esc(supplier.name || '-')}</div>
+        ${supplierAddr ? `<div class="line">${esc(supplierAddr)}</div>` : ''}
+        ${supplier.gstin ? `<div class="line"><strong>GSTIN:</strong> <span class="mono">${esc(supplier.gstin)}</span></div>` : ''}
+        ${supplier.phone ? `<div class="line">Ph: ${esc(supplier.phone)}</div>` : ''}
       </div>
-      <div class="info-box">
-        <label>Reference</label>
-        <span>JW Order: <span class="mono">${dc.order?.order_number || '-'}</span></span>
-        <br/><span class="sub-text">Status: ${dc.status}</span>
+      <div class="addr-box">
+        <h3>Reference</h3>
+        <div class="name">JW Order ${esc(dc.order?.order_number || '-')}</div>
+        ${dc.order?.subcontract_type ? `<div class="line">Type: ${esc(dc.order.subcontract_type.replace('_',' ').toUpperCase())}</div>` : ''}
+        <div class="line">DC Status: <strong>${esc((dc.status || '').toUpperCase())}</strong></div>
+        ${partTitle ? `<div class="line">Parts: ${esc(partTitle)}</div>` : ''}
+        ${parentItemName ? `<div class="line">Parent: ${esc(parentItemName)}${parentItemQty ? ` (Qty: ${parentItemQty})` : ''}</div>` : ''}
       </div>
     </div>
     
     ${isJobOS ? `
-    <div class="section-title">Job Work Part Details</div>
+    <h4 class="section">Job Work Part Details</h4>
     <table class="dc-items">
       <colgroup>
         <col style="width:5%">
@@ -643,15 +707,15 @@ export default function JobWorkPage() {
         <col style="width:11%">
       </colgroup>
       <thead><tr>
-        <th style="white-space:nowrap">Sl.</th>
+        <th>Sl.</th>
         <th>Part No., Name &amp; Description</th>
-        <th style="white-space:nowrap">HSN</th>
-        <th class="text-right" style="white-space:nowrap">Qty</th>
-        <th style="white-space:nowrap">UOM</th>
-        <th class="text-right" style="white-space:nowrap">Charges/Unit</th>
-        <th class="text-right" style="white-space:nowrap">Total Charges</th>
-        <th class="text-right" style="white-space:nowrap">RM Cost/Unit</th>
-        <th class="text-right" style="white-space:nowrap">Total Amount</th>
+        <th>HSN</th>
+        <th class="text-right">Qty</th>
+        <th>UOM</th>
+        <th class="text-right">Charges/Unit</th>
+        <th class="text-right">Total Charges</th>
+        <th class="text-right">RM Cost/Unit</th>
+        <th class="text-right">Total Amount</th>
       </tr></thead>
       <tbody>
       ${(() => {
@@ -693,7 +757,7 @@ export default function JobWorkPage() {
     </table>
     ` : `
     ${jwParts.length > 0 ? `
-    <div class="section-title">Job Work Part Details</div>
+    <h4 class="section">Job Work Part Details</h4>
     <table>
       <thead><tr><th>Sl. No.</th><th>Part No. & Name</th><th>Process</th><th>HSN</th><th class="text-right">QTY</th><th class="text-right">Charges</th><th class="text-right">Total Amount</th></tr></thead>
       <tbody>
@@ -720,13 +784,13 @@ export default function JobWorkPage() {
         <col style="width:16%">
       </colgroup>
       <thead><tr>
-        <th style="white-space:nowrap">Sl.</th>
+        <th>Sl.</th>
         <th>Part No., Name &amp; Description</th>
-        <th style="white-space:nowrap">HSN</th>
-        <th class="text-right" style="white-space:nowrap">Qty</th>
-        <th style="white-space:nowrap">UOM</th>
-        <th class="text-right" style="white-space:nowrap">Rate/Unit</th>
-        <th class="text-right" style="white-space:nowrap">Total RM Cost</th>
+        <th>HSN</th>
+        <th class="text-right">Qty</th>
+        <th>UOM</th>
+        <th class="text-right">Rate/Unit</th>
+        <th class="text-right">Total RM Cost</th>
       </tr></thead>
       <tbody>
       ${dc.lines.map((l, i) => {
@@ -757,6 +821,7 @@ export default function JobWorkPage() {
       <div><div class="sign-box">Received By (Subcontractor)</div></div>
     </div>
     <p style="text-align:center;font-size:9px;color:#aaa;margin-top:20px;">Printed on ${new Date().toLocaleString()}</p>
+    </div>
     </body></html>`;
     downloadHtmlAsPdf(html, `${dcTitle.replace(/\s+/g, '-')}-${dc.dc_number || 'document'}.pdf`, { preview: true, draft: (dc.status || '').toLowerCase() === 'draft' });
   };
