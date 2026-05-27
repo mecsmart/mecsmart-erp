@@ -44,6 +44,14 @@ export default function InventoryPage() {
   const [taxSlabs, setTaxSlabs] = useState([0, 5, 12, 18, 28]);
   // UOM master — needed to render quantities with the configured decimal places.
   const [uoms, setUoms] = useState([]);
+  // Stock transactions — date range + type filters (Date-wise report).
+  const today = new Date().toISOString().slice(0, 10);
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400 * 1000).toISOString().slice(0, 10);
+  const [txFromDate, setTxFromDate] = useState(sevenDaysAgo);
+  const [txToDate, setTxToDate] = useState(today);
+  const [txTypeFilter, setTxTypeFilter] = useState('all');
+  const [txItemFilter, setTxItemFilter] = useState('');
+  const [txLoading, setTxLoading] = useState(false);
   // Sort + resize state for the inventory table.
   const [partNumberSort, setPartNumberSort] = useState(null);
   // Pagination — render at most PAGE_SIZE rows initially, then a "Load more"
@@ -223,7 +231,7 @@ export default function InventoryPage() {
       
       const [inventoryRes, transactionsRes, warehousesRes, stockByItemRes, groupsRes, gstRes, uomsRes] = await Promise.all([
         api.get(`/api/inventory?${params.toString()}`),
-        api.get('/api/inventory/transactions?limit=50'),
+        api.get(`/api/inventory/transactions?from_date=${txFromDate}&to_date=${txToDate}&limit=500`),
         api.get('/api/warehouses'),
         api.get('/api/warehouses/stock/by-item'),
         api.get('/api/item-groups').catch(() => ({ data: [] })),
@@ -259,8 +267,7 @@ export default function InventoryPage() {
     } catch (error) {
       console.error('Failed to create transaction:', error);
       alert(error.response?.data?.detail || 'Failed to create transaction');
-    }
-  };
+    }  };
 
   const resetTransactionForm = () => {
     setTransactionForm({
@@ -273,6 +280,62 @@ export default function InventoryPage() {
   };
 
   const isLowStock = (item) => item.current_stock <= item.reorder_point;
+
+  // Refetch transactions ONLY (without touching the rest of the page state).
+  // Used by the date-range / type filters and CSV export on the Transactions tab.
+  const loadTransactions = async (overrides = {}) => {
+    const fromDate = overrides.from ?? txFromDate;
+    const toDate = overrides.to ?? txToDate;
+    const txType = overrides.type ?? txTypeFilter;
+    const itemQ = overrides.item ?? txItemFilter;
+    setTxLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (fromDate) params.append('from_date', fromDate);
+      if (toDate) params.append('to_date', toDate);
+      if (txType && txType !== 'all') params.append('transaction_type', txType);
+      params.append('limit', '500');
+      const { data } = await api.get(`/api/inventory/transactions?${params.toString()}`);
+      // Client-side item filter (part_no / name contains).
+      let rows = data || [];
+      if (itemQ) {
+        const q = itemQ.trim().toLowerCase();
+        rows = rows.filter(tx => (tx.item?.part_number || '').toLowerCase().includes(q) || (tx.item?.name || '').toLowerCase().includes(q));
+      }
+      setTransactions(rows);
+    } catch (err) {
+      console.error('Failed to load transactions', err);
+    } finally {
+      setTxLoading(false);
+    }
+  };
+
+  const exportTransactionsCsv = () => {
+    const rows = transactions || [];
+    const header = ['Date', 'Type', 'Part No', 'Item Name', 'UOM', 'Quantity', 'Previous Stock', 'New Stock', 'Notes'];
+    const csv = [header.join(',')].concat(rows.map(tx => {
+      const uom = tx.item?.unit_of_measure || '';
+      const cells = [
+        new Date(tx.created_at).toLocaleString('en-IN'),
+        tx.transaction_type || '',
+        tx.item?.part_number || '',
+        (tx.item?.name || '').replace(/"/g, '""'),
+        uom,
+        formatQty(tx.quantity, uom, uoms),
+        formatQty(tx.previous_stock, uom, uoms),
+        formatQty(tx.new_stock, uom, uoms),
+        (tx.notes || '').replace(/"/g, '""').replace(/\n/g, ' '),
+      ];
+      return cells.map(v => `"${v}"`).join(',');
+    })).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `stock-transactions-${txFromDate}_to_${txToDate}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const getTransactionIcon = (type) => {
     const txType = transactionTypes.find(t => t.value === type);
@@ -662,6 +725,38 @@ export default function InventoryPage() {
         </TabsContent>
 
         <TabsContent value="transactions" className="mt-4">
+          {/* Date-wise stock transaction report — filters + CSV export */}
+          <div className="bg-white border border-[#E5E7EB] rounded-sm p-3 mb-3 flex items-end gap-3 flex-wrap" data-testid="stock-tx-filter-bar">
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-[#6B7280] mb-1">From Date</label>
+              <input type="date" value={txFromDate} onChange={(e) => setTxFromDate(e.target.value)} className="border border-[#D1D5DB] rounded-sm text-xs px-2 py-1.5 focus:outline-none focus:border-[#1D3557]" data-testid="stock-tx-from-date" />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-[#6B7280] mb-1">To Date</label>
+              <input type="date" value={txToDate} onChange={(e) => setTxToDate(e.target.value)} className="border border-[#D1D5DB] rounded-sm text-xs px-2 py-1.5 focus:outline-none focus:border-[#1D3557]" data-testid="stock-tx-to-date" />
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-[#6B7280] mb-1">Type</label>
+              <Select value={txTypeFilter} onValueChange={setTxTypeFilter}>
+                <SelectTrigger className="w-36 h-8 text-xs" data-testid="stock-tx-type-filter"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="receive">Receive</SelectItem>
+                  <SelectItem value="issue">Issue</SelectItem>
+                  <SelectItem value="transfer">Transfer</SelectItem>
+                  <SelectItem value="adjust">Adjust</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-[#6B7280] mb-1">Item (Part No / Name)</label>
+              <input type="text" value={txItemFilter} onChange={(e) => setTxItemFilter(e.target.value)} placeholder="Search…" className="border border-[#D1D5DB] rounded-sm text-xs px-2 py-1.5 w-48 focus:outline-none focus:border-[#1D3557]" data-testid="stock-tx-item-filter" />
+            </div>
+            <button onClick={() => loadTransactions()} disabled={txLoading} className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50" data-testid="stock-tx-apply">{txLoading ? 'Loading…' : 'Apply'}</button>
+            <button onClick={() => { setTxFromDate(sevenDaysAgo); setTxToDate(today); setTxTypeFilter('all'); setTxItemFilter(''); loadTransactions({ from: sevenDaysAgo, to: today, type: 'all', item: '' }); }} className="btn-secondary text-xs px-3 py-1.5" data-testid="stock-tx-reset">Reset</button>
+            <div className="flex-1" />
+            <button onClick={exportTransactionsCsv} disabled={!transactions.length} className="btn-secondary text-xs px-3 py-1.5 disabled:opacity-50" data-testid="stock-tx-export-csv">Export CSV ({transactions.length})</button>
+          </div>
           <div className="card-flat overflow-hidden">
             {loading ? (
               <div className="flex items-center justify-center h-48">
@@ -713,10 +808,10 @@ export default function InventoryPage() {
                           tx.transaction_type === 'issue' ? 'text-[#9B1C1C]' :
                           'text-[#1E429F]'
                         }`}>
-                          {tx.transaction_type === 'receive' ? '+' : tx.transaction_type === 'issue' ? '-' : ''}{tx.quantity}
+                          {tx.transaction_type === 'receive' ? '+' : tx.transaction_type === 'issue' ? '-' : ''}{formatQty(Math.abs(Number(tx.quantity) || 0), tx.item?.unit_of_measure, uoms)}
                         </td>
-                        <td className="text-right mono">{tx.previous_stock}</td>
-                        <td className="text-right mono font-medium">{tx.new_stock}</td>
+                        <td className="text-right mono">{formatQty(tx.previous_stock, tx.item?.unit_of_measure, uoms)}</td>
+                        <td className="text-right mono font-medium">{formatQty(tx.new_stock, tx.item?.unit_of_measure, uoms)}</td>
                         <td className="text-sm text-[#4B5563] max-w-xs truncate">{tx.notes || '-'}</td>
                       </tr>
                     ))}

@@ -3417,14 +3417,39 @@ async def update_stock_fields(item_id: str, request: Request, data: dict = Body(
 
 
 @inventory_router.get("/transactions")
-async def get_inventory_transactions(request: Request, item_id: Optional[str] = None, limit: int = 100):
+async def get_inventory_transactions(
+    request: Request,
+    item_id: Optional[str] = None,
+    transaction_type: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    limit: int = 100,
+):
     await get_current_user(request)
     query = {}
     if item_id:
         query["item_id"] = item_id
-    
+    if transaction_type and transaction_type != "all":
+        query["transaction_type"] = transaction_type
+    # Date range filter — inclusive on both ends. Accepts YYYY-MM-DD.
+    if from_date or to_date:
+        date_q = {}
+        try:
+            if from_date:
+                date_q["$gte"] = datetime.strptime(from_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            if to_date:
+                # Use end-of-day so the same date appears on both sides of the filter.
+                end_dt = datetime.strptime(to_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                end_dt = end_dt + timedelta(days=1) - timedelta(milliseconds=1)
+                date_q["$lte"] = end_dt
+        except ValueError:
+            # Invalid date string — skip the filter rather than 500.
+            date_q = {}
+        if date_q:
+            query["created_at"] = date_q
+
     transactions = await db.inventory_transactions.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
-    
+
     for tx in transactions:
         item = await db.items.find_one({"id": tx.get("item_id")}, {"_id": 0})
         tx["item"] = item
@@ -6841,6 +6866,47 @@ async def _recompute_wo_status_after_op_change(wo_id: str) -> Optional[str]:
     if not operations:
         return None
     current = wo.get("status")
+
+    # Auto-heal stuck outsourced ops — if a Job Work part covering THIS
+    # WO has already been fully received via GRN (received_quantity >=
+    # quantity) BUT the corresponding op is still showing `outsource_status
+    # == 'sent'` and status != completed, flip it now. This is the main
+    # safety net for legacy MOs that got stuck because the GRN posting
+    # path didn't propagate completion (consolidated SCs, double-matching
+    # parts etc.). Mutated in-memory so the rest of this function sees the
+    # healed state; persisted at the end if anything changed.
+    op_mutated = False
+    for op in operations:
+        if not op.get("is_job_work"):
+            continue
+        if op.get("status") == "completed" or op.get("short_closed"):
+            continue
+        sc_id = op.get("outsource_sc_order_id")
+        if not sc_id:
+            continue
+        sc = await db.subcontract_orders.find_one({"id": sc_id}, {"_id": 0, "job_work_parts": 1})
+        if not sc:
+            continue
+        # Total received qty for THIS WO from matching parts. Prefer parts
+        # tagged with `wo_id == wo_id`; fall back to item-id match for
+        # legacy SCs that never recorded wo_id on the part.
+        mo_qty = float(wo.get("quantity") or 0)
+        received_for_wo = 0.0
+        any_wo_tagged = any(p.get("wo_id") == wo_id for p in sc.get("job_work_parts", []))
+        for p in sc.get("job_work_parts", []):
+            if any_wo_tagged:
+                if p.get("wo_id") == wo_id:
+                    received_for_wo += float(p.get("received_quantity") or 0)
+            elif p.get("item_id") == wo.get("item_id"):
+                received_for_wo += float(p.get("received_quantity") or 0)
+        if mo_qty > 0 and received_for_wo >= mo_qty:
+            op["status"] = "completed"
+            op["outsource_status"] = "received"
+            op["actual_end"] = datetime.now(timezone.utc)
+            op["quantity_completed"] = max(float(op.get("quantity_completed") or 0), mo_qty)
+            op["quantity_accepted"] = max(float(op.get("quantity_accepted") or 0), mo_qty)
+            op_mutated = True
+
     # An op is "effectively completed" if its status is `completed` OR it
     # was short-closed (short_closed=True). Legacy short-close paths used
     # to leave the op status as 'in_progress' while flipping short_closed,
@@ -6875,27 +6941,32 @@ async def _recompute_wo_status_after_op_change(wo_id: str) -> Optional[str]:
     elif any_active and current == "pending":
         new_status = "in_progress"
 
-    if new_status == current:
+    if new_status == current and not op_mutated:
         return None
 
-    update_payload = {"status": new_status}
-    if new_status == "completed":
-        update_payload["actual_end"] = datetime.now(timezone.utc)
-        update_payload["quantity_completed"] = wo.get("quantity", 0)
-        # Heal legacy short-closed ops whose status was never flipped to
-        # 'completed' by the old short-close paths — so the UI shows them
-        # consistently as Done.
-        healed_ops = []
-        any_healed = False
-        for op in operations:
-            if op.get("short_closed") and op.get("status") != "completed":
-                op = {**op, "status": "completed"}
-                any_healed = True
-            healed_ops.append(op)
-        if any_healed:
-            update_payload["operations_status"] = healed_ops
-    await db.work_orders.update_one({"id": wo_id}, {"$set": update_payload})
-    return new_status
+    update_payload = {}
+    if op_mutated:
+        update_payload["operations_status"] = operations
+    if new_status != current:
+        update_payload["status"] = new_status
+        if new_status == "completed":
+            update_payload["actual_end"] = datetime.now(timezone.utc)
+            update_payload["quantity_completed"] = wo.get("quantity", 0)
+            # Heal legacy short-closed ops whose status was never flipped to
+            # 'completed' by the old short-close paths — so the UI shows them
+            # consistently as Done.
+            healed_ops = []
+            any_healed = False
+            for op in operations:
+                if op.get("short_closed") and op.get("status") != "completed":
+                    op = {**op, "status": "completed"}
+                    any_healed = True
+                healed_ops.append(op)
+            if any_healed:
+                update_payload["operations_status"] = healed_ops
+    if update_payload:
+        await db.work_orders.update_one({"id": wo_id}, {"$set": update_payload})
+    return new_status if new_status != current else None
 
 
 @work_orders_router.post("/{wo_id}/sync-status")
@@ -13267,6 +13338,9 @@ async def receive_grn_from_jw(request: Request, data: dict = Body(...)):
     
     grn_lines = []
     total_process_cost = 0
+    # Track per-line how much qty went to each wo_id so we can mark the
+    # right outsourced operation as completed below. Indexed by wo_id.
+    received_per_wo = {}
     for line in lines:
         item = await db.items.find_one({"id": line["item_id"]}, {"_id": 0})
         if not item:
@@ -13305,10 +13379,33 @@ async def receive_grn_from_jw(request: Request, data: dict = Body(...)):
             "hsn_code": item.get("hsn_code", ""),
         })
         
-        # Update received_quantity on job_work_parts
+        # Distribute received qty across ALL matching job_work_parts entries
+        # FIFO (by remaining open balance). Consolidated SCs frequently carry
+        # multiple parts for the SAME item — one per source MO. Previously we
+        # incremented only the first match, leaving downstream MOs stuck.
+        remaining = float(recv_qty)
+        # Pass 1: parts that still have open balance — fill them FIFO.
         for p in order.get("job_work_parts", []):
-            if p.get("item_id") == line["item_id"]:
-                p["received_quantity"] = p.get("received_quantity", 0) + recv_qty
+            if remaining <= 0:
+                break
+            if p.get("item_id") != line["item_id"]:
+                continue
+            open_qty = float(p.get("quantity") or 0) - float(p.get("received_quantity") or 0)
+            if open_qty <= 0:
+                continue
+            take = min(open_qty, remaining)
+            p["received_quantity"] = float(p.get("received_quantity") or 0) + take
+            remaining -= take
+            if p.get("wo_id"):
+                received_per_wo[p["wo_id"]] = received_per_wo.get(p["wo_id"], 0.0) + take
+        # Pass 2: any leftover goes onto the first matching part (over-receipt).
+        if remaining > 0:
+            for p in order.get("job_work_parts", []):
+                if p.get("item_id") == line["item_id"]:
+                    p["received_quantity"] = float(p.get("received_quantity") or 0) + remaining
+                    if p.get("wo_id"):
+                        received_per_wo[p["wo_id"]] = received_per_wo.get(p["wo_id"], 0.0) + remaining
+                    break
     
     # Save GRN
     grn_doc = {
@@ -13345,29 +13442,61 @@ async def receive_grn_from_jw(request: Request, data: dict = Body(...)):
         sc_update["status"] = "completed"
         sc_update["completed_at"] = datetime.now(timezone.utc).isoformat()
     await db.subcontract_orders.update_one({"id": sc_order_id}, {"$set": sc_update})
-    
-    # Complete linked MOs if all received
-    if all_received:
-        all_wo_ids = list(set(filter(None, [
-            order.get("reference_wo_id"),
-            *(order.get("reference_wo_ids", []))
-        ])))
-        for ref_wo_id in all_wo_ids:
-            ref_wo = await db.work_orders.find_one({"id": ref_wo_id})
-            if not ref_wo or ref_wo.get("status") == "completed":
-                continue
-            ops = ref_wo.get("operations_status", [])
-            for op in ops:
-                if op.get("status") != "completed":
+
+    # Update MO progress — for EVERY linked WO, regardless of whether the
+    # whole SC is fully received. This is the critical fix: a consolidated
+    # SC may have one MO fully received while another is still pending;
+    # the previously gated `if all_received:` block left the completed
+    # MO stuck in "in_progress" because partial receipts never ran the
+    # WO update. Now each WO's outsourced op is updated based on the
+    # qty actually received against that specific MO (via wo_id linkage).
+    all_wo_ids = list(set(filter(None, [
+        order.get("reference_wo_id"),
+        *(order.get("reference_wo_ids", []))
+    ])))
+    for ref_wo_id in all_wo_ids:
+        ref_wo = await db.work_orders.find_one({"id": ref_wo_id})
+        if not ref_wo or ref_wo.get("status") == "completed":
+            continue
+        mo_qty = float(ref_wo.get("quantity", 0) or 0)
+        # Total qty received against THIS specific WO across all matching
+        # parts. Falls back to total received for the WO's FG item when
+        # wo_id wasn't tracked on the parts (legacy SCs).
+        wo_recv = received_per_wo.get(ref_wo_id, 0.0)
+        if wo_recv <= 0:
+            # Legacy fallback — sum received_quantity from job_work_parts
+            # whose wo_id matches OR (when wo_id missing) whose item_id
+            # matches the WO's FG item.
+            for p in order.get("job_work_parts", []):
+                if p.get("wo_id") == ref_wo_id:
+                    wo_recv += float(p.get("received_quantity") or 0)
+            if wo_recv <= 0:
+                for p in order.get("job_work_parts", []):
+                    if not p.get("wo_id") and p.get("item_id") == ref_wo.get("item_id"):
+                        wo_recv += float(p.get("received_quantity") or 0)
+        ops = ref_wo.get("operations_status", [])
+        qty_completed = min(wo_recv, mo_qty)
+        fully_done_for_wo = qty_completed >= mo_qty and mo_qty > 0
+        for op in ops:
+            # Mark the outsourced op as received (or completed if all qty
+            # is back). Non-outsourced ops are left untouched.
+            if op.get("is_job_work"):
+                op["outsource_status"] = "received" if fully_done_for_wo else op.get("outsource_status") or "received_partial"
+                op["quantity_completed"] = max(qty_completed, float(op.get("quantity_completed") or 0))
+                op["quantity_accepted"] = max(qty_completed, float(op.get("quantity_accepted") or 0))
+                if fully_done_for_wo:
                     op["status"] = "completed"
                     op["actual_end"] = datetime.now(timezone.utc)
-                    op["quantity_completed"] = ref_wo.get("quantity", 0)
-                    op["quantity_accepted"] = ref_wo.get("quantity", 0)
-            mo_qty = ref_wo.get("quantity", 0)
-            await db.work_orders.update_one({"id": ref_wo_id}, {"$set": {
-                "operations_status": ops, "status": "completed",
-                "quantity_completed": mo_qty, "actual_end": datetime.now(timezone.utc)
-            }})
+        mo_update = {
+            "operations_status": ops,
+            "quantity_completed": max(qty_completed, float(ref_wo.get("quantity_completed") or 0)),
+            "updated_at": datetime.now(timezone.utc),
+        }
+        # MO is completed iff every operation is now completed.
+        if all((op.get("status") == "completed") for op in ops) and ops:
+            mo_update["status"] = "completed"
+            mo_update["actual_end"] = datetime.now(timezone.utc)
+        await db.work_orders.update_one({"id": ref_wo_id}, {"$set": mo_update})
     
     grn_doc.pop("_id", None)
     return {"grn_number": grn_number, "total_process_cost": total_process_cost, "all_received": all_received}
