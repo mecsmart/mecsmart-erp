@@ -68,6 +68,10 @@ export default function ItemsPage() {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [groupFilter, setGroupFilter] = useState('');
+  // Low Stock filter — when ON, only items where current_stock <= reorder_point
+  // (or any of their variant children fall below their own reorder_point) are
+  // shown. The classic "what do I urgently need to order?" view.
+  const [lowStockOnly, setLowStockOnly] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, item: null });
@@ -570,6 +574,12 @@ export default function ItemsPage() {
           {(categoryFilter || groupFilter) && (
             <button onClick={() => { setCategoryFilter(''); setGroupFilter(''); }} className="text-[10px] text-[#9B1C1C] hover:underline">Clear</button>
           )}
+          <label className="flex items-center space-x-1 cursor-pointer text-xs text-[#111827]" title="Show only items at/below their reorder point">
+            <input type="checkbox" checked={lowStockOnly} onChange={(e) => setLowStockOnly(e.target.checked)} className="rounded" data-testid="items-low-stock-filter" />
+            <span className="flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3 text-[#9B1C1C]" /> Low Stock Only
+            </span>
+          </label>
         </div>
         <div className="flex items-center space-x-2">
           <div className="relative">
@@ -1209,15 +1219,25 @@ export default function ItemsPage() {
                   // — was running on every render which made BOM → Items
                   // navigation jank for ~600 items.
                   const { variantsByParent, baseItems } = variantsRollup;
+                  // Apply Low Stock filter — item itself OR any of its variant
+                  // children sitting at/below their reorder point qualifies.
+                  const filteredItems = lowStockOnly
+                    ? baseItems.filter(it => {
+                        const selfLow = (parseFloat(it.current_stock) || 0) <= (parseFloat(it.reorder_point) || 0);
+                        const variants = variantsByParent[it.id] || [];
+                        const anyVariantLow = variants.some(v => (parseFloat(v.current_stock) || 0) <= (parseFloat(v.reorder_point) || 0));
+                        return selfLow || anyVariantLow;
+                      })
+                    : baseItems;
                   // Apply Part Number sort (case-insensitive, natural-ish via localeCompare with numeric=true)
                   const sortedItems = partNumberSort
-                    ? [...baseItems].sort((a, b) => {
+                    ? [...filteredItems].sort((a, b) => {
                         const ax = (a.part_number || '').toLowerCase();
                         const bx = (b.part_number || '').toLowerCase();
                         const cmp = ax.localeCompare(bx, undefined, { numeric: true, sensitivity: 'base' });
                         return partNumberSort === 'asc' ? cmp : -cmp;
                       })
-                    : baseItems;
+                    : filteredItems;
                   return sortedItems.slice(0, visibleCount).map((item) => {
                   const itemGroup = itemGroups.find(g => g.id === item.group_id);
                   const variants = variantsByParent[item.id] || [];

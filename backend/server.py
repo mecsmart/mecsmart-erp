@@ -1142,6 +1142,12 @@ async def get_items(request: Request, category: Optional[str] = None, search: Op
         projection = {"_id": 0}
     # No practical hard cap — ERPs routinely carry thousands of SKUs, and the
     # BOM / PO / SO / Quotation pickers load the full list then filter client-side.
+    # Soft-retired variants (is_active=False — orphans of removed attribute
+    # values that still have transaction history) are HIDDEN by default so
+    # they don't clutter the picker / stock list. Pass `?include_inactive=1`
+    # if a future flow needs them.
+    if "is_active" not in query:
+        query["is_active"] = {"$ne": False}
     items = await db.items.find(query, projection).to_list(50000)
     return items
 
@@ -1709,7 +1715,6 @@ async def generate_item_variants(item_id: str, payload: dict = Body(default={}),
     existing_by_sku = {e["part_number"]: e for e in existing}
     created = []
     reactivated = []
-    deactivated = []
     valid_skus_in_combos = set(combo_by_sku.keys())
     for sku in selected_skus:
         if sku not in combo_by_sku:
@@ -1745,16 +1750,53 @@ async def generate_item_variants(item_id: str, payload: dict = Body(default={}),
         child.pop("_id", None)
         created.append(child)
     # Retire any pre-existing variant whose SKU is no longer in the valid combos
-    # (i.e. an attribute value was removed).
+    # (i.e. an attribute value was removed). Hard-delete the variant when it's
+    # NEVER been used in any transaction; otherwise soft-retire (is_active=False)
+    # so its transaction history stays intact.
+    retired_skus = []
+    blocked_skus = []  # variants that were referenced — kept soft-retired
     for sku, ex in existing_by_sku.items():
-        if sku not in valid_skus_in_combos:
-            await db.items.update_one({"id": ex["id"]}, {"$set": {"is_active": False}})
-            deactivated.append(sku)
+        if sku in valid_skus_in_combos:
+            continue
+        ref_collections = [
+            ("inventory_transactions", {"item_id": ex["id"]}),
+            ("purchase_orders", {"line_items.item_id": ex["id"]}),
+            ("grns", {"line_items.item_id": ex["id"]}),
+            ("subcontract_orders", {"$or": [{"lines.item_id": ex["id"]}, {"job_work_parts.item_id": ex["id"]}]}),
+            ("delivery_challans", {"lines.item_id": ex["id"]}),
+            ("work_orders", {"$or": [{"item_id": ex["id"]}, {"reserved_materials.item_id": ex["id"]}, {"consumed_materials.item_id": ex["id"]}]}),
+            ("quotations", {"line_items.item_id": ex["id"]}),
+            ("tax_invoices", {"line_items.item_id": ex["id"]}),
+            ("proforma_invoices", {"line_items.item_id": ex["id"]}),
+            ("boms", {"components.item_id": ex["id"]}),
+        ]
+        referenced = False
+        for col_name, q in ref_collections:
+            try:
+                cnt = await db[col_name].count_documents(q, limit=1)
+            except Exception:
+                cnt = 0
+            if cnt:
+                referenced = True
+                break
+        if referenced:
+            await db.items.update_one({"id": ex["id"]}, {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc)}})
+            blocked_skus.append(sku)
+        else:
+            # Safe to permanently delete — no transactional footprint.
+            await db.items.delete_one({"id": ex["id"]})
+            retired_skus.append(sku)
     return {
-        "message": f"Generated {len(created)} new variant(s)" + (f", reactivated {len(reactivated)}" if reactivated else "") + (f", retired {len(deactivated)} obsolete" if deactivated else ""),
+        "message": f"Generated {len(created)} new variant(s)"
+            + (f", reactivated {len(reactivated)}" if reactivated else "")
+            + (f", deleted {len(retired_skus)} unused" if retired_skus else "")
+            + (f", retired {len(blocked_skus)} (in use)" if blocked_skus else ""),
         "created": created,
         "reactivated_skus": reactivated,
-        "deactivated_skus": deactivated,
+        "deleted_skus": retired_skus,
+        "retired_in_use_skus": blocked_skus,
+        # Keep the legacy key for any existing client code that reads it.
+        "deactivated_skus": retired_skus + blocked_skus,
     }
 
 
