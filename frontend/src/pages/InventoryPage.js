@@ -583,19 +583,10 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* Tabs — Stock Levels tab removed. Items + variants live canonically
-          on /items (Items & Parts page). This page is now Transactions-only. */}
+      {/* Tabs wrapper kept to preserve the hidden "stock-removed" content,
+          but the TabsList (the "Transactions" pill the user circled) is
+          removed since this page is single-purpose now. */}
       <Tabs value="transactions" className="space-y-4">
-        <TabsList className="bg-[#F3F4F6] p-1 rounded-sm">
-          <TabsTrigger 
-            value="transactions" 
-            className="data-[state=active]:bg-white data-[state=active]:text-[#1D3557] rounded-sm px-4 py-2 text-sm font-medium"
-            data-testid="tab-transactions"
-          >
-            Transactions
-          </TabsTrigger>
-        </TabsList>
-
         <TabsContent value="stock-removed" className="hidden">
           <div className="card-flat overflow-hidden">
             {loading ? (

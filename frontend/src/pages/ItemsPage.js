@@ -1324,15 +1324,10 @@ export default function ItemsPage() {
                               ? v.part_number.slice(item.part_number.length + 1)
                               : v.part_number;
                             const vStock = parseFloat(v.current_stock) || 0;
-                            // Color the variant rows distinctly from the parent total:
-                            //   * Zero stock → muted grey  (#9CA3AF)
-                            //   * Low stock (≤ reorder)   → red    (#9B1C1C)
-                            //   * Healthy stock           → teal   (#0E7490)
-                            // Reorder point falls back to 0 when not set.
-                            const reorder = parseFloat(v.reorder_point) || 0;
-                            const cls = vStock === 0
-                              ? 'text-[#9CA3AF]'
-                              : (vStock <= reorder ? 'text-[#9B1C1C]' : 'text-[#0E7490]');
+                            // Stock health colour for the variant row:
+                            //   * Zero stock         → maroon  (#7F1D1D)
+                            //   * Any positive stock → green   (#15803D)
+                            const cls = vStock === 0 ? 'text-[#7F1D1D]' : 'text-[#15803D]';
                             return (
                               <div key={v.id} className={`flex items-center justify-end gap-1 ${cls}`}>
                                 <span className="mono text-[10px] font-semibold">{suffix}:</span>

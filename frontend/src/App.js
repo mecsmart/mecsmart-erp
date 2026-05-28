@@ -37,38 +37,49 @@ function App() {
   // anything until I reopen the app". We clear them on the next tick and
   // ask the Electron main window to refocus the renderer.
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof MutationObserver === 'undefined') return;
-    const cleanup = () => {
+    if (typeof window === 'undefined') return;
+    const isAnyDialogOpen = () => !!(
+      document.querySelector('[role="dialog"][data-state="open"]') ||
+      document.querySelector('[role="alertdialog"][data-state="open"]') ||
+      document.querySelector('[data-radix-popper-content-wrapper] [data-state="open"]')
+    );
+    const cleanup = (force) => {
       try {
-        if (document.body.style.pointerEvents === 'none' &&
-            !document.querySelector('[role="dialog"][data-state="open"]') &&
-            !document.querySelector('[data-state="open"][role="alertdialog"]')) {
-          document.body.style.pointerEvents = '';
-        }
-        if (document.body.style.overflow === 'hidden' &&
-            !document.querySelector('[role="dialog"][data-state="open"]') &&
-            !document.querySelector('[data-state="open"][role="alertdialog"]')) {
-          document.body.style.overflow = '';
-        }
-        if (document.body.hasAttribute('aria-hidden') &&
-            !document.querySelector('[role="dialog"][data-state="open"]')) {
-          document.body.removeAttribute('aria-hidden');
+        // Only clean when no dialog is currently open — otherwise we'd
+        // break the active modal's focus trap.
+        if (!force && isAnyDialogOpen()) return;
+        let touched = false;
+        if (document.body.style.pointerEvents === 'none') { document.body.style.pointerEvents = ''; touched = true; }
+        if (document.body.style.overflow === 'hidden') { document.body.style.overflow = ''; touched = true; }
+        if (document.body.hasAttribute('aria-hidden')) { document.body.removeAttribute('aria-hidden'); touched = true; }
+        if (document.body.hasAttribute('data-scroll-locked')) { document.body.removeAttribute('data-scroll-locked'); touched = true; }
+        // Some Radix versions stash the lock on <html> as well.
+        if (document.documentElement.style.pointerEvents === 'none') { document.documentElement.style.pointerEvents = ''; touched = true; }
+        if (touched && window.mecsmart?.refocusMain) {
+          try { window.mecsmart.refocusMain(); } catch { /* noop */ }
         }
       } catch { /* noop */ }
     };
-    const obs = new MutationObserver(() => {
-      // Debounce: run cleanup on next tick so Radix's own teardown finishes first.
-      setTimeout(cleanup, 0);
-    });
-    obs.observe(document.body, { attributes: true, attributeFilter: ['style', 'aria-hidden'], childList: true, subtree: false });
-    // Also ping Electron to refocus the renderer whenever the window
-    // regains focus — defensive against alt-tab focus loss.
+    // 1) Mutation observer — catches Radix's own teardown re-applies.
+    let obs = null;
+    if (typeof MutationObserver !== 'undefined') {
+      obs = new MutationObserver(() => setTimeout(() => cleanup(false), 0));
+      obs.observe(document.body, { attributes: true, attributeFilter: ['style', 'aria-hidden', 'data-scroll-locked'], childList: true, subtree: false });
+      obs.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+    }
+    // 2) Periodic interval — heals any cases the mutation observer missed
+    //    (e.g. Radix mutates a CSSStyleDeclaration prop the observer can't
+    //    see directly, or styles get re-applied between obs callbacks).
+    const iv = setInterval(() => cleanup(false), 500);
+    // 3) On window focus, force a refocus into the renderer.
     const onFocus = () => {
       try { window.mecsmart?.refocusMain?.(); } catch { /* noop */ }
+      cleanup(false);
     };
     window.addEventListener('focus', onFocus);
     return () => {
-      obs.disconnect();
+      if (obs) obs.disconnect();
+      clearInterval(iv);
       window.removeEventListener('focus', onFocus);
     };
   }, []);
