@@ -282,11 +282,10 @@ export default function ItemsPage() {
         setItems(prev => [created, ...prev]);
         toast.success(`Item ${created?.part_number || ''} created`);
       }
-      // Fix 3 — Auto-generate variant children when the item has variant
-      // attributes defined. Skips the manual "Generate Variant Items" click +
-      // confirmation dialog. Only runs for CP/RM items (the editor categories
-      // that own variants). FG/SG variants are inherited from BOM components,
-      // so a separate generate step is needed there.
+      // Auto-generate variant children when the item has variant
+      // attributes defined. PUT already pruned obsolete ones — this call
+      // creates any NEW combos. Skip entirely when there are no attrs
+      // (PUT's prune already handled the "remove all variants" path).
       const isLeaf = savedItem && (savedItem.category === 'component' || savedItem.category === 'raw_material');
       if (isLeaf && cleanedVariantAttrs.length > 0 && savedItem.id) {
         try {
@@ -668,18 +667,28 @@ export default function ItemsPage() {
               // The cleanup below addresses both: clear body styles + ping
               // the Electron main window to refocus. Safe no-op in the
               // browser preview.
-              setTimeout(() => {
+              // Aggressive cleanup loop — Radix Dialog's close animation
+              // runs ~300ms; during that window it can re-apply
+              // pointer-events:none and aria-hidden if any state update
+              // happens (toast, refetch, etc.). We run the cleanup 5 times
+              // across the first 600ms so we catch every re-apply.
+              const cleanupOnce = () => {
                 try {
                   if (document.body.style.pointerEvents === 'none') document.body.style.pointerEvents = '';
                   if (document.body.style.overflow === 'hidden') document.body.style.overflow = '';
                   document.body.removeAttribute('aria-hidden');
+                  document.body.removeAttribute('data-scroll-locked');
+                  // Move focus to body so no orphan element holds keyboard focus.
+                  if (document.activeElement && document.activeElement !== document.body) {
+                    try { document.activeElement.blur(); } catch { /* noop */ }
+                  }
+                  document.body.focus({ preventScroll: true });
                   if (typeof window !== 'undefined' && window.mecsmart?.refocusMain) {
                     window.mecsmart.refocusMain();
                   }
-                } catch {
-                  /* noop */
-                }
-              }, 100);
+                } catch { /* noop */ }
+              };
+              [50, 150, 300, 450, 700].forEach(d => setTimeout(cleanupOnce, d));
             }
           }}>
             <DialogTrigger asChild>
@@ -688,7 +697,18 @@ export default function ItemsPage() {
                 <span>Add Item</span>
               </button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogContent
+              className="max-w-2xl max-h-[90vh] overflow-y-auto"
+              // Block Radix's default focus-restore on close. When the items
+              // list refetches after Update Item, the trigger button (Edit
+              // pencil in the row) may unmount before Radix tries to focus
+              // it — leaving the page in a focus-trap limbo where every
+              // input swallows keystrokes. `preventDefault` here tells Radix
+              // not to restore focus at all; we manually refocus body /
+              // electron main window in `onOpenChange`.
+              onCloseAutoFocus={(e) => e.preventDefault()}
+              onEscapeKeyDown={() => { /* default close handled by Radix */ }}
+            >
               <DialogHeader>
                 <DialogTitle className="font-[Chivo]">{editingItem ? 'Edit Item' : 'Add New Item'}</DialogTitle>
               </DialogHeader>
@@ -1298,15 +1318,25 @@ export default function ItemsPage() {
                     <td className="text-right mono" style={{ minWidth: '220px' }}>
                       {formatQty(totalStock, item.unit_of_measure, uoms)} {item.unit_of_measure}
                       {variants.length > 0 && (
-                        <div className="mt-1 space-y-0.5 text-[10px] text-[#6B7280] font-normal" data-testid={`item-variant-stock-${item.part_number}`}>
+                        <div className="mt-1 space-y-0.5 text-[10px] font-normal" data-testid={`item-variant-stock-${item.part_number}`}>
                           {variants.map(v => {
                             const suffix = (v.part_number || '').startsWith(item.part_number + '-')
                               ? v.part_number.slice(item.part_number.length + 1)
                               : v.part_number;
+                            const vStock = parseFloat(v.current_stock) || 0;
+                            // Color the variant rows distinctly from the parent total:
+                            //   * Zero stock → muted grey  (#9CA3AF)
+                            //   * Low stock (≤ reorder)   → red    (#9B1C1C)
+                            //   * Healthy stock           → teal   (#0E7490)
+                            // Reorder point falls back to 0 when not set.
+                            const reorder = parseFloat(v.reorder_point) || 0;
+                            const cls = vStock === 0
+                              ? 'text-[#9CA3AF]'
+                              : (vStock <= reorder ? 'text-[#9B1C1C]' : 'text-[#0E7490]');
                             return (
-                              <div key={v.id} className="flex items-center justify-end gap-1">
-                                <span className="mono text-[10px] text-[#374151]">{suffix}:</span>
-                                <span className="mono text-[10px]">{formatQty(v.current_stock || 0, v.unit_of_measure, uoms)} {v.unit_of_measure}</span>
+                              <div key={v.id} className={`flex items-center justify-end gap-1 ${cls}`}>
+                                <span className="mono text-[10px] font-semibold">{suffix}:</span>
+                                <span className="mono text-[10px] font-semibold">{formatQty(vStock, v.unit_of_measure, uoms)} {v.unit_of_measure}</span>
                               </div>
                             );
                           })}

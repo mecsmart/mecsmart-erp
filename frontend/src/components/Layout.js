@@ -31,6 +31,7 @@ const inventoryGroupItems = [
 ];
 
 const productionGroupItems = [
+  { name: 'Items & Stock', href: '/items', icon: Package, module: 'items' },
   { name: 'BOM', href: '/bom', icon: FileStack, module: 'bom' },
   { name: 'Manufacturing Orders', href: '/manufacturing', icon: Settings2, module: 'manufacturing' },
 ];

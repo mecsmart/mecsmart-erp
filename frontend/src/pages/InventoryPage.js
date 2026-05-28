@@ -455,14 +455,13 @@ export default function InventoryPage() {
             <span>Create Item</span>
           </button>
         )}
+        {/* "New Transaction" button removed per user request — stock changes
+            should flow through their proper transactional documents (GRN, PO,
+            DC, MO consumption, etc.) rather than ad-hoc adjustments. The
+            dialog markup is kept (mounted but hidden) so any deep-link or
+            programmatic open path keeps working. */}
         {canCreate && (
           <Dialog open={isTransactionDialogOpen} onOpenChange={setIsTransactionDialogOpen}>
-            <DialogTrigger asChild>
-              <button className="btn-primary flex items-center space-x-2" data-testid="add-transaction-btn">
-                <Plus className="w-4 h-4" />
-                <span>New Transaction</span>
-              </button>
-            </DialogTrigger>
             <DialogContent className="max-w-md">
               <DialogHeader>
                 <DialogTitle className="font-[Chivo]">Record Inventory Transaction</DialogTitle>
