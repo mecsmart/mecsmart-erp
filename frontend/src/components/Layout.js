@@ -19,7 +19,11 @@ const topNavItems = [
 ];
 
 const inventoryGroupItems = [
-  { name: 'Stock', href: '/inventory', icon: Warehouse, module: 'inventory' },
+  // "Items & Parts" / "Stock" — same canonical screen. Per user request
+  // we consolidate to a SINGLE entry that opens the items master (which
+  // also shows live stock + variant rollups). Transactions stay separate.
+  { name: 'Items & Parts', href: '/items', icon: Package, module: 'items' },
+  { name: 'Stock Transactions', href: '/inventory', icon: Warehouse, module: 'inventory' },
   { name: 'Suppliers', href: '/suppliers', icon: Truck, module: 'suppliers' },
   { name: 'MRP', href: '/mrp', icon: Calculator, module: 'mrp' },
   { name: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart, module: 'purchase_orders' },
@@ -27,7 +31,6 @@ const inventoryGroupItems = [
 ];
 
 const productionGroupItems = [
-  { name: 'Items & Parts', href: '/items', icon: Package, module: 'items' },
   { name: 'BOM', href: '/bom', icon: FileStack, module: 'bom' },
   { name: 'Manufacturing Orders', href: '/manufacturing', icon: Settings2, module: 'manufacturing' },
 ];

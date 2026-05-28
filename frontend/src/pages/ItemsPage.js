@@ -94,6 +94,10 @@ export default function ItemsPage() {
   // /api/items/{id}/effective-variants when the user opens an existing FG/SG.
   const [inheritedVariants, setInheritedVariants] = useState([]);
   const [inheritedSource, setInheritedSource] = useState('none');
+  // Per-variant stock editor — populated when an item with variants is opened
+  // for edit. Keyed by variant.id → current_stock number. Saved on submit
+  // alongside the item update so users don't need two dialogs.
+  const [variantStockEdits, setVariantStockEdits] = useState({});
 
   const canEdit = user?.role === 'admin'
     || hasPermission('items', 'create')
@@ -279,6 +283,29 @@ export default function ItemsPage() {
           toast.error(genErr.response?.data?.detail || 'Variant generation failed — open the item again to retry.');
         }
       }
+      // Push variant-level stock edits whenever the parent has variant
+      // children. Only PUT variants whose value actually changed so the
+      // audit trail (inventory_transactions) stays clean.
+      if (editingItem) {
+        const changedVariants = Object.entries(variantStockEdits || {})
+          .map(([vid, newVal]) => {
+            const orig = items.find(it => it.id === vid);
+            return { vid, oldVal: Number(orig?.current_stock || 0), newVal: Number(newVal || 0) };
+          })
+          .filter(v => Math.abs(v.oldVal - v.newVal) > 1e-9);
+        for (const cv of changedVariants) {
+          try {
+            const { data: uv } = await api.put(`/api/inventory/items/${cv.vid}/stock-fields`, { current_stock: cv.newVal });
+            setItems(prev => prev.map(it => it.id === cv.vid ? { ...it, ...(uv || { current_stock: cv.newVal }) } : it));
+          } catch (vErr) {
+            console.error('Variant stock update failed for', cv.vid, vErr);
+            toast.error(`Variant ${cv.vid} stock update failed`);
+          }
+        }
+        if (changedVariants.length) {
+          toast.success(`${changedVariants.length} variant stock${changedVariants.length > 1 ? 's' : ''} updated`);
+        }
+      }
       setIsDialogOpen(false);
       setEditingItem(null);
       resetForm();
@@ -315,6 +342,13 @@ export default function ItemsPage() {
       })),
     });
     setIsDialogOpen(true);
+    // Initialize variant stock edit map — for parents that have variant
+    // children we surface a green inline editor (matches Inventory page
+    // behaviour) so the user can adjust each variant's opening/current stock.
+    const childVariants = items.filter(it => it.is_variant && it.parent_item_id === item.id);
+    const vmap = {};
+    childVariants.forEach(v => { vmap[v.id] = Number(v.current_stock || 0); });
+    setVariantStockEdits(vmap);
     // For FG/SG, also load inherited variants from BOM components so the
     // user can see what variant SKUs they can produce.
     setInheritedVariants([]);
@@ -789,14 +823,30 @@ export default function ItemsPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-[#111827] mb-1">Current Stock</label>
-                    <input
-                      type="number"
-                      value={formData.current_stock}
-                      onChange={(e) => setFormData({ ...formData, current_stock: parseInt(e.target.value) || 0 })}
-                      className="input-field mono"
-                      data-testid="item-current-stock-input"
-                    />
+                    {(() => {
+                      const childVariants = editingItem ? items.filter(it => it.is_variant && it.parent_item_id === editingItem.id) : [];
+                      const hasVariants = childVariants.length > 0;
+                      const consolidated = hasVariants
+                        ? childVariants.reduce((s, v) => s + (Number(variantStockEdits[v.id] ?? v.current_stock) || 0), 0)
+                        : null;
+                      return (
+                        <>
+                          <label className="block text-sm font-semibold text-[#111827] mb-1">
+                            Current Stock
+                            {hasVariants && <span className="text-[10px] text-[#065F46] ml-1 font-normal">(Σ variants — readonly)</span>}
+                          </label>
+                          <input
+                            type="number"
+                            step="any"
+                            value={hasVariants ? consolidated : formData.current_stock}
+                            onChange={(e) => !hasVariants && setFormData({ ...formData, current_stock: parseFloat(e.target.value) || 0 })}
+                            readOnly={hasVariants}
+                            className={`input-field mono ${hasVariants ? 'bg-[#F3F4F6] cursor-not-allowed text-[#374151]' : ''}`}
+                            data-testid="item-current-stock-input"
+                          />
+                        </>
+                      );
+                    })()}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-[#111827] mb-1">Reorder Point</label>
@@ -809,6 +859,58 @@ export default function ItemsPage() {
                     />
                   </div>
                 </div>
+
+                {/* Per-variant stock editor — appears when editing a parent
+                    item that already has generated variant children. Matches
+                    the green block on the Inventory page so users see the
+                    same UX in either place. */}
+                {editingItem && (() => {
+                  const childVariants = items.filter(it => it.is_variant && it.parent_item_id === editingItem.id);
+                  if (!childVariants.length) return null;
+                  const variantTotal = childVariants.reduce((s, v) => s + (Number(variantStockEdits[v.id] ?? v.current_stock) || 0), 0);
+                  return (
+                    <div className="border border-[#A7F3D0] bg-[#ECFDF5] rounded-sm p-3 space-y-2" data-testid="item-variant-stock-block">
+                      <div className="flex items-center justify-between">
+                        <div className="text-[11px] font-semibold text-[#065F46] uppercase tracking-wide">Variant Stock (Opening / Adjust)</div>
+                        <span className="text-[10px] text-[#047857]">Total across variants: <strong className="mono">{formatQty(variantTotal, editingItem.unit_of_measure, uoms)}</strong></span>
+                      </div>
+                      <div className="bg-white border border-[#A7F3D0] rounded-sm overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead className="bg-[#D1FAE5]">
+                            <tr>
+                              <th className="text-left px-2 py-1.5 font-semibold text-[#065F46]">Variant Part No</th>
+                              <th className="text-left px-2 py-1.5 font-semibold text-[#065F46]">Variant</th>
+                              <th className="text-right px-2 py-1.5 font-semibold text-[#065F46] w-32">Current Stock</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {childVariants.map(v => {
+                              const labels = Object.entries(v.variant_values || v.variant_short_codes || {}).map(([k, val]) => `${k}: ${val}`).join(' · ');
+                              return (
+                                <tr key={v.id} className="border-t border-[#D1FAE5]" data-testid={`item-variant-stock-row-${v.id}`}>
+                                  <td className="px-2 py-1 mono text-[11px]">{v.part_number}</td>
+                                  <td className="px-2 py-1 text-[11px] text-[#374151]">{labels || '-'}</td>
+                                  <td className="px-2 py-1 text-right">
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      min="0"
+                                      value={variantStockEdits[v.id] ?? 0}
+                                      onChange={(e) => setVariantStockEdits(prev => ({ ...prev, [v.id]: e.target.value === '' ? '' : parseFloat(e.target.value) || 0 }))}
+                                      className="input-field mono text-right h-7 text-xs"
+                                      data-testid={`item-variant-stock-input-${v.id}`}
+                                    />
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="text-[10px] text-[#065F46]">Tip: variant stocks are tracked independently. Any change logs an "adjust" entry in stock transactions.</p>
+                    </div>
+                  );
+                })()}
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>

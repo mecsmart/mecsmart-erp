@@ -38,7 +38,10 @@ export default function InventoryPage() {
   const [warehouses, setWarehouses] = useState([]);
   const [stockByItem, setStockByItem] = useState({});
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('stock');
+  // Default tab is now `transactions` — the Stock tab content is canonical
+  // on the Items & Parts page (sidebar redirects users there). Inventory
+  // route remains the home for transactions / new transaction / reconcile.
+  const [activeTab, setActiveTab] = useState('transactions');
   const [itemGroups, setItemGroups] = useState([]);
   const [groupFilter, setGroupFilter] = useState('');
   const [taxSlabs, setTaxSlabs] = useState([0, 5, 12, 18, 28]);
@@ -86,7 +89,10 @@ export default function InventoryPage() {
   // MUST be declared AFTER those `useState`s (TDZ — can't reference let-binds
   // before initialization in the function body).
   const filteredSortedInventory = useMemo(() => {
+    // Variants are RENDERED under their parent's stock cell (Fix #4) — they
+    // must not appear as standalone rows. Exclude them up-front.
     const filtered = inventory.filter(item => {
+      if (item.is_variant) return false;
       if (groupFilter && item.group_id !== groupFilter) return false;
       if (!stockSearch.trim()) return true;
       const q = stockSearch.toLowerCase();
@@ -104,6 +110,17 @@ export default function InventoryPage() {
       return partNumberSort === 'asc' ? cmp : -cmp;
     });
   }, [inventory, groupFilter, stockSearch, itemGroups, partNumberSort]);
+
+  // Lookup: parent_item_id → list of variant children (active only).
+  const variantsByParent = useMemo(() => {
+    const map = {};
+    for (const it of inventory) {
+      if (it.is_variant && it.parent_item_id) {
+        (map[it.parent_item_id] = map[it.parent_item_id] || []).push(it);
+      }
+    }
+    return map;
+  }, [inventory]);
   
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false);
   const [transactionForm, setTransactionForm] = useState({
@@ -172,12 +189,18 @@ export default function InventoryPage() {
     try {
       // Always send stock fields. Send master fields only if user can edit them
       // (defence-in-depth — backend would silently drop them anyway).
+      // When the item has variants the parent's own current_stock is a
+      // derived number; we omit it so the backend doesn't overwrite the
+      // computed sum with a stale value (variants drive the total).
+      const hasVariants = (inventory || []).some(it => it.is_variant && it.parent_item_id === item.id);
       const payload = {
         safety_stock: stockEditForm.safety_stock,
         reorder_point: stockEditForm.reorder_point,
         lead_time_days: stockEditForm.lead_time_days,
-        current_stock: stockEditForm.current_stock,
       };
+      if (!hasVariants) {
+        payload.current_stock = stockEditForm.current_stock;
+      }
       if (canEditItemMaster) {
         payload.name = stockEditForm.name;
         payload.group_id = stockEditForm.group_id || null;
@@ -661,7 +684,11 @@ export default function InventoryPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredSortedInventory.slice(0, visibleCount).map((item) => (
+                    {filteredSortedInventory.slice(0, visibleCount).map((item) => {
+                      const variants = variantsByParent[item.id] || [];
+                      const variantTotal = variants.reduce((s, v) => s + (parseFloat(v.current_stock) || 0), 0);
+                      const totalStock = (parseFloat(item.current_stock) || 0) + variantTotal;
+                      return (
                       <tr key={item.id} className={isLowStock(item) ? 'bg-[#FDE8E8]/30' : ''} data-testid={`inventory-row-${item.part_number}`}>
                         <td className="mono font-medium">{item.part_number}</td>
                         <td>
@@ -696,8 +723,23 @@ export default function InventoryPage() {
                             {item.category.replace('_', ' ')}
                           </span>
                         </td>
-                        <td className={`text-right mono font-medium ${isLowStock(item) ? 'text-[#9B1C1C]' : ''}`}>
-                          {formatQty(item.current_stock, item.unit_of_measure, uoms)} {item.unit_of_measure}
+                        <td className={`text-right mono font-medium ${isLowStock(item) ? 'text-[#9B1C1C]' : ''}`} style={{ minWidth: '220px' }}>
+                          {formatQty(totalStock, item.unit_of_measure, uoms)} {item.unit_of_measure}
+                          {variants.length > 0 && (
+                            <div className="mt-1 space-y-0.5 text-[10px] text-[#6B7280] font-normal" data-testid={`inventory-variant-stock-${item.part_number}`}>
+                              {variants.map(v => {
+                                const suffix = (v.part_number || '').startsWith(item.part_number + '-')
+                                  ? v.part_number.slice(item.part_number.length + 1)
+                                  : v.part_number;
+                                return (
+                                  <div key={v.id} className="flex items-center justify-end gap-1">
+                                    <span className="mono text-[10px] text-[#374151]">{suffix}:</span>
+                                    <span className="mono text-[10px]">{formatQty(v.current_stock || 0, v.unit_of_measure, uoms)} {v.unit_of_measure}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </td>
                         <td className="text-xs">
                           {(stockByItem[item.id] || []).length === 0 ? (
@@ -741,7 +783,8 @@ export default function InventoryPage() {
                           </td>
                         )}
                       </tr>
-                    ))}
+                    );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -870,7 +913,7 @@ export default function InventoryPage() {
           Price field set differs by category: RM = purchase + sale; others =
           sale only (unit cost rolls up from BOM for FG/SA/Component). */}
       <Dialog open={stockEditDialog.open} onOpenChange={(open) => { if (!open) setStockEditDialog({ open: false, item: null }); }}>
-        <DialogContent className="max-w-2xl" data-testid="inventory-stock-edit-dialog">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="inventory-stock-edit-dialog">
           <DialogHeader>
             <DialogTitle className="font-[Chivo]">Edit Item — {stockEditDialog.item?.part_number}</DialogTitle>
           </DialogHeader>
@@ -1069,12 +1112,34 @@ export default function InventoryPage() {
                   <div className="text-[11px] font-semibold text-[#1D3557] uppercase tracking-wide">Stock Levels</div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-[#111827] mb-1">Current Stock</label>
-                      <input type="number" step="any" min="0"
-                        value={stockEditForm.current_stock}
-                        onChange={(e) => setStockEditForm({ ...stockEditForm, current_stock: parseFloat(e.target.value) || 0 })}
-                        className="input-field mono"
-                        data-testid="stock-edit-current-stock" />
+                      {(() => {
+                        // When the item has variant children, Current Stock is
+                        // a *derived* number (sum of all variant stocks) and
+                        // must NOT be edited directly here — edits happen in
+                        // the Variant Stock table above. Show it as readonly
+                        // and reflect the live sum of variant edits so the
+                        // user sees the consolidated number update as they
+                        // tweak individual variant rows.
+                        const variants = (inventory || []).filter(it2 => it2.is_variant && it2.parent_item_id === stockEditDialog.item?.id);
+                        const hasVariants = variants.length > 0;
+                        const consolidated = hasVariants
+                          ? variants.reduce((s, v) => s + (Number(variantStockEdits[v.id] ?? v.current_stock) || 0), 0)
+                          : null;
+                        return (
+                          <>
+                            <label className="block text-xs font-semibold text-[#111827] mb-1">
+                              Current Stock
+                              {hasVariants && <span className="text-[10px] text-[#065F46] ml-1 font-normal">(Σ variants — readonly)</span>}
+                            </label>
+                            <input type="number" step="any" min="0"
+                              value={hasVariants ? consolidated : stockEditForm.current_stock}
+                              onChange={(e) => !hasVariants && setStockEditForm({ ...stockEditForm, current_stock: parseFloat(e.target.value) || 0 })}
+                              readOnly={hasVariants}
+                              className={`input-field mono ${hasVariants ? 'bg-[#F3F4F6] cursor-not-allowed text-[#374151]' : ''}`}
+                              data-testid="stock-edit-current-stock" />
+                          </>
+                        );
+                      })()}
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-[#111827] mb-1">Safety Stock</label>
