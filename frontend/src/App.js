@@ -1,4 +1,5 @@
 import "@/index.css";
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { CompanySettingsProvider } from "./context/CompanySettingsContext";
@@ -29,6 +30,48 @@ import PreviewPdfDialog from "./components/PreviewPdfDialog";
 import PromptDialog from "./components/PromptDialog";
 
 function App() {
+  // Global watchdog — observe document.body for the `pointer-events: none`
+  // style + stray `aria-hidden` attributes Radix Dialog sometimes leaves
+  // behind when state updates fire during the dialog close animation. The
+  // user-visible symptom on Windows desktop is "I can't type / click
+  // anything until I reopen the app". We clear them on the next tick and
+  // ask the Electron main window to refocus the renderer.
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof MutationObserver === 'undefined') return;
+    const cleanup = () => {
+      try {
+        if (document.body.style.pointerEvents === 'none' &&
+            !document.querySelector('[role="dialog"][data-state="open"]') &&
+            !document.querySelector('[data-state="open"][role="alertdialog"]')) {
+          document.body.style.pointerEvents = '';
+        }
+        if (document.body.style.overflow === 'hidden' &&
+            !document.querySelector('[role="dialog"][data-state="open"]') &&
+            !document.querySelector('[data-state="open"][role="alertdialog"]')) {
+          document.body.style.overflow = '';
+        }
+        if (document.body.hasAttribute('aria-hidden') &&
+            !document.querySelector('[role="dialog"][data-state="open"]')) {
+          document.body.removeAttribute('aria-hidden');
+        }
+      } catch { /* noop */ }
+    };
+    const obs = new MutationObserver(() => {
+      // Debounce: run cleanup on next tick so Radix's own teardown finishes first.
+      setTimeout(cleanup, 0);
+    });
+    obs.observe(document.body, { attributes: true, attributeFilter: ['style', 'aria-hidden'], childList: true, subtree: false });
+    // Also ping Electron to refocus the renderer whenever the window
+    // regains focus — defensive against alt-tab focus loss.
+    const onFocus = () => {
+      try { window.mecsmart?.refocusMain?.(); } catch { /* noop */ }
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      obs.disconnect();
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
   return (
     <AuthProvider>
       <CompanySettingsProvider>

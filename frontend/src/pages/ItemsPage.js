@@ -264,7 +264,18 @@ export default function ItemsPage() {
         const { data: updated } = await api.put(`/api/items/${editingItem.id}`, payload);
         savedItem = updated;
         setItems(prev => prev.map(it => it.id === editingItem.id ? { ...it, ...updated } : it));
-        toast.success(`Item ${updated?.part_number || ''} updated`);
+        // Server returns _variant_prune when CP/RM variants were removed
+        // — show the user exactly what happened.
+        const prune = updated && updated._variant_prune;
+        if (prune && (prune.deleted_skus?.length || prune.retired_in_use_skus?.length)) {
+          const parts = [];
+          if (prune.deleted_skus?.length) parts.push(`${prune.deleted_skus.length} variant${prune.deleted_skus.length > 1 ? 's' : ''} deleted`);
+          if (prune.retired_in_use_skus?.length) parts.push(`${prune.retired_in_use_skus.length} kept (in use, soft-retired)`);
+          toast.success(`Item ${updated?.part_number || ''} updated — ${parts.join(', ')}`);
+          fetchItems().catch(() => {});
+        } else {
+          toast.success(`Item ${updated?.part_number || ''} updated`);
+        }
       } else {
         const { data: created } = await api.post('/api/items', payload);
         savedItem = created;
@@ -644,6 +655,31 @@ export default function ItemsPage() {
             if (!open) {
               setEditingItem(null);
               resetForm();
+              // Two long-standing issues bite when the Item dialog closes:
+              //   1) Radix Dialog occasionally leaves `pointer-events: none`
+              //      on document.body if a state update happens during the
+              //      close animation (e.g. a toast). Subsequent clicks/typing
+              //      land on nothing. See radix-ui/primitives#1241.
+              //   2) On the Windows desktop (Electron) build, OS focus
+              //      doesn't reliably return to the webContents after the
+              //      Radix focus-trap releases — inputs across the page
+              //      silently swallow keystrokes until the user reopens
+              //      the app.
+              // The cleanup below addresses both: clear body styles + ping
+              // the Electron main window to refocus. Safe no-op in the
+              // browser preview.
+              setTimeout(() => {
+                try {
+                  if (document.body.style.pointerEvents === 'none') document.body.style.pointerEvents = '';
+                  if (document.body.style.overflow === 'hidden') document.body.style.overflow = '';
+                  document.body.removeAttribute('aria-hidden');
+                  if (typeof window !== 'undefined' && window.mecsmart?.refocusMain) {
+                    window.mecsmart.refocusMain();
+                  }
+                } catch {
+                  /* noop */
+                }
+              }, 100);
             }
           }}>
             <DialogTrigger asChild>

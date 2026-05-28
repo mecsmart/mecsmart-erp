@@ -1221,33 +1221,31 @@ async def update_item(item_id: str, item_data: ItemUpdate, request: Request):
         merged = await _apply_item_group_overrides(merged)
         update_data["hsn_code"] = merged.get("hsn_code", update_data.get("hsn_code"))
         update_data["gst_rate"] = merged.get("gst_rate", update_data.get("gst_rate"))
-    
+
     update_data["updated_at"] = datetime.now(timezone.utc)
     # Normalize variant_attributes to canonical shape (List[{name, values:[{value,short_code}]}]).
+    # We also opportunistically prune orphan variant children that no longer
+    # match the new attribute set — this is the "delete a value and update
+    # item" flow the user expects. Logic:
+    #   * Variants whose SKU is no longer in the valid combos are checked
+    #     against all transaction collections.
+    #   * No references found → hard-deleted (removes the row outright).
+    #   * Otherwise → soft-retired (is_active=False) so transaction history
+    #     stays intact but they disappear from pickers / stock lists.
+    prune_result = None
     if "variant_attributes" in update_data:
         new_attrs = _normalize_variant_attributes(update_data["variant_attributes"])
         update_data["variant_attributes"] = new_attrs
-        # If the user CLEARED all variant_attributes on a CP/RM parent that
-        # has existing variant children, retire (is_active=false) those
-        # orphans so they stop showing up in stock rollups / dropdowns.
-        # Children stay in the DB (stock history preserved) but are
-        # visually gone.
-        #
-        # NOTE: We deliberately DO NOT auto-retire for FG/SG — their variant
-        # children are driven by inherited BOM variants, not by the FG's own
-        # legacy variant_attributes. Clearing the FG's stale own-variants is
-        # actually a cleanup the system encourages (so inheritance takes over).
-        existing = await db.items.find_one({"id": item_id}, {"_id": 0, "category": 1})
-        if not new_attrs and existing and existing.get("category") in ("component", "raw_material"):
-            await db.items.update_many(
-                {"parent_item_id": item_id, "is_variant": True, "is_active": {"$ne": False}},
-                {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc)}},
-            )
+        parent = await db.items.find_one({"id": item_id}, {"_id": 0})
+        if parent and parent.get("category") in ("component", "raw_material"):
+            prune_result = await _prune_obsolete_variants(parent, new_attrs)
     result = await db.items.update_one({"id": item_id}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
     
     item = await db.items.find_one({"id": item_id}, {"_id": 0})
+    if prune_result is not None:
+        item["_variant_prune"] = prune_result
     return item
 
 @items_router.delete("/{item_id}")
@@ -1359,6 +1357,74 @@ def _build_variant_sku_from_short_codes(parent_sku: str, combo: Dict[str, Dict[s
     if not parts:
         return parent_sku
     return f"{parent_sku}-{'-'.join(parts)}"
+
+
+async def _is_variant_referenced(variant_id: str) -> bool:
+    """Returns True iff the given variant SKU appears in ANY transactional
+    collection. Mirrors the safety check inside generate_item_variants so
+    both the PUT /items path AND generate-variants treat orphans identically."""
+    ref_collections = [
+        ("inventory_transactions", {"item_id": variant_id}),
+        ("purchase_orders", {"line_items.item_id": variant_id}),
+        ("grns", {"line_items.item_id": variant_id}),
+        ("subcontract_orders", {"$or": [{"lines.item_id": variant_id}, {"job_work_parts.item_id": variant_id}]}),
+        ("delivery_challans", {"lines.item_id": variant_id}),
+        ("work_orders", {"$or": [{"item_id": variant_id}, {"reserved_materials.item_id": variant_id}, {"consumed_materials.item_id": variant_id}]}),
+        ("quotations", {"line_items.item_id": variant_id}),
+        ("tax_invoices", {"line_items.item_id": variant_id}),
+        ("proforma_invoices", {"line_items.item_id": variant_id}),
+        ("boms", {"components.item_id": variant_id}),
+    ]
+    for col_name, q in ref_collections:
+        try:
+            cnt = await db[col_name].count_documents(q, limit=1)
+        except Exception:
+            cnt = 0
+        if cnt:
+            return True
+    return False
+
+
+async def _prune_obsolete_variants(parent: Dict[str, Any], new_attrs: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """Given a parent item and its (already normalized) NEW variant_attributes,
+    walk every existing variant child and either:
+      * hard-delete it (no transactional footprint), or
+      * soft-retire it (set is_active=False) when it IS referenced anywhere.
+
+    Returns: {"deleted_skus": [...], "retired_in_use_skus": [...]}
+    Empty `new_attrs` means "no variants any more" → every child is a
+    candidate for pruning. This is the path that fires when the user removes
+    the LAST attribute and clicks "Update Item"."""
+    item_id = parent.get("id")
+    if not item_id:
+        return {"deleted_skus": [], "retired_in_use_skus": []}
+    parent_sku = parent.get("part_number") or ""
+    valid_skus: set = set()
+    if new_attrs:
+        try:
+            combos = _all_variant_combinations(new_attrs)
+            valid_skus = {_build_variant_sku_from_short_codes(parent_sku, c) for c in combos}
+        except Exception:
+            valid_skus = set()
+    children = await db.items.find(
+        {"parent_item_id": item_id, "is_variant": True},
+        {"_id": 0, "id": 1, "part_number": 1, "is_active": 1},
+    ).to_list(2000)
+    deleted: List[str] = []
+    retired: List[str] = []
+    for ch in children:
+        if ch.get("part_number") in valid_skus:
+            # Still in the combination set — leave it alone (or reactivate if soft-retired).
+            if ch.get("is_active") is False:
+                await db.items.update_one({"id": ch["id"]}, {"$set": {"is_active": True, "updated_at": datetime.now(timezone.utc)}})
+            continue
+        if await _is_variant_referenced(ch["id"]):
+            await db.items.update_one({"id": ch["id"]}, {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc)}})
+            retired.append(ch.get("part_number", ""))
+        else:
+            await db.items.delete_one({"id": ch["id"]})
+            deleted.append(ch.get("part_number", ""))
+    return {"deleted_skus": deleted, "retired_in_use_skus": retired}
 
 
 async def _compute_inherited_variants(item_id: str) -> List[Dict[str, Any]]:
@@ -1758,32 +1824,10 @@ async def generate_item_variants(item_id: str, payload: dict = Body(default={}),
     for sku, ex in existing_by_sku.items():
         if sku in valid_skus_in_combos:
             continue
-        ref_collections = [
-            ("inventory_transactions", {"item_id": ex["id"]}),
-            ("purchase_orders", {"line_items.item_id": ex["id"]}),
-            ("grns", {"line_items.item_id": ex["id"]}),
-            ("subcontract_orders", {"$or": [{"lines.item_id": ex["id"]}, {"job_work_parts.item_id": ex["id"]}]}),
-            ("delivery_challans", {"lines.item_id": ex["id"]}),
-            ("work_orders", {"$or": [{"item_id": ex["id"]}, {"reserved_materials.item_id": ex["id"]}, {"consumed_materials.item_id": ex["id"]}]}),
-            ("quotations", {"line_items.item_id": ex["id"]}),
-            ("tax_invoices", {"line_items.item_id": ex["id"]}),
-            ("proforma_invoices", {"line_items.item_id": ex["id"]}),
-            ("boms", {"components.item_id": ex["id"]}),
-        ]
-        referenced = False
-        for col_name, q in ref_collections:
-            try:
-                cnt = await db[col_name].count_documents(q, limit=1)
-            except Exception:
-                cnt = 0
-            if cnt:
-                referenced = True
-                break
-        if referenced:
+        if await _is_variant_referenced(ex["id"]):
             await db.items.update_one({"id": ex["id"]}, {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc)}})
             blocked_skus.append(sku)
         else:
-            # Safe to permanently delete — no transactional footprint.
             await db.items.delete_one({"id": ex["id"]})
             retired_skus.append(sku)
     return {
