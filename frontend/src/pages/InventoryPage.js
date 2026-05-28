@@ -133,6 +133,11 @@ export default function InventoryPage() {
     purchase_price: 0,
     sale_price: 0,
   });
+  // When the item being edited has variant children, we surface a sub-table
+  // letting the user adjust each variant's `current_stock` independently.
+  // Keyed by variant item.id → numeric stock value (string in input for
+  // smooth typing experience).
+  const [variantStockEdits, setVariantStockEdits] = useState({});
   const [stockEditSaving, setStockEditSaving] = useState(false);
 
   const openStockEdit = (item) => {
@@ -149,6 +154,15 @@ export default function InventoryPage() {
       purchase_price: Number(item.purchase_price || 0),
       sale_price: Number(item.sale_price || 0),
     });
+    // Pre-load variant stock map so each child variant gets its current
+    // value in the editable column.
+    const variantMap = {};
+    (inventory || []).forEach(it => {
+      if (it.is_variant && it.parent_item_id === item.id) {
+        variantMap[it.id] = Number(it.current_stock || 0);
+      }
+    });
+    setVariantStockEdits(variantMap);
   };
 
   const handleStockEditSave = async () => {
@@ -177,11 +191,38 @@ export default function InventoryPage() {
         payload.sale_price = stockEditForm.sale_price;
       }
       const { data: updated } = await api.put(`/api/inventory/items/${item.id}/stock-fields`, payload);
-      // Patch the item in place — preserves scroll position so the user
-      // doesn't get bounced back to the top after every stock edit.
-      setInventory(prev => prev.map(it => it.id === item.id ? { ...it, ...(updated || payload) } : it));
+
+      // Push variant-level stock edits — only PUT variants whose value
+      // actually changed (avoids spurious adjust transactions in the
+      // inventory audit log).
+      const variantsToUpdate = Object.entries(variantStockEdits || {})
+        .map(([vid, newVal]) => {
+          const orig = (inventory || []).find(it => it.id === vid);
+          const oldVal = Number(orig?.current_stock || 0);
+          const nv = Number(newVal || 0);
+          return { vid, oldVal, newVal: nv };
+        })
+        .filter(v => Math.abs(v.oldVal - v.newVal) > 1e-9);
+      const updatedVariants = [];
+      for (const v of variantsToUpdate) {
+        try {
+          const { data: uv } = await api.put(`/api/inventory/items/${v.vid}/stock-fields`, { current_stock: v.newVal });
+          updatedVariants.push(uv || { id: v.vid, current_stock: v.newVal });
+        } catch (err) {
+          console.error('Variant stock update failed for', v.vid, err);
+        }
+      }
+
+      // Patch the item + any updated variants in place so the table
+      // doesn't bounce back to the top of the list.
+      setInventory(prev => prev.map(it => {
+        if (it.id === item.id) return { ...it, ...(updated || payload) };
+        const u = updatedVariants.find(uv => uv.id === it.id);
+        if (u) return { ...it, ...u };
+        return it;
+      }));
       setStockEditDialog({ open: false, item: null });
-      toast.success(`${item.part_number} updated`);
+      toast.success(`${item.part_number} updated${variantsToUpdate.length ? ` (+ ${variantsToUpdate.length} variant${variantsToUpdate.length > 1 ? 's' : ''})` : ''}`);
     } catch (e) {
       alert(e.response?.data?.detail || 'Failed to save stock changes');
     } finally {
@@ -970,6 +1011,58 @@ export default function InventoryPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Per-variant stock editor — appears whenever the parent
+                    item has at least one generated variant child. Each row
+                    is a Part No · Variant Labels · Current Stock input.
+                    Saved alongside the main item on Save. */}
+                {(() => {
+                  const variants = (inventory || []).filter(it => it.is_variant && it.parent_item_id === stockEditDialog.item?.id);
+                  if (!variants.length) return null;
+                  const variantTotal = variants.reduce((s, v) => s + (Number(variantStockEdits[v.id] ?? v.current_stock) || 0), 0);
+                  return (
+                    <div className="border border-[#A7F3D0] bg-[#ECFDF5] rounded-sm p-3 space-y-2" data-testid="stock-edit-variant-stock-block">
+                      <div className="flex items-center justify-between">
+                        <div className="text-[11px] font-semibold text-[#065F46] uppercase tracking-wide">Variant Stock (Opening / Adjust)</div>
+                        <span className="text-[10px] text-[#047857]">Total across variants: <strong className="mono">{formatQty(variantTotal, stockEditDialog.item?.unit_of_measure, uoms)}</strong></span>
+                      </div>
+                      <div className="bg-white border border-[#A7F3D0] rounded-sm overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead className="bg-[#D1FAE5]">
+                            <tr>
+                              <th className="text-left px-2 py-1.5 font-semibold text-[#065F46]">Variant Part No</th>
+                              <th className="text-left px-2 py-1.5 font-semibold text-[#065F46]">Variant</th>
+                              <th className="text-right px-2 py-1.5 font-semibold text-[#065F46] w-32">Current Stock</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {variants.map(v => {
+                              const labels = Object.entries(v.variant_values || v.variant_short_codes || {}).map(([k, val]) => `${k}: ${val}`).join(' · ');
+                              return (
+                                <tr key={v.id} className="border-t border-[#D1FAE5]" data-testid={`variant-stock-row-${v.id}`}>
+                                  <td className="px-2 py-1 mono text-[11px]">{v.part_number}</td>
+                                  <td className="px-2 py-1 text-[11px] text-[#374151]">{labels || '-'}</td>
+                                  <td className="px-2 py-1 text-right">
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      min="0"
+                                      value={variantStockEdits[v.id] ?? 0}
+                                      onChange={(e) => setVariantStockEdits(prev => ({ ...prev, [v.id]: e.target.value === '' ? '' : parseFloat(e.target.value) || 0 }))}
+                                      className="input-field mono text-right h-7 text-xs"
+                                      data-testid={`variant-stock-input-${v.id}`}
+                                    />
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="text-[10px] text-[#065F46]">Tip: variant stock balances are tracked independently. Any change here logs an "adjust" entry in the stock transaction history.</p>
+                    </div>
+                  );
+                })()}
 
                 {/* Stock fields — always editable for users with stock or master rights */}
                 <div className="border border-[#E5E7EB] rounded-sm p-3 space-y-3">

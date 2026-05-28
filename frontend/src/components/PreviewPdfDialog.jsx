@@ -113,6 +113,10 @@ export default function PreviewPdfDialog() {
       let ipcError = null;
       try {
         const res = await desktop.downloadPdf(html, filename);
+        // After the native save dialog closes the renderer can lose
+        // keyboard focus — explicitly request the main window to refocus
+        // itself so subsequent typing into inputs works without a click.
+        try { await desktop.refocusMain?.(); } catch { /* noop */ }
         if (res?.ok) return;                  // saved to disk
         if (res?.canceled) return;            // user cancelled the save dialog
         ipcError = res?.error || 'Unknown Electron error';

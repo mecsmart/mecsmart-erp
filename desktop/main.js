@@ -17,6 +17,36 @@ const fs = require('fs');
 const Store = require('electron-store');
 const { autoUpdater } = require('electron-updater');
 
+// --------------------------------------------------------------- HARDENING
+// Intermittent "I can't type into inputs" bug reported on Windows desktop
+// build. Symptoms:
+//   • Rate / quantity / search inputs and Radix dialog inputs sometimes stop
+//     accepting keystrokes after the app has been running for a while or
+//     after PDF preview / native dialog interactions.
+//   • Restarting the app clears it.
+//
+// Root cause is a combination of (a) Chromium throttling the renderer when
+// the BrowserWindow loses OS-level focus (common on Windows when the user
+// clicks the taskbar or another app), and (b) the offscreen PDF window we
+// create for native PDF rendering occasionally stealing keyboard focus from
+// the main window when it's destroyed too quickly.
+//
+// Fixes applied in this file:
+//   1) `backgroundThrottling: false` on every BrowserWindow we open.
+//   2) Stable IPC `mecsmart:refocus-main` that the renderer can call after
+//      any dialog / native modal closes — refocuses the webContents so the
+//      next typed character lands in the right input.
+//   3) After the offscreen pdfWin is destroyed we explicitly re-focus the
+//      main window's webContents on the next tick.
+//   4) `--disable-renderer-backgrounding` Chromium flag to prevent the
+//      renderer process from being throttled when the window loses focus.
+
+// Disable Chromium's renderer-backgrounding throttling. Must be set BEFORE
+// app.whenReady() — that's why it lives at module-eval time.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+
 // --------------------------------------------------------------------- store
 // Persists user preferences (server URL, window bounds) across launches.
 const store = new Store({
@@ -210,10 +240,22 @@ function createMainWindow(serverUrl) {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.js'),
+      // Keep the renderer fully alive even when the OS deems the window
+      // backgrounded — fixes intermittent "inputs don't accept keystrokes"
+      // bug after long sessions / focus loss.
+      backgroundThrottling: false,
     },
   });
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
+
+  // When the main window regains OS focus, push focus into the webContents
+  // so Radix/MUI dialog inputs receive the next keystroke. Without this the
+  // renderer's "last focused element" sometimes stays orphaned after an
+  // OS-level alt-tab.
+  mainWindow.on('focus', () => {
+    try { mainWindow.webContents.focus(); } catch { /* noop */ }
+  });
 
   // CRITICAL: Force-clear the HTTP cache before loading the server URL.
   // Electron caches the React bundle aggressively across launches — once
@@ -460,6 +502,34 @@ ipcMain.handle('mecsmart:download-pdf', async (_event, { html, filename } = {}) 
       try { pdfWin.destroy(); } catch { /* noop */ }
     }
     try { await fs.promises.unlink(tmpFile); } catch { /* noop */ }
+    // CRITICAL: after the offscreen PDF window is gone, force the keyboard
+    // focus back into the main window's renderer. Without this the active
+    // input inside an open dialog loses its caret and silently swallows
+    // keystrokes until the user clicks elsewhere — the original "can't
+    // type after preview/save PDF" bug.
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.focus();
+        setTimeout(() => {
+          try { mainWindow.webContents.focus(); } catch { /* noop */ }
+        }, 50);
+      }
+    } catch { /* noop */ }
+  }
+});
+
+// Renderer-callable "refocus the main window" — used after closing any
+// native dialog (save-as, message box, file picker) so the next keystroke
+// reliably lands in the previously-focused input.
+ipcMain.handle('mecsmart:refocus-main', () => {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.focus();
+      mainWindow.webContents.focus();
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
   }
 });
 

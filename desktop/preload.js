@@ -35,6 +35,10 @@ contextBridge.exposeInMainWorld('mecsmart', {
   // desktop wrapper. Produces a vector PDF via Chromium's printToPDF —
   // byte-identical to the user's "Print → Save as PDF" output.
   downloadPdf: (html, filename) => ipcRenderer.invoke('mecsmart:download-pdf', { html, filename }),
+  // Force keyboard focus back into the main window's renderer. Useful
+  // after a native dialog closes — calling this guarantees the next
+  // keystroke lands in the input the user expects.
+  refocusMain: () => ipcRenderer.invoke('mecsmart:refocus-main'),
   // True when running inside Electron — used by the LoginPage to decide
   // whether to render the "Remember me" checkbox at all.
   isDesktopApp: true,
