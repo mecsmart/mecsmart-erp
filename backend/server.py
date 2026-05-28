@@ -12908,7 +12908,11 @@ async def list_open_manual_dcs(request: Request):
 async def create_manual_delivery_challan(data: ManualDCCreate, request: Request):
     """Create a standalone (manual) DC — not linked to any Subcontract Order.
     Used when goods are shipped outward and a GRN is expected back later (DC→GRN flow).
-    Deducts stock (unless skip_stock_deduct is true).
+
+    Stock is NOT deducted on create/edit — only when the DC is explicitly
+    sent via POST /challans/{dc_id}/send. This prevents the historic
+    "stock deducted twice" bug where draft creation + send each issued
+    their own inventory_transactions row.
     """
     user = await get_current_user(request)
     _require_access(user, ["admin", "production_manager", "inventory_manager"], module="job_work", action="create")
@@ -12918,26 +12922,6 @@ async def create_manual_delivery_challan(data: ManualDCCreate, request: Request)
 
     if not data.lines:
         raise HTTPException(status_code=400, detail="At least one line item is required")
-
-    # First pass: stock availability
-    if not data.skip_stock_deduct:
-        insufficient = []
-        for line in data.lines:
-            item = await db.items.find_one({"id": line.item_id})
-            if not item:
-                raise HTTPException(status_code=404, detail=f"Item {line.item_id} not found")
-            if float(item.get("current_stock", 0) or 0) < float(line.quantity):
-                insufficient.append({
-                    "part_number": item.get("part_number"),
-                    "name": item.get("name"),
-                    "required": line.quantity,
-                    "available": item.get("current_stock", 0)
-                })
-        if insufficient:
-            raise HTTPException(
-                status_code=400,
-                detail={"message": "Insufficient stock for one or more items", "items": insufficient}
-            )
 
     count = await db.delivery_challans.count_documents({})
     dc_number = await get_next_series_number("delivery_challan")
@@ -12955,27 +12939,6 @@ async def create_manual_delivery_challan(data: ManualDCCreate, request: Request)
             "item_description": line.item_description or "",
         }
         dc_lines.append(line_doc)
-        # Deduct stock
-        if not data.skip_stock_deduct and item:
-            current_stock = float(item.get("current_stock", 0) or 0)
-            new_stock = current_stock - float(line.quantity)
-            await db.items.update_one(
-                {"id": line.item_id},
-                {"$set": {"current_stock": new_stock, "updated_at": datetime.now(timezone.utc)}}
-            )
-            await db.inventory_transactions.insert_one({
-                "id": str(uuid.uuid4()),
-                "item_id": line.item_id,
-                "transaction_type": "issue",
-                "quantity": float(line.quantity),
-                "reference_type": "manual_dc",
-                "reference_id": dc_number,
-                "previous_stock": current_stock,
-                "new_stock": new_stock,
-                "notes": f"Manual DC {dc_number} to {supplier.get('name', '')}",
-                "created_at": datetime.now(timezone.utc),
-                "created_by": user["id"]
-            })
 
     dc_doc = {
         "id": str(uuid.uuid4()),
@@ -13024,72 +12987,9 @@ async def update_manual_delivery_challan(dc_id: str, data: ManualDCCreate, reque
     if not data.lines:
         raise HTTPException(status_code=400, detail="At least one line item is required")
 
-    # Build per-item delta map: new_qty - old_qty (per item_id, summed across
-    # lines because the user could split or merge lines).
-    old_qty_by_item: Dict[str, float] = {}
-    for line in dc.get("lines", []):
-        iid = line.get("item_id")
-        if iid:
-            old_qty_by_item[iid] = old_qty_by_item.get(iid, 0.0) + float(line.get("quantity", 0) or 0)
-    new_qty_by_item: Dict[str, float] = {}
-    for line in data.lines:
-        new_qty_by_item[line.item_id] = new_qty_by_item.get(line.item_id, 0.0) + float(line.quantity)
-
-    all_item_ids = set(old_qty_by_item.keys()) | set(new_qty_by_item.keys())
-    deltas = {}  # positive delta => additional stock needed
-    for iid in all_item_ids:
-        deltas[iid] = new_qty_by_item.get(iid, 0.0) - old_qty_by_item.get(iid, 0.0)
-
-    # Stock availability check — only need to validate items whose net qty INCREASED.
-    if not data.skip_stock_deduct:
-        insufficient = []
-        for iid, delta in deltas.items():
-            if delta <= 0:
-                continue
-            item = await db.items.find_one({"id": iid})
-            if not item:
-                raise HTTPException(status_code=404, detail=f"Item {iid} not found")
-            if float(item.get("current_stock", 0) or 0) < delta:
-                insufficient.append({
-                    "part_number": item.get("part_number"),
-                    "name": item.get("name"),
-                    "required": delta,
-                    "available": item.get("current_stock", 0),
-                })
-        if insufficient:
-            raise HTTPException(
-                status_code=400,
-                detail={"message": "Insufficient stock for one or more items", "items": insufficient},
-            )
-
-    # Apply stock deltas (skip if original DC was created with skip_stock_deduct,
-    # detectable by absence of inventory_transactions referencing this dc_number).
-    if not data.skip_stock_deduct:
-        for iid, delta in deltas.items():
-            if abs(delta) < 1e-9:
-                continue
-            item = await db.items.find_one({"id": iid})
-            if not item:
-                continue
-            current_stock = float(item.get("current_stock", 0) or 0)
-            new_stock = current_stock - delta  # positive delta => deduct; negative => refund
-            await db.items.update_one(
-                {"id": iid},
-                {"$set": {"current_stock": new_stock, "updated_at": datetime.now(timezone.utc)}},
-            )
-            await db.inventory_transactions.insert_one({
-                "id": str(uuid.uuid4()),
-                "item_id": iid,
-                "transaction_type": "issue" if delta > 0 else "return",
-                "quantity": abs(delta),
-                "reference_type": "manual_dc_edit",
-                "reference_id": dc.get("dc_number"),
-                "previous_stock": current_stock,
-                "new_stock": new_stock,
-                "notes": f"Manual DC {dc.get('dc_number')} edit — net {'issue' if delta > 0 else 'refund'}",
-                "created_at": datetime.now(timezone.utc),
-                "created_by": user["id"],
-            })
+    # Stock is NOT touched on edit while DC is still in draft — it will be
+    # deducted in a single pass when the DC is sent. This eliminates the
+    # historic double-deduct + complicated diff-based refund logic.
 
     # Rebuild DC lines preserving the same shape as create.
     dc_lines = []

@@ -674,6 +674,13 @@ export default function JobWorkPage() {
       .title{font-size:11px;font-weight:800;color:${accent};letter-spacing:0.5px;text-align:right;margin:0;text-transform:uppercase;line-height:1.3;max-width:150px;margin-left:auto;white-space:normal}
       .docno{font-size:14px;font-weight:700;color:#0f172a;text-align:right;margin-top:2px}
       .meta{font-size:10px;color:#475569;text-align:right;margin-top:2px}
+      /* Reference block — sits directly under the doc number on the right.
+         Small, right-aligned, slightly muted so it doesn't visually compete
+         with the doc title. */
+      .ref-block{margin-top:6px;text-align:right;font-size:10px;color:#475569;line-height:1.5}
+      .ref-block .ref-line{white-space:nowrap}
+      .ref-block .ref-lab{color:#64748b;text-transform:uppercase;letter-spacing:0.5px;font-size:9px;margin-right:3px}
+      .ref-block strong{color:#0f172a}
       /* Info bar — Quotation parity: padding 10x14, label 9px, value 13px. */
       .info-bar{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;background:${accent};color:#fff;margin-top:14px;border-radius:2px;overflow:hidden}
       .info-bar .col{padding:10px 14px;border-right:1px solid rgba(255,255,255,0.15)}
@@ -681,6 +688,9 @@ export default function JobWorkPage() {
       .info-bar .lab{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.75);margin-bottom:2px}
       .info-bar .val{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .addr-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin:16px 0}
+      /* When only Vendor + Shipping are shown (Reference moved to header),
+         the row collapses to 2 equal columns with the same gutter. */
+      .addr-row.addr-row-2{grid-template-columns:1fr 1fr;gap:20px}
       .box h4{font-size:10px;text-transform:uppercase;letter-spacing:1px;margin:0 0 4px;color:#0f172a;border-bottom:2px solid ${accent};padding-bottom:3px;display:inline-block}
       .box .name{font-size:13px;font-weight:700;color:#0f172a}
       .box .line{font-size:10px;color:#475569;line-height:1.5;white-space:pre-line}
@@ -747,7 +757,13 @@ export default function JobWorkPage() {
       <div>
         <div class="title">${esc(dcTitleFull)}</div>
         <div class="docno">${esc(dc.dc_number)}</div>
-        ${dc.order?.order_number ? `<div class="meta">JW Order: <strong>${esc(dc.order.order_number)}</strong></div>` : ''}
+        ${dc.order?.order_number ? `<div class="ref-block">
+          <div class="ref-line"><span class="ref-lab">JW Order:</span> <strong>${esc(dc.order.order_number)}</strong></div>
+          ${dc.order?.subcontract_type ? `<div class="ref-line"><span class="ref-lab">Type:</span> ${esc(dc.order.subcontract_type.replace('_',' ').toUpperCase())}</div>` : ''}
+          <div class="ref-line"><span class="ref-lab">DC Status:</span> <strong>${esc((dc.status || '').toUpperCase())}</strong></div>
+        </div>` : `<div class="ref-block">
+          <div class="ref-line"><span class="ref-lab">DC Status:</span> <strong>${esc((dc.status || '').toUpperCase())}</strong></div>
+        </div>`}
         ${(dc.status || '').toLowerCase() === 'draft' ? `<div style="display:inline-block;margin-top:4px;padding:2px 10px;background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;border-radius:3px;font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Draft</div>` : ''}
       </div>
     </div>
@@ -760,12 +776,9 @@ export default function JobWorkPage() {
       <div class="col"><div class="lab">Created By</div><div class="val">${esc(createdBy)}</div></div>
     </div>
 
-    <!-- Shipping From + Subcontractor + Reference cards (3 cols) -->
-    <div class="addr-row">
-      <div class="box">
-        <h4>Shipping From</h4>
-        ${shipFromLines.length ? `<div class="name">${esc(shipFromLines[0] || '-')}</div>${shipFromLines.slice(1).map(l => `<div class="line">${esc(l)}</div>`).join('')}` : `<div class="line">-</div>`}
-      </div>
+    <!-- Subcontractor (Vendor) on the LEFT, Shipping From on the RIGHT.
+         Per user spec — vendor takes prominence; shipping origin sits next to it. -->
+    <div class="addr-row addr-row-2">
       <div class="box">
         <h4>Subcontractor / Vendor</h4>
         <div class="name">${esc(supplier.name || '-')}</div>
@@ -774,10 +787,8 @@ export default function JobWorkPage() {
         ${supplier.phone ? `<div class="line">Ph: ${esc(supplier.phone)}</div>` : ''}
       </div>
       <div class="box">
-        <h4>Reference</h4>
-        <div class="name">JW Order ${esc(dc.order?.order_number || '-')}</div>
-        ${dc.order?.subcontract_type ? `<div class="line">Type: ${esc(dc.order.subcontract_type.replace('_',' ').toUpperCase())}</div>` : ''}
-        <div class="line">DC Status: <strong>${esc((dc.status || '').toUpperCase())}</strong></div>
+        <h4>Shipping From</h4>
+        ${shipFromLines.length ? `<div class="name">${esc(shipFromLines[0] || '-')}</div>${shipFromLines.slice(1).map(l => `<div class="line">${esc(l)}</div>`).join('')}` : `<div class="line">-</div>`}
       </div>
     </div>
     
@@ -1660,7 +1671,7 @@ export default function JobWorkPage() {
             </div>
             <div className="flex justify-end space-x-3 pt-3 border-t">
               <button type="button" onClick={() => setManualDcDialog(false)} className="btn-secondary">Cancel</button>
-              <button type="button" onClick={handleCreateManualDC} className="btn-primary" data-testid="manual-dc-submit">{manualDcForm.id ? 'Update DC & Adjust Stock' : 'Create DC & Deduct Stock'}</button>
+              <button type="button" onClick={handleCreateManualDC} className="btn-primary" data-testid="manual-dc-submit">{manualDcForm.id ? 'Update DC' : 'Create DC'}</button>
             </div>
           </div>
         </DialogContent>
