@@ -1140,6 +1140,17 @@ export default function ItemsPage() {
                                     const { data: result } = await api.post(`/api/items/${editingItem.id}/generate-variants`, {});
                                     toast.success(result.message);
                                     fetchItems().catch(() => {});
+                                    // After window.confirm + heavy refetch, the
+                                    // Radix Dialog's body-lock can drift out of
+                                    // sync with the renderer's actual focus.
+                                    // Force-reset and ping Electron to refocus
+                                    // so the dialog's inputs stay typeable.
+                                    try {
+                                      document.body.style.pointerEvents = '';
+                                      document.body.style.overflow = 'hidden'; // dialog IS open — keep scroll lock
+                                      document.documentElement.style.pointerEvents = '';
+                                      if (window.mecsmart?.refocusMain) window.mecsmart.refocusMain();
+                                    } catch { /* noop */ }
                                   }
                                 } catch (err) {
                                   toast.error(err.response?.data?.detail || 'Failed to generate variants');
@@ -1298,7 +1309,12 @@ export default function ItemsPage() {
                   const itemGroup = itemGroups.find(g => g.id === item.group_id);
                   const variants = variantsByParent[item.id] || [];
                   const variantTotal = variants.reduce((s, v) => s + (parseFloat(v.current_stock) || 0), 0);
-                  const totalStock = (parseFloat(item.current_stock) || 0) + variantTotal;
+                  // When a parent has variant children, the parent's own
+                  // current_stock is ignored — variants are the single source
+                  // of truth. (Backend's generate-variants endpoint also
+                  // zeroes the parent after first variant creation so this
+                  // is just defensive on the UI side for stale data.)
+                  const totalStock = variants.length > 0 ? variantTotal : (parseFloat(item.current_stock) || 0);
                   return (
                   <tr key={item.id} className={isLowStock(item) ? 'bg-[#FDE8E8]/30' : ''} data-testid={`item-row-${item.part_number}`}>
                     <td className="mono font-medium">{item.part_number}</td>

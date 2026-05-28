@@ -45,18 +45,25 @@ function App() {
     );
     const cleanup = (force) => {
       try {
-        // Only clean when no dialog is currently open — otherwise we'd
-        // break the active modal's focus trap.
-        if (!force && isAnyDialogOpen()) return;
-        let touched = false;
-        if (document.body.style.pointerEvents === 'none') { document.body.style.pointerEvents = ''; touched = true; }
-        if (document.body.style.overflow === 'hidden') { document.body.style.overflow = ''; touched = true; }
-        if (document.body.hasAttribute('aria-hidden')) { document.body.removeAttribute('aria-hidden'); touched = true; }
-        if (document.body.hasAttribute('data-scroll-locked')) { document.body.removeAttribute('data-scroll-locked'); touched = true; }
-        // Some Radix versions stash the lock on <html> as well.
-        if (document.documentElement.style.pointerEvents === 'none') { document.documentElement.style.pointerEvents = ''; touched = true; }
-        if (touched && window.mecsmart?.refocusMain) {
-          try { window.mecsmart.refocusMain(); } catch { /* noop */ }
+        const dialogOpen = isAnyDialogOpen();
+        // When NO dialog is open, fully release the body lock.
+        if (force || !dialogOpen) {
+          let touched = false;
+          if (document.body.style.pointerEvents === 'none') { document.body.style.pointerEvents = ''; touched = true; }
+          if (document.body.style.overflow === 'hidden') { document.body.style.overflow = ''; touched = true; }
+          if (document.body.hasAttribute('aria-hidden')) { document.body.removeAttribute('aria-hidden'); touched = true; }
+          if (document.body.hasAttribute('data-scroll-locked')) { document.body.removeAttribute('data-scroll-locked'); touched = true; }
+          if (document.documentElement.style.pointerEvents === 'none') { document.documentElement.style.pointerEvents = ''; touched = true; }
+          if (touched && window.mecsmart?.refocusMain) {
+            try { window.mecsmart.refocusMain(); } catch { /* noop */ }
+          }
+        } else {
+          // A dialog IS open but inputs may still be unresponsive because
+          // Radix left `pointer-events:none` on <html> or body even though
+          // it should only block the BACKDROP. Clear those — the dialog
+          // itself isolates pointer events via its own container.
+          if (document.documentElement.style.pointerEvents === 'none') document.documentElement.style.pointerEvents = '';
+          if (document.body.style.pointerEvents === 'none') document.body.style.pointerEvents = '';
         }
       } catch { /* noop */ }
     };

@@ -1830,6 +1830,32 @@ async def generate_item_variants(item_id: str, payload: dict = Body(default={}),
         else:
             await db.items.delete_one({"id": ex["id"]})
             retired_skus.append(sku)
+    # Variant migration — once a parent has at least one variant child, its
+    # OWN current_stock is no longer the source of truth (variants own the
+    # stock balances). Zero out the parent and emit an 'adjust' inventory
+    # transaction so the audit trail stays clean. Fixes the "parent shows
+    # phantom stock above the variant rollup" bug.
+    parent_after = await db.items.find_one({"id": item_id}, {"_id": 0})
+    if parent_after and float(parent_after.get("current_stock") or 0) > 0:
+        any_active_children = await db.items.count_documents({
+            "parent_item_id": item_id, "is_variant": True, "is_active": {"$ne": False}
+        })
+        if any_active_children:
+            prev = float(parent_after.get("current_stock") or 0)
+            await db.items.update_one({"id": item_id}, {"$set": {"current_stock": 0, "updated_at": datetime.now(timezone.utc)}})
+            await db.inventory_transactions.insert_one({
+                "id": str(uuid.uuid4()),
+                "item_id": item_id,
+                "transaction_type": "adjust",
+                "quantity": -prev,
+                "reference_type": "variant_migration",
+                "reference_id": item_id,
+                "previous_stock": prev,
+                "new_stock": 0,
+                "notes": "Parent stock zeroed — variant SKUs now own balances. Allocate to a variant via Items & Stock → Edit.",
+                "created_at": datetime.now(timezone.utc),
+                "created_by": user["id"],
+            })
     return {
         "message": f"Generated {len(created)} new variant(s)"
             + (f", reactivated {len(reactivated)}" if reactivated else "")

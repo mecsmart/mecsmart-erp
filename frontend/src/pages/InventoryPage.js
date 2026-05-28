@@ -629,7 +629,8 @@ export default function InventoryPage() {
                     {filteredSortedInventory.slice(0, visibleCount).map((item) => {
                       const variants = variantsByParent[item.id] || [];
                       const variantTotal = variants.reduce((s, v) => s + (parseFloat(v.current_stock) || 0), 0);
-                      const totalStock = (parseFloat(item.current_stock) || 0) + variantTotal;
+                      // Parents with variants → variants own the stock total.
+                      const totalStock = variants.length > 0 ? variantTotal : (parseFloat(item.current_stock) || 0);
                       return (
                       <tr key={item.id} className={isLowStock(item) ? 'bg-[#FDE8E8]/30' : ''} data-testid={`inventory-row-${item.part_number}`}>
                         <td className="mono font-medium">{item.part_number}</td>
@@ -751,8 +752,11 @@ export default function InventoryPage() {
         </TabsContent>
 
         <TabsContent value="transactions" className="mt-4">
-          {/* Date-wise stock transaction report — filters + CSV export */}
-          <div className="bg-white border border-[#E5E7EB] rounded-sm p-3 mb-3 flex items-end gap-3 flex-wrap" data-testid="stock-tx-filter-bar">
+          {/* Date-wise stock transaction report — STICKY filter toolbar.
+              `top-14` clears the page-level sticky header above it; bg-white
+              + bottom border so list rows scrolling underneath don't peek
+              through the gaps between filter controls. */}
+          <div className="bg-white border border-[#E5E7EB] rounded-sm p-3 mb-3 flex items-end gap-3 flex-wrap sticky top-14 z-20 shadow-sm" data-testid="stock-tx-filter-bar">
             <div>
               <label className="block text-[10px] font-semibold uppercase tracking-wider text-[#6B7280] mb-1">From Date</label>
               <input type="date" value={txFromDate} onChange={(e) => setTxFromDate(e.target.value)} className="border border-[#D1D5DB] rounded-sm text-xs px-2 py-1.5 focus:outline-none focus:border-[#1D3557]" data-testid="stock-tx-from-date" />
