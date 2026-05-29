@@ -149,7 +149,46 @@ export default function JobWorkPage() {
   const removeOrderLine = (idx) => setOrderForm({ ...orderForm, lines: orderForm.lines.filter((_, i) => i !== idx) });
   const updateOrderLine = (idx, field, val) => { const lines = [...orderForm.lines]; lines[idx] = { ...lines[idx], [field]: val }; setOrderForm({ ...orderForm, lines }); };
   const addJWPart = () => setOrderForm({ ...orderForm, job_work_parts: [...orderForm.job_work_parts, { item_id: '', quantity: 0, charges: 0, item_description: '', process_name: '' }] });
-  const removeJWPart = (idx) => setOrderForm({ ...orderForm, job_work_parts: orderForm.job_work_parts.filter((_, i) => i !== idx) });
+  // When removing a Job Work Part, also remove the RM lines that were auto-filled
+  // from THAT part's BOM (so the user doesn't have to clean them up manually).
+  // We re-compute the BOM RM children of the removed part and subtract their
+  // contribution from `orderForm.lines`. Lines that drop to ≤0 qty are dropped
+  // entirely; lines with positive remaining qty are kept (covers RMs shared
+  // across multiple parts).
+  const removeJWPart = async (idx) => {
+    const partToRemove = orderForm.job_work_parts[idx];
+    const remainingParts = orderForm.job_work_parts.filter((_, i) => i !== idx);
+    if (!partToRemove || !partToRemove.item_id) {
+      // Nothing to subtract — just drop the part.
+      setOrderForm({ ...orderForm, job_work_parts: remainingParts });
+      return;
+    }
+    try {
+      const { data: preview } = await api.get(`/api/bom/by-item/${partToRemove.item_id}/preview`);
+      const removedQty = parseFloat(partToRemove.quantity) || 0;
+      const rmChildren = (preview.components || []).filter(c => c.category === 'raw_material');
+      const subtractMap = new Map();
+      for (const rm of rmChildren) {
+        subtractMap.set(rm.item_id, (subtractMap.get(rm.item_id) || 0) + (rm.quantity * removedQty));
+      }
+      const newLines = orderForm.lines
+        .map(l => {
+          if (!l.item_id || !subtractMap.has(l.item_id)) return l;
+          const newQty = (parseFloat(l.quantity) || 0) - subtractMap.get(l.item_id);
+          // Keep the row only if it still has positive qty (other parts share it).
+          return { ...l, quantity: newQty };
+        })
+        .filter(l => !l.item_id || (parseFloat(l.quantity) || 0) > 0.0001);
+      // Always keep at least one blank editable row.
+      if (newLines.length === 0 || newLines[newLines.length - 1].item_id) {
+        newLines.push({ item_id: '', quantity: 0, rate: 0, item_description: '' });
+      }
+      setOrderForm({ ...orderForm, job_work_parts: remainingParts, lines: newLines });
+    } catch {
+      // Best-effort — fall back to just removing the part if BOM lookup fails.
+      setOrderForm({ ...orderForm, job_work_parts: remainingParts });
+    }
+  };
   const updateJWPart = (idx, field, val) => { const parts = [...orderForm.job_work_parts]; parts[idx] = { ...parts[idx], [field]: val }; setOrderForm({ ...orderForm, job_work_parts: parts }); };
 
   // Auto-populate charges + RM lines from BOM when user selects an item for a JW part.

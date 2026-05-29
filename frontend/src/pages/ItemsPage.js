@@ -1131,47 +1131,16 @@ export default function ItemsPage() {
                             </div>
                           );
                         })}
-                        {/* Generate Variants — only when editing an existing item (need an id) */}
-                        {editingItem && (formData.variant_attributes || []).some(a => (a.name || '').trim() && (a.values || []).length > 0) && (
-                          <div className="pt-1.5 border-t border-[#FDE68A] flex items-center gap-2 flex-wrap">
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  // Save full form first so description/name/etc edits propagate
-                                  // to newly-generated variant children (which copy from parent).
-                                  await persistParentForGenerate();
-                                  const { data: preview } = await api.post(`/api/items/${editingItem.id}/preview-variants`);
-                                  const total = preview.combinations.length;
-                                  const sample = preview.combinations.slice(0, 6).map(r => `  • ${r.sku} — ${r.label}${r.exists ? ' (exists)' : ' (NEW)'}`).join('\n');
-                                  const more = total > 6 ? `\n  …and ${total - 6} more` : '';
-                                  if (window.confirm(`Generate ${total} variant${total > 1 ? 's' : ''}?\n\n${preview.existing_count} already exist, ${preview.new_count} would be created.\n\n${sample}${more}\n\nClick OK to proceed (all combinations).`)) {
-                                    const { data: result } = await api.post(`/api/items/${editingItem.id}/generate-variants`, {});
-                                    toast.success(result.message);
-                                    // RADICAL FIX for "can't type into inputs" bug after Generate Variant
-                                    // Items: simply close the dialog. Reopening it gives a clean Radix
-                                    // focus context with no risk of stuck pointer-events / focus traps.
-                                    // The result is already saved server-side; user can reopen to verify.
-                                    setIsDialogOpen(false);
-                                    setEditingItem(null);
-                                    resetForm();
-                                    fetchItems().catch(() => {});
-                                  }
-                                } catch (err) {
-                                  toast.error(err.response?.data?.detail || 'Failed to generate variants');
-                                }
-                              }}
-                              className="text-[11px] px-2 py-1 rounded border border-[#723B13] text-[#723B13] hover:bg-[#FEF3C7] font-semibold"
-                              data-testid="item-generate-variants-btn"
-                            >
-                              Generate Variant Items
-                            </button>
-                            <span className="text-[10px] text-[#92400E]">Creates child SKUs per combination (e.g. <span className="mono">{formData.part_number || 'FG-001'}-1HP-220V</span>).</span>
-                          </div>
-                        )}
-                        {!editingItem && (formData.variant_attributes || []).some(a => (a.values || []).length > 0) && (
+                        {/* "Generate Variant Items" button removed per user
+                            request — Update Item already creates / prunes
+                            variants atomically via the auto-generate hook
+                            in handleSubmit. Keeping a separate button was
+                            the source of the recurring "can't type" focus
+                            bug, so the cleaner UX is to let the standard
+                            Save flow do everything. */}
+                        {(formData.variant_attributes || []).some(a => (a.values || []).length > 0) && (
                           <div className="pt-1.5 border-t border-[#FDE68A] text-[10px] text-[#92400E]">
-                            Save the item first — the <span className="font-semibold">"Generate Variant Items"</span> button will appear when you re-open this item for edit.
+                            <span className="font-semibold">Tip:</span> click <span className="font-semibold">{editingItem ? 'Update Item' : 'Add Item'}</span> to save — variant SKUs (e.g. <span className="mono">{formData.part_number || 'FG-001'}-1HP1-220V</span>) are created automatically for every combination.
                           </div>
                         )}
                       </div>
@@ -1204,6 +1173,11 @@ export default function ItemsPage() {
                               if (window.confirm(`Generate ${total} variant${total > 1 ? 's' : ''}?\n\n${preview.existing_count} already exist, ${preview.new_count} would be created.\n\n${sample}${more}\n\nClick OK to proceed (all combinations).`)) {
                                 const { data: result } = await api.post(`/api/items/${editingItem.id}/generate-variants`, {});
                                 toast.success(result.message);
+                                // Auto-close — same focus-trap defence as the
+                                // removed CP/RM button.
+                                setIsDialogOpen(false);
+                                setEditingItem(null);
+                                resetForm();
                                 fetchItems().catch(() => {});
                               }
                             } catch (err) {
