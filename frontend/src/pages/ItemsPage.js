@@ -1148,18 +1148,14 @@ export default function ItemsPage() {
                                   if (window.confirm(`Generate ${total} variant${total > 1 ? 's' : ''}?\n\n${preview.existing_count} already exist, ${preview.new_count} would be created.\n\n${sample}${more}\n\nClick OK to proceed (all combinations).`)) {
                                     const { data: result } = await api.post(`/api/items/${editingItem.id}/generate-variants`, {});
                                     toast.success(result.message);
+                                    // RADICAL FIX for "can't type into inputs" bug after Generate Variant
+                                    // Items: simply close the dialog. Reopening it gives a clean Radix
+                                    // focus context with no risk of stuck pointer-events / focus traps.
+                                    // The result is already saved server-side; user can reopen to verify.
+                                    setIsDialogOpen(false);
+                                    setEditingItem(null);
+                                    resetForm();
                                     fetchItems().catch(() => {});
-                                    // After window.confirm + heavy refetch, the
-                                    // Radix Dialog's body-lock can drift out of
-                                    // sync with the renderer's actual focus.
-                                    // Force-reset and ping Electron to refocus
-                                    // so the dialog's inputs stay typeable.
-                                    try {
-                                      document.body.style.pointerEvents = '';
-                                      document.body.style.overflow = 'hidden'; // dialog IS open — keep scroll lock
-                                      document.documentElement.style.pointerEvents = '';
-                                      if (window.mecsmart?.refocusMain) window.mecsmart.refocusMain();
-                                    } catch { /* noop */ }
                                   }
                                 } catch (err) {
                                   toast.error(err.response?.data?.detail || 'Failed to generate variants');

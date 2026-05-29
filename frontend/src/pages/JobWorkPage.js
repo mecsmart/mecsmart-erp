@@ -145,29 +145,42 @@ export default function JobWorkPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   // Order CRUD
-  const addOrderLine = () => setOrderForm({ ...orderForm, lines: [...orderForm.lines, { item_id: '', quantity: 0, rate: 0 }] });
+  const addOrderLine = () => setOrderForm({ ...orderForm, lines: [...orderForm.lines, { item_id: '', quantity: 0, rate: 0, item_description: '' }] });
   const removeOrderLine = (idx) => setOrderForm({ ...orderForm, lines: orderForm.lines.filter((_, i) => i !== idx) });
   const updateOrderLine = (idx, field, val) => { const lines = [...orderForm.lines]; lines[idx] = { ...lines[idx], [field]: val }; setOrderForm({ ...orderForm, lines }); };
   const addJWPart = () => setOrderForm({ ...orderForm, job_work_parts: [...orderForm.job_work_parts, { item_id: '', quantity: 0, charges: 0, item_description: '', process_name: '' }] });
   const removeJWPart = (idx) => setOrderForm({ ...orderForm, job_work_parts: orderForm.job_work_parts.filter((_, i) => i !== idx) });
   const updateJWPart = (idx, field, val) => { const parts = [...orderForm.job_work_parts]; parts[idx] = { ...parts[idx], [field]: val }; setOrderForm({ ...orderForm, job_work_parts: parts }); };
 
-  // Auto-populate charges from BOM when user selects an item for a JW part.
+  // Auto-populate charges + RM lines from BOM when user selects an item for a JW part.
   // Charges resolution priority:
   //   1) Existing user-entered charges (don't clobber)
   //   2) For Job Card OS rows (have a process_name): the specific routing's cost
   //   3) Combined BOM process cost (Full MO-SC fallback)
+  // Also auto-fills `orderForm.lines` (Raw Materials to Send) using the
+  // BOM components of the selected part — mirrors JW-OS behaviour. Only
+  // RM-category children are added; quantities are scaled by the part qty.
   const updateJWPartItem = async (idx, item_id) => {
     const parts = [...orderForm.job_work_parts];
     parts[idx] = { ...parts[idx], item_id };
     setOrderForm({ ...orderForm, job_work_parts: parts });
     if (!item_id) return;
     try {
-      const { data } = await api.get(`/api/bom/costs/${item_id}`);
+      const [{ data: costs }, { data: preview }] = await Promise.all([
+        api.get(`/api/bom/costs/${item_id}`),
+        api.get(`/api/bom/by-item/${item_id}/preview`).catch(() => ({ data: { components: [] } })),
+      ]);
+      // Resolve charges using the existing priority rules.
       const cur = [...orderForm.job_work_parts];
       const existing = cur[idx] || {};
       const isJobCardOS = !!(editingOrder?.reference_operation_seqs?.length || editingOrder?.reference_operation_seq);
       let autoCharges = existing.charges;
+      let autoDesc = existing.item_description;
+      // Auto-fill description from the master item if user hasn't typed one.
+      if (!autoDesc) {
+        const it = items.find(i => i.id === item_id);
+        if (it && it.description) autoDesc = it.description;
+      }
       if (!autoCharges) {
         if (isJobCardOS && existing.process_name) {
           try {
@@ -175,17 +188,52 @@ export default function JobWorkPage() {
             autoCharges = rc.cost || 0;
           } catch { autoCharges = 0; }
         } else {
-          autoCharges = data.process_cost || 0;
+          autoCharges = costs.process_cost || 0;
         }
       }
       cur[idx] = {
         ...existing,
         item_id,
         charges: autoCharges,
-        process_names: data.process_names || [],
+        item_description: autoDesc || '',
+        process_names: costs.process_names || [],
       };
-      setOrderForm({ ...orderForm, job_work_parts: cur });
-    } catch (e) { /* silent */ }
+      // Build RM auto-fill lines: only RM-category BOM children, qty scaled
+      // by the part's quantity (1 if not set yet). Skip RMs already present
+      // in orderForm.lines (by item_id) so reselecting the same part doesn't
+      // duplicate rows; also keep any user-edited line untouched.
+      const partQty = parseFloat(existing.quantity) || 1;
+      const rmChildren = (preview.components || []).filter(c => c.category === 'raw_material');
+      const newLines = [...orderForm.lines];
+      // Drop placeholder empty lines so the auto-fill replaces them rather
+      // than stacking under a blank row.
+      const dedupedLines = newLines.filter(l => l.item_id);
+      const existingRmIds = new Set(dedupedLines.map(l => l.item_id));
+      for (const rm of rmChildren) {
+        if (existingRmIds.has(rm.item_id)) {
+          // bump quantity on the existing line (additive when multiple parts share an RM).
+          const li = dedupedLines.findIndex(l => l.item_id === rm.item_id);
+          if (li >= 0) {
+            dedupedLines[li] = {
+              ...dedupedLines[li],
+              quantity: (parseFloat(dedupedLines[li].quantity) || 0) + rm.quantity * partQty,
+            };
+          }
+          continue;
+        }
+        dedupedLines.push({
+          item_id: rm.item_id,
+          quantity: rm.quantity * partQty,
+          rate: rm.unit_cost || 0,
+          item_description: '',
+        });
+      }
+      // Always leave at least one editable blank row at the bottom for the user.
+      if (dedupedLines.length === 0 || dedupedLines[dedupedLines.length - 1].item_id) {
+        dedupedLines.push({ item_id: '', quantity: 0, rate: 0, item_description: '' });
+      }
+      setOrderForm({ ...orderForm, job_work_parts: cur, lines: dedupedLines });
+    } catch (e) { /* silent — autofill is best-effort */ }
   };
 
   const handleCreateOrder = async () => {
@@ -1391,7 +1439,7 @@ export default function JobWorkPage() {
               </div>
               <div className="border rounded-sm overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-right py-2 px-2 text-xs w-24">Qty</th><th className="text-right py-2 px-2 text-xs w-24">Rate/Unit</th><th className="text-right py-2 px-2 text-xs w-28">Total</th><th className="w-8"></th></tr></thead>
+                  <thead><tr className="bg-[#F3F4F6]"><th className="text-left py-2 px-2 text-xs">Item</th><th className="text-left py-2 px-2 text-xs" style={{minWidth:'140px'}}>Description</th><th className="text-right py-2 px-2 text-xs w-24">Qty</th><th className="text-right py-2 px-2 text-xs w-24">Rate/Unit</th><th className="text-right py-2 px-2 text-xs w-28">Total</th><th className="w-8"></th></tr></thead>
                   <tbody>
                     {orderForm.lines.map((l, idx) => {
                       const lineTotal = (parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0);
@@ -1401,10 +1449,19 @@ export default function JobWorkPage() {
                           <SearchableItemSelect
                             items={items}
                             value={l.item_id}
-                            onChange={(id) => updateOrderLine(idx, 'item_id', id)}
+                            onChange={(id) => {
+                              // Also seed description from item master on first selection.
+                              const it = items.find(i => i.id === id);
+                              const lines2 = [...orderForm.lines];
+                              lines2[idx] = { ...lines2[idx], item_id: id, item_description: lines2[idx].item_description || it?.description || '' };
+                              setOrderForm({ ...orderForm, lines: lines2 });
+                            }}
                             placeholder="Search item by code / name…"
                             testId={`jw-rm-${idx}-item`}
                           />
+                        </td>
+                        <td className="py-1 px-2">
+                          <input type="text" value={l.item_description || ''} onChange={e => updateOrderLine(idx, 'item_description', e.target.value)} placeholder="Description / spec" className="w-full px-2 py-1 border rounded-sm text-xs" data-testid={`jw-rm-${idx}-description`} />
                         </td>
                         <td className="py-1 px-2"><input type="number" min="1" value={l.quantity} onChange={e => updateOrderLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
                         <td className="py-1 px-2"><input type="number" min="0" value={l.rate} onChange={e => updateOrderLine(idx, 'rate', parseFloat(e.target.value) || 0)} className="w-full px-2 py-1 border rounded-sm mono text-right text-xs" /></td>
@@ -1415,7 +1472,7 @@ export default function JobWorkPage() {
                     })}
                     {orderForm.lines.length > 0 && (
                       <tr className="bg-[#F9FAFB] border-t font-semibold">
-                        <td colSpan="3" className="py-2 px-2 text-right text-xs">Grand Total RM:</td>
+                        <td colSpan="4" className="py-2 px-2 text-right text-xs">Grand Total RM:</td>
                         <td className="py-2 px-2 text-right mono text-xs" data-testid="rm-grand-total">{currencySymbol}{orderForm.lines.reduce((s, l) => s + ((parseFloat(l.quantity) || 0) * (parseFloat(l.rate) || 0)), 0).toFixed(2)}</td>
                         <td></td>
                       </tr>
@@ -1495,7 +1552,6 @@ export default function JobWorkPage() {
                       <th style={{ width: '70px' }}>UOM</th>
                       <th style={{ width: '80px' }}>Qty</th>
                       <th style={{ width: '110px' }}>Unit Price ({currencySymbol})</th>
-                      <th style={{ width: '110px' }}>Charges/Unit ({currencySymbol})</th>
                       <th style={{ minWidth: '160px' }}>Notes</th>
                       <th className="remove-cell"></th>
                     </tr>
@@ -1586,9 +1642,6 @@ export default function JobWorkPage() {
                             {lineTotal > 0 && (
                               <div className="text-[10px] text-[#6B7280] text-right px-1">= {currencySymbol}{lineTotal.toFixed(2)}</div>
                             )}
-                          </td>
-                          <td>
-                            <input type="number" min="0" step="0.01" value={line.processing_charges} onChange={(e) => updateManualDcLine(idx, { processing_charges: parseFloat(e.target.value) || 0 })} className="grid-input mono num" data-testid={`manual-dc-charges-${idx}`} />
                           </td>
                           <td>
                             <input type="text" value={line.notes} onChange={(e) => updateManualDcLine(idx, { notes: e.target.value })} className="grid-input" data-testid={`manual-dc-notes-${idx}`} />
