@@ -11915,6 +11915,12 @@ def _build_tally_master_messages(invoice, supplier, lines, additional_charges):
         <PINCODE>{pincode}</PINCODE>
         <COUNTRYNAME>{country}</COUNTRYNAME>
         {addr_xml}
+        <LEDGSTREGDETAILS.LIST>
+          <APPLICABLEFROM>{_tally_date(invoice.get('invoice_date')) or '20170701'}</APPLICABLEFROM>
+          <GSTIN>{gstin}</GSTIN>
+          <GSTREGISTRATIONTYPE>{'Regular' if gstin else 'Unregistered/Consumer'}</GSTREGISTRATIONTYPE>
+          <PARTYTYPE>Not Applicable</PARTYTYPE>
+        </LEDGSTREGDETAILS.LIST>
       </LEDGER>
     </TALLYMESSAGE>""")
 
@@ -12061,33 +12067,51 @@ def _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inte
         inv_entries.append(f"""
           <ALLINVENTORYENTRIES.LIST>
             <STOCKITEMNAME>{name}</STOCKITEMNAME>
-            <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+            <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+            <ISLASTDEEMEDPOSITIVE>No</ISLASTDEEMEDPOSITIVE>
+            <ISAUTONEGATE>No</ISAUTONEGATE>
             <RATE>{rate:.2f}/{uom}</RATE>
-            <AMOUNT>-{line_total:.2f}</AMOUNT>
-            <ACTUALQTY>{qty} {uom}</ACTUALQTY>
-            <BILLEDQTY>{qty} {uom}</BILLEDQTY>
+            <AMOUNT>{line_total:.2f}</AMOUNT>
+            <ACTUALQTY> {qty} {uom}</ACTUALQTY>
+            <BILLEDQTY> {qty} {uom}</BILLEDQTY>
+            <BATCHALLOCATIONS.LIST>
+              <GODOWNNAME>Main Location</GODOWNNAME>
+              <BATCHNAME>Primary Batch</BATCHNAME>
+              <DESTINATIONGODOWNNAME>Main Location</DESTINATIONGODOWNNAME>
+              <INDENTNO/>
+              <ORDERNO/>
+              <TRACKINGNUMBER/>
+              <DYNAMICCSTISCLEARED>No</DYNAMICCSTISCLEARED>
+              <AMOUNT>{line_total:.2f}</AMOUNT>
+              <ACTUALQTY> {qty} {uom}</ACTUALQTY>
+              <BILLEDQTY> {qty} {uom}</BILLEDQTY>
+            </BATCHALLOCATIONS.LIST>
             <ACCOUNTINGALLOCATIONS.LIST>
               <LEDGERNAME>Purchase Account</LEDGERNAME>
               <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+              <LEDGERFROMITEM>No</LEDGERFROMITEM>
+              <REMOVEZEROENTRIES>No</REMOVEZEROENTRIES>
+              <ISPARTYLEDGER>No</ISPARTYLEDGER>
               <AMOUNT>-{line_total:.2f}</AMOUNT>
             </ACCOUNTINGALLOCATIONS.LIST>{tax_class_xml}
           </ALLINVENTORYENTRIES.LIST>""")
     inventory_block = "".join(inv_entries)
 
-    # Ledger entries: Party (credit), Purchase Account (debit), Tax ledgers (debit),
-    # then ONE separate ledger entry per additional charge so Tally can post each to
-    # its own ledger account (Freight, Packaging, etc.).
+    # Ledger entries: Party (credit) + Tax ledgers (debit) + Additional charges
+    # (debit). Purchase Account debits are emitted as inline
+    # ACCOUNTINGALLOCATIONS inside each ALLINVENTORYENTRIES — adding them here
+    # too would double-count.
     ledger_entries = [f"""
         <LEDGERENTRIES.LIST>
           <LEDGERNAME>{party_name}</LEDGERNAME>
           <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+          <ISPARTYLEDGER>Yes</ISPARTYLEDGER>
           <AMOUNT>{total_amount:.2f}</AMOUNT>
-        </LEDGERENTRIES.LIST>""",
-        f"""
-        <LEDGERENTRIES.LIST>
-          <LEDGERNAME>Purchase Account</LEDGERNAME>
-          <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-          <AMOUNT>-{subtotal:.2f}</AMOUNT>
+          <BILLALLOCATIONS.LIST>
+            <NAME>{inv_no}</NAME>
+            <BILLTYPE>New Ref</BILLTYPE>
+            <AMOUNT>{total_amount:.2f}</AMOUNT>
+          </BILLALLOCATIONS.LIST>
         </LEDGERENTRIES.LIST>"""]
     # Additional charges — each becomes its own ledger debit. Charge name maps
     # directly to a Tally ledger so the user can create matching ledgers like
