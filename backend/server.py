@@ -2186,28 +2186,63 @@ async def get_bom_preview_by_item(item_id: str, request: Request):
     explode (children of the item's active BOM). Returns:
       { has_bom: bool, bom_id, components: [{item_id, part_number, name,
         category, quantity, uom, unit_cost, extended_cost}] }
+
+    `unit_cost` is the rolled-up cost: for components with their own BOM
+    (Parts / Sub-Assemblies), it's the deep rollup (children + parent_routings).
+    For leaves it falls back to purchase_price → unit_cost on the master.
+    Mirrors the cost chain used by JW-OS so manual SOs price RMs identically.
     """
     await get_current_user(request)
     bom = await db.boms.find_one({"parent_item_id": item_id, "status": "active"}, {"_id": 0})
     if not bom:
         return {"has_bom": False, "bom_id": None, "components": []}
-    components = []
     comp_ids = [c.get("item_id") for c in (bom.get("components") or []) if c.get("item_id")]
     items_map = {}
     if comp_ids:
-        async for it in db.items.find({"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "part_number": 1, "name": 1, "category": 1, "unit_of_measure": 1, "purchase_price": 1, "unit_cost": 1}):
+        async for it in db.items.find({"id": {"$in": comp_ids}}, {"_id": 0, "id": 1, "part_number": 1, "name": 1, "category": 1, "unit_of_measure": 1, "purchase_price": 1, "unit_cost": 1, "description": 1}):
             items_map[it["id"]] = it
+    # Build a child_bom map for the components that have their own BOM, so we
+    # can resolve the deep-rolled unit_cost without round-tripping per item.
+    child_boms_map: Dict[str, Dict[str, Any]] = {}
+    if comp_ids:
+        async for cb in db.boms.find({"parent_item_id": {"$in": comp_ids}, "status": "active"}, {"_id": 0}):
+            child_boms_map[cb.get("parent_item_id")] = cb
+
+    async def _rolled_unit_cost(iid: str, depth: int = 0) -> float:
+        """Recursive rollup: components(qty × rolled cost) + parent_routings cost."""
+        if depth > 12:  # cycle / runaway guard
+            return 0.0
+        bom_doc = child_boms_map.get(iid) if depth == 0 else await db.boms.find_one({"parent_item_id": iid, "status": "active"}, {"_id": 0})
+        if not bom_doc:
+            it = await db.items.find_one({"id": iid}, {"_id": 0, "purchase_price": 1, "unit_cost": 1})
+            return float((it or {}).get("purchase_price") or (it or {}).get("unit_cost") or 0)
+        total = 0.0
+        for c in (bom_doc.get("components") or []):
+            if c.get("is_alternate"):
+                continue
+            qty = float(c.get("quantity") or 0)
+            child_cost = await _rolled_unit_cost(c.get("item_id"), depth + 1)
+            total += qty * child_cost
+        total += float(routings_total_cost(bom_doc.get("parent_routings", []) or []))
+        return total
+
+    components = []
     for c in (bom.get("components") or []):
         if c.get("is_alternate"):
             continue  # alternates aren't shipped — skip in preview
-        it = items_map.get(c.get("item_id")) or {}
+        cid = c.get("item_id")
+        it = items_map.get(cid) or {}
         qty = float(c.get("quantity") or 0)
-        unit_cost = float(it.get("purchase_price") or it.get("unit_cost") or 0)
+        if cid in child_boms_map:
+            unit_cost = await _rolled_unit_cost(cid)
+        else:
+            unit_cost = float(it.get("purchase_price") or it.get("unit_cost") or 0)
         components.append({
-            "item_id": c.get("item_id"),
+            "item_id": cid,
             "part_number": it.get("part_number") or "",
             "name": it.get("name") or "",
             "category": it.get("category") or "",
+            "description": it.get("description") or "",
             "quantity": qty,
             "uom": it.get("unit_of_measure") or "pcs",
             "unit_cost": unit_cost,

@@ -1060,6 +1060,36 @@ export default function JobWorkPage() {
     downloadHtmlAsPdf(html, `${dcTitle.replace(/\s+/g, '-')}-${dc.dc_number || 'document'}.pdf`, { preview: true, draft: (dc.status || '').toLowerCase() === 'draft' });
   };
 
+  // Print a Subcontract Order using the SAME layout/template as the DC
+  // print. We synthesize a virtual "DC" payload from the order so the
+  // existing `printDC` rendering pipeline (Quotation-parity layout, brand
+  // header, info-bar, JW-OS or RM table) does all the heavy lifting.
+  // Matches user request: "Manual SO print, keep the same layout of JW-SO".
+  const printSC = (order) => {
+    const virtualDC = {
+      id: order.id,
+      dc_number: order.order_number,
+      dc_date: order.created_at,
+      status: order.status,
+      lines: (order.lines || []).map(l => ({
+        item_id: l.item_id,
+        item: l.item || items.find(i => i.id === l.item_id),
+        quantity: l.quantity,
+        unit_price: l.rate || 0,
+        processing_charges: 0,
+        notes: l.notes || '',
+        item_description: l.item_description || '',
+      })),
+      supplier: order.supplier,
+      supplier_id: order.supplier_id,
+      order: order,
+      fg_item_name: order.fg_item_name || '',
+      is_manual: !order.reference_wo_id && !(order.reference_wo_ids?.length),
+      warehouse_id: order.warehouse_id || '',
+    };
+    printDC(virtualDC);
+  };
+
   const getStatusColor = (s) => {
     switch (s) {
       case 'draft': return 'bg-[#F3F4F6] text-[#4B5563]';
@@ -1200,6 +1230,13 @@ export default function JobWorkPage() {
                                   <Edit2 className="w-4 h-4" />
                                 </button>
                               )}
+                              {/* Print SC Order — uses the unified DC print
+                                  template (Quotation-parity layout) so manual
+                                  SOs and Job Card OS SOs both render with the
+                                  same visual style. */}
+                              <button onClick={() => printSC(o)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" title="Print Subcontract Order" data-testid={`print-so-${o.id}`}>
+                                <Printer className="w-4 h-4" />
+                              </button>
                               {canEdit && o.status === 'draft' && (
                                 <button onClick={() => handleConfirmOrder(o.id)} className="btn-secondary text-xs px-2 py-1 text-[#03543F] border-[#03543F]" data-testid={`confirm-jw-${o.id}`}><CheckCircle2 className="w-3 h-3 inline mr-1" />Confirm</button>
                               )}
