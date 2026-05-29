@@ -11899,9 +11899,22 @@ def _build_tally_master_messages(invoice, supplier, lines, additional_charges):
     addr_xml = "".join(f"<ADDRESS.LIST><ADDRESS>{a}</ADDRESS></ADDRESS.LIST>" if False else f"<ADDRESS>{a}</ADDRESS>" for a in addr_lines)
     # Tally expects ADDRESS as multiple repeated tags inside ADDRESS.LIST.
     addr_xml = "<ADDRESS.LIST>" + "".join(f"<ADDRESS>{a}</ADDRESS>" for a in addr_lines) + "</ADDRESS.LIST>" if addr_lines else ""
+    # Build Tally-compatible state name. If the supplier has a 2-letter state
+    # code (like '29'), keep the raw state name from the master — Tally Prime
+    # accepts the canonical state names like "Karnataka", "Tamil Nadu" etc.
+    # An empty state forces Tally to show "Not Applicable" in the master view.
+    inv_date_xml = _tally_date(invoice.get('invoice_date')) or '20170701'
+    reg_type = 'Regular' if gstin else 'Unregistered/Consumer'
+    # Tally Prime stores address details under LEDMAILINGDETAILS.LIST — using
+    # only top-level <ADDRESS.LIST> leaves the ledger Address / State /
+    # Country / GSTIN fields BLANK after import (as seen in user's screenshot).
+    mail_addr_xml = "".join(f"<ADDRESS>{_xml_escape(str(supplier.get(k, '') or ''))}</ADDRESS>" for k in ("address", "address_line2", "city") if supplier.get(k))
     blocks.append(f"""
     <TALLYMESSAGE xmlns:UDF="TallyUDF">
       <LEDGER NAME="{party_name}" RESERVEDNAME="" ACTION="Alter">
+        <MAILINGNAME.LIST TYPE="String">
+          <MAILINGNAME>{party_name}</MAILINGNAME>
+        </MAILINGNAME.LIST>
         <NAME.LIST>
           <NAME>{party_name}</NAME>
         </NAME.LIST>
@@ -11909,16 +11922,23 @@ def _build_tally_master_messages(invoice, supplier, lines, additional_charges):
         <ISBILLWISEON>Yes</ISBILLWISEON>
         <ISCOSTCENTRESON>No</ISCOSTCENTRESON>
         <PARTYGSTIN>{gstin}</PARTYGSTIN>
-        <GSTREGISTRATIONTYPE>{'Regular' if gstin else 'Unregistered/Consumer'}</GSTREGISTRATIONTYPE>
+        <GSTREGISTRATIONTYPE>{reg_type}</GSTREGISTRATIONTYPE>
         <INCOMETAXNUMBER>{pan}</INCOMETAXNUMBER>
         <LEDSTATENAME>{state}</LEDSTATENAME>
         <PINCODE>{pincode}</PINCODE>
         <COUNTRYNAME>{country}</COUNTRYNAME>
-        {addr_xml}
+        <LEDMAILINGDETAILS.LIST>
+          <FROMDATE>{inv_date_xml}</FROMDATE>
+          <MAILINGNAME>{party_name}</MAILINGNAME>
+          <ADDRESS.LIST TYPE="String">{mail_addr_xml}</ADDRESS.LIST>
+          <STATE>{state}</STATE>
+          <COUNTRYNAME>{country}</COUNTRYNAME>
+          <PINCODE>{pincode}</PINCODE>
+        </LEDMAILINGDETAILS.LIST>
         <LEDGSTREGDETAILS.LIST>
-          <APPLICABLEFROM>{_tally_date(invoice.get('invoice_date')) or '20170701'}</APPLICABLEFROM>
+          <APPLICABLEFROM>{inv_date_xml}</APPLICABLEFROM>
+          <GSTREGISTRATIONTYPE>{reg_type}</GSTREGISTRATIONTYPE>
           <GSTIN>{gstin}</GSTIN>
-          <GSTREGISTRATIONTYPE>{'Regular' if gstin else 'Unregistered/Consumer'}</GSTREGISTRATIONTYPE>
           <PARTYTYPE>Not Applicable</PARTYTYPE>
         </LEDGSTREGDETAILS.LIST>
       </LEDGER>
