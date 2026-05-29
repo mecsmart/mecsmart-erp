@@ -11869,39 +11869,86 @@ def _tally_date(dt):
     return ""
 
 def _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inter_state):
-    """Build a single <TALLYMESSAGE> block for a purchase voucher."""
+    """Build a single <TALLYMESSAGE> block for a purchase voucher.
+
+    Each line item is emitted as an ALLINVENTORYENTRIES.LIST block containing
+    BILLEDQTY (quantity) + RATE (unit price) + AMOUNT (extended), plus per-
+    line CGST/SGST/IGST classifications so Tally can re-derive the tax slabs.
+
+    Additional charges (Freight, Packaging, Insurance, etc.) are emitted as
+    SEPARATE ledger entries with their own GST classifications — keeps the
+    purchase voucher's lines clean and lets Tally allocate the charge to its
+    own ledger account.
+    """
     inv_no = _xml_escape(invoice.get("invoice_no") or invoice.get("invoice_number") or "")
     inv_date = _tally_date(invoice.get("invoice_date"))
     party_name = _xml_escape(supplier.get("name", ""))
     narration = _xml_escape(invoice.get("notes", "") or f"Purchase against invoice {inv_no}")
 
     subtotal = float(invoice.get("subtotal", 0) or 0)
+    charges_subtotal = float(invoice.get("charges_subtotal", 0) or 0)
     total_cgst = float(invoice.get("total_cgst", 0) or 0)
     total_sgst = float(invoice.get("total_sgst", 0) or 0)
     total_igst = float(invoice.get("total_igst", 0) or 0)
     total_amount = float(invoice.get("total_amount", 0) or 0)
+    additional_charges = invoice.get("additional_charges", []) or []
 
-    # Inventory entries per line (ALLINVENTORYENTRIES.LIST)
+    # Inventory entries per line — Tally's preferred shape for purchase
+    # invoice imports. Includes qty + rate + per-line tax classifications.
     inv_entries = []
     for ln in lines:
         it = ln.get("item") or {}
         name = _xml_escape(f"{it.get('part_number','')} - {it.get('name','')}".strip(" -"))
         qty = float(ln.get("quantity", 0) or 0)
         rate = float(ln.get("unit_price", 0) or 0)
-        amt = qty * rate
+        line_total = float(ln.get("line_total") or (qty * rate))
         uom = _xml_escape(it.get("unit_of_measure", "Nos"))
+        line_gst_rate = float(ln.get("gst_rate", 0) or 0)
+        line_gst_amt = float(ln.get("gst_amount", 0) or 0)
+        # Per-line tax classification — Tally uses these to fan-out the line
+        # tax into the correct CGST/SGST/IGST ledger. Inter-state → IGST;
+        # else split 50/50 into CGST + SGST.
+        tax_class_xml = ""
+        if line_gst_rate > 0 and line_gst_amt > 0:
+            if is_inter_state:
+                tax_class_xml = f"""
+            <RATEDETAILS.LIST>
+              <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>
+              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+              <GSTRATE>{line_gst_rate:.2f}</GSTRATE>
+            </RATEDETAILS.LIST>"""
+            else:
+                half = line_gst_rate / 2.0
+                tax_class_xml = f"""
+            <RATEDETAILS.LIST>
+              <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>
+              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+              <GSTRATE>{half:.2f}</GSTRATE>
+            </RATEDETAILS.LIST>
+            <RATEDETAILS.LIST>
+              <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>
+              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+              <GSTRATE>{half:.2f}</GSTRATE>
+            </RATEDETAILS.LIST>"""
         inv_entries.append(f"""
           <ALLINVENTORYENTRIES.LIST>
             <STOCKITEMNAME>{name}</STOCKITEMNAME>
             <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
             <RATE>{rate:.2f}/{uom}</RATE>
-            <AMOUNT>-{amt:.2f}</AMOUNT>
+            <AMOUNT>-{line_total:.2f}</AMOUNT>
             <ACTUALQTY>{qty} {uom}</ACTUALQTY>
             <BILLEDQTY>{qty} {uom}</BILLEDQTY>
+            <ACCOUNTINGALLOCATIONS.LIST>
+              <LEDGERNAME>Purchase Account</LEDGERNAME>
+              <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+              <AMOUNT>-{line_total:.2f}</AMOUNT>
+            </ACCOUNTINGALLOCATIONS.LIST>{tax_class_xml}
           </ALLINVENTORYENTRIES.LIST>""")
     inventory_block = "".join(inv_entries)
 
-    # Ledger entries: Party (credit), Purchase Account (debit), Tax ledgers (debit)
+    # Ledger entries: Party (credit), Purchase Account (debit), Tax ledgers (debit),
+    # then ONE separate ledger entry per additional charge so Tally can post each to
+    # its own ledger account (Freight, Packaging, etc.).
     ledger_entries = [f"""
         <LEDGERENTRIES.LIST>
           <LEDGERNAME>{party_name}</LEDGERNAME>
@@ -11914,6 +11961,23 @@ def _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inte
           <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
           <AMOUNT>-{subtotal:.2f}</AMOUNT>
         </LEDGERENTRIES.LIST>"""]
+    # Additional charges — each becomes its own ledger debit. Charge name maps
+    # directly to a Tally ledger so the user can create matching ledgers like
+    # "Freight Charges", "Packaging Charges" etc. in Tally beforehand.
+    for charge in additional_charges:
+        ch_name = _xml_escape(str(charge.get("name") or "Other Charges"))
+        ch_amount = float(charge.get("amount") or 0)
+        ch_gst_rate = float(charge.get("gst_rate") or 0)
+        ch_tax = float(charge.get("tax_amount") or 0)
+        if ch_amount <= 0 and ch_tax <= 0:
+            continue
+        ledger_entries.append(f"""
+        <LEDGERENTRIES.LIST>
+          <LEDGERNAME>{ch_name}</LEDGERNAME>
+          <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+          <AMOUNT>-{ch_amount:.2f}</AMOUNT>
+          <GSTRATE>{ch_gst_rate:.2f}</GSTRATE>
+        </LEDGERENTRIES.LIST>""")
     if is_inter_state:
         if total_igst > 0:
             ledger_entries.append(f"""
@@ -11939,11 +12003,23 @@ def _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inte
         </LEDGERENTRIES.LIST>""")
     ledger_block = "".join(ledger_entries)
 
+    # Build a small charges narration so the operator can sanity-check what
+    # was attached when reviewing in Tally.
+    charges_narration = ""
+    if additional_charges and charges_subtotal > 0:
+        items_str = ", ".join(
+            f"{_xml_escape(str(c.get('name') or ''))} {float(c.get('amount') or 0):.2f}"
+            for c in additional_charges
+            if float(c.get("amount") or 0) > 0
+        )
+        if items_str:
+            charges_narration = f" | Add'l: {items_str}"
+
     return f"""
     <TALLYMESSAGE xmlns:UDF="TallyUDF">
       <VOUCHER VCHTYPE="Purchase" ACTION="Create" OBJVIEW="Invoice Voucher View">
         <DATE>{inv_date}</DATE>
-        <NARRATION>{narration}</NARRATION>
+        <NARRATION>{narration}{charges_narration}</NARRATION>
         <VOUCHERTYPENAME>Purchase</VOUCHERTYPENAME>
         <VOUCHERNUMBER>{inv_no}</VOUCHERNUMBER>
         <REFERENCE>{inv_no}</REFERENCE>
