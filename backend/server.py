@@ -10058,6 +10058,15 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
         if not bom_data.get("parent_item_id"):
             continue
 
+        # Normalize status to canonical lowercase value so the BOM list filter
+        # ("active" / "draft" / "obsolete") sees consistent data regardless of
+        # how the user typed it in Excel ("Active", "ACTIVE", " active " etc.).
+        # Anything outside the known set falls back to "active".
+        raw_status = (bom_data.get("status") or "active").strip().lower()
+        if raw_status not in ("draft", "active", "obsolete"):
+            raw_status = "active"
+        bom_data["status"] = raw_status
+
         # Convert accumulated routing dict back to a list, dropping zero-cost
         # entries that the user didn't actually fill (avoid noise in the doc).
         parent_routings = [
@@ -10077,6 +10086,14 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
                     "updated_at": datetime.now(timezone.utc)
                 }}
             )
+            # When the imported BOM is being marked active, demote any OTHER
+            # revisions of the same parent that were previously active so the
+            # business rule "only one active revision per parent" stays true.
+            if bom_data["status"] == "active":
+                await db.boms.update_many(
+                    {"parent_item_id": bom_data["parent_item_id"], "id": {"$ne": existing["id"]}, "status": "active"},
+                    {"$set": {"status": "obsolete", "updated_at": datetime.now(timezone.utc)}},
+                )
             results["updated"] += 1
             results["imported_bom_ids"].append(existing["id"])
             results["imported_part_numbers"].append(parent_pn)
@@ -10094,6 +10111,12 @@ async def import_bom_excel(request: Request, file: UploadFile = File(...)):
                 "created_by": user["id"]
             }
             await db.boms.insert_one(bom_doc)
+            # Same single-active-revision rule applies on insert.
+            if bom_data["status"] == "active":
+                await db.boms.update_many(
+                    {"parent_item_id": bom_data["parent_item_id"], "id": {"$ne": bom_doc["id"]}, "status": "active"},
+                    {"$set": {"status": "obsolete", "updated_at": datetime.now(timezone.utc)}},
+                )
             results["created"] += 1
             results["imported_bom_ids"].append(bom_doc["id"])
             results["imported_part_numbers"].append(parent_pn)
