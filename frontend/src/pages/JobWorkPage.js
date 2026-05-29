@@ -166,7 +166,9 @@ export default function JobWorkPage() {
     try {
       const { data: preview } = await api.get(`/api/bom/by-item/${partToRemove.item_id}/preview`);
       const removedQty = parseFloat(partToRemove.quantity) || 0;
-      const rmChildren = (preview.components || []).filter(c => c.category === 'raw_material');
+      // Match the auto-fill side: subtract for ALL first-level BOM children
+      // (Parts + RMs), not just raw_material category.
+      const rmChildren = (preview.components || []).filter(c => c.item_id && c.item_id !== partToRemove.item_id);
       const subtractMap = new Map();
       for (const rm of rmChildren) {
         subtractMap.set(rm.item_id, (subtractMap.get(rm.item_id) || 0) + (rm.quantity * removedQty));
@@ -237,12 +239,14 @@ export default function JobWorkPage() {
         item_description: autoDesc || '',
         process_names: costs.process_names || [],
       };
-      // Build RM auto-fill lines: only RM-category BOM children, qty scaled
-      // by the part's quantity (1 if not set yet). Skip RMs already present
-      // in orderForm.lines (by item_id) so reselecting the same part doesn't
-      // duplicate rows; also keep any user-edited line untouched.
+      // Build auto-fill lines: ALL first-level BOM children (Parts + RMs)
+      // — user wants to ship both to the subcontractor. Filter only excludes
+      // alternates (handled by backend preview already) and any direct-cycle
+      // back-reference. Qty is scaled by the part's quantity (1 if not set).
+      // Skip items already present in orderForm.lines so reselecting the
+      // same part doesn't duplicate rows.
       const partQty = parseFloat(existing.quantity) || 1;
-      const rmChildren = (preview.components || []).filter(c => c.category === 'raw_material');
+      const rmChildren = (preview.components || []).filter(c => c.item_id && c.item_id !== item_id);
       const newLines = [...orderForm.lines];
       // Drop placeholder empty lines so the auto-fill replaces them rather
       // than stacking under a blank row.
