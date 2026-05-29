@@ -11868,6 +11868,134 @@ def _tally_date(dt):
         return dt.strftime("%Y%m%d")
     return ""
 
+
+def _build_tally_master_messages(invoice, supplier, lines, additional_charges):
+    """Emit the stock-item + ledger master <TALLYMESSAGE> blocks the voucher
+    references. Without these, Tally treats unknown stock items as text-only
+    (qty/rate blank) and unknown ledgers as plain-amount entries. Each
+    master uses `ACTION="Alter"` with `CANDELETE="No"` so re-importing the
+    same XML is idempotent.
+
+    Two categories of master are pushed here:
+      1) Stock items for every PI line — gives Tally a valid stock master
+         so BILLEDQTY + RATE actually show up in the voucher view.
+      2) The supplier ledger (Sundry Creditor) with full address + GSTIN —
+         fixes the "Party A/c GSTIN and address not showing" bug.
+    """
+    blocks: List[str] = []
+
+    # ---------------- Supplier ledger master with GSTIN + address ----------
+    party_name = _xml_escape(supplier.get("name", ""))
+    gstin = _xml_escape(supplier.get("gstin") or "")
+    pan = _xml_escape((supplier.get("pan") or (supplier.get("gstin", "")[2:12] if supplier.get("gstin") else "")))
+    addr_lines = []
+    for k in ("address", "address_line2", "city"):
+        v = supplier.get(k)
+        if v:
+            addr_lines.append(_xml_escape(str(v)))
+    state = _xml_escape(supplier.get("state") or "")
+    pincode = _xml_escape(supplier.get("pin_code") or supplier.get("pincode") or "")
+    country = _xml_escape(supplier.get("country") or "India")
+    addr_xml = "".join(f"<ADDRESS.LIST><ADDRESS>{a}</ADDRESS></ADDRESS.LIST>" if False else f"<ADDRESS>{a}</ADDRESS>" for a in addr_lines)
+    # Tally expects ADDRESS as multiple repeated tags inside ADDRESS.LIST.
+    addr_xml = "<ADDRESS.LIST>" + "".join(f"<ADDRESS>{a}</ADDRESS>" for a in addr_lines) + "</ADDRESS.LIST>" if addr_lines else ""
+    blocks.append(f"""
+    <TALLYMESSAGE xmlns:UDF="TallyUDF">
+      <LEDGER NAME="{party_name}" RESERVEDNAME="" ACTION="Alter">
+        <NAME.LIST>
+          <NAME>{party_name}</NAME>
+        </NAME.LIST>
+        <PARENT>Sundry Creditors</PARENT>
+        <ISBILLWISEON>Yes</ISBILLWISEON>
+        <ISCOSTCENTRESON>No</ISCOSTCENTRESON>
+        <PARTYGSTIN>{gstin}</PARTYGSTIN>
+        <GSTREGISTRATIONTYPE>{'Regular' if gstin else 'Unregistered/Consumer'}</GSTREGISTRATIONTYPE>
+        <INCOMETAXNUMBER>{pan}</INCOMETAXNUMBER>
+        <LEDSTATENAME>{state}</LEDSTATENAME>
+        <PINCODE>{pincode}</PINCODE>
+        <COUNTRYNAME>{country}</COUNTRYNAME>
+        {addr_xml}
+      </LEDGER>
+    </TALLYMESSAGE>""")
+
+    # ---------------- Stock item masters --------------------------------
+    seen_stock = set()
+    for ln in lines:
+        it = ln.get("item") or {}
+        si_name = f"{it.get('part_number','')} - {it.get('name','')}".strip(" -")
+        if not si_name or si_name in seen_stock:
+            continue
+        seen_stock.add(si_name)
+        uom = _xml_escape(it.get("unit_of_measure", "Nos"))
+        si_name_x = _xml_escape(si_name)
+        hsn = _xml_escape(it.get("hsn_code") or "")
+        gst_rate = float(ln.get("gst_rate") or it.get("gst_rate") or 0)
+        blocks.append(f"""
+    <TALLYMESSAGE xmlns:UDF="TallyUDF">
+      <STOCKITEM NAME="{si_name_x}" RESERVEDNAME="" ACTION="Alter">
+        <NAME.LIST>
+          <NAME>{si_name_x}</NAME>
+        </NAME.LIST>
+        <BASEUNITS>{uom}</BASEUNITS>
+        <GSTAPPLICABLE>&#4; Applicable</GSTAPPLICABLE>
+        <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>
+        <HSNCODE>{hsn}</HSNCODE>
+        <GSTDETAILS.LIST>
+          <APPLICABLEFROM>{_tally_date(invoice.get('invoice_date'))}</APPLICABLEFROM>
+          <HSNCODE>{hsn}</HSNCODE>
+          <STATEWISEDETAILS.LIST>
+            <STATENAME>&#4; Any</STATENAME>
+            <RATEDETAILS.LIST>
+              <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>
+              <GSTRATE>{gst_rate/2:.2f}</GSTRATE>
+            </RATEDETAILS.LIST>
+            <RATEDETAILS.LIST>
+              <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>
+              <GSTRATE>{gst_rate/2:.2f}</GSTRATE>
+            </RATEDETAILS.LIST>
+            <RATEDETAILS.LIST>
+              <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>
+              <GSTRATE>{gst_rate:.2f}</GSTRATE>
+            </RATEDETAILS.LIST>
+          </STATEWISEDETAILS.LIST>
+        </GSTDETAILS.LIST>
+      </STOCKITEM>
+    </TALLYMESSAGE>""")
+
+    # ---------------- UOM masters (BASEUNITS referenced by stock items) ---
+    seen_uoms = set()
+    for ln in lines:
+        it = ln.get("item") or {}
+        uom = (it.get("unit_of_measure") or "Nos").strip()
+        if not uom or uom in seen_uoms:
+            continue
+        seen_uoms.add(uom)
+        uom_x = _xml_escape(uom)
+        blocks.append(f"""
+    <TALLYMESSAGE xmlns:UDF="TallyUDF">
+      <UNIT NAME="{uom_x}" RESERVEDNAME="" ACTION="Alter">
+        <NAME.LIST><NAME>{uom_x}</NAME></NAME.LIST>
+        <ISSIMPLEUNIT>Yes</ISSIMPLEUNIT>
+      </UNIT>
+    </TALLYMESSAGE>""")
+
+    # ---------------- Additional-charge ledger masters --------------------
+    for charge in (additional_charges or []):
+        ch_name = (charge.get("name") or "").strip()
+        if not ch_name:
+            continue
+        ch_name_x = _xml_escape(ch_name)
+        blocks.append(f"""
+    <TALLYMESSAGE xmlns:UDF="TallyUDF">
+      <LEDGER NAME="{ch_name_x}" RESERVEDNAME="" ACTION="Alter">
+        <NAME.LIST><NAME>{ch_name_x}</NAME></NAME.LIST>
+        <PARENT>Indirect Expenses</PARENT>
+        <ISBILLWISEON>No</ISBILLWISEON>
+      </LEDGER>
+    </TALLYMESSAGE>""")
+    return "".join(blocks)
+
+
 def _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inter_state):
     """Build a single <TALLYMESSAGE> block for a purchase voucher.
 
@@ -12024,7 +12152,14 @@ def _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inte
         <VOUCHERNUMBER>{inv_no}</VOUCHERNUMBER>
         <REFERENCE>{inv_no}</REFERENCE>
         <PARTYLEDGERNAME>{party_name}</PARTYLEDGERNAME>
+        <PARTYNAME>{party_name}</PARTYNAME>
         <BASICBUYERNAME>{party_name}</BASICBUYERNAME>
+        <PARTYGSTIN>{_xml_escape(supplier.get('gstin') or '')}</PARTYGSTIN>
+        <BUYERSGSTIN>{_xml_escape(supplier.get('gstin') or '')}</BUYERSGSTIN>
+        <STATENAME>{_xml_escape(supplier.get('state') or '')}</STATENAME>
+        <PLACEOFSUPPLY>{_xml_escape(supplier.get('state') or '')}</PLACEOFSUPPLY>
+        <CONSIGNEEGSTIN>{_xml_escape(supplier.get('gstin') or '')}</CONSIGNEEGSTIN>
+        <BASICBUYERADDRESS.LIST>{"".join(f"<BASICBUYERADDRESS>{_xml_escape(str(supplier.get(k, '') or ''))}</BASICBUYERADDRESS>" for k in ("address", "address_line2", "city") if supplier.get(k))}</BASICBUYERADDRESS.LIST>
         <ISINVOICE>Yes</ISINVOICE>
         <EFFECTIVEDATE>{inv_date}</EFFECTIVEDATE>
         {ledger_block}
@@ -12075,8 +12210,14 @@ async def export_purchase_invoice_to_tally(invoice_id: str, request: Request):
     lines = invoice.get("lines", []) or []
     for ln in lines:
         ln["item"] = await db.items.find_one({"id": ln.get("item_id")}, {"_id": 0}) or {}
+    # Emit master messages first (stock items + ledger + UOM), then the
+    # voucher. Without the masters, Tally treats unknown stock items as text
+    # and unknown ledgers as plain-amount entries — qty/rate/GSTIN are not
+    # rendered. The masters use ACTION="Alter" so re-imports are idempotent.
+    additional_charges = invoice.get("additional_charges", []) or []
+    masters = _build_tally_master_messages(invoice, supplier, lines, additional_charges)
     msg = _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inter_state)
-    xml = _wrap_tally_envelope(msg, company=company)
+    xml = _wrap_tally_envelope(masters + msg, company=company)
     fname = f"tally_{invoice.get('invoice_number', invoice_id)}.xml"
     return Response(
         content=xml,
@@ -12102,6 +12243,8 @@ async def export_purchase_invoices_bulk_tally(request: Request, payload: dict = 
         lines = invoice.get("lines", []) or []
         for ln in lines:
             ln["item"] = await db.items.find_one({"id": ln.get("item_id")}, {"_id": 0}) or {}
+        additional_charges = invoice.get("additional_charges", []) or []
+        messages.append(_build_tally_master_messages(invoice, supplier, lines, additional_charges))
         messages.append(_build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inter_state))
     xml = _wrap_tally_envelope("".join(messages), company=company)
     return Response(
