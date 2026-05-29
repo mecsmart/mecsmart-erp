@@ -12,6 +12,7 @@ import { SearchableItemSelect } from '../components/SearchableItemSelect';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
 import { downloadHtmlAsPdf } from '../utils/pdfPrint';
 import { fmtAmt } from '../utils/numberFormat';
+import { toast } from 'sonner';
 
 export default function JobWorkPage() {
   const { user, hasPermission } = useAuth();
@@ -155,41 +156,37 @@ export default function JobWorkPage() {
   // contribution from `orderForm.lines`. Lines that drop to ≤0 qty are dropped
   // entirely; lines with positive remaining qty are kept (covers RMs shared
   // across multiple parts).
-  const removeJWPart = async (idx) => {
+  const removeJWPart = (idx) => {
     const partToRemove = orderForm.job_work_parts[idx];
     const remainingParts = orderForm.job_work_parts.filter((_, i) => i !== idx);
     if (!partToRemove || !partToRemove.item_id) {
-      // Nothing to subtract — just drop the part.
       setOrderForm({ ...orderForm, job_work_parts: remainingParts });
       return;
     }
-    try {
-      const { data: preview } = await api.get(`/api/bom/by-item/${partToRemove.item_id}/preview`);
-      const removedQty = parseFloat(partToRemove.quantity) || 0;
-      // Match the auto-fill side: subtract for ALL first-level BOM children
-      // (Parts + RMs), not just raw_material category.
-      const rmChildren = (preview.components || []).filter(c => c.item_id && c.item_id !== partToRemove.item_id);
-      const subtractMap = new Map();
-      for (const rm of rmChildren) {
-        subtractMap.set(rm.item_id, (subtractMap.get(rm.item_id) || 0) + (rm.quantity * removedQty));
-      }
-      const newLines = orderForm.lines
-        .map(l => {
-          if (!l.item_id || !subtractMap.has(l.item_id)) return l;
-          const newQty = (parseFloat(l.quantity) || 0) - subtractMap.get(l.item_id);
-          // Keep the row only if it still has positive qty (other parts share it).
-          return { ...l, quantity: newQty };
-        })
-        .filter(l => !l.item_id || (parseFloat(l.quantity) || 0) > 0.0001);
-      // Always keep at least one blank editable row.
-      if (newLines.length === 0 || newLines[newLines.length - 1].item_id) {
-        newLines.push({ item_id: '', quantity: 0, rate: 0, item_description: '' });
-      }
-      setOrderForm({ ...orderForm, job_work_parts: remainingParts, lines: newLines });
-    } catch {
-      // Best-effort — fall back to just removing the part if BOM lookup fails.
-      setOrderForm({ ...orderForm, job_work_parts: remainingParts });
+    // Use the contribution map written by updateJWPartItem — works even when
+    // the BOM endpoint is unavailable and is robust against BOM edits between
+    // add+remove (no second API call needed).
+    const partId = partToRemove.item_id;
+    const newLines = orderForm.lines
+      .map(l => {
+        const contribs = l._contributions || {};
+        let subtract = 0;
+        const next = { ...contribs };
+        for (const key of Object.keys(contribs)) {
+          if (key.startsWith(`${partId}::`)) {
+            subtract += contribs[key];
+            delete next[key];
+          }
+        }
+        if (subtract <= 0) return l;
+        const newQty = (parseFloat(l.quantity) || 0) - subtract;
+        return { ...l, quantity: newQty, _contributions: next };
+      })
+      .filter(l => !l.item_id || (parseFloat(l.quantity) || 0) > 0.0001);
+    if (newLines.length === 0 || newLines[newLines.length - 1].item_id) {
+      newLines.push({ item_id: '', quantity: 0, rate: 0, item_description: '' });
     }
+    setOrderForm({ ...orderForm, job_work_parts: remainingParts, lines: newLines });
   };
   const updateJWPart = (idx, field, val) => { const parts = [...orderForm.job_work_parts]; parts[idx] = { ...parts[idx], [field]: val }; setOrderForm({ ...orderForm, job_work_parts: parts }); };
 
@@ -257,18 +254,34 @@ export default function JobWorkPage() {
           // bump quantity on the existing line (additive when multiple parts share an RM).
           const li = dedupedLines.findIndex(l => l.item_id === rm.item_id);
           if (li >= 0) {
+            // Track which parts contributed to this RM's quantity so removeJWPart
+            // can subtract exactly that share even if the BOM is later edited.
+            const prev = dedupedLines[li];
+            const contribKey = `${item_id}::${rm.item_id}`;
+            const contributions = { ...(prev._contributions || {}) };
+            contributions[contribKey] = (contributions[contribKey] || 0) + rm.quantity * partQty;
             dedupedLines[li] = {
-              ...dedupedLines[li],
-              quantity: (parseFloat(dedupedLines[li].quantity) || 0) + rm.quantity * partQty,
+              ...prev,
+              quantity: (parseFloat(prev.quantity) || 0) + rm.quantity * partQty,
+              _contributions: contributions,
             };
           }
           continue;
         }
+        // Resolve a usable rate: BOM preview's unit_cost first, then fall
+        // back to the master item's purchase_price / unit_cost (which is
+        // populated for both RMs AND components/sub-assemblies via the BOM
+        // rollup cron). This is the same fallback chain JW-OS uses.
+        const rmItem = items.find(i => i.id === rm.item_id);
+        const resolvedRate = rm.unit_cost || rmItem?.purchase_price || rmItem?.unit_cost || 0;
+        const resolvedDesc = rmItem?.description || '';
+        const contribKey = `${item_id}::${rm.item_id}`;
         dedupedLines.push({
           item_id: rm.item_id,
           quantity: rm.quantity * partQty,
-          rate: rm.unit_cost || 0,
-          item_description: '',
+          rate: resolvedRate,
+          item_description: resolvedDesc,
+          _contributions: { [contribKey]: rm.quantity * partQty },
         });
       }
       // Always leave at least one editable blank row at the bottom for the user.
@@ -284,16 +297,18 @@ export default function JobWorkPage() {
     // field. The previous combined check ("Select supplier and add items") was
     // misleading for without_material SCs (no RM lines, only job_work_parts) —
     // it would fire even when the supplier was clearly selected.
-    if (!orderForm.supplier_id) { alert('Please select a supplier (Party) to continue.'); return; }
+    if (!orderForm.supplier_id) { toast.error('Please select a supplier (Party) to continue.'); return; }
     const hasLines = (orderForm.lines || []).filter(l => l.item_id).length > 0;
     const hasParts = (orderForm.job_work_parts || []).filter(p => p.item_id).length > 0;
-    if (!hasLines && !hasParts) { alert('Please add at least one Job Work Part or Raw Material line.'); return; }
+    if (!hasLines && !hasParts) { toast.error('Please add at least one Job Work Part or Raw Material line.'); return; }
     try {
       const payload = {
         ...orderForm,
         // Strip empty lines/parts (rows where the user never picked an item) so
         // they don't get persisted as ghost lines on the backend.
-        lines: (orderForm.lines || []).filter(l => l.item_id),
+        // Also strip the client-only `_contributions` tracker used to subtract
+        // RMs when the parent JW part is removed.
+        lines: (orderForm.lines || []).filter(l => l.item_id).map(({ _contributions, ...rest }) => rest),
         job_work_parts: (orderForm.job_work_parts || []).filter(p => p.item_id),
         expected_return_date: orderForm.expected_return_date ? new Date(orderForm.expected_return_date).toISOString() : null,
       };
@@ -304,9 +319,9 @@ export default function JobWorkPage() {
       }
       setOrderDialog(false);
       setEditingOrder(null);
-      setOrderForm({ supplier_id: '', expected_return_date: '', processing_charges: 0, notes: '', lines: [{ item_id: '', quantity: 0, rate: 0 }], job_work_parts: [] });
+      setOrderForm({ supplier_id: '', expected_return_date: '', processing_charges: 0, notes: '', lines: [{ item_id: '', quantity: 0, rate: 0, item_description: '' }], job_work_parts: [] });
       fetchData();
-    } catch (e) { alert(e.response?.data?.detail || 'Failed'); }
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to save subcontract order'); }
   };
 
   const handleEditOrder = (order) => {
@@ -1376,8 +1391,21 @@ export default function JobWorkPage() {
       </div>
 
       {/* Create Order Dialog */}
-      <Dialog open={orderDialog} onOpenChange={setOrderDialog}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <Dialog open={orderDialog} onOpenChange={(open) => {
+        setOrderDialog(open);
+        if (!open) {
+          // Hard reset on close — previously the form state lingered, so
+          // closing without saving and reopening showed stale parts/RMs.
+          setEditingOrder(null);
+          setOrderForm({ supplier_id: '', expected_return_date: '', processing_charges: 0, notes: '', lines: [{ item_id: '', quantity: 0, rate: 0, item_description: '' }], job_work_parts: [] });
+        }
+      }}>
+        <DialogContent
+          className="max-w-5xl max-h-[90vh] overflow-y-auto"
+          // Block Radix focus-restore on close — fixes the "can't type" lockout
+          // after a failed Create Order toast / native alert was shown.
+          onCloseAutoFocus={(e) => e.preventDefault()}
+        >
           <DialogHeader><DialogTitle className="font-[Chivo]">{editingOrder ? 'Edit Subcontract Order' : 'New Subcontract Order'}</DialogTitle></DialogHeader>
           <div className="space-y-4 mt-3">
             <div className="grid grid-cols-2 gap-4">
