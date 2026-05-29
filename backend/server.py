@@ -11869,6 +11869,119 @@ def _tally_date(dt):
     return ""
 
 
+# Indian GST state code → state name. Tally Prime stores the full state name
+# (e.g. "Maharashtra"), but most ERP supplier records carry only the 2-digit
+# state_code (the first two characters of the GSTIN). Without this lookup, the
+# Tally Ledger Alteration screen shows "•Not Applicable" for State / Country
+# even when the GSTIN is valid.
+_GST_STATE_CODE_TO_NAME = {
+    "01": "Jammu and Kashmir", "02": "Himachal Pradesh", "03": "Punjab",
+    "04": "Chandigarh", "05": "Uttarakhand", "06": "Haryana", "07": "Delhi",
+    "08": "Rajasthan", "09": "Uttar Pradesh", "10": "Bihar", "11": "Sikkim",
+    "12": "Arunachal Pradesh", "13": "Nagaland", "14": "Manipur",
+    "15": "Mizoram", "16": "Tripura", "17": "Meghalaya", "18": "Assam",
+    "19": "West Bengal", "20": "Jharkhand", "21": "Odisha",
+    "22": "Chhattisgarh", "23": "Madhya Pradesh", "24": "Gujarat",
+    "25": "Daman and Diu", "26": "Dadra and Nagar Haveli",
+    "27": "Maharashtra", "28": "Andhra Pradesh", "29": "Karnataka",
+    "30": "Goa", "31": "Lakshadweep", "32": "Kerala", "33": "Tamil Nadu",
+    "34": "Puducherry", "35": "Andaman and Nicobar Islands",
+    "36": "Telangana", "37": "Andhra Pradesh", "38": "Ladakh",
+    "97": "Other Territory", "99": "Centre Jurisdiction",
+}
+
+
+def _resolve_state_name(party):
+    """Return the best human-readable state name for a supplier / customer.
+
+    Preference:
+      1) party['state']  (if non-empty after strip)
+      2) GST-code-to-name lookup on party['state_code']
+      3) First 2 chars of GSTIN if state_code is missing
+      4) "" (lets caller emit blank rather than wrong data)
+    """
+    if not party:
+        return ""
+    state = (party.get("state") or "").strip()
+    if state:
+        return state
+    code = (party.get("state_code") or "").strip()
+    if not code:
+        gstin = (party.get("gstin") or "").strip()
+        if len(gstin) >= 2 and gstin[:2].isdigit():
+            code = gstin[:2]
+    if code and len(code) == 1:
+        code = "0" + code  # pad e.g. "9" → "09"
+    return _GST_STATE_CODE_TO_NAME.get(code, "")
+
+
+def _build_tally_party_ledger_xml(party, parent_group, ref_date):
+    """Build the LEDGER master <TALLYMESSAGE> block for a supplier/customer.
+
+    Used for both supplier (parent="Sundry Creditors") and customer
+    (parent="Sundry Debtors") so the Tally Prime Ledger Alteration screen
+    shows the full Address / State / Country / GSTIN block instead of
+    "•Not Applicable".
+
+    `ref_date` is the YYYYMMDD applicable-from date used inside
+    LEDMAILINGDETAILS.LIST and LEDGSTREGDETAILS.LIST.
+    """
+    if not party or not party.get("name"):
+        return ""
+    party_name = _xml_escape(party.get("name", ""))
+    gstin = _xml_escape(party.get("gstin") or "")
+    pan = _xml_escape((party.get("pan") or (party.get("gstin", "")[2:12] if party.get("gstin") else "")))
+    addr_lines = []
+    for k in ("address", "address_line2", "city"):
+        v = party.get(k)
+        if v:
+            addr_lines.append(_xml_escape(str(v)))
+    state = _xml_escape(_resolve_state_name(party))
+    pincode = _xml_escape(party.get("pin_code") or party.get("pincode") or "")
+    country = _xml_escape(party.get("country") or "India")
+    addr_xml = ("<ADDRESS.LIST>" + "".join(f"<ADDRESS>{a}</ADDRESS>" for a in addr_lines) + "</ADDRESS.LIST>") if addr_lines else ""
+    mail_addr_xml = "".join(f"<ADDRESS>{_xml_escape(str(party.get(k, '') or ''))}</ADDRESS>" for k in ("address", "address_line2", "city") if party.get(k))
+    reg_type = 'Regular' if gstin else 'Unregistered/Consumer'
+    parent_x = _xml_escape(parent_group)
+    return f"""
+    <TALLYMESSAGE xmlns:UDF="TallyUDF">
+      <LEDGER NAME="{party_name}" RESERVEDNAME="" ACTION="Alter">
+        <MAILINGNAME.LIST TYPE="String">
+          <MAILINGNAME>{party_name}</MAILINGNAME>
+        </MAILINGNAME.LIST>
+        <NAME.LIST>
+          <NAME>{party_name}</NAME>
+        </NAME.LIST>
+        <PARENT>{parent_x}</PARENT>
+        <ISBILLWISEON>Yes</ISBILLWISEON>
+        <ISCOSTCENTRESON>No</ISCOSTCENTRESON>
+        {addr_xml}
+        <COUNTRYNAME>{country}</COUNTRYNAME>
+        <LEDSTATENAME>{state}</LEDSTATENAME>
+        <STATENAME>{state}</STATENAME>
+        <PINCODE>{pincode}</PINCODE>
+        <PARTYGSTIN>{gstin}</PARTYGSTIN>
+        <GSTREGISTRATIONTYPE>{reg_type}</GSTREGISTRATIONTYPE>
+        <INCOMETAXNUMBER>{pan}</INCOMETAXNUMBER>
+        <LEDMAILINGDETAILS.LIST>
+          <APPLICABLEFROM>{ref_date}</APPLICABLEFROM>
+          <MAILINGNAME>{party_name}</MAILINGNAME>
+          <ADDRESS.LIST TYPE="String">{mail_addr_xml}</ADDRESS.LIST>
+          <STATE>{state}</STATE>
+          <COUNTRY>{country}</COUNTRY>
+          <PINCODE>{pincode}</PINCODE>
+        </LEDMAILINGDETAILS.LIST>
+        <LEDGSTREGDETAILS.LIST>
+          <APPLICABLEFROM>{ref_date}</APPLICABLEFROM>
+          <GSTREGISTRATIONTYPE>{reg_type}</GSTREGISTRATIONTYPE>
+          <STATE>{state}</STATE>
+          <GSTIN>{gstin}</GSTIN>
+          <PARTYTYPE>Not Applicable</PARTYTYPE>
+        </LEDGSTREGDETAILS.LIST>
+      </LEDGER>
+    </TALLYMESSAGE>"""
+
+
 def _build_tally_master_messages(invoice, supplier, lines, additional_charges):
     """Emit the stock-item + ledger master <TALLYMESSAGE> blocks the voucher
     references. Without these, Tally treats unknown stock items as text-only
@@ -11885,64 +11998,10 @@ def _build_tally_master_messages(invoice, supplier, lines, additional_charges):
     blocks: List[str] = []
 
     # ---------------- Supplier ledger master with GSTIN + address ----------
-    party_name = _xml_escape(supplier.get("name", ""))
-    gstin = _xml_escape(supplier.get("gstin") or "")
-    pan = _xml_escape((supplier.get("pan") or (supplier.get("gstin", "")[2:12] if supplier.get("gstin") else "")))
-    addr_lines = []
-    for k in ("address", "address_line2", "city"):
-        v = supplier.get(k)
-        if v:
-            addr_lines.append(_xml_escape(str(v)))
-    state = _xml_escape(supplier.get("state") or "")
-    pincode = _xml_escape(supplier.get("pin_code") or supplier.get("pincode") or "")
-    country = _xml_escape(supplier.get("country") or "India")
-    addr_xml = "".join(f"<ADDRESS.LIST><ADDRESS>{a}</ADDRESS></ADDRESS.LIST>" if False else f"<ADDRESS>{a}</ADDRESS>" for a in addr_lines)
-    # Tally expects ADDRESS as multiple repeated tags inside ADDRESS.LIST.
-    addr_xml = "<ADDRESS.LIST>" + "".join(f"<ADDRESS>{a}</ADDRESS>" for a in addr_lines) + "</ADDRESS.LIST>" if addr_lines else ""
-    # Build Tally-compatible state name. If the supplier has a 2-letter state
-    # code (like '29'), keep the raw state name from the master — Tally Prime
-    # accepts the canonical state names like "Karnataka", "Tamil Nadu" etc.
-    # An empty state forces Tally to show "Not Applicable" in the master view.
     inv_date_xml = _tally_date(invoice.get('invoice_date')) or '20170701'
-    reg_type = 'Regular' if gstin else 'Unregistered/Consumer'
-    # Tally Prime stores address details under LEDMAILINGDETAILS.LIST — using
-    # only top-level <ADDRESS.LIST> leaves the ledger Address / State /
-    # Country / GSTIN fields BLANK after import (as seen in user's screenshot).
-    mail_addr_xml = "".join(f"<ADDRESS>{_xml_escape(str(supplier.get(k, '') or ''))}</ADDRESS>" for k in ("address", "address_line2", "city") if supplier.get(k))
-    blocks.append(f"""
-    <TALLYMESSAGE xmlns:UDF="TallyUDF">
-      <LEDGER NAME="{party_name}" RESERVEDNAME="" ACTION="Alter">
-        <MAILINGNAME.LIST TYPE="String">
-          <MAILINGNAME>{party_name}</MAILINGNAME>
-        </MAILINGNAME.LIST>
-        <NAME.LIST>
-          <NAME>{party_name}</NAME>
-        </NAME.LIST>
-        <PARENT>Sundry Creditors</PARENT>
-        <ISBILLWISEON>Yes</ISBILLWISEON>
-        <ISCOSTCENTRESON>No</ISCOSTCENTRESON>
-        <PARTYGSTIN>{gstin}</PARTYGSTIN>
-        <GSTREGISTRATIONTYPE>{reg_type}</GSTREGISTRATIONTYPE>
-        <INCOMETAXNUMBER>{pan}</INCOMETAXNUMBER>
-        <LEDSTATENAME>{state}</LEDSTATENAME>
-        <PINCODE>{pincode}</PINCODE>
-        <COUNTRYNAME>{country}</COUNTRYNAME>
-        <LEDMAILINGDETAILS.LIST>
-          <FROMDATE>{inv_date_xml}</FROMDATE>
-          <MAILINGNAME>{party_name}</MAILINGNAME>
-          <ADDRESS.LIST TYPE="String">{mail_addr_xml}</ADDRESS.LIST>
-          <STATE>{state}</STATE>
-          <COUNTRYNAME>{country}</COUNTRYNAME>
-          <PINCODE>{pincode}</PINCODE>
-        </LEDMAILINGDETAILS.LIST>
-        <LEDGSTREGDETAILS.LIST>
-          <APPLICABLEFROM>{inv_date_xml}</APPLICABLEFROM>
-          <GSTREGISTRATIONTYPE>{reg_type}</GSTREGISTRATIONTYPE>
-          <GSTIN>{gstin}</GSTIN>
-          <PARTYTYPE>Not Applicable</PARTYTYPE>
-        </LEDGSTREGDETAILS.LIST>
-      </LEDGER>
-    </TALLYMESSAGE>""")
+    sup_block = _build_tally_party_ledger_xml(supplier, "Sundry Creditors", inv_date_xml)
+    if sup_block:
+        blocks.append(sup_block)
 
     # ---------------- Stock item masters --------------------------------
     seen_stock = set()
@@ -12038,6 +12097,7 @@ def _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inte
     inv_date = _tally_date(invoice.get("invoice_date"))
     party_name = _xml_escape(supplier.get("name", ""))
     narration = _xml_escape(invoice.get("notes", "") or f"Purchase against invoice {inv_no}")
+    state_name = _xml_escape(_resolve_state_name(supplier))
 
     subtotal = float(invoice.get("subtotal", 0) or 0)
     charges_subtotal = float(invoice.get("charges_subtotal", 0) or 0)
@@ -12200,8 +12260,8 @@ def _build_tally_purchase_voucher_xml(invoice, supplier, company, lines, is_inte
         <BASICBUYERNAME>{party_name}</BASICBUYERNAME>
         <PARTYGSTIN>{_xml_escape(supplier.get('gstin') or '')}</PARTYGSTIN>
         <BUYERSGSTIN>{_xml_escape(supplier.get('gstin') or '')}</BUYERSGSTIN>
-        <STATENAME>{_xml_escape(supplier.get('state') or '')}</STATENAME>
-        <PLACEOFSUPPLY>{_xml_escape(supplier.get('state') or '')}</PLACEOFSUPPLY>
+        <STATENAME>{state_name}</STATENAME>
+        <PLACEOFSUPPLY>{state_name}</PLACEOFSUPPLY>
         <CONSIGNEEGSTIN>{_xml_escape(supplier.get('gstin') or '')}</CONSIGNEEGSTIN>
         <BASICBUYERADDRESS.LIST>{"".join(f"<BASICBUYERADDRESS>{_xml_escape(str(supplier.get(k, '') or ''))}</BASICBUYERADDRESS>" for k in ("address", "address_line2", "city") if supplier.get(k))}</BASICBUYERADDRESS.LIST>
         <ISINVOICE>Yes</ISINVOICE>
@@ -12417,6 +12477,7 @@ def _build_tally_sales_voucher_xml(invoice, customer, company, lines, is_inter_s
 
     gstin = _xml_escape(customer.get("gstin") or "")
     state_code = _xml_escape(customer.get("state_code") or "")
+    buyer_state_name = _xml_escape(_resolve_state_name(customer))
 
     # ----- Seller (company) details ----------------------------------------
     # Tally usually picks the seller from the loaded company file, but we
@@ -12452,8 +12513,8 @@ def _build_tally_sales_voucher_xml(invoice, customer, company, lines, is_inter_s
         <BASICBUYERADDRESS.LIST>{addr_block}</BASICBUYERADDRESS.LIST>
         <BUYERADDRESS.LIST>{addr_block}</BUYERADDRESS.LIST>
         {('<PARTYGSTIN>' + gstin + '</PARTYGSTIN>') if gstin else ''}
-        {('<STATENAME>' + state_code + '</STATENAME>') if state_code else ''}
-        {('<PLACEOFSUPPLY>' + _xml_escape(invoice.get('place_of_supply') or '') + '</PLACEOFSUPPLY>') if invoice.get('place_of_supply') else ''}
+        {('<STATENAME>' + buyer_state_name + '</STATENAME>') if buyer_state_name else ''}
+        {('<PLACEOFSUPPLY>' + (_xml_escape(invoice.get('place_of_supply') or '') or buyer_state_name) + '</PLACEOFSUPPLY>') if (invoice.get('place_of_supply') or buyer_state_name) else ''}
         <!-- Seller / Company details — embedded so imports carry GSTIN + address -->
         {('<BASICCOMPANYNAME>' + seller_name + '</BASICCOMPANYNAME>') if seller_name else ''}
         {('<BASICCOMPANYFORMALNAME>' + seller_name + '</BASICCOMPANYFORMALNAME>') if seller_name else ''}
@@ -12488,8 +12549,12 @@ async def export_tax_invoice_to_tally(tid: str, request: Request):
     company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
     is_inter_state = bool(invoice.get("is_inter_state"))
     await _hydrate_ti_lines_for_tally(invoice)
+    # Emit customer ledger master BEFORE the voucher so Tally's Sundry Debtors
+    # entry carries GSTIN + State + Address (not "•Not Applicable").
+    inv_date_xml = _tally_date(invoice.get("invoice_date")) or "20170701"
+    cust_master = _build_tally_party_ledger_xml(customer, "Sundry Debtors", inv_date_xml)
     msg = _build_tally_sales_voucher_xml(invoice, customer, company, invoice.get("lines", []), is_inter_state)
-    xml = _wrap_tally_envelope(msg, company=company)
+    xml = _wrap_tally_envelope(cust_master + msg, company=company)
     fname = f"tally_{invoice.get('invoice_no', tid)}.xml"
     return Response(
         content=xml,
@@ -12507,6 +12572,7 @@ async def export_tax_invoices_bulk_tally(request: Request, payload: dict = Body(
         raise HTTPException(status_code=400, detail="invoice_ids required")
     company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
     messages = []
+    seen_customer_masters = set()
     for tid in ids:
         invoice = await db.tax_invoices.find_one({"id": tid}, {"_id": 0})
         if not invoice:
@@ -12514,6 +12580,12 @@ async def export_tax_invoices_bulk_tally(request: Request, payload: dict = Body(
         customer = await db.customers.find_one({"id": invoice.get("customer_id")}, {"_id": 0}) or {}
         is_inter_state = bool(invoice.get("is_inter_state"))
         await _hydrate_ti_lines_for_tally(invoice)
+        # Emit customer ledger master once per unique customer in the batch.
+        cust_id = customer.get("id") or customer.get("name") or ""
+        if cust_id and cust_id not in seen_customer_masters:
+            seen_customer_masters.add(cust_id)
+            inv_date_xml = _tally_date(invoice.get("invoice_date")) or "20170701"
+            messages.append(_build_tally_party_ledger_xml(customer, "Sundry Debtors", inv_date_xml))
         messages.append(_build_tally_sales_voucher_xml(invoice, customer, company, invoice.get("lines", []), is_inter_state))
     xml = _wrap_tally_envelope("".join(messages), company=company)
     return Response(

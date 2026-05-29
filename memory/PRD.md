@@ -19,6 +19,15 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **Auth:** JWT custom (cookie-based), 10 min idle timeout
 - **Excel:** `openpyxl` (server-side only)
 
+- **2026-02-25 (Round 41 — Tally XML Party Master GSTIN/Address fix — DONE ✅):**
+  1. **Root cause** — Two issues conspired to leave Tally's Ledger Alteration screen with blank Address/State/GSTIN: (a) most supplier records only carry `state_code` ("27") not `state` ("Maharashtra"), so the XML emitted an empty STATENAME — Tally then displayed "•Not Applicable"; (b) the master block was missing the top-level `<ADDRESS.LIST>`/`<STATENAME>` Tally Prime expects, and used `<COUNTRYNAME>` inside `LEDMAILINGDETAILS.LIST` instead of the correct `<COUNTRY>` tag.
+  2. **Fix** — Added `_GST_STATE_CODE_TO_NAME` (full Indian GST state code map) and `_resolve_state_name(party)` that falls back: `state` → `state_code` lookup → first 2 chars of GSTIN. Extracted a reusable `_build_tally_party_ledger_xml(party, parent_group, ref_date)` helper that emits both legacy (Tally Prime 2.x) and new (3.0+) tag layouts: top-level `<ADDRESS.LIST>`, `<STATENAME>` + `<LEDSTATENAME>`, `<PARTYGSTIN>`, plus full `<LEDMAILINGDETAILS.LIST>` (with `<COUNTRY>` not `<COUNTRYNAME>`) and `<LEDGSTREGDETAILS.LIST>`. Applied to both Supplier (Sundry Creditors) and Customer (Sundry Debtors).
+  3. **Tax-Invoice export now also emits customer ledger master** — Previously only the Sales voucher was exported; now the customer master is pushed first (with dedup in bulk-export) so the Sundry Debtors ledger carries GSTIN + address. Also fixed the Sales voucher `<STATENAME>` which was emitting state_code ("27") instead of state name ("Maharashtra").
+  4. **Files** — `/app/backend/server.py` — `_resolve_state_name`, `_build_tally_party_ledger_xml`, `_build_tally_master_messages`, `_build_tally_purchase_voucher_xml`, `_build_tally_sales_voucher_xml`, `export_tax_invoice_to_tally`, `export_tax_invoices_bulk_tally`.
+  5. **Verified** — Smoke test against live API: PI XML now contains `<STATENAME>Maharashtra</STATENAME>`, `<ADDRESS.LIST><ADDRESS>…</ADDRESS></ADDRESS.LIST>` (top-level), `<COUNTRY>India</COUNTRY>` (in LEDMAILINGDETAILS), `<PARTYGSTIN>27AABCU9603R1ZM</PARTYGSTIN>` and `<LEDGSTREGDETAILS.LIST><GSTIN>…</GSTIN></LEDGSTREGDETAILS.LIST>`.
+
+
+
 - **2026-02-22 (Round 40 — DC PDF: 5 layout polish fixes — DONE ✅):**
   1. **Company name single-line, larger** — `.company-name` bumped 17 → 22px with `white-space:nowrap` so long brand names stay on one line (mirrors Quotation's 22px brand heading).
   2. **Doc title in two lines + smaller** — Title (e.g. "Job Work Order Cum Delivery Challan") is auto-split on "Cum" → "Job Work Order Cum / Delivery Challan". Font reduced 13 → 11px and max-width 160px right-aligned so it stays compact.
