@@ -1301,6 +1301,7 @@ def _normalize_variant_attributes(raw: Optional[List[Dict[str, Any]]]) -> List[D
     if not raw:
         return []
     out = []
+    invalid_lengths: List[str] = []  # collect violations to raise a single, helpful error
     for attr in raw:
         if not isinstance(attr, dict):
             continue
@@ -1315,6 +1316,10 @@ def _normalize_variant_attributes(raw: Optional[List[Dict[str, Any]]]) -> List[D
                 if not val:
                     continue
                 sc = "".join(ch for ch in val.upper() if ch.isalnum())[:4]
+                # Enforce exactly-4-character rule (matches frontend).
+                if len(val) != 4:
+                    invalid_lengths.append(f"{name}={val!r}")
+                    continue
                 norm_vals.append({"value": val, "short_code": sc or val[:4]})
             elif isinstance(v, dict):
                 val = (v.get("value") or "").strip()
@@ -1324,9 +1329,18 @@ def _normalize_variant_attributes(raw: Optional[List[Dict[str, Any]]]) -> List[D
                 if not sc:
                     sc = "".join(ch for ch in val.upper() if ch.isalnum())[:4]
                 sc = sc[:4]
+                # Enforce exactly-4-character rule on the value AND the short_code.
+                if len(val) != 4 or len(sc) != 4:
+                    invalid_lengths.append(f"{name}={val!r}/{sc!r}")
+                    continue
                 norm_vals.append({"value": val, "short_code": sc})
         if norm_vals:
             out.append({"name": name, "values": norm_vals})
+    if invalid_lengths:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Variant value(s) must be exactly 4 characters: {', '.join(invalid_lengths)}",
+        )
     return out
 
 
@@ -1362,17 +1376,22 @@ def _build_variant_sku_from_short_codes(parent_sku: str, combo: Dict[str, Dict[s
 async def _is_variant_referenced(variant_id: str) -> bool:
     """Returns True iff the given variant SKU appears in ANY transactional
     collection. Mirrors the safety check inside generate_item_variants so
-    both the PUT /items path AND generate-variants treat orphans identically."""
+    both the PUT /items path AND generate-variants treat orphans identically.
+
+    NOTE: PO/Quotation/TaxInvoice/PI/PurchaseInvoice/DC all use `lines.item_id`
+    (NOT `line_items.item_id`). GRNs and quotations may use either — we
+    check both keys to stay safe."""
     ref_collections = [
         ("inventory_transactions", {"item_id": variant_id}),
-        ("purchase_orders", {"line_items.item_id": variant_id}),
-        ("grns", {"line_items.item_id": variant_id}),
+        ("purchase_orders", {"lines.item_id": variant_id}),
+        ("purchase_invoices", {"lines.item_id": variant_id}),
+        ("grns", {"$or": [{"lines.item_id": variant_id}, {"line_items.item_id": variant_id}]}),
         ("subcontract_orders", {"$or": [{"lines.item_id": variant_id}, {"job_work_parts.item_id": variant_id}]}),
         ("delivery_challans", {"lines.item_id": variant_id}),
         ("work_orders", {"$or": [{"item_id": variant_id}, {"reserved_materials.item_id": variant_id}, {"consumed_materials.item_id": variant_id}]}),
-        ("quotations", {"line_items.item_id": variant_id}),
-        ("tax_invoices", {"line_items.item_id": variant_id}),
-        ("proforma_invoices", {"line_items.item_id": variant_id}),
+        ("quotations", {"lines.item_id": variant_id}),
+        ("tax_invoices", {"lines.item_id": variant_id}),
+        ("proforma_invoices", {"lines.item_id": variant_id}),
         ("boms", {"components.item_id": variant_id}),
     ]
     for col_name, q in ref_collections:
@@ -1389,9 +1408,15 @@ async def _prune_obsolete_variants(parent: Dict[str, Any], new_attrs: List[Dict[
     """Given a parent item and its (already normalized) NEW variant_attributes,
     walk every existing variant child and either:
       * hard-delete it (no transactional footprint), or
-      * soft-retire it (set is_active=False) when it IS referenced anywhere.
+      * RAISE HTTPException 400 when it IS referenced anywhere.
 
-    Returns: {"deleted_skus": [...], "retired_in_use_skus": [...]}
+    User rule (strict): "Variant used anywhere in transaction should not allow
+    me to delete the variant." We therefore refuse the entire update rather
+    than silently soft-retiring it — the operator must roll back / replace
+    the transactional usage before they can remove the attribute value.
+
+    Returns: {"deleted_skus": [...]}  (retired_in_use_skus stays an empty
+    list for back-compat with old callers).
     Empty `new_attrs` means "no variants any more" → every child is a
     candidate for pruning. This is the path that fires when the user removes
     the LAST attribute and clicks "Update Item"."""
@@ -1410,8 +1435,11 @@ async def _prune_obsolete_variants(parent: Dict[str, Any], new_attrs: List[Dict[
         {"parent_item_id": item_id, "is_variant": True},
         {"_id": 0, "id": 1, "part_number": 1, "is_active": 1},
     ).to_list(2000)
-    deleted: List[str] = []
-    retired: List[str] = []
+    # First pass — collect any obsolete variants that are referenced. If
+    # ANY are referenced, refuse the whole prune (atomic — we don't want
+    # to delete some while keeping others).
+    blocked: List[str] = []
+    candidates_for_delete: List[Dict[str, Any]] = []
     for ch in children:
         if ch.get("part_number") in valid_skus:
             # Still in the combination set — leave it alone (or reactivate if soft-retired).
@@ -1419,12 +1447,25 @@ async def _prune_obsolete_variants(parent: Dict[str, Any], new_attrs: List[Dict[
                 await db.items.update_one({"id": ch["id"]}, {"$set": {"is_active": True, "updated_at": datetime.now(timezone.utc)}})
             continue
         if await _is_variant_referenced(ch["id"]):
-            await db.items.update_one({"id": ch["id"]}, {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc)}})
-            retired.append(ch.get("part_number", ""))
+            blocked.append(ch.get("part_number", ""))
         else:
-            await db.items.delete_one({"id": ch["id"]})
-            deleted.append(ch.get("part_number", ""))
-    return {"deleted_skus": deleted, "retired_in_use_skus": retired}
+            candidates_for_delete.append(ch)
+    if blocked:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Cannot remove variant value(s): the following variant SKU(s) are used in "
+                "Purchase Orders / GRNs / Invoices / BOMs / Inventory transactions and must "
+                "be reversed there first → "
+                + ", ".join(sorted(blocked))
+            ),
+        )
+    # Safe to hard-delete the unused obsoletes.
+    deleted: List[str] = []
+    for ch in candidates_for_delete:
+        await db.items.delete_one({"id": ch["id"]})
+        deleted.append(ch.get("part_number", ""))
+    return {"deleted_skus": deleted, "retired_in_use_skus": []}
 
 
 async def _compute_inherited_variants(item_id: str) -> List[Dict[str, Any]]:
@@ -1816,20 +1857,32 @@ async def generate_item_variants(item_id: str, payload: dict = Body(default={}),
         child.pop("_id", None)
         created.append(child)
     # Retire any pre-existing variant whose SKU is no longer in the valid combos
-    # (i.e. an attribute value was removed). Hard-delete the variant when it's
-    # NEVER been used in any transaction; otherwise soft-retire (is_active=False)
-    # so its transaction history stays intact.
-    retired_skus = []
-    blocked_skus = []  # variants that were referenced — kept soft-retired
+    # (i.e. an attribute value was removed). HARD BLOCK if any referenced —
+    # the user must reverse the transactional usage first. Otherwise hard-
+    # delete (clean removal).
+    blocked_skus = []
+    candidates: List[Dict[str, Any]] = []
     for sku, ex in existing_by_sku.items():
         if sku in valid_skus_in_combos:
             continue
         if await _is_variant_referenced(ex["id"]):
-            await db.items.update_one({"id": ex["id"]}, {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc)}})
             blocked_skus.append(sku)
         else:
-            await db.items.delete_one({"id": ex["id"]})
-            retired_skus.append(sku)
+            candidates.append(ex)
+    if blocked_skus:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Cannot remove variant value(s): the following SKU(s) are used in "
+                "Purchase Orders / GRNs / Invoices / BOMs / Inventory transactions and must "
+                "be reversed there first → "
+                + ", ".join(sorted(blocked_skus))
+            ),
+        )
+    retired_skus: List[str] = []
+    for ex in candidates:
+        await db.items.delete_one({"id": ex["id"]})
+        retired_skus.append(ex.get("part_number", ""))
     # Variant migration — once a parent has at least one variant child, its
     # OWN current_stock is no longer the source of truth (variants own the
     # stock balances). Zero out the parent and emit an 'adjust' inventory
@@ -1859,14 +1912,12 @@ async def generate_item_variants(item_id: str, payload: dict = Body(default={}),
     return {
         "message": f"Generated {len(created)} new variant(s)"
             + (f", reactivated {len(reactivated)}" if reactivated else "")
-            + (f", deleted {len(retired_skus)} unused" if retired_skus else "")
-            + (f", retired {len(blocked_skus)} (in use)" if blocked_skus else ""),
+            + (f", deleted {len(retired_skus)} obsolete" if retired_skus else ""),
         "created": created,
         "reactivated_skus": reactivated,
         "deleted_skus": retired_skus,
-        "retired_in_use_skus": blocked_skus,
-        # Keep the legacy key for any existing client code that reads it.
-        "deactivated_skus": retired_skus + blocked_skus,
+        "retired_in_use_skus": [],
+        "deactivated_skus": retired_skus,
     }
 
 

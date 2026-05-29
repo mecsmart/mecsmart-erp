@@ -265,13 +265,12 @@ export default function ItemsPage() {
         savedItem = updated;
         setItems(prev => prev.map(it => it.id === editingItem.id ? { ...it, ...updated } : it));
         // Server returns _variant_prune when CP/RM variants were removed
-        // — show the user exactly what happened.
+        // — show the user exactly what happened. Hard-block errors are
+        // surfaced via the catch path with the explicit "Cannot remove…"
+        // message from the backend.
         const prune = updated && updated._variant_prune;
-        if (prune && (prune.deleted_skus?.length || prune.retired_in_use_skus?.length)) {
-          const parts = [];
-          if (prune.deleted_skus?.length) parts.push(`${prune.deleted_skus.length} variant${prune.deleted_skus.length > 1 ? 's' : ''} deleted`);
-          if (prune.retired_in_use_skus?.length) parts.push(`${prune.retired_in_use_skus.length} kept (in use, soft-retired)`);
-          toast.success(`Item ${updated?.part_number || ''} updated — ${parts.join(', ')}`);
+        if (prune && prune.deleted_skus?.length) {
+          toast.success(`Item ${updated?.part_number || ''} updated — ${prune.deleted_skus.length} variant${prune.deleted_skus.length > 1 ? 's' : ''} deleted`);
           fetchItems().catch(() => {});
         } else {
           toast.success(`Item ${updated?.part_number || ''} updated`);
@@ -1058,6 +1057,7 @@ export default function ItemsPage() {
                                     <input
                                       type="text"
                                       maxLength={4}
+                                      minLength={4}
                                       value={v.short_code || ''}
                                       onChange={(e) => {
                                         const sc = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
@@ -1065,9 +1065,9 @@ export default function ItemsPage() {
                                         updateVals(newVals);
                                       }}
                                       onClick={(e) => e.stopPropagation()}
-                                      className="w-10 text-[9px] bg-white/20 text-white border-0 px-1 py-0 rounded outline-none placeholder-white/60 text-center"
-                                      title="Short code for SKU suffix (max 4 chars)"
-                                      placeholder="code"
+                                      className={`w-12 text-[9px] bg-white/20 text-white border ${(v.short_code || '').length === 4 ? 'border-transparent' : 'border-[#FECDD3]'} px-1 py-0 rounded outline-none placeholder-white/60 text-center`}
+                                      title="Short code for SKU suffix (must be exactly 4 characters)"
+                                      placeholder="CODE"
                                       data-testid={`item-variant-attr-shortcode-${ai}-${vi}`}
                                     />
                                     <button
@@ -1079,30 +1079,39 @@ export default function ItemsPage() {
                                 ))}
                                 <input
                                   type="text"
-                                  placeholder={(attr.values || []).length === 0 ? 'type value + Enter (e.g. 1HP)' : ''}
+                                  maxLength={4}
+                                  placeholder={(attr.values || []).length === 0 ? '4-char value + Enter (e.g. 1HP1, 30GT)' : ''}
                                   onKeyDown={(e) => {
                                     if (e.key === ',' || e.key === 'Enter' || e.key === 'Tab') {
-                                      const raw = (e.currentTarget.value || '').trim();
-                                      if (raw) {
-                                        e.preventDefault();
-                                        const cur = attr.values || [];
-                                        if (!cur.find(x => x.value === raw)) {
-                                          const sc = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
-                                          updateVals([...cur, { value: raw, short_code: sc }]);
+                                      // Enforce EXACTLY 4 characters — value AND short_code share
+                                      // the same length so SKU suffixes are consistent.
+                                      const raw = (e.currentTarget.value || '').trim().slice(0, 4);
+                                      if (raw.length < 4) {
+                                        if (raw.length > 0 && (e.key === ',' || e.key === 'Enter')) {
+                                          e.preventDefault();
+                                          // Show a brief title-tooltip via the title attribute on the parent
+                                          // (toast feels heavy here). For now just refuse silently — the
+                                          // maxLength + title hints already nudge the user.
                                         }
-                                        e.currentTarget.value = '';
-                                      } else if (e.key === ',' || e.key === 'Enter') {
-                                        e.preventDefault();
+                                        return;
                                       }
+                                      e.preventDefault();
+                                      const cur = attr.values || [];
+                                      if (!cur.find(x => x.value === raw)) {
+                                        const sc = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+                                        updateVals([...cur, { value: raw, short_code: sc }]);
+                                      }
+                                      e.currentTarget.value = '';
                                     } else if (e.key === 'Backspace' && !e.currentTarget.value) {
                                       const cur = attr.values || [];
                                       if (cur.length > 0) updateVals(cur.slice(0, -1));
                                     }
                                   }}
                                   onBlur={(e) => {
-                                    const raw = (e.currentTarget.value || '').trim();
+                                    const raw = (e.currentTarget.value || '').trim().slice(0, 4);
                                     const cur = attr.values || [];
-                                    if (raw && !cur.find(x => x.value === raw)) {
+                                    // Only commit when the value is the full 4 chars.
+                                    if (raw.length === 4 && !cur.find(x => x.value === raw)) {
                                       const sc = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
                                       updateVals([...cur, { value: raw, short_code: sc }]);
                                     }
