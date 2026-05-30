@@ -76,6 +76,8 @@ export default function PurchaseInvoicePage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState(null);  // Holds the invoice being edited (PUT mode) vs null = create mode
   const [selectedIds, setSelectedIds] = useState([]);  // Bulk Tally XML selection
@@ -98,7 +100,11 @@ export default function PurchaseInvoicePage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const params = statusFilter ? `?status=${statusFilter}` : '';
+      const qs = new URLSearchParams();
+      if (statusFilter) qs.set('status', statusFilter);
+      if (dateFrom) qs.set('date_from', dateFrom);
+      if (dateTo) qs.set('date_to', dateTo);
+      const params = qs.toString() ? `?${qs.toString()}` : '';
       const [invRes, grnRes, itemRes, supRes] = await Promise.all([
         api.get(`/api/purchase-invoices${params}`),
         api.get('/api/purchase-invoices/pending-grns'),
@@ -110,7 +116,7 @@ export default function PurchaseInvoicePage() {
       setItems(itemRes.data);
       setSuppliers(supRes.data);
     } catch (e) { console.error(e); } finally { setLoading(false); }
-  }, [statusFilter]);
+  }, [statusFilter, dateFrom, dateTo]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -378,6 +384,15 @@ export default function PurchaseInvoicePage() {
             </SelectContent>
           </Select>
           {statusFilter && <button onClick={() => setStatusFilter('')} className="text-[10px] text-[#9B1C1C] hover:underline">Clear</button>}
+          <div className="flex items-center gap-1.5" data-testid="invoice-date-range-filter">
+            <label className="text-[10px] text-[#6B7280]">From</label>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-8 text-xs border border-[#D1D5DB] rounded-sm px-2 focus:outline-none focus:border-[#1D3557]" data-testid="invoice-date-from" />
+            <label className="text-[10px] text-[#6B7280]">To</label>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-8 text-xs border border-[#D1D5DB] rounded-sm px-2 focus:outline-none focus:border-[#1D3557]" data-testid="invoice-date-to" />
+            {(dateFrom || dateTo) && (
+              <button onClick={() => { setDateFrom(''); setDateTo(''); }} className="text-[10px] text-[#9B1C1C] hover:underline" data-testid="invoice-date-clear-btn">Clear</button>
+            )}
+          </div>
           <span className="text-[10px] text-[#6B7280]">{invoices.length} invoices</span>
           {pendingGRNs.length > 0 && <span className="text-[10px] text-[#723B13] bg-[#FDF6B2] px-2 py-0.5 rounded">{pendingGRNs.length} GRN(s) pending invoice</span>}
           <div className="relative w-56">

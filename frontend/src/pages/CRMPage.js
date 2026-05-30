@@ -3152,10 +3152,19 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   const [waShare, setWaShare] = useState({ open: false, doc: null });
 
   const [editingTI, setEditingTI] = useState(null);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const load = useCallback(async () => {
-    try { const r = await api.get('/api/crm/tax-invoices'); setList(r.data || []); } catch (e) { console.error(e); }
-  }, []);
+    try {
+      const qs = new URLSearchParams();
+      if (dateFrom) qs.set('date_from', dateFrom);
+      if (dateTo) qs.set('date_to', dateTo);
+      const url = `/api/crm/tax-invoices${qs.toString() ? '?' + qs.toString() : ''}`;
+      const r = await api.get(url);
+      setList(r.data || []);
+    } catch (e) { console.error(e); }
+  }, [dateFrom, dateTo]);
   useEffect(() => { load(); }, [load]);
 
   // Additional charges master (Packing/Forwarding/Insurance/etc.) — used as
@@ -3518,6 +3527,15 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
           <div className="border border-[#E5E7EB] bg-white rounded-sm px-3 py-2 min-w-[150px]">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-[#03543F]">Paid</div>
             <div className="text-lg font-semibold mono">{filtered.filter(t => t.status === 'paid').length} · {formatCurrency(totalPaid)}</div>
+          </div>
+          <div className="flex items-center gap-1.5 self-center" data-testid="tax-invoice-date-range-filter">
+            <label className="text-[10px] text-[#6B7280]">From</label>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="h-8 text-xs border border-[#D1D5DB] rounded-sm px-2 focus:outline-none focus:border-[#1D3557]" data-testid="tax-invoice-date-from" />
+            <label className="text-[10px] text-[#6B7280]">To</label>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="h-8 text-xs border border-[#D1D5DB] rounded-sm px-2 focus:outline-none focus:border-[#1D3557]" data-testid="tax-invoice-date-to" />
+            {(dateFrom || dateTo) && (
+              <button onClick={() => { setDateFrom(''); setDateTo(''); }} className="text-[10px] text-[#9B1C1C] hover:underline" data-testid="tax-invoice-date-clear-btn">Clear</button>
+            )}
           </div>
         </div>
         {canEdit && (

@@ -11502,12 +11502,37 @@ async def shutdown_db_client():
 # ================== PURCHASE INVOICE ROUTES ==================
 
 @purchase_invoices_router.get("")
-async def get_purchase_invoices(request: Request, status: str = None):
+async def get_purchase_invoices(
+    request: Request,
+    status: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
     user = await get_current_user(request)
     query = {}
     if status:
         query["status"] = status
-    invoices = await db.purchase_invoices.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    # Optional date range filter on invoice_date (YYYY-MM-DD inclusive).
+    if date_from or date_to:
+        rng = {}
+        if date_from:
+            try:
+                rng["$gte"] = datetime.fromisoformat(date_from.replace("Z", "+00:00"))
+            except Exception:
+                pass
+        if date_to:
+            try:
+                end = datetime.fromisoformat(date_to.replace("Z", "+00:00"))
+                # Make `date_to` inclusive of the entire day when only a date is sent.
+                if end.hour == 0 and end.minute == 0 and end.second == 0:
+                    end = end.replace(hour=23, minute=59, second=59)
+                rng["$lte"] = end
+            except Exception:
+                pass
+        if rng:
+            query["invoice_date"] = rng
+    # Sort by invoice_date desc (newest first) with created_at as tiebreaker.
+    invoices = await db.purchase_invoices.find(query, {"_id": 0}).sort([("invoice_date", -1), ("created_at", -1)]).to_list(2000)
     for inv in invoices:
         # JW-based PIs may not carry supplier_id on the invoice doc itself —
         # the supplier lives on the linked subcontract order. Walk that chain
@@ -12004,16 +12029,54 @@ def _build_tally_master_messages(invoice, supplier, lines, additional_charges):
         blocks.append(sup_block)
 
     # ---------------- Stock item masters --------------------------------
+    blocks.append(_build_tally_inventory_masters(invoice, lines, additional_charges))
+    return "".join(blocks)
+
+
+def _stock_item_name_for_line(ln):
+    """Resolve the Tally STOCKITEMNAME for an invoice line.
+
+    For PI lines the item doc lives under ln['item']; for TI / SO lines we
+    only have description + hsn_code. The fallback chain is:
+      1) part_number + name (PI shape)
+      2) description (TI / SO shape)
+      3) HSN-XXXXX (last resort so Tally still sees a master)
+    """
+    it = ln.get("item") or {}
+    pn = (it.get("part_number") or "").strip()
+    nm = (it.get("name") or "").strip()
+    composite = f"{pn} - {nm}".strip(" -")
+    if composite:
+        return composite
+    desc = (ln.get("description") or "").strip().splitlines()[0].strip() if ln.get("description") else ""
+    if desc:
+        return desc[:80]
+    hsn = (ln.get("hsn_code") or it.get("hsn_code") or "").strip()
+    if hsn:
+        return f"HSN-{hsn}"
+    return "Misc Item"
+
+
+def _build_tally_inventory_masters(invoice, lines, additional_charges):
+    """Emit STOCKITEM + UNIT + additional-charge ledger masters.
+
+    Without these masters Tally treats STOCKITEMNAME as plain text → quantity
+    + rate disappear in the voucher view. Reused by both Purchase (Sundry
+    Creditor flow) and Sales (Sundry Debtor flow) exports.
+    """
+    blocks: List[str] = []
+    ref_date = _tally_date(invoice.get("invoice_date")) or "20170701"
+    # Stock items
     seen_stock = set()
     for ln in lines:
-        it = ln.get("item") or {}
-        si_name = f"{it.get('part_number','')} - {it.get('name','')}".strip(" -")
+        si_name = _stock_item_name_for_line(ln)
         if not si_name or si_name in seen_stock:
             continue
         seen_stock.add(si_name)
-        uom = _xml_escape(it.get("unit_of_measure", "Nos"))
+        it = ln.get("item") or {}
+        uom = _xml_escape(it.get("unit_of_measure") or ln.get("uom") or "Nos")
         si_name_x = _xml_escape(si_name)
-        hsn = _xml_escape(it.get("hsn_code") or "")
+        hsn = _xml_escape(ln.get("hsn_code") or it.get("hsn_code") or "")
         gst_rate = float(ln.get("gst_rate") or it.get("gst_rate") or 0)
         blocks.append(f"""
     <TALLYMESSAGE xmlns:UDF="TallyUDF">
@@ -12026,7 +12089,7 @@ def _build_tally_master_messages(invoice, supplier, lines, additional_charges):
         <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>
         <HSNCODE>{hsn}</HSNCODE>
         <GSTDETAILS.LIST>
-          <APPLICABLEFROM>{_tally_date(invoice.get('invoice_date'))}</APPLICABLEFROM>
+          <APPLICABLEFROM>{ref_date}</APPLICABLEFROM>
           <HSNCODE>{hsn}</HSNCODE>
           <STATEWISEDETAILS.LIST>
             <STATENAME>&#4; Any</STATENAME>
@@ -12047,11 +12110,11 @@ def _build_tally_master_messages(invoice, supplier, lines, additional_charges):
       </STOCKITEM>
     </TALLYMESSAGE>""")
 
-    # ---------------- UOM masters (BASEUNITS referenced by stock items) ---
+    # UOM masters
     seen_uoms = set()
     for ln in lines:
         it = ln.get("item") or {}
-        uom = (it.get("unit_of_measure") or "Nos").strip()
+        uom = (it.get("unit_of_measure") or ln.get("uom") or "Nos").strip()
         if not uom or uom in seen_uoms:
             continue
         seen_uoms.add(uom)
@@ -12064,7 +12127,7 @@ def _build_tally_master_messages(invoice, supplier, lines, additional_charges):
       </UNIT>
     </TALLYMESSAGE>""")
 
-    # ---------------- Additional-charge ledger masters --------------------
+    # Additional-charge ledger masters
     for charge in (additional_charges or []):
         ch_name = (charge.get("name") or "").strip()
         if not ch_name:
@@ -12397,7 +12460,7 @@ def _build_tally_sales_voucher_xml(invoice, customer, company, lines, is_inter_s
         addr_lines.append(f"State Code: {customer.get('state_code')}")
     addr_block = "".join(f"<ADDRESS>{_xml_escape(a)}</ADDRESS>" for a in addr_lines)
 
-    subtotal = float(invoice.get("subtotal", 0) or 0)
+    subtotal = float(invoice.get("net_subtotal") or invoice.get("subtotal") or 0)
     total_discount = sum(
         (float(ln.get("quantity", 0) or 0) * float(ln.get("unit_price") or ln.get("rate") or 0) * float(ln.get("discount_pct") or ln.get("discount") or 0) / 100.0)
         for ln in lines
@@ -12410,24 +12473,72 @@ def _build_tally_sales_voucher_xml(invoice, customer, company, lines, is_inter_s
     inv_entries = []
     for ln in lines:
         it = ln.get("item") or {}
-        name = _xml_escape(f"{it.get('part_number','')} - {it.get('name','')}".strip(" -"))
+        # Use the shared resolver so TI lines (no item_id, description-only)
+        # still emit a valid STOCKITEMNAME — falls back to description / HSN.
+        name = _xml_escape(_stock_item_name_for_line(ln))
         qty = float(ln.get("quantity", 0) or 0)
         rate = float(ln.get("unit_price") or ln.get("rate") or 0)
         disc_pct = float(ln.get("discount_pct") or ln.get("discount") or 0)
         gross = qty * rate
         net_after_disc = gross * (1 - disc_pct / 100.0)
-        uom = _xml_escape(it.get("unit_of_measure") or it.get("uom") or "Nos")
+        uom = _xml_escape(it.get("unit_of_measure") or it.get("uom") or ln.get("uom") or "Nos")
         desc = _xml_escape((ln.get("description") or it.get("description") or "").strip())
+        # Per-line CGST/SGST/IGST classification — lets Tally re-derive slabs.
+        line_gst_rate = float(ln.get("gst_rate") or 0)
+        if is_inter_state and line_gst_rate > 0:
+            line_tax_class = f"""
+            <RATEDETAILS.LIST>
+              <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>
+              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+              <GSTRATE>{line_gst_rate:.2f}</GSTRATE>
+            </RATEDETAILS.LIST>"""
+        elif line_gst_rate > 0:
+            half = line_gst_rate / 2.0
+            line_tax_class = f"""
+            <RATEDETAILS.LIST>
+              <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>
+              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+              <GSTRATE>{half:.2f}</GSTRATE>
+            </RATEDETAILS.LIST>
+            <RATEDETAILS.LIST>
+              <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>
+              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+              <GSTRATE>{half:.2f}</GSTRATE>
+            </RATEDETAILS.LIST>"""
+        else:
+            line_tax_class = ""
         inv_entries.append(f"""
           <ALLINVENTORYENTRIES.LIST>
             <STOCKITEMNAME>{name}</STOCKITEMNAME>
             <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+            <ISLASTDEEMEDPOSITIVE>No</ISLASTDEEMEDPOSITIVE>
+            <ISAUTONEGATE>No</ISAUTONEGATE>
             <RATE>{rate:.2f}/{uom}</RATE>
             <AMOUNT>{net_after_disc:.2f}</AMOUNT>
             <ACTUALQTY>{qty} {uom}</ACTUALQTY>
             <BILLEDQTY>{qty} {uom}</BILLEDQTY>
             <DISCOUNT>{disc_pct:.2f}</DISCOUNT>
             {('<DESCRIPTION>' + desc + '</DESCRIPTION>') if desc else ''}
+            <BATCHALLOCATIONS.LIST>
+              <GODOWNNAME>Main Location</GODOWNNAME>
+              <BATCHNAME>Primary Batch</BATCHNAME>
+              <DESTINATIONGODOWNNAME>Main Location</DESTINATIONGODOWNNAME>
+              <INDENTNO/>
+              <ORDERNO/>
+              <TRACKINGNUMBER/>
+              <DYNAMICCSTISCLEARED>No</DYNAMICCSTISCLEARED>
+              <AMOUNT>{net_after_disc:.2f}</AMOUNT>
+              <ACTUALQTY>{qty} {uom}</ACTUALQTY>
+              <BILLEDQTY>{qty} {uom}</BILLEDQTY>
+            </BATCHALLOCATIONS.LIST>
+            <ACCOUNTINGALLOCATIONS.LIST>
+              <LEDGERNAME>Sales Account</LEDGERNAME>
+              <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+              <LEDGERFROMITEM>No</LEDGERFROMITEM>
+              <REMOVEZEROENTRIES>No</REMOVEZEROENTRIES>
+              <ISPARTYLEDGER>No</ISPARTYLEDGER>
+              <AMOUNT>{net_after_disc:.2f}</AMOUNT>
+            </ACCOUNTINGALLOCATIONS.LIST>{line_tax_class}
           </ALLINVENTORYENTRIES.LIST>""")
     inventory_block = "".join(inv_entries)
 
@@ -12435,13 +12546,13 @@ def _build_tally_sales_voucher_xml(invoice, customer, company, lines, is_inter_s
         <LEDGERENTRIES.LIST>
           <LEDGERNAME>{party_name}</LEDGERNAME>
           <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+          <ISPARTYLEDGER>Yes</ISPARTYLEDGER>
           <AMOUNT>-{grand_total:.2f}</AMOUNT>
-        </LEDGERENTRIES.LIST>""",
-        f"""
-        <LEDGERENTRIES.LIST>
-          <LEDGERNAME>Sales Account</LEDGERNAME>
-          <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
-          <AMOUNT>{subtotal:.2f}</AMOUNT>
+          <BILLALLOCATIONS.LIST>
+            <NAME>{inv_no}</NAME>
+            <BILLTYPE>New Ref</BILLTYPE>
+            <AMOUNT>-{grand_total:.2f}</AMOUNT>
+          </BILLALLOCATIONS.LIST>
         </LEDGERENTRIES.LIST>"""]
     if total_discount > 0:
         ledger_entries.append(f"""
@@ -12549,12 +12660,26 @@ async def export_tax_invoice_to_tally(tid: str, request: Request):
     company = await db.company_settings.find_one({"type": "company"}, {"_id": 0}) or {}
     is_inter_state = bool(invoice.get("is_inter_state"))
     await _hydrate_ti_lines_for_tally(invoice)
-    # Emit customer ledger master BEFORE the voucher so Tally's Sundry Debtors
-    # entry carries GSTIN + State + Address (not "•Not Applicable").
+    # If the customer record was deleted / lookup misses, synthesize a
+    # party-like dict from the invoice fields so the Tally Sundry Debtors
+    # ledger still carries the snapshot the user printed on the invoice.
+    party_for_master = customer if (customer and customer.get("name")) else {
+        "name": invoice.get("customer_name") or "",
+        "gstin": invoice.get("customer_gstin") or "",
+        "address": invoice.get("billing_address") or "",
+        "state": invoice.get("customer_state") or invoice.get("place_of_supply") or "",
+        "state_code": invoice.get("customer_state_code") or "",
+        "country": "India",
+    }
+    # Emit customer ledger master + stock-item / UOM masters BEFORE the
+    # voucher so the Sundry Debtors ledger shows GSTIN/Address AND the
+    # voucher view actually renders quantity + rate per line (without
+    # masters, Tally treats STOCKITEMNAME as plain text → qty/rate blank).
     inv_date_xml = _tally_date(invoice.get("invoice_date")) or "20170701"
-    cust_master = _build_tally_party_ledger_xml(customer, "Sundry Debtors", inv_date_xml)
-    msg = _build_tally_sales_voucher_xml(invoice, customer, company, invoice.get("lines", []), is_inter_state)
-    xml = _wrap_tally_envelope(cust_master + msg, company=company)
+    cust_master = _build_tally_party_ledger_xml(party_for_master, "Sundry Debtors", inv_date_xml)
+    inv_masters = _build_tally_inventory_masters(invoice, invoice.get("lines", []), invoice.get("additional_charges", []))
+    msg = _build_tally_sales_voucher_xml(invoice, party_for_master, company, invoice.get("lines", []), is_inter_state)
+    xml = _wrap_tally_envelope(cust_master + inv_masters + msg, company=company)
     fname = f"tally_{invoice.get('invoice_no', tid)}.xml"
     return Response(
         content=xml,
@@ -12586,6 +12711,9 @@ async def export_tax_invoices_bulk_tally(request: Request, payload: dict = Body(
             seen_customer_masters.add(cust_id)
             inv_date_xml = _tally_date(invoice.get("invoice_date")) or "20170701"
             messages.append(_build_tally_party_ledger_xml(customer, "Sundry Debtors", inv_date_xml))
+        # Stock-item / UOM masters per invoice — Tally needs these so the
+        # voucher view renders BILLEDQTY + RATE for each line.
+        messages.append(_build_tally_inventory_masters(invoice, invoice.get("lines", []), invoice.get("additional_charges", [])))
         messages.append(_build_tally_sales_voucher_xml(invoice, customer, company, invoice.get("lines", []), is_inter_state))
     xml = _wrap_tally_envelope("".join(messages), company=company)
     return Response(
@@ -16194,12 +16322,34 @@ async def _restore_tax_invoice_stock(invoice_doc, user_id):
     await db.tax_invoices.update_one({"id": invoice_doc["id"]}, {"$set": {"stock_consumed": False, "stock_restored_at": datetime.now(timezone.utc)}})
 
 @crm_router.get("/tax-invoices")
-async def list_tax_invoices(request: Request, status: Optional[str] = None):
+async def list_tax_invoices(
+    request: Request,
+    status: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+):
     await get_current_user(request)
     q = {}
     if status:
         q["status"] = status
-    docs = await db.tax_invoices.find(q).sort("created_at", -1).to_list(2000)
+    if date_from or date_to:
+        rng = {}
+        if date_from:
+            try:
+                rng["$gte"] = datetime.fromisoformat(date_from.replace("Z", "+00:00"))
+            except Exception:
+                pass
+        if date_to:
+            try:
+                end = datetime.fromisoformat(date_to.replace("Z", "+00:00"))
+                if end.hour == 0 and end.minute == 0 and end.second == 0:
+                    end = end.replace(hour=23, minute=59, second=59)
+                rng["$lte"] = end
+            except Exception:
+                pass
+        if rng:
+            q["invoice_date"] = rng
+    docs = await db.tax_invoices.find(q).sort([("invoice_date", -1), ("created_at", -1)]).to_list(2000)
     return [await _enrich_tax_invoice(d) for d in docs]
 
 @crm_router.post("/tax-invoices", status_code=201)
