@@ -90,7 +90,7 @@ export default function UserManagementPage() {
   const [tab, setTab] = useState('users');
   const [groupDialog, setGroupDialog] = useState(false);
   const [editingGroup, setEditingGroup] = useState(null);
-  const [groupForm, setGroupForm] = useState({ name: '', description: '', is_admin_group: false, permissions: {} });
+  const [groupForm, setGroupForm] = useState({ name: '', description: '', is_admin_group: false, view_all_parties: false, permissions: {} });
   // All customers — used to populate the "Assigned Customers" multi-select in the user dialog
   const [allCustomers, setAllCustomers] = useState([]);
   const [customerSearch, setCustomerSearch] = useState('');
@@ -118,10 +118,10 @@ export default function UserManagementPage() {
   const openGroupDialog = (g) => {
     if (g) {
       setEditingGroup(g);
-      setGroupForm({ name: g.name, description: g.description || '', is_admin_group: !!g.is_admin_group, permissions: g.permissions || {} });
+      setGroupForm({ name: g.name, description: g.description || '', is_admin_group: !!g.is_admin_group, view_all_parties: !!g.view_all_parties, permissions: g.permissions || {} });
     } else {
       setEditingGroup(null);
-      setGroupForm({ name: '', description: '', is_admin_group: false, permissions: {} });
+      setGroupForm({ name: '', description: '', is_admin_group: false, view_all_parties: false, permissions: {} });
     }
     setGroupDialog(true);
   };
@@ -534,6 +534,13 @@ export default function UserManagementPage() {
                 <label htmlFor="is-admin-group" className="text-sm">
                   <span className="font-semibold text-[#9B1C1C]">Admin Group</span>
                   <span className="text-[#723B13] ml-2">— Members can see BOM rollup costs (Material Cost, Process Cost, Extended Cost, Total/Unit).</span>
+                </label>
+              </div>
+              <div className="col-span-2 flex items-center gap-2 bg-[#DBEAFE] border border-[#3B82F6] rounded-sm px-3 py-2">
+                <input type="checkbox" id="view-all-parties" checked={groupForm.view_all_parties} onChange={e => setGroupForm({ ...groupForm, view_all_parties: e.target.checked })} className="w-4 h-4 accent-[#1D3557]" data-testid="group-view-all-parties-flag" />
+                <label htmlFor="view-all-parties" className="text-sm">
+                  <span className="font-semibold text-[#1E429F]">View All Parties</span>
+                  <span className="text-[#1E3A8A] ml-2">— Members see ALL Customers + Suppliers (not just their own / assigned). Useful for Sales Managers / Procurement Heads who need full party visibility.</span>
                 </label>
               </div>
             </div>

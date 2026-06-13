@@ -533,6 +533,7 @@ class SupplierCreate(BaseModel):
     lead_time_days: int = 7
     rating: Optional[int] = 3  # 1-5 stars
     status: str = "active"  # active, inactive
+    assigned_user_ids: Optional[List[str]] = []  # Per-user contact ownership (same model as customers)
 
 class SupplierUpdate(BaseModel):
     name: Optional[str] = None
@@ -550,6 +551,7 @@ class SupplierUpdate(BaseModel):
     lead_time_days: Optional[int] = None
     rating: Optional[int] = None
     status: Optional[str] = None
+    assigned_user_ids: Optional[List[str]] = None
 
 class MRPCreatePORequest(BaseModel):
     supplier_id: str
@@ -1035,6 +1037,7 @@ async def login(user_data: UserLogin, response: Response, request: Request):
         # Overlay role group permissions + admin flag if assigned.
         effective_perms = user.get("permissions") or get_default_permissions(user["role"])
         is_admin_group = False
+        view_all_parties = False
         role_group = None
         if user.get("role_group_id"):
             group = await db.role_groups.find_one({"id": user["role_group_id"]}, {"_id": 0})
@@ -1043,6 +1046,7 @@ async def login(user_data: UserLogin, response: Response, request: Request):
                 if group.get("permissions"):
                     effective_perms = group["permissions"]
                 is_admin_group = bool(group.get("is_admin_group"))
+                view_all_parties = bool(group.get("view_all_parties"))
 
         return {
             "id": user_id,
@@ -1053,6 +1057,7 @@ async def login(user_data: UserLogin, response: Response, request: Request):
             "role_group_id": user.get("role_group_id"),
             "role_group": role_group,
             "is_admin_group": is_admin_group,
+            "view_all_parties": view_all_parties,
             "signature_url": user.get("signature_url", ""),
         }
     except HTTPException:
@@ -1082,6 +1087,7 @@ async def get_me(request: Request):
             if group.get("permissions"):
                 user["permissions"] = group["permissions"]
             user["is_admin_group"] = bool(group.get("is_admin_group"))
+            user["view_all_parties"] = bool(group.get("view_all_parties"))
     return user
 
 @auth_router.post("/refresh")
@@ -3981,12 +3987,14 @@ class RoleGroupCreate(BaseModel):
     description: Optional[str] = ""
     permissions: dict = {}
     is_admin_group: bool = False
+    view_all_parties: bool = False  # When True, members can see ALL customers + suppliers (not just their own/assigned)
 
 class RoleGroupUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     permissions: Optional[dict] = None
     is_admin_group: Optional[bool] = None
+    view_all_parties: Optional[bool] = None
 
 @users_router.get("/role-groups")
 async def list_role_groups(request: Request):
@@ -4008,6 +4016,7 @@ async def create_role_group(data: RoleGroupCreate, request: Request):
         "description": data.description or "",
         "permissions": data.permissions or {},
         "is_admin_group": bool(data.is_admin_group),
+        "view_all_parties": bool(data.view_all_parties),
         "created_at": datetime.now(timezone.utc),
         "created_by": user["id"]
     }
@@ -4087,12 +4096,33 @@ async def get_dashboard_stats(request: Request):
 # ================== SUPPLIER ROUTES ==================
 
 @suppliers_router.get("")
-async def get_suppliers(request: Request, status: Optional[str] = None):
-    await get_current_user(request)
+async def get_suppliers(request: Request, status: Optional[str] = None, mine: Optional[bool] = False):
+    user = await get_current_user(request)
     query = {}
     if status:
         query["status"] = status
-    suppliers = await db.suppliers.find(query, {"_id": 0}).to_list(1000)
+    # Same per-user contact ownership rule as customers:
+    #   - Admins / admin-group / view_all_parties group → see ALL suppliers.
+    #     `mine=true` narrows to only ones they personally created.
+    #   - Others → only suppliers they created OR are listed in
+    #     `supplier.assigned_user_ids`.
+    is_admin = user.get("role") == "admin"
+    can_view_all = False
+    if not is_admin and user.get("role_group_id"):
+        rg = await db.role_groups.find_one({"id": user["role_group_id"]}, {"_id": 0, "is_admin_group": 1, "view_all_parties": 1})
+        if rg and rg.get("is_admin_group"):
+            is_admin = True
+        if rg and rg.get("view_all_parties"):
+            can_view_all = True
+    if is_admin or can_view_all:
+        if mine:
+            query["created_by"] = user["id"]
+    else:
+        query["$or"] = [
+            {"created_by": user["id"]},
+            {"assigned_user_ids": user["id"]},
+        ]
+    suppliers = await db.suppliers.find(query, {"_id": 0}).to_list(2000)
     return suppliers
 
 @suppliers_router.get("/{supplier_id}")
@@ -6486,15 +6516,21 @@ async def create_work_order(wo_data: WorkOrderCreate, request: Request):
                     {"$push": {"child_reservations": {"item_id": child_item_id, "qty": int(free_stock)}}},
                 )
             
-            # Create work orders for any item that can be manufactured — either has a
-            # legacy routings doc OR its own BOM defines parent_routings.
+            # Create work orders for any manufacturable child — i.e., any child
+            # that has its own BOM. Previously we additionally required a
+            # routing source (legacy `routings` doc OR BOM `parent_routings`),
+            # which silently dropped parts/SGs that didn't yet have a routing.
+            # Per user request, MOs are now created for parts/SGs regardless
+            # of routing; routing-less MOs go straight from Start → consume
+            # RM → show the Complete button (no Job Card / operations).
             child_routing = await db.routings.find_one({"item_id": child_item_id, "status": "active"})
             child_own_bom = await db.boms.find_one(
                 {"parent_item_id": child_item_id, "status": "active"},
-                {"_id": 0, "parent_routings": 1}
+                {"_id": 0, "parent_routings": 1, "components": 1}
             )
+            is_manufacturable = bool(child_own_bom)
             has_routing_source = bool(child_routing) or bool(child_own_bom and child_own_bom.get("parent_routings"))
-            if has_routing_source:
+            if is_manufacturable or has_routing_source:
                 child_wo = await create_wo_for_item(child_item_id, shortage_qty, parent_wo_id)
                 if child_wo:
                     created_work_orders.append(child_wo)
@@ -10765,11 +10801,14 @@ async def get_customers(request: Request, status: Optional[str] = None, mine: Op
     #     any customer until the admin assigns them as a salesperson — no legacy
     #     null-created_by fallback.
     is_admin = user.get("role") == "admin"
+    can_view_all = False
     if not is_admin and user.get("role_group_id"):
-        rg = await db.role_groups.find_one({"id": user["role_group_id"]}, {"_id": 0, "is_admin_group": 1})
+        rg = await db.role_groups.find_one({"id": user["role_group_id"]}, {"_id": 0, "is_admin_group": 1, "view_all_parties": 1})
         if rg and rg.get("is_admin_group"):
             is_admin = True
-    if is_admin:
+        if rg and rg.get("view_all_parties"):
+            can_view_all = True
+    if is_admin or can_view_all:
         if mine:
             query["created_by"] = user["id"]
     else:

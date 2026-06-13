@@ -1870,6 +1870,31 @@ export default function ManufacturingPage() {
                             </div>
                             {ops.length > 0 && <p className="text-[10px] text-[#6B7280]">{completedOps}/{ops.length} ops</p>}
                           </td>
+                          <td style={{minWidth:'108px'}} data-testid={`wo-schedule-${wo.id}`}>
+                            {(() => {
+                              // Show schedule date + delay badge for pending/released/in_progress MOs.
+                              // Once `completed`, hide the delay badge — it's water under the bridge.
+                              const schedRaw = wo.scheduled_end || wo.due_date || wo.scheduled_start;
+                              if (!schedRaw) return <span className="text-[11px] text-[#9CA3AF]">-</span>;
+                              const sched = new Date(schedRaw);
+                              const today = new Date();
+                              today.setHours(0,0,0,0);
+                              const schedStart = new Date(sched);
+                              schedStart.setHours(0,0,0,0);
+                              const isLate = wo.status !== 'completed' && wo.status !== 'cancelled' && schedStart.getTime() < today.getTime();
+                              const daysLate = isLate ? Math.floor((today.getTime() - schedStart.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+                              return (
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-[11px] mono text-[#374151]">{sched.toLocaleDateString()}</span>
+                                  {isLate && (
+                                    <span className="text-[10px] bg-[#FDE8E8] text-[#9B1C1C] px-1 py-px rounded font-semibold inline-block w-fit" data-testid={`wo-delay-${wo.id}`} title={`Scheduled ${sched.toLocaleDateString()} — overdue by ${daysLate} day(s)`}>
+                                      {daysLate}d delayed
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </td>
                           <td>
                             <span className={`status-badge ${getStatusColor(wo.status)}`}>{wo.status?.replace('_',' ')}</span>
                             {wo.is_subcontract && <span className="ml-1 text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">SC{wo.subcontract_type === 'without_material' ? ' (No RM)' : ''}</span>}
@@ -2098,7 +2123,7 @@ export default function ManufacturingPage() {
                         <div className="fg-mo-table-host">
                           <table className="w-full data-table mo-family-table">
                             <thead className="sticky-mo-head">
-                              <tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr>
+                              <tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Schedule</th><th>Status</th><th>Actions</th></tr>
                             </thead>
                             <tbody>{renderMORow(parentMO, 0, activePanelFilter, panelSearch[parentMO.id] || '', panelStatus[parentMO.id] || '', familyMask)}</tbody>
                           </table>
