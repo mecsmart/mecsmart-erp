@@ -23,6 +23,7 @@ import {
   PackageX,
   Filter,
   FileText,
+  Trash2,
   X as XIcon,
   RefreshCw
 } from 'lucide-react';
@@ -764,6 +765,35 @@ export default function ManufacturingPage() {
       status: routing.status || 'active',
     });
     setIsRoutingDialogOpen(true);
+  };
+
+  // Hard-block deletion of routings that are referenced anywhere (MOs, BOMs,
+  // items). The Delete button is hidden in the UI when `r.in_use` is true,
+  // and the backend also enforces this — so the toast.error path triggers
+  // only if the user races a hot reload.
+  //
+  // We deliberately avoid `window.confirm` here: in the Electron desktop
+  // wrapper it traps focus and the watchdog in App.js then has to recover.
+  // Instead we use sonner's promise-based confirm pattern.
+  const handleDeleteRouting = (routing) => {
+    toast(`Delete routing "${routing.name}"?`, {
+      description: 'This cannot be undone.',
+      action: {
+        label: 'Delete',
+        onClick: async () => {
+          try {
+            await api.delete(`/api/routings/${routing.id}`);
+            toast.success(`Routing "${routing.name}" deleted`);
+            const r = await api.get('/api/routings');
+            setRoutings(r.data);
+          } catch (e) {
+            toast.error(e.response?.data?.detail || 'Failed to delete routing');
+          }
+        },
+      },
+      cancel: { label: 'Cancel', onClick: () => {} },
+      duration: 10000,
+    });
   };
 
   const resetWorkOrderForm = () => {
@@ -1625,13 +1655,14 @@ export default function ManufacturingPage() {
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-semibold text-[#111827] mb-1">Scheduled Start</label>
+                        <label className="block text-sm font-semibold text-[#111827] mb-1">Release Date</label>
                         <input
-                          type="datetime-local"
-                          value={workOrderForm.scheduled_start}
-                          onChange={(e) => setWorkOrderForm({ ...workOrderForm, scheduled_start: e.target.value })}
-                          className="input-field"
-                          data-testid="wo-start-input"
+                          type="text"
+                          value={new Date().toLocaleDateString('en-GB')}
+                          disabled
+                          className="input-field bg-[#F3F4F6] text-[#6B7280] cursor-not-allowed"
+                          data-testid="wo-release-date-display"
+                          title="Today is auto-recorded as the release date"
                         />
                       </div>
                       <div>
@@ -1913,41 +1944,6 @@ export default function ManufacturingPage() {
                             </div>
                             {ops.length > 0 && <p className="text-[10px] text-[#6B7280]">{completedOps}/{ops.length} ops</p>}
                           </td>
-                          <td style={{minWidth:'108px'}} data-testid={`wo-schedule-${wo.id}`}>
-                            {(() => {
-                              // Schedule date is shown for every MO (FG / SG / Part);
-                              // but the "delay" badge is intentionally limited to
-                              // the FG level (parent_wo_id is null) — children's
-                              // delays roll up into the FG's, showing per-child
-                              // badges just adds noise. Delay is calculated from
-                              // `scheduled_end` only (not the start date), since
-                              // that's the user-visible due date.
-                              const schedRaw = wo.scheduled_end || wo.due_date || wo.scheduled_start;
-                              if (!schedRaw) return <span className="text-[11px] text-[#9CA3AF]">-</span>;
-                              const sched = new Date(schedRaw);
-                              const isFG = !wo.parent_wo_id;
-                              const today = new Date();
-                              today.setHours(0,0,0,0);
-                              const endRaw = wo.scheduled_end;
-                              const showDelay = isFG && endRaw && !['completed','cancelled'].includes(wo.status);
-                              let daysLate = 0;
-                              if (showDelay) {
-                                const end = new Date(endRaw);
-                                end.setHours(0,0,0,0);
-                                daysLate = Math.floor((today.getTime() - end.getTime()) / (1000 * 60 * 60 * 24));
-                              }
-                              return (
-                                <div className="flex flex-col gap-0.5">
-                                  <span className="text-[11px] mono text-[#374151]">{sched.toLocaleDateString()}</span>
-                                  {showDelay && daysLate > 0 && (
-                                    <span className="text-[10px] bg-[#FDE8E8] text-[#9B1C1C] px-1 py-px rounded font-semibold inline-block w-fit" data-testid={`wo-delay-${wo.id}`} title={`Scheduled end ${new Date(endRaw).toLocaleDateString()} — overdue by ${daysLate} day(s)`}>
-                                      {daysLate}d delayed
-                                    </span>
-                                  )}
-                                </div>
-                              );
-                            })()}
-                          </td>
                           <td>
                             <span className={`status-badge ${getStatusColor(wo.status)}`}>{wo.status?.replace('_',' ')}</span>
                             {wo.is_subcontract && <span className="ml-1 text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">SC{wo.subcontract_type === 'without_material' ? ' (No RM)' : ''}</span>}
@@ -2177,11 +2173,45 @@ export default function ManufacturingPage() {
                               <option value="cancelled">Cancelled</option>
                             </select>
                           </div>
+                          {/* ── Release / Schedule / Delay info strip ──
+                              Replaces the per-row Schedule column. Rendered as
+                              its own w-full block inside the flex-wrap summary
+                              so it lines up underneath the title row. Hidden
+                              for cancelled FGs (delay is meaningless once
+                              cancelled). */}
+                          {(() => {
+                            const relRaw = parentMO.created_at;
+                            const schedRaw = parentMO.scheduled_end || parentMO.due_date;
+                            if (!relRaw && !schedRaw) return null;
+                            const today = new Date();
+                            today.setHours(0,0,0,0);
+                            let daysLate = 0;
+                            const showDelay = schedRaw && !['completed','cancelled'].includes(parentMO.status);
+                            if (showDelay) {
+                              const end = new Date(schedRaw);
+                              end.setHours(0,0,0,0);
+                              daysLate = Math.floor((today.getTime() - end.getTime()) / (1000 * 60 * 60 * 24));
+                            }
+                            const fmt = (d) => d ? new Date(d).toLocaleDateString('en-GB') : '-';
+                            return (
+                              <div className="basis-full flex items-center gap-4 pl-7 mt-1 text-[11px] mono" data-testid={`fg-dates-${parentMO.id}`}>
+                                {relRaw && (
+                                  <span className="text-[#03543F] font-semibold" data-testid={`fg-release-date-${parentMO.id}`}>Rel. On: {fmt(relRaw)}</span>
+                                )}
+                                {schedRaw && (
+                                  <span className="text-[#9A3412] font-semibold" data-testid={`fg-schedule-date-${parentMO.id}`}>Schedule: {fmt(schedRaw)}</span>
+                                )}
+                                {showDelay && daysLate > 0 && (
+                                  <span className="text-[#9B1C1C] font-bold" data-testid={`fg-delay-${parentMO.id}`}>Delay: {daysLate} Day{daysLate === 1 ? '' : 's'}</span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </summary>
                         <div className="fg-mo-table-host">
                           <table className="w-full data-table mo-family-table">
                             <thead className="sticky-mo-head">
-                              <tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Schedule</th><th>Status</th><th>Actions</th></tr>
+                              <tr><th>MO / Level</th><th>Item</th><th>Routing</th><th className="text-right">Qty</th><th>Progress</th><th>Status</th><th>Actions</th></tr>
                             </thead>
                             <tbody>{renderMORow(parentMO, 0, activePanelFilter, panelSearch[parentMO.id] || '', panelStatus[parentMO.id] || '', familyMask)}</tbody>
                           </table>
@@ -2258,7 +2288,24 @@ export default function ManufacturingPage() {
                       <td className="font-semibold text-sm">{r.name}</td>
                       <td className="text-sm text-[#4B5563]">{r.description || '-'}</td>
                       <td><span className="status-badge bg-[#DEF7EC] text-[#03543F]">{r.status}</span></td>
-                      <td>{canEdit && <button onClick={() => handleEditRouting(r)} className="p-1 text-[#4B5563] hover:text-[#1D3557]"><Edit2 className="w-4 h-4" /></button>}</td>
+                      <td className="flex items-center gap-1">
+                        {canEdit && <button onClick={() => handleEditRouting(r)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" data-testid={`edit-routing-${r.id}`}><Edit2 className="w-4 h-4" /></button>}
+                        {canEdit && !r.in_use && (
+                          <button
+                            onClick={() => handleDeleteRouting(r)}
+                            className="p-1 text-[#4B5563] hover:text-[#9B1C1C]"
+                            data-testid={`delete-routing-${r.id}`}
+                            title="Delete unused routing"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canEdit && r.in_use && (
+                          <span className="text-[10px] text-[#6B7280] ml-1" data-testid={`routing-in-use-${r.id}`} title={`Used by ${r.wo_count || 0} MO(s), ${r.bom_count || 0} BOM(s), ${r.item_count || 0} item(s)`}>
+                            in use
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {routings.filter(r => r.status !== 'active').map(r => (
@@ -2266,7 +2313,19 @@ export default function ManufacturingPage() {
                       <td className="font-semibold text-sm">{r.name}</td>
                       <td className="text-sm text-[#4B5563]">{r.description || '-'}</td>
                       <td><span className="status-badge bg-[#E5E7EB] text-[#6B7280]">{r.status}</span></td>
-                      <td>{canEdit && <button onClick={() => handleEditRouting(r)} className="p-1 text-[#4B5563] hover:text-[#1D3557]"><Edit2 className="w-4 h-4" /></button>}</td>
+                      <td className="flex items-center gap-1">
+                        {canEdit && <button onClick={() => handleEditRouting(r)} className="p-1 text-[#4B5563] hover:text-[#1D3557]" data-testid={`edit-routing-${r.id}`}><Edit2 className="w-4 h-4" /></button>}
+                        {canEdit && !r.in_use && (
+                          <button
+                            onClick={() => handleDeleteRouting(r)}
+                            className="p-1 text-[#4B5563] hover:text-[#9B1C1C]"
+                            data-testid={`delete-routing-${r.id}`}
+                            title="Delete unused routing"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

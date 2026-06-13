@@ -5929,6 +5929,43 @@ async def get_routings(request: Request, status: Optional[str] = None, item_id: 
         query["item_id"] = item_id
     
     routings = await db.routings.find(query, {"_id": 0}).to_list(1000)
+    # Annotate each routing with an `in_use` flag so the UI can hide the
+    # Delete button for routings referenced by any WO / BOM / item. Single
+    # batch query per source for efficiency.
+    if routings:
+        rids = [r["id"] for r in routings]
+        rnames = [r.get("name") for r in routings if r.get("name")]
+        wo_counts = {}
+        bom_counts_by_name = {}
+        item_counts = {}
+        # work_orders reference routings by UUID (`routing_id`).
+        async for d in db.work_orders.aggregate([
+            {"$match": {"routing_id": {"$in": rids}}},
+            {"$group": {"_id": "$routing_id", "n": {"$sum": 1}}},
+        ]):
+            wo_counts[d["_id"]] = d["n"]
+        # BOMs reference routings by NAME inside `parent_routings[].name`,
+        # not by routing_id — they're snapshotted into the BOM doc.
+        async for d in db.boms.aggregate([
+            {"$match": {"parent_routings.name": {"$in": rnames}}},
+            {"$unwind": "$parent_routings"},
+            {"$match": {"parent_routings.name": {"$in": rnames}}},
+            {"$group": {"_id": "$parent_routings.name", "n": {"$sum": 1}}},
+        ]):
+            bom_counts_by_name[d["_id"]] = d["n"]
+        try:
+            async for d in db.items.aggregate([
+                {"$match": {"routing_id": {"$in": rids}}},
+                {"$group": {"_id": "$routing_id", "n": {"$sum": 1}}},
+            ]):
+                item_counts[d["_id"]] = d["n"]
+        except Exception:
+            pass
+        for r in routings:
+            r["wo_count"] = wo_counts.get(r["id"], 0)
+            r["bom_count"] = bom_counts_by_name.get(r.get("name"), 0)
+            r["item_count"] = item_counts.get(r["id"], 0)
+            r["in_use"] = (r["wo_count"] + r["bom_count"] + r["item_count"]) > 0
     return routings
 
 @routings_router.get("/{routing_id}")
@@ -5974,6 +6011,62 @@ async def update_routing(routing_id: str, routing_data: RoutingUpdate, request: 
     
     routing = await db.routings.find_one({"id": routing_id}, {"_id": 0})
     return routing
+
+
+async def _routing_usage(routing_id: str) -> dict:
+    """Return a usage summary for a routing.
+
+    A routing is considered "in use" if it is referenced by any work order
+    (including cancelled MOs — we don't break the audit trail) OR by any BOM
+    parent_routings entry. Returns counts so the UI can show a friendly
+    reason when blocking the delete.
+
+    NOTE on BOM matching: BOM docs snapshot routings by NAME (e.g.
+    `parent_routings: [{name: "Welding", cost: 1500}]`) rather than by UUID,
+    so we resolve the routing's name once and match on that.
+    """
+    routing = await db.routings.find_one({"id": routing_id}, {"_id": 0, "name": 1})
+    rname = (routing or {}).get("name", "")
+    wo_count = await db.work_orders.count_documents({"routing_id": routing_id})
+    bom_count = await db.boms.count_documents({"parent_routings.name": rname}) if rname else 0
+    item_count = 0
+    try:
+        item_count = await db.items.count_documents({"routing_id": routing_id})
+    except Exception:
+        pass
+    return {"work_orders": wo_count, "boms": bom_count, "items": item_count, "in_use": (wo_count + bom_count + item_count) > 0}
+
+
+@routings_router.get("/{routing_id}/usage")
+async def get_routing_usage(routing_id: str, request: Request):
+    """Lets the UI decide whether to enable the Delete button."""
+    await get_current_user(request)
+    routing = await db.routings.find_one({"id": routing_id}, {"_id": 0, "id": 1})
+    if not routing:
+        raise HTTPException(status_code=404, detail="Routing not found")
+    return await _routing_usage(routing_id)
+
+
+@routings_router.delete("/{routing_id}")
+async def delete_routing(routing_id: str, request: Request):
+    user = await get_current_user(request)
+    _require_access(user, ["admin", "production_manager"], module="routings", action="delete")
+    routing = await db.routings.find_one({"id": routing_id}, {"_id": 0})
+    if not routing:
+        raise HTTPException(status_code=404, detail="Routing not found")
+    usage = await _routing_usage(routing_id)
+    if usage["in_use"]:
+        # Same UX pattern as variant-delete: hard-block when the routing is
+        # referenced anywhere. The UI hides the delete button proactively, but
+        # this server-side guard prevents data corruption if a stale UI ever
+        # tries to delete an in-use routing.
+        bits = []
+        if usage["work_orders"]: bits.append(f"{usage['work_orders']} work order(s)")
+        if usage["boms"]: bits.append(f"{usage['boms']} BOM(s)")
+        if usage["items"]: bits.append(f"{usage['items']} item(s)")
+        raise HTTPException(status_code=400, detail=f"Routing in use by {', '.join(bits)} — cannot delete")
+    await db.routings.delete_one({"id": routing_id})
+    return {"message": "Routing deleted"}
 
 # ================== WORK ORDER ROUTES ==================
 
