@@ -2068,7 +2068,15 @@ export default function ManufacturingPage() {
                           {parentMO.production_order?.order_number && <span className="text-[10px] bg-[#E1EFFE] text-[#1E429F] px-1.5 py-0.5 rounded font-medium mono" data-testid={`so-ref-${parentMO.id}`}>SO: {parentMO.production_order.order_number}</span>}
                           <span className="text-sm font-medium text-[#374151]">{parentItem?.part_number} - {parentItem?.name}</span>
                           <span className="text-[10px] px-1.5 py-0.5 rounded text-white font-semibold" style={{backgroundColor: catColor}}>{getCatLabel(parentMO)}</span>
-                          <span className={`text-[10px] px-1 rounded ${parentMO.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : parentMO.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : parentMO.status === 'cancelled' ? 'bg-[#9B1C1C] text-white font-semibold' : 'bg-[#FDF6B2] text-[#723B13]'}`}>{parentMO.status?.replace('_',' ')}</span>
+                          <span className={`text-[10px] px-1 rounded ${parentMO.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : parentMO.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : parentMO.status === 'cancelled' ? 'bg-[#9B1C1C] text-white font-semibold' : 'bg-[#FDF6B2] text-[#723B13]'}`} data-testid={`fg-status-${parentMO.id}`}>
+                            {parentMO.status?.replace('_',' ')}
+                            {/* For completed FGs, show the completion date
+                                inline inside the status pill so the user
+                                immediately sees how delay is calculated. */}
+                            {parentMO.status === 'completed' && parentMO.actual_end && (
+                              <span className="ml-1 opacity-80" data-testid={`fg-completed-inline-${parentMO.id}`}>· {new Date(parentMO.actual_end).toLocaleDateString('en-GB')}</span>
+                            )}
+                          </span>
                           {parentMO.is_subcontract && <span className="text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">Sub-Contract</span>}
                           {/* Inline Clear-focus chip — appears on the FG header
                               whenever the active family focus is on an SG/Part
@@ -2176,13 +2184,6 @@ export default function ManufacturingPage() {
                                 )}
                                 {schedRaw && (
                                   <span className="text-[#9A3412] font-semibold" data-testid={`fg-schedule-date-${parentMO.id}`}>Schedule: {fmt(schedRaw)}</span>
-                                )}
-                                {parentMO.status === 'completed' && parentMO.actual_end && (
-                                  <span
-                                    className="text-[#03543F] font-semibold"
-                                    data-testid={`fg-completed-date-${parentMO.id}`}
-                                    title={`Manufacturing order completed on ${fmt(parentMO.actual_end)}`}
-                                  >Completed: {fmt(parentMO.actual_end)}</span>
                                 )}
                                 {showDelay && daysLate > 0 && (
                                   <span
