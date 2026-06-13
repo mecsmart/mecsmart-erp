@@ -2150,11 +2150,23 @@ export default function ManufacturingPage() {
                             const today = new Date();
                             today.setHours(0,0,0,0);
                             let daysLate = 0;
-                            const showDelay = schedRaw && !['completed','cancelled'].includes(parentMO.status);
+                            // Delay computation:
+                            //   • Still in progress / pending → today vs scheduled_end (live overrun)
+                            //   • Completed → actual_end vs scheduled_end (frozen historical delay)
+                            //   • Cancelled → hide (the delivery never happened, delay is meaningless)
+                            const showDelay = schedRaw && parentMO.status !== 'cancelled';
                             if (showDelay) {
                               const end = new Date(schedRaw);
                               end.setHours(0,0,0,0);
-                              daysLate = Math.floor((today.getTime() - end.getTime()) / (1000 * 60 * 60 * 24));
+                              let compareTs;
+                              if (parentMO.status === 'completed' && parentMO.actual_end) {
+                                const done = new Date(parentMO.actual_end);
+                                done.setHours(0,0,0,0);
+                                compareTs = done.getTime();
+                              } else {
+                                compareTs = today.getTime();
+                              }
+                              daysLate = Math.floor((compareTs - end.getTime()) / (1000 * 60 * 60 * 24));
                             }
                             const fmt = (d) => d ? new Date(d).toLocaleDateString('en-GB') : '-';
                             return (
@@ -2165,8 +2177,21 @@ export default function ManufacturingPage() {
                                 {schedRaw && (
                                   <span className="text-[#9A3412] font-semibold" data-testid={`fg-schedule-date-${parentMO.id}`}>Schedule: {fmt(schedRaw)}</span>
                                 )}
+                                {parentMO.status === 'completed' && parentMO.actual_end && (
+                                  <span
+                                    className="text-[#03543F] font-semibold"
+                                    data-testid={`fg-completed-date-${parentMO.id}`}
+                                    title={`Manufacturing order completed on ${fmt(parentMO.actual_end)}`}
+                                  >Completed: {fmt(parentMO.actual_end)}</span>
+                                )}
                                 {showDelay && daysLate > 0 && (
-                                  <span className="bg-[#9B1C1C] text-white font-semibold px-2 py-0.5 rounded" data-testid={`fg-delay-${parentMO.id}`}>Delay: {daysLate} Day{daysLate === 1 ? '' : 's'}</span>
+                                  <span
+                                    className="bg-[#9B1C1C] text-white font-semibold px-2 py-0.5 rounded"
+                                    data-testid={`fg-delay-${parentMO.id}`}
+                                    title={parentMO.status === 'completed'
+                                      ? `Completed on ${fmt(parentMO.actual_end)} — ${daysLate} day(s) past scheduled ${fmt(schedRaw)}`
+                                      : `Scheduled ${fmt(schedRaw)} — overdue by ${daysLate} day(s)`}
+                                  >Delay: {daysLate} Day{daysLate === 1 ? '' : 's'}</span>
                                 )}
                                 {/* Search + Status filter inputs — pushed to
                                     the right edge of the date strip. */}
