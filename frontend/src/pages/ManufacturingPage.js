@@ -2086,45 +2086,15 @@ export default function ManufacturingPage() {
                               <XIcon className="w-3 h-3 ml-0.5" />
                             </button>
                           )}
-                          {/* Per-FG child filter + family totals were moved to
-                              the bottom date strip — see the basis-full block
-                              below. The top summary row now stays compact:
-                              MO# · item · status · search · status select. */}
-                          {/* Per-FG search + status filter (SG / Parts under
-                              THIS FG only). Placed on the right side of the FG
-                              header. */}
-                          <div className="ml-auto flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                            <div className="relative">
-                              <Search className="w-3 h-3 absolute left-1.5 top-1/2 -translate-y-1/2 text-[#6B7280]" />
-                              <input
-                                type="text"
-                                placeholder="Search SG/Part…"
-                                value={panelSearch[parentMO.id] || ''}
-                                onChange={(e) => setPanelSearchFor(parentMO.id, e.target.value)}
-                                onClick={(e) => e.stopPropagation()}
-                                className="pl-5 pr-1.5 py-0.5 border border-[#D1D5DB] rounded-sm text-[11px] w-44 focus:outline-none focus:border-[#1D3557]"
-                                data-testid={`panel-search-${parentMO.id}`}
-                              />
-                            </div>
-                            <select
-                              value={panelStatus[parentMO.id] || ''}
-                              onChange={(e) => setPanelStatusFor(parentMO.id, e.target.value)}
-                              onClick={(e) => e.stopPropagation()}
-                              className="px-1.5 py-0.5 border border-[#D1D5DB] rounded-sm text-[11px] bg-white focus:outline-none focus:border-[#1D3557]"
-                              data-testid={`panel-status-${parentMO.id}`}
-                            >
-                              <option value="">All</option>
-                              <option value="pending">Pending</option>
-                              <option value="in_progress">In Progress</option>
-                              <option value="outsourced">Outsourced</option>
-                              <option value="completed">Completed</option>
-                              <option value="cancelled">Cancelled</option>
-                            </select>
-                          </div>
+                          {/* Per-FG child filter + family totals + search + status
+                              dropdown were all moved down into the bottom date
+                              strip — see the basis-full block below. The top
+                              summary row now stays compact: MO# · item · status. */}
                           {/* ── Release / Schedule / Delay strip + inline child
-                              filter pills + family totals ──
+                              filter pills + family totals + search + status ──
                               Replaces the per-row Schedule column AND moves
-                              the SG/Parts filter pills down here per user's
+                              the SG/Parts filter pills, family totals, search
+                              box, and status dropdown down here per user's
                               preferred layout. Rendered as a w-full block
                               inside the flex-wrap summary so it lines up
                               underneath the title row. Delay is hidden for
@@ -2156,7 +2126,7 @@ export default function ManufacturingPage() {
                             const totalFam = familyMos.length;
                             const doneFam = familyMos.filter(m => m.status === 'completed').length;
                             return (
-                              <div className="basis-full flex items-center flex-wrap gap-4 pl-7 mt-1 text-[11px] mono" data-testid={`fg-dates-${parentMO.id}`}>
+                              <div className="basis-full flex items-center flex-wrap gap-3 pl-7 mt-1 text-[11px] mono" data-testid={`fg-dates-${parentMO.id}`}>
                                 {relRaw && (
                                   <span className="text-[#1E429F] font-semibold" data-testid={`fg-release-date-${parentMO.id}`}>Rel. On: {fmt(relRaw)}</span>
                                 )}
@@ -2164,13 +2134,10 @@ export default function ManufacturingPage() {
                                   <span className="text-[#9A3412] font-semibold" data-testid={`fg-schedule-date-${parentMO.id}`}>Schedule: {fmt(schedRaw)}</span>
                                 )}
                                 {showDelay && daysLate > 0 && (
-                                  <span className="text-[#9B1C1C] font-bold" data-testid={`fg-delay-${parentMO.id}`}>Delay: {daysLate} Day{daysLate === 1 ? '' : 's'}</span>
+                                  <span className="bg-[#9B1C1C] text-white font-semibold px-2 py-0.5 rounded" data-testid={`fg-delay-${parentMO.id}`}>Delay: {daysLate} Day{daysLate === 1 ? '' : 's'}</span>
                                 )}
-                                {/* SG / Parts filter pills — moved from the
-                                    top summary row to sit inline with the
-                                    Schedule label per user's preferred
-                                    layout. Only renders if this FG has SG
-                                    or Part descendants worth filtering. */}
+                                {/* SG / Parts filter pills — inline with the
+                                    Schedule label per user's preferred layout. */}
                                 {(descendantCats.has('component') || descendantCats.has('sub_assembly')) && (
                                   <div className="flex items-center gap-0.5 border border-[#D1D5DB] rounded-sm p-0.5 bg-white" data-testid={`panel-filter-${parentMO.id}`} onClick={(e) => e.preventDefault()}>
                                     <button
@@ -2199,6 +2166,36 @@ export default function ManufacturingPage() {
                                   <span className="text-[#6B7280]">/</span>
                                   <span className="font-semibold text-[#1D3557]">{totalFam}</span> MO(s)
                                 </span>
+                                {/* Search + Status filter inputs — pushed to
+                                    the right edge of the date strip. */}
+                                <div className="ml-auto flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                                  <div className="relative">
+                                    <Search className="w-3 h-3 absolute left-1.5 top-1/2 -translate-y-1/2 text-[#6B7280]" />
+                                    <input
+                                      type="text"
+                                      placeholder="Search SG/Part…"
+                                      value={panelSearch[parentMO.id] || ''}
+                                      onChange={(e) => setPanelSearchFor(parentMO.id, e.target.value)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="pl-5 pr-1.5 py-0.5 border border-[#D1D5DB] rounded-sm text-[11px] w-44 focus:outline-none focus:border-[#1D3557]"
+                                      data-testid={`panel-search-${parentMO.id}`}
+                                    />
+                                  </div>
+                                  <select
+                                    value={panelStatus[parentMO.id] || ''}
+                                    onChange={(e) => setPanelStatusFor(parentMO.id, e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="px-1.5 py-0.5 border border-[#D1D5DB] rounded-sm text-[11px] bg-white focus:outline-none focus:border-[#1D3557]"
+                                    data-testid={`panel-status-${parentMO.id}`}
+                                  >
+                                    <option value="">All</option>
+                                    <option value="pending">Pending</option>
+                                    <option value="in_progress">In Progress</option>
+                                    <option value="outsourced">Outsourced</option>
+                                    <option value="completed">Completed</option>
+                                    <option value="cancelled">Cancelled</option>
+                                  </select>
+                                </div>
                               </div>
                             );
                           })()}
