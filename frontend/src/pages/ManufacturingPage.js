@@ -2086,19 +2086,64 @@ export default function ManufacturingPage() {
                               <XIcon className="w-3 h-3 ml-0.5" />
                             </button>
                           )}
-                          {/* Per-FG child filter + family totals + search + status
-                              dropdown were all moved down into the bottom date
-                              strip — see the basis-full block below. The top
-                              summary row now stays compact: MO# · item · status. */}
-                          {/* ── Release / Schedule / Delay strip + inline child
-                              filter pills + family totals + search + status ──
-                              Replaces the per-row Schedule column AND moves
-                              the SG/Parts filter pills, family totals, search
-                              box, and status dropdown down here per user's
-                              preferred layout. Rendered as a w-full block
-                              inside the flex-wrap summary so it lines up
-                              underneath the title row. Delay is hidden for
-                              completed / cancelled FGs (meaningless). */}
+                          {/* SG / Parts filter pills + family totals — pushed
+                              to the right edge of the top summary row (inline
+                              with the FG item title) per user's preferred
+                              layout. Search + status dropdown stay on the
+                              bottom date strip. Only render if this FG has
+                              SG or Part descendants worth filtering. */}
+                          <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                            {(descendantCats.has('component') || descendantCats.has('sub_assembly')) && (
+                              <div className="flex items-center gap-0.5 border border-[#D1D5DB] rounded-sm p-0.5 bg-white" data-testid={`panel-filter-${parentMO.id}`} onClick={(e) => e.preventDefault()}>
+                                <button
+                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPanelFilter(parentMO.id, ''); }}
+                                  className={`text-[10px] px-1.5 py-0.5 rounded-sm ${activePanelFilter === '' ? 'bg-[#1D3557] text-white font-semibold' : 'text-[#4B5563] hover:bg-[#F3F4F6]'}`}
+                                  data-testid={`panel-filter-${parentMO.id}-all`}
+                                >All</button>
+                                {descendantCats.has('sub_assembly') && (
+                                  <button
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPanelFilter(parentMO.id, activePanelFilter === 'sub_assembly' ? '' : 'sub_assembly'); }}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded-sm ${activePanelFilter === 'sub_assembly' ? 'bg-[#1E429F] text-white font-semibold' : 'text-[#4B5563] hover:bg-[#F3F4F6]'}`}
+                                    data-testid={`panel-filter-${parentMO.id}-sg`}
+                                  >SG only</button>
+                                )}
+                                {descendantCats.has('component') && (
+                                  <button
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPanelFilter(parentMO.id, activePanelFilter === 'component' ? '' : 'component'); }}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded-sm ${activePanelFilter === 'component' ? 'bg-[#723B13] text-white font-semibold' : 'text-[#4B5563] hover:bg-[#F3F4F6]'}`}
+                                    data-testid={`panel-filter-${parentMO.id}-parts`}
+                                  >Parts only</button>
+                                )}
+                              </div>
+                            )}
+                            <span className="text-[11px] mono text-[#6B7280]" data-testid={`fg-totals-${parentMO.id}`}>
+                              {(() => {
+                                const familyMos = [parentMO];
+                                const walkAll = (pid) => {
+                                  for (const w of workOrders) {
+                                    if (w.parent_wo_id === pid) {
+                                      familyMos.push(w);
+                                      walkAll(w.id);
+                                    }
+                                  }
+                                };
+                                walkAll(parentMO.id);
+                                const total = familyMos.length;
+                                const done = familyMos.filter(m => m.status === 'completed').length;
+                                return (
+                                  <>
+                                    <span className="font-semibold text-[#03543F]">{done}</span>
+                                    <span className="text-[#6B7280]">/</span>
+                                    <span className="font-semibold text-[#1D3557]">{total}</span> MO(s)
+                                  </>
+                                );
+                              })()}
+                            </span>
+                          </div>
+                          {/* ── Release / Schedule / Delay strip + Search /
+                              Status filter (bottom row, full-width). ──
+                              Replaces the per-row Schedule column. Hidden for
+                              FGs with neither schedule data nor children. */}
                           {(() => {
                             const relRaw = parentMO.created_at;
                             const schedRaw = parentMO.scheduled_end || parentMO.due_date;
@@ -2112,19 +2157,6 @@ export default function ManufacturingPage() {
                               daysLate = Math.floor((today.getTime() - end.getTime()) / (1000 * 60 * 60 * 24));
                             }
                             const fmt = (d) => d ? new Date(d).toLocaleDateString('en-GB') : '-';
-                            // Walk descendants for the family totals badge.
-                            const familyMos = [parentMO];
-                            const walkAll = (pid) => {
-                              for (const w of workOrders) {
-                                if (w.parent_wo_id === pid) {
-                                  familyMos.push(w);
-                                  walkAll(w.id);
-                                }
-                              }
-                            };
-                            walkAll(parentMO.id);
-                            const totalFam = familyMos.length;
-                            const doneFam = familyMos.filter(m => m.status === 'completed').length;
                             return (
                               <div className="basis-full flex items-center flex-wrap gap-3 pl-7 mt-1 text-[11px] mono" data-testid={`fg-dates-${parentMO.id}`}>
                                 {relRaw && (
@@ -2136,36 +2168,6 @@ export default function ManufacturingPage() {
                                 {showDelay && daysLate > 0 && (
                                   <span className="bg-[#9B1C1C] text-white font-semibold px-2 py-0.5 rounded" data-testid={`fg-delay-${parentMO.id}`}>Delay: {daysLate} Day{daysLate === 1 ? '' : 's'}</span>
                                 )}
-                                {/* SG / Parts filter pills — inline with the
-                                    Schedule label per user's preferred layout. */}
-                                {(descendantCats.has('component') || descendantCats.has('sub_assembly')) && (
-                                  <div className="flex items-center gap-0.5 border border-[#D1D5DB] rounded-sm p-0.5 bg-white" data-testid={`panel-filter-${parentMO.id}`} onClick={(e) => e.preventDefault()}>
-                                    <button
-                                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPanelFilter(parentMO.id, ''); }}
-                                      className={`text-[10px] px-1.5 py-0.5 rounded-sm ${activePanelFilter === '' ? 'bg-[#1D3557] text-white font-semibold' : 'text-[#4B5563] hover:bg-[#F3F4F6]'}`}
-                                      data-testid={`panel-filter-${parentMO.id}-all`}
-                                    >All</button>
-                                    {descendantCats.has('sub_assembly') && (
-                                      <button
-                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPanelFilter(parentMO.id, activePanelFilter === 'sub_assembly' ? '' : 'sub_assembly'); }}
-                                        className={`text-[10px] px-1.5 py-0.5 rounded-sm ${activePanelFilter === 'sub_assembly' ? 'bg-[#1E429F] text-white font-semibold' : 'text-[#4B5563] hover:bg-[#F3F4F6]'}`}
-                                        data-testid={`panel-filter-${parentMO.id}-sg`}
-                                      >SG only</button>
-                                    )}
-                                    {descendantCats.has('component') && (
-                                      <button
-                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setPanelFilter(parentMO.id, activePanelFilter === 'component' ? '' : 'component'); }}
-                                        className={`text-[10px] px-1.5 py-0.5 rounded-sm ${activePanelFilter === 'component' ? 'bg-[#723B13] text-white font-semibold' : 'text-[#4B5563] hover:bg-[#F3F4F6]'}`}
-                                        data-testid={`panel-filter-${parentMO.id}-parts`}
-                                      >Parts only</button>
-                                    )}
-                                  </div>
-                                )}
-                                <span className="text-[#6B7280]" data-testid={`fg-totals-${parentMO.id}`}>
-                                  <span className="font-semibold text-[#03543F]">{doneFam}</span>
-                                  <span className="text-[#6B7280]">/</span>
-                                  <span className="font-semibold text-[#1D3557]">{totalFam}</span> MO(s)
-                                </span>
                                 {/* Search + Status filter inputs — pushed to
                                     the right edge of the date strip. */}
                                 <div className="ml-auto flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
