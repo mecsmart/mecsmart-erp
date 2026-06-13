@@ -2072,7 +2072,7 @@ export default function ManufacturingPage() {
                           {parentMO.production_order?.order_number && <span className="text-[10px] bg-[#E1EFFE] text-[#1E429F] px-1.5 py-0.5 rounded font-medium mono" data-testid={`so-ref-${parentMO.id}`}>SO: {parentMO.production_order.order_number}</span>}
                           <span className="text-sm font-medium text-[#374151]">{parentItem?.part_number} - {parentItem?.name}</span>
                           <span className="text-[10px] px-1.5 py-0.5 rounded text-white font-semibold" style={{backgroundColor: catColor}}>{getCatLabel(parentMO)}</span>
-                          <span className={`text-[10px] px-1 rounded ${parentMO.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : parentMO.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : 'bg-[#FDF6B2] text-[#723B13]'}`}>{parentMO.status?.replace('_',' ')}</span>
+                          <span className={`text-[10px] px-1 rounded ${parentMO.status === 'completed' ? 'bg-[#DEF7EC] text-[#03543F]' : parentMO.status === 'in_progress' ? 'bg-[#E1EFFE] text-[#1E429F]' : parentMO.status === 'cancelled' ? 'bg-[#9B1C1C] text-white font-semibold' : 'bg-[#FDF6B2] text-[#723B13]'}`}>{parentMO.status?.replace('_',' ')}</span>
                           {parentMO.is_subcontract && <span className="text-[10px] bg-[#FDF6B2] text-[#723B13] px-1 rounded">Sub-Contract</span>}
                           {/* Inline Clear-focus chip — appears on the FG header
                               whenever the active family focus is on an SG/Part
