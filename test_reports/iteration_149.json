@@ -1,0 +1,64 @@
+{
+  "summary": "Iteration 149 - Frontend-only testing of Manufacturing Dashboard UX improvements. All 3 features verified successfully: (1) Delay badge at FG level only - confirmed delay badges only appear on FG MOs (parent_wo_id is null) and not on child MOs, delay calculated from scheduled_end only, correctly suppressed for completed/cancelled status. (2) Cancelled MO badge in solid red - verified bg=#9B1C1C (rgb(155,28,28)) with white text and font-weight 500 (semibold). (3) Cancelled MO stat card + clickable filter cards - all 4 cards present (Total/Under Process/Finished/Cancelled), toggle behavior works correctly, active card shows solid color bg + white text.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/.screenshots/stat_cards_initial.png",
+    "/.screenshots/under_process_filter_active.png",
+    "/.screenshots/cancelled_filter_active.png",
+    "/.screenshots/cancelled_badges_detail.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only testing per request)",
+    "frontend": "100% - All 3 UX improvements verified"
+  },
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "None - used existing data",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 149 verified 3 frontend UX improvements on Manufacturing page: (1) Delay badge logic - only shows on FG MOs (parent_wo_id is null) when scheduled_end < today AND status not in completed/cancelled. Tested with MO-000001 which has past date but cancelled status - correctly no delay badge. (2) Cancelled status badge - solid red bg (#9B1C1C = rgb(155,28,28)) with white text and font-semibold. Verified via computed styles on 127 cancelled badges. (3) Stat cards - 4 clickable cards (Total: 532, Under Process: 341, Finished: 27, Cancelled: 85) with toggle filter behavior. Active card shows solid color bg + white text + ring. data-testids: stat-card-total, stat-card-under-process, stat-card-finished, stat-card-cancelled.",
+  "tests_verified": {
+    "STAT_CARDS_VISIBLE": {
+      "status": "PASSED",
+      "details": "All 4 stat cards visible with correct data-testids: stat-card-total (532), stat-card-under-process (341), stat-card-finished (27), stat-card-cancelled (85)"
+    },
+    "STAT_CARDS_CLICKABLE": {
+      "status": "PASSED",
+      "details": "All cards are clickable buttons with toggle behavior. Clicking sets filter, clicking again clears. Total card acts as reset."
+    },
+    "STAT_CARDS_ACTIVE_STYLE": {
+      "status": "PASSED",
+      "details": "Active card shows solid color background + white text. Under Process: rgb(30,66,159), Finished: rgb(3,84,63), Cancelled: rgb(155,28,28)"
+    },
+    "CANCELLED_BADGE_COLOR": {
+      "status": "PASSED",
+      "details": "Cancelled status badge has solid red bg (rgb(155,28,28) = #9B1C1C), white text (rgb(255,255,255)), font-weight 500 (semibold)"
+    },
+    "DELAY_BADGE_FG_ONLY": {
+      "status": "PASSED",
+      "details": "Delay badges only appear on FG MOs (parent_wo_id is null). Verified 141 child rows have 0 delay badges."
+    },
+    "DELAY_BADGE_SUPPRESSED_FOR_CANCELLED": {
+      "status": "PASSED",
+      "details": "MO-000001 has past scheduled_end (4/20/2026) but status is cancelled - correctly no delay badge shown"
+    },
+    "SCHEDULE_COLUMN_TESTIDS": {
+      "status": "PASSED",
+      "details": "All MO rows have data-testid='wo-schedule-{woId}' on schedule column (673 cells found)"
+    },
+    "EMPTY_STATE_MESSAGE": {
+      "status": "NOT_TESTED",
+      "details": "Could not test empty state for cancelled filter as there are 85 cancelled MOs in the system"
+    }
+  }
+}

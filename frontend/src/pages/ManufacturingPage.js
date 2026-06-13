@@ -86,6 +86,11 @@ export default function ManufacturingPage() {
   // given FG group. Keyed by FG WO id; empty means no filter.
   const [panelSearch, setPanelSearch] = useState({});
   const [panelStatus, setPanelStatus] = useState({});
+  // Top-level FG filter driven by the dashboard stat cards. Clicking a card
+  // sets this to its key; clicking the same card again clears the filter
+  // (toggle behavior). Allowed values: '' (all) | 'under_process' |
+  // 'finished' | 'cancelled'.
+  const [fgCardFilter, setFgCardFilter] = useState('');
   const setPanelSearchFor = (fgId, q) => setPanelSearch(prev => ({ ...prev, [fgId]: q }));
   const setPanelStatusFor = (fgId, s) => setPanelStatus(prev => ({ ...prev, [fgId]: s }));
   
@@ -795,7 +800,7 @@ export default function ManufacturingPage() {
       case 'completed': return 'bg-[#DEF7EC] text-[#03543F]';
       case 'in_progress': return 'bg-[#E1EFFE] text-[#1E429F]';
       case 'pending': return 'bg-[#FDF6B2] text-[#723B13]';
-      case 'cancelled': return 'bg-[#FDE8E8] text-[#9B1C1C]';
+      case 'cancelled': return 'bg-[#9B1C1C] text-white font-semibold';
       case 'outsourced': return 'bg-[#E5E7EB] text-[#6B7280]';
       default: return 'bg-[#F3F4F6] text-[#4B5563]';
     }
@@ -1279,6 +1284,7 @@ export default function ManufacturingPage() {
             //     work has started somewhere in the family even if the FG
             //     itself is still pending — production has begun)
             const finishedFG = mainFGs.filter(w => w.status === 'completed').length;
+            const cancelledFG = mainFGs.filter(w => w.status === 'cancelled').length;
             const underProcessFG = mainFGs.filter(w => {
               if (w.status === 'completed' || w.status === 'cancelled') return false;
               if (w.status === 'in_progress') return true;
@@ -1286,21 +1292,32 @@ export default function ManufacturingPage() {
               const ds = descStatuses(w.id);
               return ds.some(s => s === 'in_progress' || s === 'completed');
             }).length;
-            const card = (label, value, color, testId) => (
-              <div
-                key={testId}
-                className={`min-w-[120px] px-3 py-1.5 border-[1.5px] rounded ${color} bg-white text-center`}
-                data-testid={testId}
-              >
-                <div className={`text-[10px] font-bold tracking-wider uppercase ${color.replace('border-', 'text-')}`}>{label}</div>
-                <div className={`text-xl font-bold mono ${color.replace('border-', 'text-')}`}>{value}</div>
-              </div>
-            );
+            // Click card → set filter, click again → clear (toggle).
+            // The "Total" card always clears the filter (acts as Reset).
+            const toggle = (key) => () => setFgCardFilter(prev => (key === '' ? '' : (prev === key ? '' : key)));
+            const card = (label, value, color, testId, filterKey) => {
+              const isActive = fgCardFilter === filterKey && filterKey !== '';
+              return (
+                <button
+                  type="button"
+                  key={testId}
+                  onClick={toggle(filterKey)}
+                  className={`min-w-[120px] px-3 py-1.5 border-[1.5px] rounded ${color} text-center transition-all cursor-pointer hover:shadow-md focus:outline-none ${isActive ? 'shadow-md ring-2 ring-offset-1' : 'bg-white'} ${isActive ? color.replace('border-', 'bg-').replace('text-', '') : ''}`}
+                  style={isActive ? { backgroundColor: color.match(/#[0-9A-F]+/i)?.[0], color: 'white' } : {}}
+                  data-testid={testId}
+                  title={filterKey === '' ? 'Clear filter — show all MOs' : (isActive ? `Click to clear ${label} filter` : `Click to filter ${label}`)}
+                >
+                  <div className={`text-[10px] font-bold tracking-wider uppercase ${isActive ? 'text-white' : color.replace('border-', 'text-')}`}>{label}</div>
+                  <div className={`text-xl font-bold mono ${isActive ? 'text-white' : color.replace('border-', 'text-')}`}>{value}</div>
+                </button>
+              );
+            };
             return (
               <div className="flex items-center gap-2" data-testid="fg-stat-cards">
-                {card('Total MO(s)', totalFG, 'border-[#9B1C1C]', 'stat-card-total')}
-                {card('Under Process MO(s)', underProcessFG, 'border-[#1E429F]', 'stat-card-under-process')}
-                {card('Finished MO(s)', finishedFG, 'border-[#03543F]', 'stat-card-finished')}
+                {card('Total MO(s)', totalFG, 'border-[#9B1C1C]', 'stat-card-total', '')}
+                {card('Under Process MO(s)', underProcessFG, 'border-[#1E429F]', 'stat-card-under-process', 'under_process')}
+                {card('Finished MO(s)', finishedFG, 'border-[#03543F]', 'stat-card-finished', 'finished')}
+                {card('Cancelled MO(s)', cancelledFG, 'border-[#9B1C1C]', 'stat-card-cancelled', 'cancelled')}
               </div>
             );
           })()}
@@ -1702,6 +1719,32 @@ export default function ManufacturingPage() {
                     }
                   }
                   const rootMOs = rootIdsOrder.map(id => woById.get(id)).filter(Boolean);
+                  // Apply top-level dashboard-card filter. When a stat card is
+                  // active (`fgCardFilter` set), only show FG roots that match
+                  // its group. Children come along via the recursive walk
+                  // below.
+                  const classifyFG = (fg) => {
+                    if (fg.status === 'completed') return 'finished';
+                    if (fg.status === 'cancelled') return 'cancelled';
+                    if (fg.status === 'in_progress') return 'under_process';
+                    // pending FG → under_process only if any descendant has started
+                    const collect = (pid) => {
+                      const out = [];
+                      for (const w of workOrders) {
+                        if (w.parent_wo_id === pid) {
+                          out.push(w.status);
+                          out.push(...collect(w.id));
+                        }
+                      }
+                      return out;
+                    };
+                    const ds = collect(fg.id);
+                    if (ds.some(s => s === 'in_progress' || s === 'completed')) return 'under_process';
+                    return 'pending';
+                  };
+                  const filteredRootMOs = fgCardFilter
+                    ? rootMOs.filter(fg => classifyFG(fg) === fgCardFilter)
+                    : rootMOs;
                   const getChildMOs = (pid) => workOrders.filter(wo => wo.parent_wo_id === pid);
                   const getCatLabel = (wo) => { const cat = wo.item?.category || items.find(i => i.id === wo.item_id)?.category; return cat === 'finished_good' ? 'FG' : cat === 'sub_assembly' ? 'SA' : 'PART'; };
                   const getCatColor = (wo) => { const cat = wo.item?.category || items.find(i => i.id === wo.item_id)?.category; return cat === 'finished_good' ? '#1D3557' : cat === 'sub_assembly' ? '#1E429F' : '#723B13'; };
@@ -1872,22 +1915,32 @@ export default function ManufacturingPage() {
                           </td>
                           <td style={{minWidth:'108px'}} data-testid={`wo-schedule-${wo.id}`}>
                             {(() => {
-                              // Show schedule date + delay badge for pending/released/in_progress MOs.
-                              // Once `completed`, hide the delay badge — it's water under the bridge.
+                              // Schedule date is shown for every MO (FG / SG / Part);
+                              // but the "delay" badge is intentionally limited to
+                              // the FG level (parent_wo_id is null) — children's
+                              // delays roll up into the FG's, showing per-child
+                              // badges just adds noise. Delay is calculated from
+                              // `scheduled_end` only (not the start date), since
+                              // that's the user-visible due date.
                               const schedRaw = wo.scheduled_end || wo.due_date || wo.scheduled_start;
                               if (!schedRaw) return <span className="text-[11px] text-[#9CA3AF]">-</span>;
                               const sched = new Date(schedRaw);
+                              const isFG = !wo.parent_wo_id;
                               const today = new Date();
                               today.setHours(0,0,0,0);
-                              const schedStart = new Date(sched);
-                              schedStart.setHours(0,0,0,0);
-                              const isLate = wo.status !== 'completed' && wo.status !== 'cancelled' && schedStart.getTime() < today.getTime();
-                              const daysLate = isLate ? Math.floor((today.getTime() - schedStart.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+                              const endRaw = wo.scheduled_end;
+                              const showDelay = isFG && endRaw && !['completed','cancelled'].includes(wo.status);
+                              let daysLate = 0;
+                              if (showDelay) {
+                                const end = new Date(endRaw);
+                                end.setHours(0,0,0,0);
+                                daysLate = Math.floor((today.getTime() - end.getTime()) / (1000 * 60 * 60 * 24));
+                              }
                               return (
                                 <div className="flex flex-col gap-0.5">
                                   <span className="text-[11px] mono text-[#374151]">{sched.toLocaleDateString()}</span>
-                                  {isLate && (
-                                    <span className="text-[10px] bg-[#FDE8E8] text-[#9B1C1C] px-1 py-px rounded font-semibold inline-block w-fit" data-testid={`wo-delay-${wo.id}`} title={`Scheduled ${sched.toLocaleDateString()} — overdue by ${daysLate} day(s)`}>
+                                  {showDelay && daysLate > 0 && (
+                                    <span className="text-[10px] bg-[#FDE8E8] text-[#9B1C1C] px-1 py-px rounded font-semibold inline-block w-fit" data-testid={`wo-delay-${wo.id}`} title={`Scheduled end ${new Date(endRaw).toLocaleDateString()} — overdue by ${daysLate} day(s)`}>
                                       {daysLate}d delayed
                                     </span>
                                   )}
@@ -1943,7 +1996,12 @@ export default function ManufacturingPage() {
 
                   return (
                     <>
-                    {rootMOs.map(parentMO => {
+                    {filteredRootMOs.length === 0 && fgCardFilter ? (
+                      <div className="text-center text-sm text-[#6B7280] py-8" data-testid="fg-filter-empty">
+                        No {fgCardFilter.replace('_', ' ')} manufacturing orders. <button onClick={() => setFgCardFilter('')} className="text-[#1D3557] underline ml-1">Clear filter</button>
+                      </div>
+                    ) : null}
+                    {filteredRootMOs.map(parentMO => {
                     // Reset per-tree dedup so each <details> renders its own subtree fully
                     renderedIds = new Set();
                     const parentItem = parentMO.item || items.find(i => i.id === parentMO.item_id);
