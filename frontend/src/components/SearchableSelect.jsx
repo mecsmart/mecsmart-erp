@@ -40,11 +40,16 @@ export const SearchableSelect = ({
 
   const selected = options.find(o => o.id === value);
 
-  const filtered = options.filter(o => {
-    if (!query.trim()) return false;
+  const filtered = (() => {
+    // Show ALL options (capped at 100) when the dropdown is open and no
+    // query has been typed yet — this is what most users expect from a
+    // dropdown (click → see entries). Typing then narrows the list.
+    if (!query.trim()) return options.slice(0, 100);
     const q = query.toLowerCase();
-    return matchFields.some(f => String(o?.[f] || '').toLowerCase().includes(q));
-  }).slice(0, 100);
+    return options.filter(o =>
+      matchFields.some(f => String(o?.[f] || '').toLowerCase().includes(q))
+    ).slice(0, 100);
+  })();
 
   useEffect(() => {
     const handler = (e) => {
@@ -142,13 +147,15 @@ export const SearchableSelect = ({
         </div>
       )}
 
-      {showSearchInput && focused && query.trim() && (
+      {showSearchInput && focused && (
         <div className="absolute z-50 mt-1 w-full bg-white border border-[#E5E7EB] rounded-sm shadow-lg max-h-64 overflow-y-auto">
           <div className="px-3 py-1 text-[10px] text-[#6B7280] uppercase tracking-wide border-b border-[#F3F4F6]">
-            {filtered.length} match{filtered.length !== 1 ? 'es' : ''} for "{query}"
+            {query.trim()
+              ? `${filtered.length} match${filtered.length !== 1 ? 'es' : ''} for "${query}"`
+              : `${options.length} option${options.length !== 1 ? 's' : ''}${options.length > 100 ? ' — showing first 100, type to filter' : ''}`}
           </div>
           {filtered.length === 0 ? (
-            <div className="p-3 text-xs text-[#9CA3AF] text-center italic">No match</div>
+            <div className="p-3 text-xs text-[#9CA3AF] text-center italic">{query.trim() ? 'No match' : 'No options available'}</div>
           ) : (
             filtered.map(o => (
               <button
