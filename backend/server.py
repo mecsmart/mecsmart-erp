@@ -4096,7 +4096,7 @@ async def get_dashboard_stats(request: Request):
 # ================== SUPPLIER ROUTES ==================
 
 @suppliers_router.get("")
-async def get_suppliers(request: Request, status: Optional[str] = None, mine: Optional[bool] = False):
+async def get_suppliers(request: Request, status: Optional[str] = None, mine: Optional[bool] = False, all: Optional[bool] = False):
     user = await get_current_user(request)
     query = {}
     if status:
@@ -4104,6 +4104,12 @@ async def get_suppliers(request: Request, status: Optional[str] = None, mine: Op
     # Same per-user contact ownership rule as customers:
     #   - Admins / admin-group / view_all_parties group → see ALL suppliers.
     #     `mine=true` narrows to only ones they personally created.
+    #   - `all=true` is an EXPLICIT override used by transaction forms
+    #     (Delivery Challan, Purchase Invoice, etc.). Anyone creating a
+    #     business document needs to be able to pick ANY supplier, regardless
+    #     of who owns that record in the master list. We keep the strict
+    #     ownership filter on /api/suppliers for the list-view UI, but loosen
+    #     it on transaction dropdowns via this flag.
     #   - Others → only suppliers they created OR are listed in
     #     `supplier.assigned_user_ids`.
     is_admin = user.get("role") == "admin"
@@ -4114,7 +4120,7 @@ async def get_suppliers(request: Request, status: Optional[str] = None, mine: Op
             is_admin = True
         if rg and rg.get("view_all_parties"):
             can_view_all = True
-    if is_admin or can_view_all:
+    if is_admin or can_view_all or all:
         if mine:
             query["created_by"] = user["id"]
     else:
@@ -10881,7 +10887,7 @@ async def customer_lookup_gstin(payload: GSTINLookupRequest, request: Request):
 
 
 @customers_router.get("")
-async def get_customers(request: Request, status: Optional[str] = None, mine: Optional[bool] = False):
+async def get_customers(request: Request, status: Optional[str] = None, mine: Optional[bool] = False, all: Optional[bool] = False):
     user = await get_current_user(request)
     query = {}
     if status:
@@ -10889,6 +10895,10 @@ async def get_customers(request: Request, status: Optional[str] = None, mine: Op
     # Per-user contact ownership (customer-centric assignment, Odoo-style):
     #   - Admins see ALL contacts by default. They can pass `mine=true` to filter to
     #     only contacts they personally created.
+    #   - `all=true` is an EXPLICIT override used by transaction forms (Tax
+    #     Invoice, Delivery Challan, etc.). Anyone creating a business
+    #     document needs to be able to pick ANY customer regardless of
+    #     ownership — list views remain filtered.
     #   - Non-admins see ONLY customers where they are the creator OR where their
     #     user id is listed in `customer.assigned_user_ids`. A non-admin cannot see
     #     any customer until the admin assigns them as a salesperson — no legacy
@@ -10901,7 +10911,7 @@ async def get_customers(request: Request, status: Optional[str] = None, mine: Op
             is_admin = True
         if rg and rg.get("view_all_parties"):
             can_view_all = True
-    if is_admin or can_view_all:
+    if is_admin or can_view_all or all:
         if mine:
             query["created_by"] = user["id"]
     else:

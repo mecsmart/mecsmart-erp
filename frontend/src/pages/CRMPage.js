@@ -3119,6 +3119,15 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   const { user } = useAuth();
   const { companySettings } = useCompanySettings();
   const [list, setList] = useState([]);
+  // For the TI dropdown we always need the FULL customer list — even users
+  // who only own a subset of customers must be able to invoice ANY party.
+  // The list-page CRM still uses the ownership-filtered `customers` prop.
+  const [allCustomers, setAllCustomers] = useState([]);
+  useEffect(() => {
+    // Load all customers (bypasses ownership filter) on mount + when parent
+    // refreshes so newly-created customers immediately appear in the dropdown.
+    api.get('/api/customers?all=true').then(r => setAllCustomers(r.data || [])).catch(() => setAllCustomers(customers || []));
+  }, []);
   const [salesOrders, setSalesOrders] = useState([]);
   const [items, setItems] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -3242,7 +3251,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   };
 
   const applyCustomer = (cid) => {
-    const c = customers.find(x => x.id === cid);
+    const c = allCustomers.find(x => x.id === cid) || customers.find(x => x.id === cid);
     if (c) {
       // Build a complete address block: street + city/state/pin + GSTIN.
       // Bill-To and Ship-To start identical; user can edit Ship-To if the
@@ -3281,7 +3290,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
       const r = await api.get(`/api/production/${soId}`);
       const so = r.data;
       if (!so) return;
-      const c = customers.find(x => x.id === so.customer_id) || {};
+      const c = allCustomers.find(x => x.id === so.customer_id) || customers.find(x => x.id === so.customer_id) || {};
       const soLines = so.lines || (so.bom_id ? [{ bom_id: so.bom_id, quantity: so.quantity }] : []);
       const lines = [];
       for (const ln of soLines) {
@@ -3645,7 +3654,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
                   <SelectContent>
                     {salesOrders.length === 0 && <div className="p-3 text-xs text-[#6B7280]">No confirmed Sales Orders available.</div>}
                     {salesOrders.map(so => {
-                      const c = customers.find(x => x.id === so.customer_id);
+                      const c = allCustomers.find(x => x.id === so.customer_id) || customers.find(x => x.id === so.customer_id);
                       return <SelectItem key={so.id} value={so.id}>{so.order_number} — {c?.name || 'No customer'} · {so.lines?.length || 1} line(s)</SelectItem>;
                     })}
                   </SelectContent>
@@ -3657,7 +3666,7 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
               <div>
                 <label className="text-sm font-medium text-[#374151]">Customer *</label>
                 <SearchableSelect
-                  options={customers}
+                  options={allCustomers}
                   value={form.customer_id}
                   onChange={applyCustomer}
                   getLabel={(c) => c.name || ''}

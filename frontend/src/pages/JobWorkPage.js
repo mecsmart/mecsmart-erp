@@ -130,7 +130,7 @@ export default function JobWorkPage() {
         api.get('/api/job-work/orders'),
         api.get('/api/job-work/challans'),
         api.get('/api/job-work/receipts'),
-        api.get('/api/suppliers'),
+        api.get('/api/suppliers?all=true'),
         api.get('/api/items'),
         api.get('/api/warehouses'),
       ]);
