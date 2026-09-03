@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
+import { promptDialog } from '../components/PromptDialog';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { letterheadCSS, buildLetterheadHTML } from '../utils/printHeader';
@@ -497,8 +498,11 @@ export default function BOMPage() {
   };
 
   const handleRevise = async (bom) => {
-    const newRevision = prompt('Enter new revision (e.g., B, C, D):', 
-      String.fromCharCode(bom.revision.charCodeAt(0) + 1));
+    const newRevision = await promptDialog({
+      title: 'Revise BOM',
+      message: 'Enter new revision (e.g., B, C, D):',
+      defaultValue: String.fromCharCode(bom.revision.charCodeAt(0) + 1),
+    });
     if (!newRevision) return;
     
     try {

@@ -682,9 +682,6 @@ export default function ItemsPage() {
                     try { document.activeElement.blur(); } catch { /* noop */ }
                   }
                   document.body.focus({ preventScroll: true });
-                  if (typeof window !== 'undefined' && window.mecsmart?.refocusMain) {
-                    window.mecsmart.refocusMain();
-                  }
                 } catch { /* noop */ }
               };
               [50, 150, 300, 450, 700].forEach(d => setTimeout(cleanupOnce, d));

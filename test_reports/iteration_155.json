@@ -1,0 +1,18 @@
+{
+  "summary": "Retest of v1.0.5 fixes: (1) Electron harness re-run with Xvfb :99 → HARNESS_SHIM {shim:true, alertNative:false, confirmNative:false, promptSafe:true, isDesktop:true} + HARNESS_PASS (typedAfterDialogs='abc', activeTag=INPUT). (2) grep of /app/frontend/src → zero remaining native prompt( calls (only doc comments in PromptDialog.jsx). (3) BOM page Revise → in-app PromptDialog (data-testid=prompt-dialog) opens pre-filled with next revision 'B'; Cancel closes with no API call and body pointer-events:auto; OK fired POST /api/bom/{id}/revise?new_revision=B. (4) Settings → Integrations → 'Test Lookup' (GSTIN verify) opens in-app PromptDialog; Cancel closes cleanly. (5) PDF preview (BOM → PDF): dialog renders, only ONE visible X in toolbar (2nd lucide-x is the Radix button hidden via [&>button:last-child]:hidden), [data-testid=pdf-preview-close] clicked with normal (non-forced) click, dialog closed, body pointer-events:auto, typing in BOM search worked after close. (6) Items regression: Add Item dialog typing works (value 'TESTX'), Esc closes, body pointer-events:auto, search box typing works ('bolt').",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Settings GSTIN verify control is labelled 'Test Lookup' (not 'Verify') and lacks a data-testid; add one (e.g. settings-gstin-test-lookup) for stable automation."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not retested (no backend changes in scope)", "frontend": "100%"},
+  "seed_data_creation": "One BOM revision created on FG_C-36c0cb1a (id 045e26bf...) via the Revise OK path (revision B).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@erp.com / Admin@123",
+  "context_for_next_testing_agent": "Both iteration_154 issues are fixed and verified. PDF preview dialog is reached via BOM page 'PDF' buttons (Quotations page has no Print/PDF button matching title selectors — use get_by_role button name 'PDF'). Electron harness command: cd /app/desktop && DISPLAY=:99 XDG_CONFIG_HOME=/tmp/eltest timeout 100 ./node_modules/electron/dist/electron tests/harness.js --dev --no-sandbox --disable-gpu.",
+  "rca_of_the_issue": "Previously native window.prompt() (unsupported in Electron) threw and Radix's default close button overlapped the custom close button. Fixes verified: promptDialog() replaces native prompt, main.js shim returns null for window.prompt, and DialogContent hides the last-child Radix close button."
+}

@@ -54,9 +54,7 @@ function App() {
           if (document.body.hasAttribute('aria-hidden')) { document.body.removeAttribute('aria-hidden'); touched = true; }
           if (document.body.hasAttribute('data-scroll-locked')) { document.body.removeAttribute('data-scroll-locked'); touched = true; }
           if (document.documentElement.style.pointerEvents === 'none') { document.documentElement.style.pointerEvents = ''; touched = true; }
-          if (touched && window.mecsmart?.refocusMain) {
-            try { window.mecsmart.refocusMain(); } catch { /* noop */ }
-          }
+          void touched;
         } else {
           // A dialog IS open but inputs may still be unresponsive because
           // Radix left `pointer-events:none` on <html> or body even though
@@ -78,16 +76,9 @@ function App() {
     //    (e.g. Radix mutates a CSSStyleDeclaration prop the observer can't
     //    see directly, or styles get re-applied between obs callbacks).
     const iv = setInterval(() => cleanup(false), 500);
-    // 3) On window focus, force a refocus into the renderer.
-    const onFocus = () => {
-      try { window.mecsmart?.refocusMain?.(); } catch { /* noop */ }
-      cleanup(false);
-    };
-    window.addEventListener('focus', onFocus);
     return () => {
       if (obs) obs.disconnect();
       clearInterval(iv);
-      window.removeEventListener('focus', onFocus);
     };
   }, []);
   return (

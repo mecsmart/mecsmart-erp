@@ -1,150 +1,66 @@
-// MecSmart ERP — Electron main process.
+// MecSmart ERP — Electron main process (v1.0.5, "quiet window" rewrite).
 //
-// What this does (at a high level):
-//   1. On first launch, asks the user for their MecSmart server URL
-//      (e.g. http://192.168.1.50:8001 — the central FastAPI host).
-//   2. Persists the URL to disk via electron-store so subsequent launches
-//      open the app directly.
-//   3. Loads that URL inside a frameless BrowserWindow with a custom title
-//      bar — looks and feels like a native Windows app, NO browser chrome.
-//   4. Auto-checks for app updates on launch (electron-updater) and downloads
-//      them silently in the background. User is prompted once the update is
-//      ready and the next launch installs it.
+// Design rules (learned from the Windows "can't type" bug):
+//   • NEVER call webContents.focus()/win.focus() from focus handlers — it loops
+//     with the renderer and steals the caret from the active input.
+//   • NEVER let the page use Chromium's JS alert()/confirm(): on Windows the
+//     renderer loses keyboard input after they close. We replace them with
+//     OS message boxes parented to the window (see installDialogShims).
+//   • Hidden helper windows (PDF render) are created `focusable: false` so
+//     they can never take focus from the main window.
 
 const { app, BrowserWindow, ipcMain, Menu, dialog, shell, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const Store = require('electron-store');
 const { autoUpdater } = require('electron-updater');
 
-// --------------------------------------------------------------- HARDENING
-// Intermittent "I can't type into inputs" bug reported on Windows desktop
-// build. Symptoms:
-//   • Rate / quantity / search inputs and Radix dialog inputs sometimes stop
-//     accepting keystrokes after the app has been running for a while or
-//     after PDF preview / native dialog interactions.
-//   • Restarting the app clears it.
-//
-// Root cause is a combination of (a) Chromium throttling the renderer when
-// the BrowserWindow loses OS-level focus (common on Windows when the user
-// clicks the taskbar or another app), and (b) the offscreen PDF window we
-// create for native PDF rendering occasionally stealing keyboard focus from
-// the main window when it's destroyed too quickly.
-//
-// Fixes applied in this file:
-//   1) `backgroundThrottling: false` on every BrowserWindow we open.
-//   2) Stable IPC `mecsmart:refocus-main` that the renderer can call after
-//      any dialog / native modal closes — refocuses the webContents so the
-//      next typed character lands in the right input.
-//   3) After the offscreen pdfWin is destroyed we explicitly re-focus the
-//      main window's webContents on the next tick.
-//   4) `--disable-renderer-backgrounding` Chromium flag to prevent the
-//      renderer process from being throttled when the window loses focus.
-
-// Disable Chromium's renderer-backgrounding throttling. Must be set BEFORE
-// app.whenReady() — that's why it lives at module-eval time.
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 
-// --------------------------------------------------------------------- store
-// Persists user preferences (server URL, window bounds) across launches.
 const store = new Store({
   name: 'mecsmart-config',
-  defaults: {
-    serverUrl: '',          // populated by first-run config dialog
-    windowBounds: { width: 1400, height: 900 },
-  },
+  defaults: { serverUrl: '', windowBounds: { width: 1400, height: 900 } },
 });
 
-let mainWindow = null;       // points at the live ERP window once configured
-let configWindow = null;     // first-run server-URL picker
-
+let mainWindow = null;
+let configWindow = null;
 const isDev = process.argv.includes('--dev');
 
-// ----------------------------------------------------------- updater plumbing
-//
-// electron-updater fires events for every step of the silent update lifecycle.
-// We only surface the user-visible bits ("update available" / "ready to install")
-// so the agent stays out of the way.
-//
-// IMPORTANT: The publish URL in `package.json` (`updates.mecsmart.local`) is a
-// PLACEHOLDER. Until the customer stands up a real update host (an HTTPS server
-// hosting `latest.yml` + the `.exe`), auto-update is effectively disabled — we
-// detect DNS/connection failures and show a friendly "not configured" message
-// instead of a raw `net::ERR_NAME_NOT_RESOLVED`. To enable real updates, point
-// `package.json → build.publish[0].url` at the real host and rebuild, OR set
-// the `MECSMART_UPDATE_URL` environment variable on the client at runtime
-// (overrides the baked-in feed via `autoUpdater.setFeedURL`).
-
-// `ERR_NAME_NOT_RESOLVED` (DNS), `ENOTFOUND`, `ECONNREFUSED`, `ETIMEDOUT` and
-// generic "net::" prefixes all indicate the update host is unreachable rather
-// than a real "update broken" condition. Surface a friendly message in that case.
+// ------------------------------------------------------------------ updater
 function isNetworkError(err) {
   const m = String((err && (err.message || err.code)) || '').toLowerCase();
-  return [
-    'err_name_not_resolved',
-    'enotfound',
-    'econnrefused',
-    'etimedout',
-    'err_internet_disconnected',
-    'err_connection_refused',
-    'err_connection_timed_out',
-    'getaddrinfo',
-    'net::',
-  ].some(s => m.includes(s));
+  return ['err_name_not_resolved', 'enotfound', 'econnrefused', 'etimedout', 'err_internet_disconnected',
+    'err_connection_refused', 'err_connection_timed_out', 'getaddrinfo', 'net::'].some(s => m.includes(s));
 }
 
 function configureAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
-
-  // Allow runtime override of the feed URL — handy for IT admins who want to
-  // point a fleet at a private update host without rebuilding the installer.
   const overrideUrl = process.env.MECSMART_UPDATE_URL || store.get('updateFeedUrl') || '';
   if (overrideUrl) {
-    try {
-      autoUpdater.setFeedURL({ provider: 'generic', url: overrideUrl, channel: 'latest' });
-    } catch (e) {
-      console.error('[auto-updater] invalid MECSMART_UPDATE_URL:', e.message);
-    }
+    try { autoUpdater.setFeedURL({ provider: 'generic', url: overrideUrl, channel: 'latest' }); }
+    catch (e) { console.error('[auto-updater] invalid MECSMART_UPDATE_URL:', e.message); }
   }
-
   autoUpdater.on('update-available', (info) => {
-    if (mainWindow) {
-      mainWindow.webContents.send('mecsmart:update-available', { version: info.version });
-    }
+    if (mainWindow) mainWindow.webContents.send('mecsmart:update-available', { version: info.version });
   });
-
   autoUpdater.on('update-downloaded', (info) => {
-    const result = dialog.showMessageBoxSync({
-      type: 'info',
-      buttons: ['Restart Now', 'Install on Quit'],
-      defaultId: 0,
-      cancelId: 1,
+    const result = dialog.showMessageBoxSync(mainWindow, {
+      type: 'info', buttons: ['Restart Now', 'Install on Quit'], defaultId: 0, cancelId: 1,
       title: 'MecSmart ERP — Update Ready',
       message: `Version ${info.version} has been downloaded.`,
       detail: 'Restart now to install, or it will be applied automatically the next time you close MecSmart ERP.',
     });
     if (result === 0) autoUpdater.quitAndInstall(false, true);
   });
-
-  autoUpdater.on('error', (err) => {
-    // Silent failure — auto-updater should never break the app even if the
-    // update server is unreachable. We log to console for diagnostics only.
-    console.error('[auto-updater]', err && err.message);
-  });
-
-  // Auto-check on launch ONLY if a real update host is configured. The default
-  // `updates.mecsmart.local` host doesn't resolve, so checking it just spams
-  // DNS and the console. Once a real URL is set (env var or stored config),
-  // the silent background check resumes.
-  if (!isDev && overrideUrl) {
-    setTimeout(() => autoUpdater.checkForUpdatesAndNotify().catch(() => {}), 6000);
-  }
+  autoUpdater.on('error', (err) => console.error('[auto-updater]', err && err.message));
+  if (!isDev && overrideUrl) setTimeout(() => autoUpdater.checkForUpdatesAndNotify().catch(() => {}), 6000);
 }
 
-// -------------------------------------------------------------------- helpers
+// --------------------------------------------------------------------- menu
 function buildMenu() {
   const template = [
     {
@@ -156,8 +72,6 @@ function buildMenu() {
         {
           label: 'Switch Server URL…',
           click: () => {
-            // Allow the user to re-pick a server (useful when migrating from
-            // dev → prod LAN). Closes the main window and re-opens the picker.
             store.set('serverUrl', '');
             if (mainWindow) mainWindow.close();
             openServerConfigWindow();
@@ -170,13 +84,9 @@ function buildMenu() {
     {
       label: 'View',
       submenu: [
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { role: 'resetZoom' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-        { type: 'separator' },
-        { role: 'toggleDevTools', visible: isDev },
+        { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' },
+        { type: 'separator' }, { role: 'togglefullscreen' },
+        { type: 'separator' }, { role: 'toggleDevTools', visible: isDev },
       ],
     },
     {
@@ -188,35 +98,29 @@ function buildMenu() {
             const overrideUrl = process.env.MECSMART_UPDATE_URL || store.get('updateFeedUrl') || '';
             try {
               const r = await autoUpdater.checkForUpdates();
-              if (!r || !r.updateInfo) {
-                dialog.showMessageBox({ type: 'info', message: 'You are on the latest version.' });
-              }
+              if (!r || !r.updateInfo) dialog.showMessageBox(mainWindow, { type: 'info', message: 'You are on the latest version.' });
             } catch (e) {
               if (isNetworkError(e)) {
-                dialog.showMessageBox({
-                  type: 'info',
-                  title: 'Auto-update not configured',
+                dialog.showMessageBox(mainWindow, {
+                  type: 'info', title: 'Auto-update not configured',
                   message: 'Auto-update is not available on this installation.',
                   detail: overrideUrl
-                    ? `Could not reach the update server (${overrideUrl}). Please check your internet connection or contact your IT admin.`
-                    : 'No update server has been configured yet. Please contact your IT admin or MecSmart support to set the update feed URL.',
+                    ? `Could not reach the update server (${overrideUrl}).`
+                    : 'No update server has been configured yet. Please contact your IT admin.',
                 });
               } else {
-                dialog.showMessageBox({ type: 'error', message: 'Update check failed.', detail: e.message });
+                dialog.showMessageBox(mainWindow, { type: 'error', message: 'Update check failed.', detail: e.message });
               }
             }
           },
         },
         {
           label: 'About MecSmart ERP',
-          click: () => {
-            dialog.showMessageBox({
-              type: 'info',
-              title: 'About',
-              message: `MecSmart ERP\nVersion ${app.getVersion()}`,
-              detail: 'Manufacturing ERP — BOM · MRP · Quality · CRM · GST.',
-            });
-          },
+          click: () => dialog.showMessageBox(mainWindow, {
+            type: 'info', title: 'About',
+            message: `MecSmart ERP\nVersion ${app.getVersion()}`,
+            detail: 'Manufacturing ERP — BOM · MRP · Quality · CRM · GST.',
+          }),
         },
       ],
     },
@@ -224,7 +128,39 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-// -------------------------------------------------------- main ERP window
+// ------------------------------------------------ alert()/confirm() shims
+// Replaces the page's native JS dialogs with OS message boxes owned by the
+// main window. Runs once per page load (SPA navigations don't reload).
+function installDialogShims(wc) {
+  const js = `
+    (function () {
+      if (window.__mecsmartDialogShim || !window.mecsmart) return;
+      window.__mecsmartDialogShim = true;
+      window.alert = function (m) { try { window.mecsmart.nativeAlert(m === undefined ? '' : String(m)); } catch (e) {} };
+      window.confirm = function (m) { try { return !!window.mecsmart.nativeConfirm(m === undefined ? '' : String(m)); } catch (e) { return false; } };
+      // Electron has no native prompt() (it throws). Return null so legacy callers no-op.
+      window.prompt = function () { console.warn('[mecsmart] window.prompt() is not supported in the desktop app; use promptDialog()'); return null; };
+    })();
+  `;
+  wc.on('dom-ready', () => { wc.executeJavaScript(js).catch(() => {}); });
+}
+
+ipcMain.on('mecsmart:native-alert', (event, message) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  dialog.showMessageBoxSync(win, { type: 'info', buttons: ['OK'], title: 'MecSmart ERP', message: String(message || '') });
+  event.returnValue = true;
+});
+
+ipcMain.on('mecsmart:native-confirm', (event, message) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  const r = dialog.showMessageBoxSync(win, {
+    type: 'question', buttons: ['OK', 'Cancel'], defaultId: 0, cancelId: 1, noLink: true,
+    title: 'MecSmart ERP', message: String(message || ''),
+  });
+  event.returnValue = r === 0;
+});
+
+// ------------------------------------------------------------- main window
 function createMainWindow(serverUrl) {
   const bounds = store.get('windowBounds');
   mainWindow = new BrowserWindow({
@@ -240,37 +176,16 @@ function createMainWindow(serverUrl) {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.js'),
-      // Keep the renderer fully alive even when the OS deems the window
-      // backgrounded — fixes intermittent "inputs don't accept keystrokes"
-      // bug after long sessions / focus loss.
       backgroundThrottling: false,
     },
   });
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
+  installDialogShims(mainWindow.webContents);
 
-  // When the main window regains OS focus, push focus into the webContents
-  // so Radix/MUI dialog inputs receive the next keystroke. Without this the
-  // renderer's "last focused element" sometimes stays orphaned after an
-  // OS-level alt-tab.
-  mainWindow.on('focus', () => {
-    try { mainWindow.webContents.focus(); } catch { /* noop */ }
-  });
+  // Always fetch the latest React bundle from the server.
+  try { mainWindow.webContents.session.clearCache().catch(() => {}); } catch { /* noop */ }
 
-  // CRITICAL: Force-clear the HTTP cache before loading the server URL.
-  // Electron caches the React bundle aggressively across launches — once
-  // the bundle is cached, the desktop app continues to render the OLD
-  // version even after the on-prem React build is updated on the server.
-  // Users reported "Edit not working" (typing into qty/price/etc. produced
-  // no state change) because the cached bundle was missing the post-iter-120
-  // callback fixes. Clearing the cache on every launch guarantees the latest
-  // build is fetched. Small one-time download cost (~few hundred KB),
-  // negligible on LAN.
-  try {
-    mainWindow.webContents.session.clearCache().catch(() => {});
-  } catch { /* clearCache may not exist on older Electron — ignore */ }
-
-  // Persist window size on resize.
   mainWindow.on('close', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       const b = mainWindow.getBounds();
@@ -278,46 +193,32 @@ function createMainWindow(serverUrl) {
     }
   });
 
-  // External links (mailto, http://something-else) open in the user's
-  // default browser, NOT inside the ERP window.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     try {
-      const target = new URL(url);
-      const home = new URL(serverUrl);
-      if (target.host !== home.host) {
+      if (new URL(url).host !== new URL(serverUrl).host) {
         shell.openExternal(url);
         return { action: 'deny' };
       }
-    } catch { /* malformed URL → fall through */ }
+    } catch { /* noop */ }
     return { action: 'allow' };
   });
 
   mainWindow.loadURL(serverUrl).catch((err) => {
-    dialog.showErrorBox(
-      'Cannot reach MecSmart server',
-      `Tried: ${serverUrl}\n\n${err.message}\n\nUse File → Switch Server URL to fix.`,
-    );
+    dialog.showErrorBox('Cannot reach MecSmart server',
+      `Tried: ${serverUrl}\n\n${err.message}\n\nUse File → Switch Server URL to fix.`);
   });
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-// ----------------------------------------------------- first-run config window
+// ----------------------------------------------------- server config window
 function openServerConfigWindow() {
   configWindow = new BrowserWindow({
-    width: 520,
-    height: 380,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
+    width: 520, height: 380, resizable: false, minimizable: false, maximizable: false,
     title: 'MecSmart ERP — Server Setup',
     icon: path.join(__dirname, 'build', 'icon.ico'),
     backgroundColor: '#1D3557',
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, 'preload.js'),
-    },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'preload.js') },
   });
   configWindow.setMenu(null);
   configWindow.loadFile(path.join(__dirname, 'server-config.html'));
@@ -328,9 +229,6 @@ function openServerConfigWindow() {
 ipcMain.handle('mecsmart:get-server-url', () => store.get('serverUrl'));
 
 ipcMain.handle('mecsmart:save-server-url', (_event, url) => {
-  // Sanity-check that the URL is reachable before we commit it. The renderer
-  // already does a fetch() probe but a defensive parse here means a manually
-  // hand-edited config can't crash the loader on next boot.
   try {
     const parsed = new URL(url);
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Protocol must be http or https');
@@ -345,24 +243,18 @@ ipcMain.handle('mecsmart:save-server-url', (_event, url) => {
 
 ipcMain.handle('mecsmart:get-app-version', () => app.getVersion());
 
-// ─── Credential persistence (Remember me) ───────────────────────────────
-// Electron strips Chrome's "Save password?" UI, so we DIY one using
-// `safeStorage` — Chromium's wrapper over the OS-native keychain.
-//   • Windows: DPAPI (per-user, machine-bound)
-//   • macOS: Keychain
-//   • Linux: libsecret / kwallet
-// We store the encrypted ciphertext in electron-store (config.json), keyed
-// by the current server URL so multi-server installs don't collide.
+// Kept for backward compatibility with older frontend builds — intentionally
+// a no-op: forcing focus from here is what caused the input-freeze loop.
+ipcMain.handle('mecsmart:refocus-main', () => ({ ok: true }));
+
+// --------------------------------------------------- credentials (Remember me)
 const credKey = () => `creds:${store.get('serverUrl') || 'default'}`;
 
 ipcMain.handle('mecsmart:save-credentials', (_event, { email, password } = {}) => {
   if (!email || !password) return { ok: false, error: 'email + password required' };
-  if (!safeStorage.isEncryptionAvailable()) {
-    return { ok: false, error: 'OS keychain not available — credentials cannot be saved.' };
-  }
+  if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: 'OS keychain not available.' };
   try {
-    const cipher = safeStorage.encryptString(JSON.stringify({ email, password })).toString('base64');
-    store.set(credKey(), cipher);
+    store.set(credKey(), safeStorage.encryptString(JSON.stringify({ email, password })).toString('base64'));
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -372,164 +264,58 @@ ipcMain.handle('mecsmart:save-credentials', (_event, { email, password } = {}) =
 ipcMain.handle('mecsmart:load-credentials', () => {
   const cipher = store.get(credKey());
   if (!cipher || !safeStorage.isEncryptionAvailable()) return null;
-  try {
-    const decrypted = safeStorage.decryptString(Buffer.from(cipher, 'base64'));
-    return JSON.parse(decrypted);
-  } catch {
-    // Cipher may have been encrypted under a different OS user / DPAPI
-    // master key (e.g. user copied config.json to another machine). Wipe
-    // it so the next save starts clean.
-    store.delete(credKey());
-    return null;
-  }
+  try { return JSON.parse(safeStorage.decryptString(Buffer.from(cipher, 'base64'))); }
+  catch { store.delete(credKey()); return null; }
 });
 
-ipcMain.handle('mecsmart:clear-credentials', () => {
-  store.delete(credKey());
-  return { ok: true };
-});
+ipcMain.handle('mecsmart:clear-credentials', () => { store.delete(credKey()); return { ok: true }; });
 
-// ─── Native PDF download via Electron's webContents.printToPDF ──────────
-// The renderer's PreviewPdfDialog calls this when running inside the
-// desktop wrapper. Loading the print HTML into an offscreen BrowserWindow
-// and calling printToPDF() produces a vector PDF that is byte-identical
-// to the user's "Print → Save as PDF" output — including the repeating
-// thead, custom fonts, watermarks, and all CSS @page rules.
-//
-// Why not the backend Playwright endpoint? It requires a full Chromium
-// install on the customer's server which has been crashing with 500s in
-// the production deployment. Electron already bundles Chromium so this
-// works offline, on the customer's local machine, with zero extra deps.
-//
-// IMPLEMENTATION NOTES:
-//   - We use a TEMP FILE (loadFile) instead of a data: URL because data
-//     URLs have a ~2MB limit in Chromium and large quotation HTML with
-//     embedded base64 logos blows past that ceiling silently.
-//   - We wait for did-finish-load before calling printToPDF — otherwise
-//     Chromium can race and produce a blank page.
+// --------------------------------------------------------- native PDF export
 ipcMain.handle('mecsmart:download-pdf', async (_event, { html, filename } = {}) => {
-  console.log('[mecsmart:download-pdf] invoked', {
-    hasHtml: !!html,
-    htmlLen: html ? html.length : 0,
-    filename,
-  });
-  if (!html || typeof html !== 'string') {
-    return { ok: false, error: 'HTML content is required' };
-  }
+  if (!html || typeof html !== 'string') return { ok: false, error: 'HTML content is required' };
   const safe = String(filename || 'document.pdf').replace(/[^A-Za-z0-9._-]+/g, '_');
   const finalName = safe.toLowerCase().endsWith('.pdf') ? safe : `${safe}.pdf`;
 
-  // Ask the user where to save FIRST — if they cancel we can skip the
-  // entire offscreen render. Better UX than rendering then prompting.
-  const focused = BrowserWindow.getFocusedWindow() || mainWindow;
-  const saveResult = await dialog.showSaveDialog(focused, {
-    title: 'Save PDF',
-    defaultPath: finalName,
-    filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
+  const saveResult = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save PDF', defaultPath: finalName, filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
   });
-  if (saveResult.canceled || !saveResult.filePath) {
-    console.log('[mecsmart:download-pdf] user cancelled save dialog');
-    return { ok: false, canceled: true };
-  }
+  if (saveResult.canceled || !saveResult.filePath) return { ok: false, canceled: true };
 
-  // Persist HTML to a temp .html file so we can loadFile() it. data:
-  // URLs are fragile for large HTML (~2MB ceiling in Chromium).
-  const os = require('os');
   const tmpFile = path.join(os.tmpdir(), `mecsmart-pdf-${Date.now()}-${Math.floor(Math.random() * 1e6)}.html`);
   let pdfWin = null;
   try {
     await fs.promises.writeFile(tmpFile, html, 'utf8');
-    console.log('[mecsmart:download-pdf] wrote temp HTML', { tmpFile, bytes: Buffer.byteLength(html, 'utf8') });
-
-    // Offscreen window sized to A4 width @ 96dpi (794 CSS-px). Hidden so
-    // it never flashes on screen. nodeIntegration off for safety since
-    // we're loading arbitrary HTML.
     pdfWin = new BrowserWindow({
       show: false,
+      focusable: false,
+      skipTaskbar: true,
       width: 794,
       height: 1123,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        javascript: true,
-      },
+      webPreferences: { contextIsolation: true, nodeIntegration: false },
     });
-
-    // Wait for the page to be FULLY loaded before printing. did-finish-load
-    // fires AFTER all subresources (CSS, images, fonts) have settled.
     await new Promise((resolve, reject) => {
       const onFail = (_e, code, desc) => reject(new Error(`page load failed: ${desc} (code ${code})`));
-      pdfWin.webContents.once('did-finish-load', () => {
-        pdfWin.webContents.removeListener('did-fail-load', onFail);
-        resolve();
-      });
+      pdfWin.webContents.once('did-finish-load', () => { pdfWin.webContents.removeListener('did-fail-load', onFail); resolve(); });
       pdfWin.webContents.once('did-fail-load', onFail);
       pdfWin.loadFile(tmpFile).catch(reject);
-      // Hard safety: never wait more than 25 seconds for the page.
       setTimeout(() => reject(new Error('page load timed out after 25s')), 25000);
     });
-
-    // Extra grace period so any async font/image decoding settles.
     await new Promise(r => setTimeout(r, 600));
-
-    console.log('[mecsmart:download-pdf] calling printToPDF…');
     const pdfBuffer = await pdfWin.webContents.printToPDF({
-      pageSize: 'A4',
-      printBackground: true,
-      preferCSSPageSize: true,
-      margins: { marginType: 'default' },
-      // Render Chromium's built-in page-number footer. Without this the
-      // @page @bottom-right CSS margin-box is silently dropped by Electron's
-      // printToPDF (same behavior as Playwright's page.pdf()).
-      displayHeaderFooter: true,
-      headerTemplate: '<div></div>',
+      pageSize: 'A4', printBackground: true, preferCSSPageSize: true, margins: { marginType: 'default' },
+      displayHeaderFooter: true, headerTemplate: '<div></div>',
       footerTemplate:
-        '<div style="font-family:Helvetica,Arial,sans-serif;font-size:8px;' +
-        'color:#64748b;width:100%;text-align:right;padding:0 8mm 0 0;">' +
-        'Page <span class="pageNumber"></span> of <span class="totalPages"></span>' +
-        '</div>',
+        '<div style="font-family:Helvetica,Arial,sans-serif;font-size:8px;color:#64748b;width:100%;text-align:right;padding:0 8mm 0 0;">' +
+        'Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>',
     });
-    console.log('[mecsmart:download-pdf] printToPDF ok', { pdfBytes: pdfBuffer.length });
-
     await fs.promises.writeFile(saveResult.filePath, pdfBuffer);
-    console.log('[mecsmart:download-pdf] saved to', saveResult.filePath);
     return { ok: true, path: saveResult.filePath };
   } catch (err) {
     console.error('[mecsmart:download-pdf] FAILED:', err);
     return { ok: false, error: String((err && err.message) || err) };
   } finally {
-    if (pdfWin && !pdfWin.isDestroyed()) {
-      try { pdfWin.destroy(); } catch { /* noop */ }
-    }
+    if (pdfWin && !pdfWin.isDestroyed()) { try { pdfWin.destroy(); } catch { /* noop */ } }
     try { await fs.promises.unlink(tmpFile); } catch { /* noop */ }
-    // CRITICAL: after the offscreen PDF window is gone, force the keyboard
-    // focus back into the main window's renderer. Without this the active
-    // input inside an open dialog loses its caret and silently swallows
-    // keystrokes until the user clicks elsewhere — the original "can't
-    // type after preview/save PDF" bug.
-    try {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.focus();
-        setTimeout(() => {
-          try { mainWindow.webContents.focus(); } catch { /* noop */ }
-        }, 50);
-      }
-    } catch { /* noop */ }
-  }
-});
-
-// Renderer-callable "refocus the main window" — used after closing any
-// native dialog (save-as, message box, file picker) so the next keystroke
-// reliably lands in the previously-focused input.
-ipcMain.handle('mecsmart:refocus-main', () => {
-  try {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.focus();
-      mainWindow.webContents.focus();
-    }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String((e && e.message) || e) };
   }
 });
 
@@ -537,22 +323,14 @@ ipcMain.handle('mecsmart:refocus-main', () => {
 app.whenReady().then(() => {
   buildMenu();
   configureAutoUpdater();
-
   const stored = store.get('serverUrl');
-  if (stored) {
-    createMainWindow(stored);
-  } else {
-    openServerConfigWindow();
-  }
-
+  if (stored) createMainWindow(stored); else openServerConfigWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const u = store.get('serverUrl');
-      u ? createMainWindow(u) : openServerConfigWindow();
+      if (u) createMainWindow(u); else openServerConfigWindow();
     }
   });
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

@@ -1,0 +1,57 @@
+{
+  "summary": "Verified the Electron 'blocks typing' fix (v1.0.5). (1) Headless Electron harness RUN and PASSED end-to-end: shim:true, alertNative:false, confirmNative:false, confirmOk:true, alertRet:'returned', 2 dialogCalls (question+info, win:true → parented to the window), typedAfterDialogs:'abc', activeTag:INPUT, HARNESS_PASS. (2) Static review of main.js/preload.js: zero focus() calls anywhere, sendSync-based synchronous confirm, guarded dom-ready injection, all dialog.* parented to mainWindow, PDF window focusable:false+skipTaskbar, refocus-main is a no-op. (3) Frontend regression on the preview URL (browser mode, window.mecsmart undefined): login → Items → Add Item dialog → type → close (Esc) → typing in search works, no pointer-events:none/aria-hidden/data-scroll-locked left on body or html, add-item-btn hit-tests clickable and re-opens, 0 console errors, no refocusMain references left in /app/frontend/src. (4) PreviewPdfDialog opens via the mecsmart:preview event bridge, renders the iframe, Download PDF completes with NO ReferenceError (toast import present). (5) Auth playbook: 7/8 pytest checks pass. NEW HIGH BUG FOUND: window.prompt() is still called in BOMPage.js:500 and SettingsPage.js:828 and it THROWS in Electron ('prompt() is and will not be supported.') — it is NOT covered by installDialogShims. Plus a real unclickable button: PreviewPdfDialog's custom close button is covered by DialogContent's built-in Radix close X.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/login", "issue": "No brute-force lockout: 6 consecutive wrong passwords for admin@erp.com all return 401 (expected 423/429 after 5) and a valid login immediately afterwards still returns 200. Pre-existing, also flagged in iteration_152/153."},
+      {"endpoint": "CORS (server.py ~L17546)", "issue": "allow_origin_regex='.*' + allow_credentials=True means ANY origin can make credentialed calls; combined with SameSite=None cookies this is a CSRF/credential-leak risk. Set CORS_ORIGINS explicitly in production. (App-level preflight itself is correct: echoes exact origin + Allow-Credentials: true; the '*' seen on the public URL comes from the Cloudflare edge answering OPTIONS, not FastAPI.)"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "BOMPage handleRevise (L500) + SettingsPage GSTIN verify (L828)", "issue": "HIGH — native prompt() is still used. Verified in real Electron (probe: promptIsNative:true, promptShimmed:false, result 'THREW: prompt() is and will not be supported.'). In the desktop .exe the Revise-BOM button and the GSTIN verify button throw an uncaught error inside the click handler, so the feature is dead and the aborted handler can leave dialog/body state half-torn-down — the same class of symptom as the reported 'can't type' bug. installDialogShims() only shims alert/confirm, not prompt. Fix: use the existing PromptDialog component (or add a prompt shim).", "selector": "BOM row Revise action; SettingsPage verify-gstin button", "priority": "HIGH"},
+      {"component": "PreviewPdfDialog", "issue": "MEDIUM — the custom close button data-testid='pdf-preview-close' is NOT clickable: DialogContent (components/ui/dialog.jsx L54) always renders its own DialogPrimitive.Close at 'absolute right-4 top-4', which sits exactly on top of it. Playwright: 'subtree intercepts pointer events' (30s timeout); hit-test confirms blocked:true and 2 lucide-x icons render inside the dialog (visible duplicate X). The dialog still closes via the Radix X, so it is not a dead end, but the app's own close button never fires setOpen(false) and the double-X looks broken.", "selector": "[data-testid=\"pdf-preview-close\"]", "priority": "MEDIUM"},
+      {"component": "PreviewPdfDialog", "issue": "LOW — Escape does not close the PDF preview (DialogContent defaults to dismissible=false, blocking onEscapeKeyDown). Unexpected for a read-only preview; consider passing dismissible.", "selector": "[data-testid=\"pdf-preview-dialog\"]", "priority": "LOW"},
+      {"component": "PreviewPdfDialog L177", "issue": "LOW — the final client-fallback failure path still uses native alert() (only L132 was converted to toast.error). Harmless in Electron (shimmed) but inconsistent with the stated fix and produces a Chromium JS dialog in the browser.", "selector": "n/a", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "PDF Preview dialog toolbar", "issues": ["Two overlapping X close icons at the top-right (custom button + Radix built-in)"]}
+    ]
+  },
+  "desktop_static_review": [
+    {"file": "desktop/main.js", "finding": "CORRECT — grep for 'focus' returns only comments, focusable:false (L288) and the no-op refocus-main handler (L246). No webContents.focus()/win.focus() anywhere, so the focus-forcing loop is gone."},
+    {"file": "desktop/main.js installDialogShims (L134-144)", "finding": "CORRECT — injected on 'dom-ready' so it re-runs on Ctrl+R/full reloads; guarded by window.__mecsmartDialogShim (a fresh window per load resets it); returns early unless window.mecsmart exists (preload runs before page scripts, verified isDesktop:true at dom-ready). confirm() uses ipcRenderer.sendSync so it stays synchronous and returns a boolean; both shims swallow exceptions (confirm fails closed = safe)."},
+    {"file": "desktop/main.js dialog parents", "finding": "CORRECT — native-alert/native-confirm use BrowserWindow.fromWebContents(event.sender) || mainWindow; updater, About, update-check and showSaveDialog (L277) all pass mainWindow. Only dialog.showErrorBox (L205) has no parent, which is expected (API takes none)."},
+    {"file": "desktop/main.js download-pdf (L286-292)", "finding": "CORRECT — pdfWin is show:false + focusable:false + skipTaskbar:true and is destroyed in finally; it can no longer steal focus after Save PDF."},
+    {"file": "desktop/main.js setWindowOpenHandler (L194)", "finding": "GAP (LOW/MEDIUM) — same-host popups are allowed but installDialogShims() is only attached to mainWindow.webContents, so any child window (e.g. ProductionPage.js:473 window.open('', '_blank')) still gets Chromium's native alert/confirm, i.e. the original freeze vector. Consider app.on('web-contents-created', (_e, wc) => installDialogShims(wc))."},
+    {"file": "desktop/main.js (L185)", "finding": "NIT — session.clearCache() runs on every launch on the shared default session; costs a full re-download of the React bundle at each start on slow shop-floor LANs."}
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_154_auth_playbook.py",
+    "/app/test_reports/pytest/iteration_154.xml",
+    "/app/desktop/tests/probe_prompt.js"
+  ],
+  "action_items": [
+    "HIGH: replace the two native prompt() calls (BOMPage.js:500 Revise BOM, SettingsPage.js:828 GSTIN verify) with the existing PromptDialog — prompt() THROWS in Electron, verified in the real binary.",
+    "MEDIUM: PreviewPdfDialog's own close button is covered by DialogContent's built-in Radix close X — remove one of the two (e.g. add a hideClose prop to DialogContent or drop the custom button).",
+    "LOW: also install the dialog shims on child web contents (app.on('web-contents-created')) so window.open popups are covered.",
+    "LOW: convert the remaining alert() at PreviewPdfDialog.jsx:177 to toast.error; allow Escape to close the PDF preview.",
+    "PRE-EXISTING: add brute-force lockout (5 fails → 423/429) to POST /api/auth/login and set CORS_ORIGINS explicitly instead of the '.*' regex."
+  ],
+  "critical_code_review_comments": [
+    "installDialogShims covers alert/confirm but not prompt, and prompt() is a hard throw in Electron — every remaining prompt() call site is a broken feature in the .exe. Add a repo lint rule (eslint no-alert as error) so new alert/confirm/prompt call sites cannot be added; the frontend still has ~197 alert/confirm call sites that only work because of the shim.",
+    "components/ui/dialog.jsx unconditionally renders its own close X; any dialog that also draws a custom close button in a top-right toolbar will be overlapped. Add a `hideClose` prop."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_154_auth_playbook.py (new)",
+    "/app/desktop/tests/probe_prompt.js (new, read-only probe; main.js/preload.js/harness.js untouched)"
+  ],
+  "success_rate": {"backend": "87.5% (7/8 auth playbook checks; only brute-force lockout fails)", "frontend": "90% (all typing/focus/dialog regressions pass; 1 unclickable close button + 1 Electron-breaking prompt() found)"},
+  "seed_data_creation": "None. Typed only transient values into search/dialog inputs; no records created.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "admin@erp.com / Admin@123 (from /app/memory/test_credentials.md, valid)",
+  "context_for_next_testing_agent": "Electron harness: `cd /app/desktop && DISPLAY=:99 XDG_CONFIG_HOME=/tmp/eltest timeout 100 ./node_modules/electron/dist/electron tests/harness.js --dev --no-sandbox --disable-gpu | grep HARNESS` → HARNESS_PASS (Xvfb :99 already running at 2560x1600; the harness itself resizes the window to 800x600). /tmp/eltest/Electron/mecsmart-config.json points at http://localhost:3000. tests/probe_prompt.js is the same pattern and proves window.prompt throws in Electron — re-run it after the prompt() call sites are fixed. Verified in browser mode: Add Item dialog open/type/close leaves no body pointer-events lock and typing in the Items search still works. Open items: prompt() call sites (HIGH), duplicate/blocked PDF-preview close X (MEDIUM), shims not installed on popup web contents (LOW), missing login brute-force lockout (pre-existing).",
+  "rca_of_the_issue": "The reported 'blocks typing' bug had two causes, both now fixed and verified: (a) Chromium JS alert()/confirm() in Electron on Windows leaves the renderer without keyboard input after closing — now replaced at dom-ready by OS message boxes parented to mainWindow via ipcRenderer.sendSync, and the harness proves keystrokes still land in an input right after a confirm+alert pair; (b) a focus-forcing loop (webContents.focus() on focus + refocusMain IPC) plus a focusable hidden PDF window — all focus calls are removed, refocus-main is a no-op, and pdfWin is focusable:false/skipTaskbar. Residual risk of the SAME symptom: window.prompt() still throws in two handlers (BOMPage/SettingsPage), aborting the handler mid-flight, and popups opened via window.open never receive the dialog shims."
+}

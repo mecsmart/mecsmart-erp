@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../context/AuthContext';
 import { useAuth } from '../context/AuthContext';
+import { promptDialog } from '../components/PromptDialog';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { Building2, Save, MapPin, Plus, Trash2, Edit2, Truck, X, Upload, Image, DollarSign, FileText, Database, Download, UploadCloud, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -825,7 +826,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={async () => {
-                    const g = prompt('Enter a 15-char GSTIN to verify the integration:');
+                    const g = await promptDialog({ title: 'Verify GSTIN', message: 'Enter a 15-char GSTIN to verify the integration:' });
                     if (!g) return;
                     try {
                       const { data } = await api.post('/api/suppliers/lookup-gstin', { gstin: g.trim().toUpperCase() });

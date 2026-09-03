@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 import { Printer, Download, X } from 'lucide-react';
 import { downloadHtmlAsPdfWithPageNumbers } from '../utils/pdfPrint';
 import { api } from '../context/AuthContext';
+import { toast } from 'sonner';
 
 // Global event bridge — callers anywhere in the app can pop the preview
 // by dispatching a custom event, so we don't have to thread an
@@ -113,10 +114,6 @@ export default function PreviewPdfDialog() {
       let ipcError = null;
       try {
         const res = await desktop.downloadPdf(html, filename);
-        // After the native save dialog closes the renderer can lose
-        // keyboard focus — explicitly request the main window to refocus
-        // itself so subsequent typing into inputs works without a click.
-        try { await desktop.refocusMain?.(); } catch { /* noop */ }
         if (res?.ok) return;                  // saved to disk
         if (res?.canceled) return;            // user cancelled the save dialog
         ipcError = res?.error || 'Unknown Electron error';
@@ -132,8 +129,7 @@ export default function PreviewPdfDialog() {
         return;
       } catch (clientErr) {
         console.error('[PreviewPdfDialog] client-side fallback also failed:', clientErr);
-        // eslint-disable-next-line no-alert
-        alert(`Download PDF failed (desktop):\n\n${ipcError}\nClient fallback: ${clientErr?.message || clientErr}\n\nPlease use "Print / Save as PDF" instead.`);
+        toast.error(`Download PDF failed: ${ipcError}. Please use "Print / Save as PDF" instead.`);
         return;
       }
     }
@@ -186,7 +182,7 @@ export default function PreviewPdfDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
-        className="max-w-[95vw] w-[95vw] h-[92vh] p-0 flex flex-col bg-white"
+        className="max-w-[95vw] w-[95vw] h-[92vh] p-0 flex flex-col bg-white [&>button:last-child]:hidden"
         data-testid="pdf-preview-dialog"
       >
         <DialogTitle className="sr-only">PDF Preview — {filename}</DialogTitle>

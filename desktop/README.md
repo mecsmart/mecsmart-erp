@@ -41,6 +41,15 @@ Opens the Electron window pointed at whatever URL you saved last
 
 ## Build the Windows installer (.exe)
 
+> **v1.0.5 — "can't type after dialogs" fix.** Chromium's JS `alert()`/`confirm()`
+> break keyboard input in Electron on Windows after they close. The wrapper now
+> replaces them with OS message boxes owned by the app window, removes all
+> focus-forcing (`webContents.focus()` loops) and renders PDFs in a
+> `focusable:false` hidden window. Rebuild and reinstall on every client PC.
+>
+> Headless regression harness (Linux/Xvfb): `DISPLAY=:99 electron tests/harness.js --dev --no-sandbox --disable-gpu`
+> (needs `serverUrl` in the electron-store config; prints `HARNESS_PASS`).
+
 ```cmd
 yarn build:win
 ```
