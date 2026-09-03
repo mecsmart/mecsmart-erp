@@ -73,7 +73,7 @@ def test_data(session):
         session.delete(f"{BASE_URL}/api/items/{data['fg_item']['id']}")
         session.delete(f"{BASE_URL}/api/items/{data['rm_item']['id']}")
         session.delete(f"{BASE_URL}/api/suppliers/{data['supplier']['id']}")
-    except:
+    except Exception:
         pass
 
 
@@ -327,28 +327,28 @@ class TestCleanup:
         if "work_order" in test_data:
             try:
                 session.delete(f"{BASE_URL}/api/work-orders/{test_data['work_order']['id']}")
-            except:
+            except Exception:
                 pass
         
         # Delete production order if exists
         if "production_order" in test_data:
             try:
                 session.delete(f"{BASE_URL}/api/production/{test_data['production_order']['id']}")
-            except:
+            except Exception:
                 pass
         
         # Delete BOM if exists
         if "bom" in test_data:
             try:
                 session.delete(f"{BASE_URL}/api/bom/{test_data['bom']['id']}")
-            except:
+            except Exception:
                 pass
         
         # Delete routing if exists
         if "routing" in test_data:
             try:
                 session.delete(f"{BASE_URL}/api/routings/{test_data['routing']['id']}")
-            except:
+            except Exception:
                 pass
         
         print("PASSED: Cleanup completed")

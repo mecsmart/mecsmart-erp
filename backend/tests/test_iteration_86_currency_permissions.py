@@ -48,9 +48,9 @@ class TestCurrencySupport:
                 if q.get('notes', '').startswith('TEST_'):
                     try:
                         self.session.delete(f"{BASE_URL}/api/crm/quotations/{q['id']}")
-                    except:
+                    except Exception:
                         pass
-        except:
+        except Exception:
             pass
     
     def _get_test_supplier(self):

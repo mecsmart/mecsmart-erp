@@ -50,22 +50,22 @@ class TestDCLinesChargesOverride:
         for order_id in self.created_orders:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/orders/{order_id}")
-            except:
+            except Exception:
                 pass
         for bom_id in self.created_boms:
             try:
                 self.client.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.client.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         for sup_id in self.created_suppliers:
             try:
                 self.client.delete(f"{BASE_URL}/api/suppliers/{sup_id}")
-            except:
+            except Exception:
                 pass
     
     def _create_test_item(self, api_client, suffix, category="component"):
@@ -256,27 +256,27 @@ class TestChallansListSelfHeal:
         for dc_id in self.created_challans:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/challans/{dc_id}")
-            except:
+            except Exception:
                 pass
         for order_id in self.created_orders:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/orders/{order_id}")
-            except:
+            except Exception:
                 pass
         for bom_id in self.created_boms:
             try:
                 self.client.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.client.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         for sup_id in self.created_suppliers:
             try:
                 self.client.delete(f"{BASE_URL}/api/suppliers/{sup_id}")
-            except:
+            except Exception:
                 pass
     
     def _create_test_item(self, api_client, suffix, category="component"):
@@ -507,22 +507,22 @@ class TestDCCreatePersistsNewFields:
         for dc_id in self.created_challans:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/challans/{dc_id}")
-            except:
+            except Exception:
                 pass
         for order_id in self.created_orders:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/orders/{order_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.client.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         for sup_id in self.created_suppliers:
             try:
                 self.client.delete(f"{BASE_URL}/api/suppliers/{sup_id}")
-            except:
+            except Exception:
                 pass
     
     def _create_test_item(self, api_client, suffix):
@@ -649,27 +649,27 @@ class TestRegressionFullMOSC:
         for dc_id in self.created_challans:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/challans/{dc_id}")
-            except:
+            except Exception:
                 pass
         for order_id in self.created_orders:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/orders/{order_id}")
-            except:
+            except Exception:
                 pass
         for bom_id in self.created_boms:
             try:
                 self.client.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.client.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         for sup_id in self.created_suppliers:
             try:
                 self.client.delete(f"{BASE_URL}/api/suppliers/{sup_id}")
-            except:
+            except Exception:
                 pass
     
     def _create_test_item(self, api_client, suffix):

@@ -46,31 +46,31 @@ class TestMTOMTSShortageQtyFix:
         for wo_id in self.created_wos:
             try:
                 self.session.delete(f"{BASE_URL}/api/work-orders/{wo_id}")
-            except:
+            except Exception:
                 pass
         # Delete production orders (SOs)
         for so_id in self.created_sos:
             try:
                 self.session.delete(f"{BASE_URL}/api/production/{so_id}")
-            except:
+            except Exception:
                 pass
         # Delete BOMs
         for bom_id in self.created_boms:
             try:
                 self.session.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         # Delete items
         for item_id in self.created_items:
             try:
                 self.session.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         # Delete customers
         for cust_id in self.created_customers:
             try:
                 self.session.delete(f"{BASE_URL}/api/customers/{cust_id}")
-            except:
+            except Exception:
                 pass
     
     def _create_item(self, part_number: str, category: str, current_stock: int = 0) -> dict:
@@ -115,7 +115,6 @@ class TestMTOMTSShortageQtyFix:
     
     def _create_so_and_confirm(self, bom_id: str, quantity: int, customer_id: str) -> dict:
         """Create and confirm a Sales Order (Production Order)"""
-        from datetime import datetime, timedelta
         due_date = (datetime.now() + timedelta(days=7)).isoformat()
         
         # Create SO

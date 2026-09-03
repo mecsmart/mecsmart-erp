@@ -158,7 +158,7 @@ class TestBug1_GRNDoubleStock:
             api_client.delete(f"{BASE_URL}/api/items/{data['fg_item']['id']}")
             api_client.delete(f"{BASE_URL}/api/suppliers/{data['supplier']['id']}")
             api_client.delete(f"{BASE_URL}/api/routings/{data['routing']['id']}")
-        except:
+        except Exception:
             pass
     
     def test_01_create_mo_for_sc(self, api_client, test_data):
@@ -408,7 +408,7 @@ class TestBug2_WIPStockCalculation:
             api_client.delete(f"{BASE_URL}/api/items/{data['sg_item']['id']}")
             api_client.delete(f"{BASE_URL}/api/routings/{data['fg_routing']['id']}")
             api_client.delete(f"{BASE_URL}/api/routings/{data['sg_routing']['id']}")
-        except:
+        except Exception:
             pass
     
     def test_01_create_first_fg_mo(self, api_client, test_data_wip):
@@ -749,7 +749,7 @@ class TestRegression:
             api_client.delete(f"{BASE_URL}/api/items/{fg_item['id']}")
             api_client.delete(f"{BASE_URL}/api/items/{rm_item['id']}")
             api_client.delete(f"{BASE_URL}/api/suppliers/{supplier['id']}")
-        except:
+        except Exception:
             pass
 
 

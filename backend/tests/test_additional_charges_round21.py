@@ -42,12 +42,12 @@ class TestAdditionalChargesRound21:
         for cid in self.created_charge_ids:
             try:
                 self.session.delete(f"{BASE_URL}/api/crm/additional-charges/{cid}")
-            except:
+            except Exception:
                 pass
         for qid in self.created_quotation_ids:
             try:
                 self.session.delete(f"{BASE_URL}/api/crm/quotations/{qid}")
-            except:
+            except Exception:
                 pass
     
     # =========================================================================

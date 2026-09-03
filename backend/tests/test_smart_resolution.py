@@ -46,28 +46,28 @@ class TestSmartResolution:
         for wo_id in self.created_wos:
             try:
                 self.session.delete(f"{BASE_URL}/api/work-orders/{wo_id}")
-            except:
+            except Exception:
                 pass
         
         # Delete BOMs
         for bom_id in self.created_boms:
             try:
                 self.session.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         
         # Delete routings
         for routing_id in self.created_routings:
             try:
                 self.session.delete(f"{BASE_URL}/api/routings/{routing_id}")
-            except:
+            except Exception:
                 pass
         
         # Delete items
         for item_id in self.created_items:
             try:
                 self.session.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
 
     def _create_test_item(self, part_number, name, category):

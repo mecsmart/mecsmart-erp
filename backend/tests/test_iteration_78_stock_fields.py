@@ -53,7 +53,7 @@ class TestStockFieldsEndpoint:
         # Cleanup: restore original values
         try:
             self.session.put(f"{BASE_URL}/api/inventory/items/{self.test_item_id}/stock-fields", json=self.original_values)
-        except:
+        except Exception:
             pass
     
     def test_update_stock_fields_decimal_values(self):

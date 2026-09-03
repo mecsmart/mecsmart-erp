@@ -40,12 +40,12 @@ class TestRoutingCostEndpoint:
         for bom_id in self.created_boms:
             try:
                 self.client.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.client.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
     
     def test_routing_cost_returns_specific_op_cost(self, api_client):
@@ -163,22 +163,22 @@ class TestJobWorkOrderPreservation:
         for order_id in self.created_orders:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/orders/{order_id}")
-            except:
+            except Exception:
                 pass
         for bom_id in self.created_boms:
             try:
                 self.client.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.client.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         for sup_id in self.created_suppliers:
             try:
                 self.client.delete(f"{BASE_URL}/api/suppliers/{sup_id}")
-            except:
+            except Exception:
                 pass
     
     def _create_test_item(self, api_client, suffix, category="component"):
@@ -429,22 +429,22 @@ class TestJobWorkOrderCreate:
         for order_id in self.created_orders:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/orders/{order_id}")
-            except:
+            except Exception:
                 pass
         for bom_id in self.created_boms:
             try:
                 self.client.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.client.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         for sup_id in self.created_suppliers:
             try:
                 self.client.delete(f"{BASE_URL}/api/suppliers/{sup_id}")
-            except:
+            except Exception:
                 pass
     
     def _create_test_item(self, api_client, suffix, category="component"):
@@ -624,22 +624,22 @@ class TestMultiLineJobCardOS:
         for order_id in self.created_orders:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/orders/{order_id}")
-            except:
+            except Exception:
                 pass
         for bom_id in self.created_boms:
             try:
                 self.client.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.client.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         for sup_id in self.created_suppliers:
             try:
                 self.client.delete(f"{BASE_URL}/api/suppliers/{sup_id}")
-            except:
+            except Exception:
                 pass
     
     def _create_test_item(self, api_client, suffix, category="component"):

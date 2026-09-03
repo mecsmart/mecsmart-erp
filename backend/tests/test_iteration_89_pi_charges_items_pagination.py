@@ -54,7 +54,7 @@ def test_supplier_intra(auth_session):
     # Cleanup
     try:
         auth_session.delete(f"{BASE_URL}/api/suppliers/{supplier['id']}")
-    except:
+    except Exception:
         pass
 
 
@@ -80,7 +80,7 @@ def test_supplier_inter(auth_session):
     # Cleanup
     try:
         auth_session.delete(f"{BASE_URL}/api/suppliers/{supplier['id']}")
-    except:
+    except Exception:
         pass
 
 
@@ -104,7 +104,7 @@ def test_item(auth_session):
     # Cleanup
     try:
         auth_session.delete(f"{BASE_URL}/api/items/{item['id']}")
-    except:
+    except Exception:
         pass
 
 
@@ -176,7 +176,7 @@ class TestPurchaseInvoiceAdditionalCharges:
         # Cleanup
         try:
             auth_session.delete(f"{BASE_URL}/api/purchase-invoices/{pi['id']}")
-        except:
+        except Exception:
             pass
         
         print("✓ PI with additional_charges (intra-state) - totals computed correctly")
@@ -228,7 +228,7 @@ class TestPurchaseInvoiceAdditionalCharges:
         # Cleanup
         try:
             auth_session.delete(f"{BASE_URL}/api/purchase-invoices/{pi['id']}")
-        except:
+        except Exception:
             pass
         
         print("✓ PI with additional_charges (inter-state) - IGST computed correctly")
@@ -274,7 +274,7 @@ class TestPurchaseInvoiceAdditionalCharges:
         # Cleanup
         try:
             auth_session.delete(f"{BASE_URL}/api/purchase-invoices/{pi['id']}")
-        except:
+        except Exception:
             pass
         
         print("✓ PI with 0% GST charge - computed correctly")
@@ -312,7 +312,7 @@ class TestPurchaseInvoiceAdditionalCharges:
         # Cleanup
         try:
             auth_session.delete(f"{BASE_URL}/api/purchase-invoices/{pi['id']}")
-        except:
+        except Exception:
             pass
         
         print("✓ PI without additional_charges - backward compatible")
@@ -363,7 +363,7 @@ class TestPurchaseInvoiceAdditionalCharges:
         # Cleanup
         try:
             auth_session.delete(f"{BASE_URL}/api/purchase-invoices/{pi_id}")
-        except:
+        except Exception:
             pass
         
         print("✓ GET PI list returns additional_charges with computed fields")
@@ -464,7 +464,7 @@ class TestRegressionQuotationGlobalDiscount:
         # Cleanup
         try:
             auth_session.delete(f"{BASE_URL}/api/crm/quotations/{quotation['id']}")
-        except:
+        except Exception:
             pass
         
         print("✓ Quotation global discount regression test passed")

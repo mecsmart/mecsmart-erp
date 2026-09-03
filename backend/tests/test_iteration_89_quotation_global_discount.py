@@ -462,10 +462,10 @@ def cleanup(auth_session, test_customer, test_item):
     # Cleanup customer
     try:
         auth_session.delete(f"{BASE_URL}/api/customers/{test_customer['id']}")
-    except:
+    except Exception:
         pass
     # Cleanup item
     try:
         auth_session.delete(f"{BASE_URL}/api/items/{test_item['id']}")
-    except:
+    except Exception:
         pass

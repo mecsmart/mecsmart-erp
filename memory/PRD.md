@@ -591,6 +591,11 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 
 
 ## Changelog (recent)
+- **2026-06 (newest)** — **Windows launcher scripts (`/app/windows/`) + single-port production serving (DONE, backend verified; .bat files NOT executed on real Windows — user verification pending):**
+  1. `setup.bat` (venv + pip + yarn + writes `backend\.env`/`frontend\.env` templates), `start-prod.bat` (Mongo → uvicorn :8001 serving API + React build), `start-dev.bat` (Mongo → uvicorn --reload :8001 + yarn start :3000), `build-frontend.bat`, `stop-erp.bat [--with-mongo]`, `start-mongo.bat` (service → PATH → Program Files → `windows\config.bat` override), `create-desktop-shortcuts.bat/.ps1`, `README.md`.
+  2. `server.py` (tail): if `frontend/build/index.html` exists, mounts `/static` and a SPA catch-all (non-`/api` paths → `index.html`). Verified with curl: `/`, `/login`, `/manifest.json` → 200 html/json; `/api/nope` → 404 JSON.
+  3. `craco.config.js`: now loads `.env.<NODE_ENV>.local` → `.env.local` → `.env` (CRA precedence). Previously `.env` was loaded first, so `.env.production.local` (`REACT_APP_BACKEND_URL=` empty → same-origin API) was ignored. Verified: production bundle has `baseURL:""` and no preview URL.
+  4. Lint: replaced 131 bare `except:` with `except Exception:` in `server.py` + `backend/tests/*`.
 - **2026-05-14 (newest)** — **Global single-line headers + brand-hides-on-scroll + Inventory New-Transaction speed (DONE & VERIFIED ✅):**
   1. **Brand header now scrolls away on scroll**: Removed `sticky top-0 z-30` from the Layout's MecSmart ERP brand header (`/app/frontend/src/components/Layout.js`). Page headers (sticky themselves) now slide up to the very top when content scrolls — matching the BOM page pattern requested.
   2. **Single-line headers across the entire app**: Bulk-removed all page subtitle `<p>` lines and applied the sticky-on-scroll pattern (`sticky top-0 z-30 bg-white py-2 border-b -mx-6 px-6`) to 12 pages: Items, Inventory, Sales Orders (Production), Suppliers, Customers, MRP, Purchase Invoices, Purchase Orders, Quality, Settings, User Management, Warehouses, JobWork, BOM. Title compressed from `text-2xl` → `text-xl`.
@@ -1135,9 +1140,10 @@ Build a Machinery manufacturing ERP system with Multi Level BOM, MRP and Quality
 - **P4 (Phase 2 — pending)** Per-domain route extraction into `/app/backend/routers/` (`auth.py`, `items.py`, `bom.py`, `inventory.py`, `purchase_orders.py`, `crm.py`, `jobwork.py`, …).
 - **P5** GST Compliance Phase 3 — GSTR-1/3B report formats + ITC tracking.
 - **P6** Barcode/QR scanning for inventory transactions.
-- **Future** Windows desktop wrapper (Electron/Tauri).
+- **Future** Electron desktop wrapper enhancements (offline mode, native dialogs). Windows server launchers live in `/app/windows/` (see README there).
 
 ## Key Files
+- `/app/windows/*.bat|.ps1` — Windows one-click launchers (setup / start-prod / start-dev / stop / shortcuts).
 - `/app/backend/server.py` — main app, route definitions (Phase-2 router split pending). Imports shared building blocks from `core/`.
 - `/app/backend/core/db.py` — Mongo client + `db`.
 - `/app/backend/core/permissions.py` — `ALL_MODULES`, `DEFAULT_PERMISSIONS`, `get_default_permissions`, `allowed_actions_for`.

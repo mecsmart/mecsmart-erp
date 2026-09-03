@@ -46,27 +46,27 @@ class TestQuotationSOPrefill:
         for so_id in self.created_sos:
             try:
                 self.session.post(f"{BASE_URL}/api/production/{so_id}/cancel")
-            except:
+            except Exception:
                 pass
         for qid in self.created_quotations:
             try:
                 self.session.delete(f"{BASE_URL}/api/crm/quotations/{qid}")
-            except:
+            except Exception:
                 pass
         for bom_id in self.created_boms:
             try:
                 self.session.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.session.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         for cust_id in self.created_customers:
             try:
                 self.session.delete(f"{BASE_URL}/api/customers/{cust_id}")
-            except:
+            except Exception:
                 pass
 
     def _create_test_item(self, part_number, name, category="finished_good", current_stock=0):
@@ -433,22 +433,22 @@ class TestMTSMTOConfirmFlow:
         for wo_id in self.created_wos:
             try:
                 self.session.post(f"{BASE_URL}/api/work-orders/{wo_id}/cancel")
-            except:
+            except Exception:
                 pass
         for so_id in self.created_sos:
             try:
                 self.session.post(f"{BASE_URL}/api/production/{so_id}/cancel")
-            except:
+            except Exception:
                 pass
         for bom_id in self.created_boms:
             try:
                 self.session.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.session.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
 
     def _create_test_item(self, part_number, name, category="finished_good", current_stock=0):
@@ -656,22 +656,22 @@ class TestChildReservations:
         for wo_id in self.created_wos:
             try:
                 self.session.post(f"{BASE_URL}/api/work-orders/{wo_id}/cancel")
-            except:
+            except Exception:
                 pass
         for so_id in self.created_sos:
             try:
                 self.session.post(f"{BASE_URL}/api/production/{so_id}/cancel")
-            except:
+            except Exception:
                 pass
         for bom_id in self.created_boms:
             try:
                 self.session.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.session.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
 
     def _create_test_item(self, part_number, name, category="finished_good", current_stock=0):
@@ -862,27 +862,27 @@ class TestSOSourceQuotationDisplay:
         for so_id in self.created_sos:
             try:
                 self.session.post(f"{BASE_URL}/api/production/{so_id}/cancel")
-            except:
+            except Exception:
                 pass
         for qid in self.created_quotations:
             try:
                 self.session.delete(f"{BASE_URL}/api/crm/quotations/{qid}")
-            except:
+            except Exception:
                 pass
         for bom_id in self.created_boms:
             try:
                 self.session.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.session.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         for cust_id in self.created_customers:
             try:
                 self.session.delete(f"{BASE_URL}/api/customers/{cust_id}")
-            except:
+            except Exception:
                 pass
 
     def _create_test_item(self, part_number, name, category="finished_good"):

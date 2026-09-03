@@ -69,7 +69,7 @@ class TestMasterFieldsForRawMaterial:
                 'reorder_point': self.original_values['reorder_point'],
             }
             self.session.put(f"{BASE_URL}/api/inventory/items/{self.test_item_id}/stock-fields", json=restore_payload)
-        except:
+        except Exception:
             pass
     
     def test_raw_material_master_fields_update(self):
@@ -158,7 +158,7 @@ class TestMasterFieldsForNonRawMaterial:
                 'sale_price': self.original_values['sale_price'],
                 'safety_stock': self.original_values['safety_stock'],
             })
-        except:
+        except Exception:
             pass
     
     def test_non_rm_purchase_price_does_not_sync_unit_cost(self):

@@ -133,7 +133,7 @@ class TestItemInheritanceOnCreate:
                 if item.get("part_number", "").startswith("TEST_"):
                     api_client.delete(f"{BASE_URL}/api/items/{item['id']}")
             api_client.delete(f"{BASE_URL}/api/item-groups/{self.group_id}")
-        except:
+        except Exception:
             pass
     
     def test_item_inherits_hsn_gst_from_group(self, api_client):
@@ -211,7 +211,7 @@ class TestItemInheritanceCascade:
             for item_id in self.item_ids:
                 api_client.delete(f"{BASE_URL}/api/items/{item_id}")
             api_client.delete(f"{BASE_URL}/api/item-groups/{self.group_id}")
-        except:
+        except Exception:
             pass
     
     def test_group_update_cascades_to_items(self, api_client):
@@ -283,7 +283,7 @@ class TestDeleteGroupWithItems:
         try:
             api_client.delete(f"{BASE_URL}/api/items/{self.item_id}")
             api_client.delete(f"{BASE_URL}/api/item-groups/{self.group_id}")
-        except:
+        except Exception:
             pass
     
     def test_delete_group_with_items_returns_400(self, api_client):

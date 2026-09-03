@@ -226,7 +226,7 @@ class TestSCOrderChargesPreservation:
         # Cleanup - delete the test order
         try:
             self.session.delete(f"{BASE_URL}/api/job-work/orders/{sc_order['id']}")
-        except:
+        except Exception:
             pass
 
 

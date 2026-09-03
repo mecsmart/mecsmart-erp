@@ -55,7 +55,7 @@ def test_item(session):
     # Cleanup
     try:
         session.delete(f"{BASE_URL}/api/items/{item['id']}")
-    except:
+    except Exception:
         pass
 
 
@@ -79,7 +79,7 @@ def test_customer(session):
     # Cleanup
     try:
         session.delete(f"{BASE_URL}/api/customers/{customer['id']}")
-    except:
+    except Exception:
         pass
 
 

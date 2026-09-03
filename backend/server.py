@@ -3929,7 +3929,7 @@ async def update_user(user_id: str, data: UserUpdate, request: Request):
     # Try matching by ObjectId
     try:
         result = await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update_data})
-    except:
+    except Exception:
         result = await db.users.update_one({"id": user_id}, {"$set": update_data})
     
     if result.matched_count == 0:
@@ -3938,7 +3938,7 @@ async def update_user(user_id: str, data: UserUpdate, request: Request):
     # Return updated user
     try:
         updated = await db.users.find_one({"_id": ObjectId(user_id)}, {"password_hash": 0})
-    except:
+    except Exception:
         updated = await db.users.find_one({"id": user_id}, {"password_hash": 0})
     
     if updated:
@@ -3959,7 +3959,7 @@ async def delete_user(user_id: str, request: Request):
     
     try:
         result = await db.users.delete_one({"_id": ObjectId(user_id)})
-    except:
+    except Exception:
         result = await db.users.delete_one({"id": user_id})
     
     if result.deleted_count == 0:
@@ -17581,3 +17581,23 @@ async def _global_exception_handler(request: _FRequest, exc: Exception):
             "Vary": "Origin",
         },
     )
+
+
+# ─── Production mode: serve the React build from the same port (Windows single-port launcher) ───
+_FRONTEND_BUILD = Path(__file__).resolve().parent.parent / "frontend" / "build"
+if (_FRONTEND_BUILD / "index.html").is_file():
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse
+
+    app.mount("/static", StaticFiles(directory=str(_FRONTEND_BUILD / "static")), name="frontend-static")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def _serve_spa(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = _FRONTEND_BUILD / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(str(candidate))
+        return FileResponse(str(_FRONTEND_BUILD / "index.html"))
+
+    logger.info(f"[static] Serving frontend build from {_FRONTEND_BUILD}")

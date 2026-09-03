@@ -46,22 +46,22 @@ class TestFindRoutingCostMultiBOMSearch:
         for order_id in self.created_orders:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/orders/{order_id}")
-            except:
+            except Exception:
                 pass
         for bom_id in self.created_boms:
             try:
                 self.client.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.client.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         for sup_id in self.created_suppliers:
             try:
                 self.client.delete(f"{BASE_URL}/api/suppliers/{sup_id}")
-            except:
+            except Exception:
                 pass
     
     def _create_test_item(self, api_client, suffix, category="component"):
@@ -307,27 +307,27 @@ class TestPUTJobWorkOrderPermissions:
         for order_id in self.created_orders:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/orders/{order_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.client.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         for sup_id in self.created_suppliers:
             try:
                 self.client.delete(f"{BASE_URL}/api/suppliers/{sup_id}")
-            except:
+            except Exception:
                 pass
         for user_id in self.created_users:
             try:
                 self.client.delete(f"{BASE_URL}/api/users/{user_id}")
-            except:
+            except Exception:
                 pass
         for rg_id in self.created_role_groups:
             try:
                 self.client.delete(f"{BASE_URL}/api/users/role-groups/{rg_id}")
-            except:
+            except Exception:
                 pass
     
     def _create_test_item(self, api_client, suffix, category="component"):
@@ -607,22 +607,22 @@ class TestRegressionIteration113:
         for order_id in self.created_orders:
             try:
                 self.client.delete(f"{BASE_URL}/api/job-work/orders/{order_id}")
-            except:
+            except Exception:
                 pass
         for bom_id in self.created_boms:
             try:
                 self.client.delete(f"{BASE_URL}/api/bom/{bom_id}")
-            except:
+            except Exception:
                 pass
         for item_id in self.created_items:
             try:
                 self.client.delete(f"{BASE_URL}/api/items/{item_id}")
-            except:
+            except Exception:
                 pass
         for sup_id in self.created_suppliers:
             try:
                 self.client.delete(f"{BASE_URL}/api/suppliers/{sup_id}")
-            except:
+            except Exception:
                 pass
     
     def _create_test_item(self, api_client, suffix, category="component"):

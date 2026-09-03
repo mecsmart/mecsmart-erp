@@ -112,7 +112,7 @@ def test_data(session):
         session.delete(f"{BASE_URL}/api/items/{data['rm_item']['id']}")
         if "work_center" in data:
             session.delete(f"{BASE_URL}/api/work-centers/{data['work_center']['id']}")
-    except:
+    except Exception:
         pass
 
 
@@ -419,21 +419,21 @@ class TestCleanup:
         for wo in test_data.get("work_orders", []):
             try:
                 session.delete(f"{BASE_URL}/api/work-orders/{wo['id']}")
-            except:
+            except Exception:
                 pass
         
         # Delete production order if exists
         if "production_order" in test_data:
             try:
                 session.post(f"{BASE_URL}/api/production/{test_data['production_order']['id']}/cancel")
-            except:
+            except Exception:
                 pass
         
         # Delete BOM if exists
         if "bom" in test_data:
             try:
                 session.delete(f"{BASE_URL}/api/bom/{test_data['bom']['id']}")
-            except:
+            except Exception:
                 pass
         
         print("PASSED: Cleanup completed")
