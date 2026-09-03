@@ -1,0 +1,110 @@
+{
+  "summary": "Windows single-port PRODUCTION mode verified end-to-end inside the pod (http://localhost:8001) with Playwright + pytest, preview (dev) URL regression re-verified after the craco env-order change, and a static review of /app/windows/*.bat/.ps1 + requirements-windows.txt. PROD mode works: SPA fallback, deep-link redirect to /login, login as admin@erp.com, dashboard stats, Items (100 rows) and BOM pages, hard reload on /items keeps session, ALL API calls same-origin (zero requests to the preview URL, no CORS errors). Preview URL login + dashboard still fine. pytest: 16/18 passed (2 genuine findings). CRITICAL: the new SPA catch-all in server.py has an unauthenticated path-traversal that leaks arbitrary files (backend/.env with JWT_SECRET + ADMIN_PASSWORD, /etc/passwd) on port 8001 — this is exactly the port the Windows launcher exposes on 0.0.0.0/LAN.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /{full_path:path} (_serve_spa, backend/server.py ~line 17600)",
+        "issue": "PATH TRAVERSAL / ARBITRARY FILE READ (unauthenticated). `candidate = _FRONTEND_BUILD / full_path` is served with FileResponse without verifying it stays inside the build dir. Reproduced: `curl --path-as-is 'http://localhost:8001/..%2f..%2fbackend/.env'` -> 200 text/plain with MONGO_URL, JWT_SECRET, ADMIN_EMAIL/ADMIN_PASSWORD; `curl --path-as-is 'http://localhost:8001/..%2f..%2f..%2fetc/passwd'` -> 200 with /etc/passwd. The preview URL is protected only because nginx returns 400; start-prod.bat binds uvicorn to 0.0.0.0:8001 and the README tells users to open the port in the firewall, so on Windows this is exposed to the whole LAN. Fix: `candidate = (_FRONTEND_BUILD / full_path).resolve()` then require `candidate.is_file() and _FRONTEND_BUILD.resolve() in candidate.parents` (or use `is_relative_to`), else fall back to index.html.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/auth/login",
+        "issue": "No brute-force lockout: 6 consecutive wrong-password attempts all return 401 (playbook expects 423/429 after 5). `db.login_attempts` index is created at startup (server.py:11601) but the collection is never read/written anywhere — dead code. Pre-existing, not caused by this feature."
+      },
+      {
+        "endpoint": "GET /manifest.json, /favicon.ico (single-port mode)",
+        "issue": "Missing static files fall through the SPA catch-all and return 200 text/html instead of 404 (build/ only has index.html, asset-manifest.json, static/). Cosmetic today because build/index.html references neither, but any future asset typo will silently return HTML. Suggest returning 404 for paths with a file extension that don't exist."
+      },
+      {
+        "endpoint": "cookie flags (core/auth.py get_cookie_settings)",
+        "issue": "Informational: in this pod CORS_ORIGINS='*' so cookies are Secure; SameSite=None. Browser login on http://localhost:8001 still worked (localhost is a trustworthy origin) — verified. But if a Windows user ever sets CORS_ORIGINS=* while serving over plain http on a LAN IP (http://192.168.x.x:8001), Secure cookies will be dropped and login will silently fail. The setup.bat template correctly writes explicit origins (secure=False), so document/guard this."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "windows_script_static_review": [
+    {
+      "file": "start-prod.bat L43-44 / start-dev.bat L19,34 / start-mongo.bat L5,41 / stop-erp.bat L14",
+      "issue": "`netstat -ano | findstr /R /C:\":PORT .*LISTENING\"` depends on the ENGLISH state string. On localised Windows (German 'ABHÖREN', French 'ÉCOUTE', Spanish 'ESCUCHAR', ...) the match never succeeds: start-prod/start-dev spin the wait loop for 60/180s and then print 'backend did not start' even though it did; start-mongo re-launches mongod; stop-erp.bat kills nothing. Fix: use `netstat -ano -p TCP | findstr /R /C:\":PORT \"` (state-agnostic) or `powershell -NoProfile -Command \"if (Get-NetTCPConnection -LocalPort PORT -State Listen -ErrorAction SilentlyContinue) {exit 0} else {exit 1}\"`.",
+      "priority": "HIGH"
+    },
+    {
+      "file": "start-prod.bat L43-44",
+      "issue": "`for /f ... in ('ipconfig ^| findstr /C:\"IPv4\"') do set \"LANIP=%%A\"` keeps the LAST IPv4 of the machine, so on PCs with Hyper-V/WSL/VirtualBox/VPN adapters the printed 'LAN' URL is an unreachable virtual IP (e.g. 172.x/192.168.56.x). Fix: `if not defined LANIP set \"LANIP=%%A\"` plus skip 127.*/169.254.* (same 'if not defined' pattern already used correctly for MONGOD in start-mongo.bat L21).",
+      "priority": "MEDIUM"
+    },
+    {
+      "file": "build-frontend.bat",
+      "issue": "No Node heap bump. A CRA/craco build of this app on a 4-8 GB office PC commonly dies with 'JavaScript heap out of memory', and start-prod.bat calls it on first run, so the one-click flow fails at the worst moment. Add `set \"NODE_OPTIONS=--max-old-space-size=4096\"` before `call yarn build`.",
+      "priority": "MEDIUM"
+    },
+    {
+      "file": "build-frontend.bat L7 / setup.bat L73",
+      "issue": "`> \"%FRONTEND%\\.env.production.local\" echo REACT_APP_BACKEND_URL=` unconditionally overwrites the file on every build, discarding any user customisation. Write it only `if not exist`.",
+      "priority": "LOW"
+    },
+    {
+      "file": "start-mongo.bat L12-17",
+      "issue": "`net start MongoDB` errorlevel is discarded (`>nul 2>&1` then unconditional `goto :wait`); if the service is disabled or needs elevation the script silently waits 30s before reporting a generic failure. Also `sc query MongoDB` only matches that exact service name — MongoDB 6/7 installers may register e.g. 'MongoDB' (ok) but custom installs differ; consider `sc query state= all | findstr /I mongodb`.",
+      "priority": "LOW"
+    },
+    {
+      "file": "start-dev.bat L26-37",
+      "issue": "Only the FRONTEND port is polled; if uvicorn dies at import time the script still reports success once :3000 is up. Poll BACKEND_PORT too before opening the browser.",
+      "priority": "LOW"
+    },
+    {
+      "file": "stop-erp.bat L13-18",
+      "issue": "Kills ANY pid listening on 3000/8001 (could be an unrelated dev server / another product). Acceptable but worth an echo of the image name (`tasklist /FI \"PID eq %%I\"`) before /F.",
+      "priority": "LOW"
+    },
+    {
+      "file": "setup.bat L21",
+      "issue": "`call npm install -g yarn` requires an elevated shell on most default Windows installs (global npm prefix under Program Files) and the failure is not checked. Prefer `corepack enable` (bundled with Node 20) and verify `where yarn` again afterwards, aborting with a clear message.",
+      "priority": "LOW"
+    },
+    {
+      "file": "setup.bat L48",
+      "issue": "Fallback `set \"SECRET=change-me-%RANDOM%...\"` is a weak JWT secret and %RANDOM% is expanded at block-parse time; if the python one-liner ever fails the deployment silently gets a predictable secret. Prefer aborting with an error instead.",
+      "priority": "LOW"
+    },
+    {
+      "file": "VERIFIED-OK (no bug found)",
+      "issue": "cmd /k quoting in start-prod.bat L30 / start-dev.bat L26,29 and the `for /f usebackq` python one-liner in setup.bat L47 are correct under cmd's >2-quotes strip-first-and-last rule; delayed expansion (!SECRET!) is used with `setlocal EnableDelayedExpansion` and only for parse-time-unsafe vars; escaped parens `^( ^)` in setup.bat L59 are correct; `> file ( echo ... )` blocks are valid; label/goto flow and `call x.bat || (...)` errorlevel handling are correct; PowerShell shortcut Arguments `'/c \"\"<path>\"\"'` resolves to a valid `cmd /c \"<path>\"`; requirements-windows.txt covers every third-party import in server.py and core/*.py (bcrypt, bson/pymongo, dotenv, fastapi, httpx, PyJWT, motor, openpyxl, playwright, pydantic, starlette) and correctly adds watchfiles/websockets for --reload.",
+      "priority": "INFO"
+    }
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_150_windows_singleport.py",
+    "/app/test_reports/pytest/iteration_150.xml"
+  ],
+  "action_items": [
+    "CRITICAL: sandbox the SPA catch-all in server.py (_serve_spa) — resolve() the candidate path and reject anything outside /app/frontend/build; re-test with `curl --path-as-is 'http://localhost:8001/..%2f..%2fbackend/.env'` (must be index.html or 404).",
+    "Replace the locale-dependent `findstr ... LISTENING` port checks in all .bat files with a state-agnostic netstat pattern or Get-NetTCPConnection.",
+    "start-prod.bat: pick the FIRST non-loopback IPv4 for the LAN URL instead of the last ipconfig match.",
+    "build-frontend.bat: add NODE_OPTIONS=--max-old-space-size=4096.",
+    "Optional/pre-existing: implement the brute-force lockout that db.login_attempts was indexed for, or drop the dead index.",
+    "Optional: return 404 (not index.html) for missing files with an extension, and ship public/manifest.json + favicon.ico."
+  ],
+  "critical_code_review_comments": [
+    "server.py _serve_spa: user-controlled path joined onto a filesystem root and returned via FileResponse with no containment check = unauthenticated arbitrary file read; the traversal is reachable because the encoded `..%2f` segments are not normalised by uvicorn/Starlette.",
+    "server.py is ~17.6k lines — the SPA mount is appended after a global Exception handler and after CORS setup; consider extracting the static/SPA mount into core/static.py so it is reviewable/testable in isolation.",
+    "db.login_attempts index is created but never used — dead code implying a security control that does not exist."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_150_windows_singleport.py (new test file only)"
+  ],
+  "success_rate": {"backend": "89% (16/18 pytest)", "frontend": "100% (prod single-port + preview flows all passed)"},
+  "seed_data_creation": "None. No .bat file modified, /app/frontend/build untouched.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "admin@erp.com / Admin@123",
+  "context_for_next_testing_agent": "Prod single-port mode is served by the running supervisor backend on http://localhost:8001 from /app/frontend/build (do not delete). Playwright works against localhost:8001 inside the pod; browser login there succeeds despite Secure cookies because localhost is a trustworthy origin (python-requests, however, will NOT replay Secure cookies over http — replay them via an explicit Cookie header, see test_login_sets_httponly_cookies). BOM list endpoint is /api/bom (not /api/boms). After the traversal fix, re-run tests/test_iteration_150_windows_singleport.py and add the traversal assertions.",
+  "rca_of_the_issue": "The new single-port production mode added `@app.get('/{full_path:path}')` that maps the raw URL path onto the build directory. Percent-encoded `..%2f` segments survive routing and are decoded into the path parameter, so `Path('/app/frontend/build') / '../../backend/.env'` resolves outside the web root and FileResponse happily streams it (verified 200 + secrets). Only nginx on the preview host masks it (400); the Windows launcher exposes uvicorn directly on 0.0.0.0:8001 to the LAN, so the fix must be in the handler."
+}

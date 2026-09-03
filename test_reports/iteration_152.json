@@ -1,0 +1,66 @@
+{
+  "summary": "Short RETEST of iteration_151 fixes. (1) Dot-file 404 fix VERIFIED: /.env, /backend/.env, /a/b/.env, /....//....//backend/.env and /..%5c..%5cbackend/.env all return 404 application/json {'detail':'Not found'} with no secret markers (sent via raw http.client so uvicorn sees the literal path). Extension-less SPA routes (/, /dashboard, /items) still return index.html 200 and every /static bundle referenced by index.html still returns 200 non-JSON. (2) pytest 48/49 passed across test_iteration_152_dotfile_404.py + test_iteration_151_traversal_singleport.py + test_iteration_150_windows_singleport.py; the only failure is the known out-of-scope brute-force lockout (6 wrong passwords -> [401 x6]). (3) PROD single-port Playwright smoke on http://localhost:8001: admin@erp.com login -> /dashboard renders with real data (1392 items, 331 BOMs), zero 4xx/5xx /api responses, no console errors. (4) Static review of the two .bat fixes: BOTH ARE NOW CORRECT (details below). Also fixed a test-only bug: the raw-socket helper in iteration_151 sent a duplicate Host header (skip_host=False + explicit putheader), so uvicorn replied 400 'Invalid HTTP request received' and the traversal assertions were being satisfied trivially by the allowed 400. Changed to skip_host=True; all 12 traversal payloads now reach the app and still pass (404/index.html, no leak).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/auth/login",
+        "issue": "Brute-force lockout still absent: 6 consecutive wrong passwords -> [401,401,401,401,401,401] (playbook expects 423/429 after 5). db.login_attempts index still created at startup and never read/written. Pre-existing, declared out of scope."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "windows_script_static_review": [
+    {
+      "file": "build-frontend.bat L7 / setup.bat L74",
+      "issue": "FIXED - VERIFIED. `if not exist \"%FRONTEND%\\.env.production.local\" (>\"%FRONTEND%\\.env.production.local\" echo REACT_APP_BACKEND_URL=)` — the redirection is now inside the parenthesised block, so it belongs to the inner `echo` command and cmd only opens/creates the file when the IF condition is TRUE. Because the `>redirect` is placed BEFORE the echo text, the written line is exactly `REACT_APP_BACKEND_URL=` + CRLF with NO trailing space (the classic `echo X >file` trailing-space trap is avoided). Existing files are kept untouched. Same-origin production bundle behaviour is therefore correct.",
+      "priority": "INFO"
+    },
+    {
+      "file": "stop-erp.bat L13-20",
+      "issue": "FIXED - VERIFIED. `if not \"%%I\"==\"0\" ( echo / taskkill )` is nested correctly inside `for /f ... do (` inside `for %%P in (...) do (`; parentheses are balanced (13->20, 14->19, 15->18), the two loop variables %%P/%%I don't collide, and %%I expands fine inside the nested IF block (no delayed expansion needed since %%I is a FOR variable). PID 0 / System Idle Process is now skipped, so no bogus 'killing PID 0'.",
+      "priority": "INFO"
+    },
+    {
+      "file": "start-prod.bat L23/L35, start-dev.bat, start-mongo.bat",
+      "issue": "STILL OPEN (MEDIUM, from iteration_151): the netstat regex `^ *TCP *[^ ]*:PORT ` is state-agnostic, so TIME_WAIT/ESTABLISHED rows with the local port equal to the server port also match. Re-running start-prod.bat within ~2 min of stop-erp.bat can falsely abort with 'Port 8001 is already in use'. Suggested: also anchor the foreign column `... *[^ ]*:0 ` (listeners only) or use Get-NetTCPConnection -State Listen.",
+      "priority": "MEDIUM"
+    },
+    {
+      "file": "start-prod.bat :pick_ip",
+      "issue": "STILL OPEN (LOW): WSL2/Hyper-V/VMware adapters (172.x, 192.168.x Default Switch) are not filtered, so the printed LAN URL can be an unreachable virtual adapter IP. Prefer the adapter with an IPv4 default gateway.",
+      "priority": "LOW"
+    }
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_152_dotfile_404.py",
+    "/app/backend/tests/test_iteration_151_traversal_singleport.py",
+    "/app/backend/tests/test_iteration_150_windows_singleport.py",
+    "/app/test_reports/pytest/iteration_152.xml"
+  ],
+  "action_items": [
+    "MEDIUM: tighten the netstat port check to LISTENING sockets only (add the ` *[^ ]*:0 ` foreign-address part) so TIME_WAIT rows on :8001 don't cause a false 'port already in use' abort in start-prod.bat/start-dev.bat.",
+    "LOW: pick the LAN IP from the adapter that has an IPv4 default gateway (virtual adapters still unfiltered).",
+    "OPTIONAL/pre-existing: implement the brute-force lockout that db.login_attempts is indexed for, or drop the dead index.",
+    "OPTIONAL: for offline Windows LAN deployments, self-host fonts and strip fonts.googleapis / assets.emergent.sh / posthog tags from public/index.html."
+  ],
+  "critical_code_review_comments": [
+    "server.py _serve_spa is now correct: containment via resolve()+is_relative_to, plus `Path(full_path).suffix or Path(full_path).name.startswith('.')` -> 404 for both extensioned assets and dot-files. Still worth extracting to core/static.py (server.py is ~17.6k lines) so this security-sensitive handler is unit-testable.",
+    "Testing note for future agents: with http.client, `putrequest(..., skip_host=False)` + an explicit `putheader('Host', ...)` sends TWO Host headers and uvicorn rejects the request with 400 before routing. Always use skip_host=True when hand-crafting raw traversal requests, otherwise the test silently proves nothing."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_152_dotfile_404.py (new)",
+    "/app/backend/tests/test_iteration_151_traversal_singleport.py (test-only: skip_host=True to remove the duplicate Host header that made uvicorn return 400)"
+  ],
+  "success_rate": {"backend": "98% (48/49 pytest; only the known out-of-scope brute-force lockout fails)", "frontend": "100% (prod single-port login -> dashboard, no API errors, no console errors)"},
+  "seed_data_creation": "None. No .bat file modified; /app/frontend/build untouched.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@erp.com / Admin@123",
+  "context_for_next_testing_agent": "Single-port PROD mode is the running supervisor backend on http://localhost:8001 serving /app/frontend/build (do not delete). Dot-file 404 + traversal + missing-asset contracts are covered by tests/test_iteration_152_dotfile_404.py and tests/test_iteration_151_traversal_singleport.py — keep the raw http.client approach but ALWAYS with skip_host=True. Both reviewed .bat fixes (build-frontend.bat L7 / setup.bat L74 redirection scoping, stop-erp.bat PID-0 skip) are confirmed correct. Only remaining Windows items are the netstat listening-state regex (MEDIUM) and LAN IP adapter selection (LOW), plus the pre-existing missing brute-force lockout.",
+  "rca_of_the_issue": "Dot-file fallthrough was caused by Path('.env').suffix == ''; fixed by additionally 404-ing when the last path segment starts with a dot. The iteration_151 raw-socket helper was masking coverage: a duplicate Host header made uvicorn short-circuit with 400 'Invalid HTTP request received', which the test accepted as a pass; corrected to a single Host header so payloads now reach the SPA handler."
+}

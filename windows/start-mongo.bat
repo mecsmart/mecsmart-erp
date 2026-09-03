@@ -2,7 +2,7 @@
 rem Ensures MongoDB is listening on 27017. Called via `call start-mongo.bat`.
 call "%~dp0_env.bat"
 
-netstat -ano | findstr /R /C:":27017 .*LISTENING" >nul 2>&1
+netstat -ano -p TCP | findstr /R /C:"^ *TCP *[^ ]*:27017  *[^ ]*:0 " >nul 2>&1
 if %errorlevel%==0 (
   echo [Mongo] already running on port 27017.
   exit /b 0
@@ -38,7 +38,7 @@ start "MecSmart - MongoDB" /min "%MONGOD%" --dbpath "%MONGO_DATA%" --port 27017 
 set /a tries=0
 :loop
 timeout /t 1 /nobreak >nul
-netstat -ano | findstr /R /C:":27017 .*LISTENING" >nul 2>&1
+netstat -ano -p TCP | findstr /R /C:"^ *TCP *[^ ]*:27017  *[^ ]*:0 " >nul 2>&1
 if %errorlevel%==0 (
   echo [Mongo] ready.
   exit /b 0

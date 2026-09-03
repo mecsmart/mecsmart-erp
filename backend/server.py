@@ -17595,9 +17595,14 @@ if (_FRONTEND_BUILD / "index.html").is_file():
     async def _serve_spa(full_path: str):
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not found")
-        candidate = _FRONTEND_BUILD / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(str(candidate))
+        if full_path:
+            candidate = (_FRONTEND_BUILD / full_path).resolve()
+            if not candidate.is_relative_to(_FRONTEND_BUILD):
+                raise HTTPException(status_code=404, detail="Not found")
+            if candidate.is_file():
+                return FileResponse(str(candidate))
+            if Path(full_path).suffix or Path(full_path).name.startswith("."):
+                raise HTTPException(status_code=404, detail="Not found")
         return FileResponse(str(_FRONTEND_BUILD / "index.html"))
 
     logger.info(f"[static] Serving frontend build from {_FRONTEND_BUILD}")

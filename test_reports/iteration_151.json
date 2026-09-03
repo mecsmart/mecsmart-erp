@@ -1,0 +1,85 @@
+{
+  "summary": "RETEST of iteration_150 fixes. (1) SECURITY: SPA catch-all path traversal is CLOSED — 12 encoding variants (..%2f, %2e%2e, double-encoded %252e, backslash ..%5c, ....//, //etc/passwd, %c0%af, /static/../../, mixed case %2F) sent via raw http.client so uvicorn sees the literal path: none returned file contents; all either 404 JSON or the harmless index.html fallback. No JWT_SECRET/MONGO_URL/ADMIN_PASSWORD/etc-passwd marker in any body. (2) Missing assets WITH an extension (/favicon.ico, /manifest.json, /static/js/nope.js, /robots.txt, /nope.png) now return 404 application/json; extension-less routes (/, /dashboard, /items, /login, /bom/nested/deep) still return index.html 200; the real bundle from index.html and /asset-manifest.json still 200. (3) PROD single-port Playwright on http://localhost:8001: login admin@erp.com -> /dashboard, /items and /bom render, hard reload on /items keeps the session, and all 18 /api calls are same-origin (zero cross-origin API calls, no 4xx/5xx besides the expected pre-login 401). pytest 45/46 passed; the single failure is the known, out-of-scope brute-force lockout. (4) Static review of the changed .bat files (NOT modified) found one new HIGH bug in build-frontend.bat/setup.bat and one MEDIUM regression risk in the new locale-agnostic netstat check.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /{full_path:path} (_serve_spa)",
+        "issue": "Dot-file paths still fall through to index.html 200 because Path('.env').suffix == '' — /.env, /backend/.env, /a/b/.env, /....//....//backend/.env and /..%5c..%5cbackend/.env all return 200 text/html (index.html). No file is leaked (containment check works), so this is cosmetic/consistency only. If you want strict behaviour, treat a leading-dot last segment as an asset too (e.g. `if Path(full_path).suffix or Path(full_path).name.startswith('.')`)."
+      },
+      {
+        "endpoint": "POST /api/auth/login",
+        "issue": "Brute-force lockout still absent: 6 consecutive wrong passwords -> [401 x6] (playbook expects 423/429 after 5). db.login_attempts index is still created at startup and never read/written (dead code). Pre-existing / declared out of scope — reported for completeness."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "build/index.html (single-port Windows deployment)",
+        "issues": [
+          "index.html still pulls https://fonts.googleapis.com, https://fonts.gstatic.com, https://assets.emergent.sh/scripts/emergent-main.js and https://us.i.posthog.com. On the intended target (offline / firewalled factory LAN Windows PC) these requests stall or fail on every page load, delaying first paint and leaking telemetry. Consider self-hosting the fonts and stripping the Emergent/PostHog tags from public/index.html for the Windows build."
+        ]
+      }
+    ]
+  },
+  "windows_script_static_review": [
+    {
+      "file": "build-frontend.bat L7 and setup.bat L74",
+      "issue": "NEW BUG (introduced by the 'write only if missing' fix). `if not exist \"%FRONTEND%\\.env.production.local\" > \"%FRONTEND%\\.env.production.local\" echo REACT_APP_BACKEND_URL=` — cmd sets up the `>` redirection BEFORE evaluating the IF condition, so the file is created/truncated first, the condition is then FALSE and the `echo` never runs. Result: a 0-byte .env.production.local. CRA then falls back to frontend/.env, which setup.bat writes as REACT_APP_BACKEND_URL=http://localhost:8001, so the production bundle is baked with an ABSOLUTE localhost URL instead of same-origin — every other PC on the LAN opening http://<LANIP>:8001 will call its own localhost:8001 and fail. Fix: wrap the whole thing so the redirect belongs to the inner command: `if not exist \"%FRONTEND%\\.env.production.local\" ( > \"%FRONTEND%\\.env.production.local\" echo REACT_APP_BACKEND_URL= )`  (or `(if not exist X > X echo ...)`).",
+      "priority": "HIGH"
+    },
+    {
+      "file": "start-prod.bat L23/L35, start-dev.bat L19/L34/L36, start-mongo.bat L5/L41, stop-erp.bat L14",
+      "issue": "The new regex `^ *TCP *[^ ]*:PORT ` is correctly locale-agnostic and (verified by reasoning over netstat column layout) can only match the LOCAL address column — `[^ ]*` cannot cross the space separating Local from Foreign address, so ESTABLISHED rows whose FOREIGN port is 8001 do NOT match. Also `^` and `[^ ]` are inside double quotes, so cmd's caret escaping (which only needs `^|` for the unquoted pipe) does not consume them; `tokens=5` still yields the PID; IPv6 rows `[::]:8001` also match. HOWEVER, dropping the state means rows in ESTABLISHED/TIME_WAIT/CLOSE_WAIT whose LOCAL port is the server port now match too. Concrete regression: after stop-erp.bat, the server-side sockets sit in TIME_WAIT on :8001 for ~2 minutes, so an immediate re-run of start-prod.bat aborts with '[Server] Port 8001 is already in use - MecSmart may already be running. Use stop-erp.bat first.' even though nothing is listening; the same false positive can make the :wait loop jump to :ready before uvicorn has bound. Fix: also anchor the foreign column, which is *:0 only for listeners: `findstr /R /C:\"^ *TCP *[^ ]*:PORT  *[^ ]*:0 \"` (note the two spaces / ` *`), or use `powershell -NoProfile -Command \"exit ([bool](Get-NetTCPConnection -LocalPort PORT -State Listen -ErrorAction SilentlyContinue) -eq $false)\"`.",
+      "priority": "MEDIUM"
+    },
+    {
+      "file": "stop-erp.bat L13-18",
+      "issue": "Consequence of the state-agnostic regex: TIME_WAIT rows report PID 0, so the script prints 'killing PID 0' and runs `taskkill /PID 0 /T /F` against the System Idle Process (fails silently, output suppressed). Harmless but confusing; filter to listening rows or skip PID 0.",
+      "priority": "LOW"
+    },
+    {
+      "file": "start-prod.bat L43-44 + :pick_ip L55-62",
+      "issue": "Subroutine itself is correct: `for /f tokens=2 delims=:` strips the leading space via the call argument, `if defined LANIP exit /b 0` keeps the FIRST match, 127./169.254./192.168.56. are skipped, and using `call` avoids the delayed-expansion trap (no EnableDelayedExpansion needed); `findstr /C:\"IPv4\"` still matches most localised ipconfig labels (de 'IPv4-Adresse', fr 'Adresse IPv4', ru 'IPv4-адрес'). Remaining gap: WSL2/Hyper-V (172.x, and 192.168.x for the Default Switch) and VMware (192.168.x) adapters are NOT filtered and are often listed before the physical NIC, so the printed LAN URL can still be unreachable. More robust: `for /f \"delims=\" %%A in ('powershell -NoProfile -Command \"(Get-NetIPConfiguration ^| Where-Object {$_.IPv4DefaultGateway}).IPv4Address.IPAddress ^| Select-Object -First 1\"') do set \"LANIP=%%A\"`.",
+      "priority": "LOW"
+    },
+    {
+      "file": "VERIFIED-OK (no bug found)",
+      "issue": "build-frontend.bat NODE_OPTIONS=--max-old-space-size=4096 is set before `call yarn build` and %RC% is captured after popd correctly. setup.bat corepack fallback (`where yarn || (echo & call corepack enable)` then re-check with a clear abort message) is correct, and the JWT-secret block now aborts instead of falling back to a weak secret; the usebackq python one-liner quoting and `!SECRET!` delayed expansion are still correct. start-dev.bat now polls BOTH :3000 and :8001 (via :notready) before opening the browser — flow is correct, 90 x 2s = 180s budget. start-mongo.bat unchanged logic is fine. All `call x.bat || (pause & exit /b 1)` error paths and cmd /k quoting remain valid.",
+      "priority": "INFO"
+    }
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_151_traversal_singleport.py",
+    "/app/backend/tests/test_iteration_150_windows_singleport.py",
+    "/app/test_reports/pytest/iteration_151.xml"
+  ],
+  "action_items": [
+    "HIGH: fix the `if not exist X > X echo ...` pattern in build-frontend.bat L7 and setup.bat L74 — redirection runs before the IF, so .env.production.local is created EMPTY and the prod bundle gets baked with http://localhost:8001 (LAN clients break). Use `if not exist X ( > X echo REACT_APP_BACKEND_URL= )`.",
+    "MEDIUM: tighten the netstat regex to listening sockets only (add the ` *[^ ]*:0 ` foreign-address part) so TIME_WAIT rows on :8001 don't trigger a false 'port already in use' abort right after stop-erp.bat.",
+    "LOW: skip PID 0 in stop-erp.bat's kill loop.",
+    "LOW: pick the LAN IP from the adapter that has an IPv4 default gateway (WSL/Hyper-V/VMware 172.x & 192.168.x are still unfiltered).",
+    "OPTIONAL: 404 for missing dot-files too (/.env currently returns index.html 200 — no leak, just inconsistent).",
+    "OPTIONAL/pre-existing: implement the brute-force lockout db.login_attempts was indexed for, or drop the dead index.",
+    "OPTIONAL: for offline Windows LAN deployments, self-host fonts and remove the fonts.googleapis / assets.emergent.sh / posthog tags from public/index.html."
+  ],
+  "critical_code_review_comments": [
+    "server.py _serve_spa: containment via `(_FRONTEND_BUILD / full_path).resolve().is_relative_to(_FRONTEND_BUILD)` is the correct fix and verified effective; note _FRONTEND_BUILD is itself resolve()d so a symlinked build dir won't cause false negatives. Suffix-based 404 misses dot-files only.",
+    "The static/SPA mount is still appended at the very end of a ~17.6k-line server.py, after the global Exception handler; extracting it to core/static.py would make this security-sensitive handler unit-testable in isolation.",
+    "Batch-file review rule: never put a `>` redirection on an `if` line without parentheses — cmd opens the file before the condition is evaluated (this is exactly the .env.production.local bug)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_151_traversal_singleport.py (new)",
+    "/app/backend/tests/test_iteration_150_windows_singleport.py (test-only: test_manifest_json now asserts the post-fix 404-JSON contract instead of the old 200 expectation)"
+  ],
+  "success_rate": {"backend": "98% (45/46 pytest; only the known out-of-scope brute-force lockout fails)", "frontend": "100% (prod single-port login, dashboard, items, bom, hard-reload session, same-origin API all pass)"},
+  "seed_data_creation": "None. No .bat file modified; /app/frontend/build untouched. Note: an existing item is named 'HACK_ATTEMPT' (RM-002) — leftover junk data from an earlier iteration, cosmetic only.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "admin@erp.com / Admin@123",
+  "context_for_next_testing_agent": "Path traversal is fixed and covered by tests/test_iteration_151_traversal_singleport.py (uses raw http.client so requests' path normalisation doesn't hide the payload — keep that approach). Missing-asset 404 contract is asserted there too. PROD single-port is the running supervisor backend on http://localhost:8001 serving /app/frontend/build (do not delete). Playwright login works on localhost:8001 despite Secure cookies; python-requests must replay cookies via an explicit Cookie header. Third-party requests to fonts.googleapis/posthog/assets.emergent.sh come from index.html — don't assert 'zero cross-origin requests', assert only that /api calls are same-origin. Remaining open items are the two .bat bugs above (must be verified on a real Windows box or by re-reading the scripts).",
+  "rca_of_the_issue": "Traversal: fixed by resolving the candidate and requiring is_relative_to(build dir); verified with raw-socket requests for 12 encodings. New .bat finding: cmd.exe performs output redirection setup before executing the IF command, so `if not exist F > F echo X` always leaves F as a 0-byte file and never writes X — turning the intended 'same-origin empty REACT_APP_BACKEND_URL' into 'no override', which makes CRA use frontend/.env (http://localhost:8001) in the production build. netstat finding: removing the LISTENING state token also matches TIME_WAIT/ESTABLISHED rows whose LOCAL port equals the server port, which can falsely report 'port in use' for ~2 minutes after a shutdown."
+}
