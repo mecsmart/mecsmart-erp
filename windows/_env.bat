@@ -15,6 +15,8 @@ if exist "%BACKEND%\venv\Scripts\python.exe" (
   set "PY=python"
 )
 
+rem Some PCs have a broken PATH without System32 - make sure netstat/findstr/taskkill/timeout are reachable
+set "PATH=%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0;%PATH%"
 if exist "%ProgramFiles%\nodejs\node.exe" set "PATH=%PATH%;%ProgramFiles%\nodejs;%APPDATA%\npm"
 
 rem Optional overrides (e.g. custom mongod.exe path) — create windows\config.bat with `set MONGOD=...`
