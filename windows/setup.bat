@@ -22,7 +22,7 @@ if errorlevel 1 if exist "%ProgramFiles%\nodejs\node.exe" set "PATH=%ProgramFile
 node -v >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Node.js not found. "node -v" failed in this window.
-  echo         Install the 64-bit LTS .msi from https://nodejs.org/ ^(keep "Add to PATH" ticked^).
+  echo         Install the 64-bit LTS .msi from https://nodejs.org/ - keep "Add to PATH" ticked.
   echo         If you just installed it, CLOSE this window and open a NEW cmd/PowerShell, then re-run setup.bat.
   pause & exit /b 1
 )
@@ -68,7 +68,7 @@ if not exist "%BACKEND%\.env" (
     echo FRONTEND_URL=http://localhost:3000
     echo APPYFLOW_API_KEY=
   )
-  echo   created backend\.env  ^(default admin: admin@erp.com / Admin@123^)
+  echo   created backend\.env - default admin: admin@erp.com / Admin@123
 ) else (
   echo   backend\.env already exists - kept.
 )
