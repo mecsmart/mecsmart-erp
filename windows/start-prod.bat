@@ -16,7 +16,7 @@ if not exist "%BACKEND%\.env" (
 call "%~dp0start-mongo.bat" || (pause & exit /b 1)
 
 if not exist "%FRONTEND%\build\index.html" (
-  echo [Frontend] No production build found - building now (first run only, 2-5 min)...
+  echo [Frontend] No production build found - building now - first run only, takes 2-5 min...
   call "%~dp0build-frontend.bat" quiet || (pause & exit /b 1)
 )
 
@@ -45,7 +45,7 @@ for /f "tokens=2 delims=:" %%A in ('ipconfig ^| findstr /C:"IPv4"') do call :pic
 echo.
 echo   MecSmart ERP is running.
 echo     This PC : http://localhost:%BACKEND_PORT%
-if defined LANIP echo     LAN     : http://%LANIP%:%BACKEND_PORT%   (use this in the desktop app / other PCs)
+if defined LANIP echo     LAN     : http://%LANIP%:%BACKEND_PORT%   - use this in the desktop app / other PCs
 echo.
 start "" "http://localhost:%BACKEND_PORT%"
 timeout /t 5 >nul
