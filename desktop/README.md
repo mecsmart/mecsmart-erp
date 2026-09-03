@@ -54,7 +54,7 @@ Opens the Electron window pointed at whatever URL you saved last
 yarn build:win
 ```
 
-Output: `dist\MecSmart ERP Setup 1.0.0.exe`
+Output: `dist\MecSmart ERP Setup 1.0.5.exe`
 
 Distribute that single `.exe` to every PC. The installer:
 - creates a desktop shortcut + Start-menu entry
