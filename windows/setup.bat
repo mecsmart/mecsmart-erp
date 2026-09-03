@@ -17,7 +17,15 @@ if errorlevel 1 (
   echo         If you see the Microsoft Store opening, disable the "python.exe" App execution alias in Windows Settings.
   pause & exit /b 1
 )
-where node >nul 2>&1 || (echo [ERROR] Node.js 20 LTS not found. Install from https://nodejs.org/ & pause & exit /b 1)
+where node >nul 2>&1 || (
+  if exist "%ProgramFiles%\nodejs\node.exe" set "PATH=%ProgramFiles%\nodejs;%APPDATA%\npm;%PATH%"
+)
+where node >nul 2>&1 || (
+  echo [ERROR] Node.js 20 LTS not found on PATH.
+  echo         Install the 64-bit LTS .msi from https://nodejs.org/ ^(keep "Add to PATH" ticked^).
+  echo         If you just installed it, CLOSE this window and open a NEW cmd/PowerShell, then re-run setup.bat.
+  pause & exit /b 1
+)
 where yarn >nul 2>&1 || (echo [Yarn] not found - enabling via corepack... & call corepack enable)
 where yarn >nul 2>&1 || (echo [ERROR] yarn still not available. Run "npm install -g yarn" in an Administrator prompt, then re-run setup.bat. & pause & exit /b 1)
 
