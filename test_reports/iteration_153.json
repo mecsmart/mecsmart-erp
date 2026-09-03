@@ -1,0 +1,54 @@
+{
+  "summary": "STATIC REVIEW ONLY (no cmd.exe/PowerShell runtime on this Linux pod) of the powershell-not-recognized fix. Reviewed /app/windows/create-desktop-shortcuts.bat, create-desktop-shortcuts.ps1 and _env.bat. VERDICT: the fix is CORRECT and will work on a PC whose PATH lacks System32. No blocking bugs found; 2 LOW nits reported. No files modified.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": { "ui_bugs": [], "integration_issues": [], "design_issues": [] },
+  "windows_script_static_review": [
+    {
+      "file": "windows/create-desktop-shortcuts.bat",
+      "issue": "FIX VERIFIED. (1) L3 `call \"%~dp0_env.bat\"` is present; _env.bat itself uses only cmd internals (set / if exist / for), so it runs even with a broken PATH. (2) L4 sets PS to the absolute %SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe - %SystemRoot% is always defined by Windows, so this resolves regardless of PATH; L5 falls back to bare `powershell`, which _env.bat L19 has just made resolvable by prepending %SystemRoot%\\System32;%SystemRoot%;...\\Wbem;...\\WindowsPowerShell\\v1.0 to PATH. (3) L6 quoting is valid cmd syntax: \"%PS%\" quoted (path has no special chars needing more), -NoProfile -ExecutionPolicy Bypass -File \"%~dp0create-desktop-shortcuts.ps1\" - %~dp0 keeps its trailing backslash so the concatenation is correct and space-safe. (4) `if errorlevel 1` on L7 immediately follows the call and is outside any parenthesised block, so no delayed-expansion problem; _env.bat's `exit /b 0` runs BEFORE the call so it cannot pollute errorlevel. If powershell.exe is truly missing, cmd sets errorlevel 9009 (>=1) and the error line prints. All 8 lines are CRLF-terminated.",
+      "priority": "INFO"
+    },
+    {
+      "file": "windows/create-desktop-shortcuts.ps1 L21 (Arguments)",
+      "issue": "CORRECT. Arguments = '/c \"\"<full path to .bat>\"\"'. Per `cmd /?` rule 2, because there are more than two quote characters cmd strips only the leading quote and the last quote, leaving `\"C:\\...\\start-prod.bat\"` - i.e. the path stays quoted and works with spaces (e.g. C:\\Program Files\\...). TargetPath cmd.exe is absolute (%SystemRoot%\\System32\\cmd.exe) so the shortcut does not depend on PATH either. WorkingDirectory = $here (windows folder) and all three targets (start-prod.bat, start-dev.bat, stop-erp.bat) exist in /app/windows.",
+      "priority": "INFO"
+    },
+    {
+      "file": "windows/create-desktop-shortcuts.ps1 - PS 5.1 compatibility",
+      "issue": "CORRECT. No PS7-only syntax (no ??, ?., ternary, -Parallel). `$icon = if (...) {...} else {...}` (if-as-expression) is PS3+; New-Object -ComObject WScript.Shell, [Environment]::GetFolderPath('Desktop'), Split-Path/Join-Path/Resolve-Path and Write-Host -ForegroundColor are all Windows PowerShell 5.1 safe. $MyInvocation.MyCommand.Path is populated when invoked via -File, so $here is right. Join-Path $here '..' + Resolve-Path is valid ($here has no trailing backslash). File is ASCII, no BOM, all lines CRLF.",
+      "priority": "INFO"
+    },
+    {
+      "file": "windows/create-desktop-shortcuts.ps1 L9/L24 (IconLocation)",
+      "issue": "LOW nit: when desktop\\build\\icon.ico exists, IconLocation is set to the bare file path with no `,<index>`. WScript.Shell documents the format as \"path,index\"; safest is `$icoCandidate + ',0'`. Not currently triggered - /app/desktop/build contains only icon.placeholder.txt, so the shell32.dll,15 / ,27 fallbacks (which do include an index) are used.",
+      "priority": "LOW"
+    },
+    {
+      "file": "windows/create-desktop-shortcuts.bat L7 (error text)",
+      "issue": "LOW nit: the message is emitted for ANY non-zero exit, including a genuine COM/shortcut-write failure, and then blames a missing PowerShell install. Consider `if errorlevel 9009 (echo PowerShell not found...) else if errorlevel 1 (echo Shortcut creation failed...)`.",
+      "priority": "LOW"
+    },
+    {
+      "file": "windows/_env.bat L19",
+      "issue": "CONFIRMED as requested: PATH is prepended with %SystemRoot%\\System32;%SystemRoot%;%SystemRoot%\\System32\\Wbem;%SystemRoot%\\System32\\WindowsPowerShell\\v1.0, so the bare `powershell` fallback resolves. Carried over from iteration_152 and unchanged: start-prod.bat/start-dev.bat netstat regex is still state-agnostic (MEDIUM) and :pick_ip still does not filter virtual adapters (LOW).",
+      "priority": "INFO"
+    }
+  ],
+  "test_report_links": [],
+  "action_items": [
+    "Nothing blocking for the shortcut fix - ship as is.",
+    "LOW: append ',0' to IconLocation when using icon.ico.",
+    "LOW: differentiate errorlevel 9009 (powershell missing) from other failures in the error message.",
+    "STILL OPEN from iteration_152 (MEDIUM): anchor the netstat check to LISTENING sockets only in start-prod.bat/start-dev.bat."
+  ],
+  "critical_code_review_comments": [
+    "The %SystemRoot% absolute-path + PATH-repair pattern is now consistent across the launcher scripts; keep _env.bat free of external commands (it currently is) or the broken-PATH fix breaks itself."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "N/A (static review only, no API testing requested)", "frontend": "N/A (skipped per request)" },
+  "seed_data_creation": "None. No files modified.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Windows launcher scripts reviewed statically only; cmd/PowerShell cannot be executed in this pod. create-desktop-shortcuts.bat/.ps1 are confirmed correct (CRLF, quoting, errorlevel, PS5.1 compatible, cmd /c \"\"..\"\" double-quote wrapping). Remaining Windows debt: netstat LISTENING-state regex (MEDIUM), LAN IP adapter selection (LOW), plus the pre-existing missing brute-force lockout on POST /api/auth/login.",
+  "rca_of_the_issue": "Original failure: create-desktop-shortcuts.bat invoked bare `powershell` without calling _env.bat, so on a PC whose PATH lacks C:\\Windows\\System32 cmd could not resolve the executable ('powershell' is not recognized, errorlevel 9009). The fix removes the PATH dependency entirely by using %SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe and additionally repairs PATH via _env.bat for the fallback."
+}
