@@ -17,17 +17,20 @@ if errorlevel 1 (
   echo         If you see the Microsoft Store opening, disable the "python.exe" App execution alias in Windows Settings.
   pause & exit /b 1
 )
-where node >nul 2>&1 || (
-  if exist "%ProgramFiles%\nodejs\node.exe" set "PATH=%ProgramFiles%\nodejs;%APPDATA%\npm;%PATH%"
-)
-where node >nul 2>&1 || (
-  echo [ERROR] Node.js 20 LTS not found on PATH.
+node -v >nul 2>&1
+if errorlevel 1 if exist "%ProgramFiles%\nodejs\node.exe" set "PATH=%ProgramFiles%\nodejs;%APPDATA%\npm;%PATH%"
+node -v >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Node.js not found. "node -v" failed in this window.
   echo         Install the 64-bit LTS .msi from https://nodejs.org/ ^(keep "Add to PATH" ticked^).
   echo         If you just installed it, CLOSE this window and open a NEW cmd/PowerShell, then re-run setup.bat.
   pause & exit /b 1
 )
-where yarn >nul 2>&1 || (echo [Yarn] not found - enabling via corepack... & call corepack enable)
-where yarn >nul 2>&1 || (echo [ERROR] yarn still not available. Run "npm install -g yarn" in an Administrator prompt, then re-run setup.bat. & pause & exit /b 1)
+for /f "delims=" %%V in ('node -v') do echo   Node.js %%V detected.
+call yarn -v >nul 2>&1
+if errorlevel 1 (echo [Yarn] not found - enabling via corepack... & call corepack enable)
+call yarn -v >nul 2>&1
+if errorlevel 1 (echo [ERROR] yarn still not available. Run "npm install -g yarn" in an Administrator prompt, then re-run setup.bat. & pause & exit /b 1)
 
 echo.
 echo [1/5] Python virtual environment + backend dependencies
