@@ -5,6 +5,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depend
 from fastapi.responses import StreamingResponse, JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 import os
+import asyncio
 import logging
 import io
 from pathlib import Path
@@ -15327,8 +15328,81 @@ async def list_quotations(request: Request, status: Optional[str] = None, lead_i
         q["status"] = status
     if lead_id:
         q["lead_id"] = lead_id
-    docs = await db.crm_quotations.find(q).sort("created_at", -1).to_list(2000)
-    return [await _enrich_quotation(d) for d in docs]
+    docs = await db.crm_quotations.find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return await _enrich_quotations_bulk(docs)
+
+
+async def _enrich_quotations_bulk(docs):
+    """Same output as _enrich_quotation per doc, but with batched lookups
+    (customers / leads / SOs / creators / items in one $in query each) instead
+    of ~6 round-trips per quotation."""
+    if not docs:
+        return []
+    cust_ids = {d["customer_id"] for d in docs if d.get("customer_id")}
+    lead_ids = {d["lead_id"] for d in docs if d.get("lead_id")}
+    so_ids = {d["converted_so_id"] for d in docs if d.get("converted_so_id")}
+    item_ids = {ln["item_id"] for d in docs for ln in (d.get("lines") or []) if ln.get("item_id")}
+    creator_oids = []
+    for d in docs:
+        try:
+            if d.get("created_by"):
+                creator_oids.append(ObjectId(d["created_by"]))
+        except Exception:
+            pass
+
+    customers, leads, sos, items, users = await asyncio.gather(
+        db.customers.find({"id": {"$in": list(cust_ids)}}, {"_id": 0}).to_list(None) if cust_ids else _empty_list(),
+        db.crm_leads.find({"id": {"$in": list(lead_ids)}}, {"_id": 0, "id": 1, "lead_no": 1, "name": 1, "stage": 1}).to_list(None) if lead_ids else _empty_list(),
+        db.production_orders.find({"id": {"$in": list(so_ids)}}, {"_id": 0, "id": 1, "order_number": 1, "status": 1}).to_list(None) if so_ids else _empty_list(),
+        db.items.find({"id": {"$in": list(item_ids)}}, {"_id": 0, "id": 1, "part_number": 1, "name": 1, "uom": 1, "unit_of_measure": 1, "hsn_code": 1, "gst_rate": 1}).to_list(None) if item_ids else _empty_list(),
+        db.users.find({"_id": {"$in": creator_oids}}, {"name": 1, "email": 1, "signature_url": 1}).to_list(None) if creator_oids else _empty_list(),
+    )
+    cust_map = {c["id"]: c for c in customers}
+    lead_map = {l["id"]: {k: v for k, v in l.items() if k != "id"} for l in leads}
+    so_map = {s["id"]: {"order_number": s.get("order_number"), "status": s.get("status")} for s in sos}
+    item_map = {i["id"]: {k: v for k, v in i.items() if k != "id"} for i in items}
+    user_map = {
+        str(u["_id"]): {"name": u.get("name") or u.get("email") or "", "email": u.get("email") or "", "signature_url": u.get("signature_url") or ""}
+        for u in users
+    }
+
+    out = []
+    for d in docs:
+        d.pop("_id", None)
+        if d.get("customer_id"):
+            d["customer"] = cust_map.get(d["customer_id"])
+        if d.get("lead_id"):
+            d["lead"] = lead_map.get(d["lead_id"])
+        if d.get("converted_so_id"):
+            d["converted_so"] = so_map.get(d["converted_so_id"])
+        d["created_by_user"] = user_map.get(str(d.get("created_by") or ""))
+        for ln in (d.get("lines") or []):
+            it = item_map.get(ln.get("item_id")) if ln.get("item_id") else None
+            if it:
+                ln["item"] = it
+        if "is_inter_state" not in d or d.get("cgst") is None:
+            try:
+                split = await _compute_gst_split(d.get("customer_id") or None, d.get("lines") or [])
+                d["is_inter_state"] = split["is_inter_state"]
+                d["cgst"] = split["cgst"]
+                d["sgst"] = split["sgst"]
+                d["igst"] = split["igst"]
+                d["hsn_summary"] = split["hsn_summary"]
+            except Exception:
+                pass
+        if d.get("status") != "converted":
+            d["is_locked"] = False
+        elif not d.get("converted_so_id"):
+            d["is_locked"] = True
+        else:
+            so = so_map.get(d["converted_so_id"])
+            d["is_locked"] = bool(so) and so.get("status") not in ("cancelled",)
+        out.append(d)
+    return out
+
+
+async def _empty_list():
+    return []
 
 @crm_router.post("/quotations", status_code=201)
 async def create_quotation(data: QuotationCreate, request: Request):

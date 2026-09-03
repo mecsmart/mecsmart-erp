@@ -1,0 +1,39 @@
+{
+  "summary": "Tested the two requested changes end-to-end. Backend: new pytest suite (18 cases, 17 pass / 1 skip) covering GET /api/crm/quotations bulk enrichment (fields, filters, latency, auth), /api/items?lite=1, /api/item-groups and item group_id persistence + regression endpoints. Frontend: Playwright on the public URL — CRM Quotations table renders in ~0.94s with 43 rows and ZERO full /api/items requests (only one /api/items?lite=1 background prefetch, not repeated on SPA sub-tab switch); New Quotation dialog opens with items available and item pick auto-fills description/rate/HSN; Edit QUO000118 opens with item chip pre-filled and HSN back-filled from the item master (7209); Support New Ticket dialog product picker populated; Items page Item Group SearchableSelect shows the full group list on click, narrows on typing ('Bea'/'Mot'), shows chip with category/HSN/GST, shows the 'HSN/GST inherited from group' note, locks+fills HSN/GST fields, clear resets; creating an item via UI persisted group_id (verified via API: group_id=Motors, hsn 85015, gst 28) and editing it shows the chip pre-selected; Items search and BOM page work. No blocking defects found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/crm/quotations/{id}", "issue": "No single-quotation GET endpoint (405 Method Not Allowed), so the requested bulk-vs-single payload comparison could not be executed via API. Parity was instead verified by code review: _enrich_quotations_bulk mirrors _enrich_quotation for customer/lead/converted_so/created_by_user/lines[].item and the is_locked branches (incl. 'SO vanished -> unlocked')."},
+      {"endpoint": "GET /api/items?lite=1", "issue": "lite payload is only ~16% smaller than full (607,781 B vs 726,914 B for 1392 items), not the 3-5x claimed in the code comment — the lite projection still returns description, stock, variant and pricing fields. The real page-load win comes from deferring the call, not from the projection."},
+      {"endpoint": "GET /api/crm/quotations", "issue": "Data-quality only: QUO000043 has an orphan customer_id (master deleted) so customer is null; identical to old per-doc behaviour and UI falls back to the customer_name snapshot."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "New/Edit Quotation dialog", "issues": ["Quotation line item picker returns 0 options when clicked with an empty query (requires typing), which is inconsistent with the new Item Group picker that lists all options on click — consider applying the same 'click -> show first 100' behaviour for consistency.", "The 'Link to Lead' searchable dropdown auto-opens/auto-focuses when the dialog opens and its 34-option overlay covers Contact Person/Email/Quotation Date until dismissed.", "Quotation Date / Valid Until use the native browser date input (mm/dd/yyyy) instead of the shadcn calendar component (pre-existing)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_156_quotation_perf_item_group.py",
+    "/app/test_reports/pytest/iter156.xml"
+  ],
+  "action_items": [
+    "Optional: trim the lite=1 projection further (drop current_stock/safety_stock/reorder_point/variant_* for picker use) or add server-side item search so the 600KB lite payload shrinks.",
+    "Optional UX: make the quotation line item picker list options on click (parity with the new Item Group picker) and stop auto-opening the Link-to-Lead dropdown when the quotation dialog mounts."
+  ],
+  "critical_code_review_comments": [
+    "_enrich_quotations_bulk duplicates the is_locked decision tree instead of reusing _quotation_is_locked with a pre-fetched so_map; behaviour matches today (verified branch-by-branch) but will drift when lock rules change — pass the so_map into a shared helper.",
+    "_enrich_quotations_bulk still awaits _compute_gst_split per legacy doc inside the loop, so quotations saved before the GST-split back-fill remain O(n) round-trips; consider a one-time migration to back-fill cgst/sgst/igst/hsn_summary.",
+    "server.py is 17,682 lines and CRMPage.js 5,312 lines — both far above the 700-line guideline; splitting CRM routes/panels into modules would make this kind of perf change much safer to review."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration_156_quotation_perf_item_group.py"],
+  "success_rate": {"backend": "100% (17 passed, 1 skipped - endpoint absent)", "frontend": "100% of tested flows"},
+  "seed_data_creation": "Created and deleted TEST_IG_* item (API) and TEST-UIGRP-* item (UI, group=Motors); an item's group_id was cleared then the item deleted. No seeded data modified.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "admin@erp.com / Admin@123 (from /app/memory/test_credentials.md); login sets an HttpOnly cookie and returns a token.",
+  "context_for_next_testing_agent": "Both requested features verified working. Reusable suite: /app/backend/tests/test_iteration_156_quotation_perf_item_group.py. Item groups seeded: Bearings(8482/18%), Motors(85015/28%), V-Belts(4010/18%). Quotations with item_id lines: 15 of 43; QUO000118 (id 1586c879-00ee-45ef-b69c-cbb981c917a2) is a good edit-dialog fixture (stored hsn_code empty, item master hsn 7209). QUO000119 line has item_id='' so its edit dialog legitimately shows an empty item picker. No single-quotation GET endpoint exists (405). Item picker testids: quotation-line-item-0 + quotation-line-item-0-option-<id>; group picker: item-group-search / -option-<id> / -change / -clear.",
+  "rca_of_the_issue": "N/A - no defects reproduced. Perf claim validated: quotations table paints in ~0.94s and no 700KB /api/items call happens on CRM load; only one /api/items?lite=1 request is issued per page mount and it is not re-issued when switching CRM sub-tabs within the SPA."
+}

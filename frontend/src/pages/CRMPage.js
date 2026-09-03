@@ -74,6 +74,17 @@ export default function CRMPage() {
   const [tickets, setTickets] = useState([]);
   const [quotations, setQuotations] = useState([]);
   const [items, setItems] = useState([]);
+  // Items (1,000s of SKUs, ~600KB) are only needed inside the Quotation /
+  // Ticket dialogs — load them lazily on first use instead of on page open.
+  const itemsPromiseRef = React.useRef(null);
+  const ensureItems = useCallback(() => {
+    if (!itemsPromiseRef.current) {
+      itemsPromiseRef.current = api.get('/api/items?lite=1')
+        .then(r => { const list = r.data || []; setItems(list); return list; })
+        .catch(() => { itemsPromiseRef.current = null; return []; });
+    }
+    return itemsPromiseRef.current;
+  }, []);
   const [customers, setCustomers] = useState([]);
   const [users, setUsers] = useState([]);
   const [marketingStages, setMarketingStages] = useState(LEAD_STAGES);
@@ -98,11 +109,10 @@ export default function CRMPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [lRes, tRes, qRes, iRes, cRes, uRes, mCfg, sCfg] = await Promise.all([
+      const [lRes, tRes, qRes, cRes, uRes, mCfg, sCfg] = await Promise.all([
         api.get('/api/crm/leads'),
         api.get('/api/crm/tickets'),
         api.get('/api/crm/quotations'),
-        api.get('/api/items').catch(() => ({ data: [] })),
         api.get('/api/customers'),
         // /api/users requires admin. Fall back to /api/users/assignable (open to any
         // authenticated user) so Support / Sales reps can still pick assignees.
@@ -113,7 +123,6 @@ export default function CRMPage() {
       setLeads(lRes.data || []);
       setTickets(tRes.data || []);
       setQuotations(qRes.data || []);
-      setItems(iRes.data || []);
       setCustomers(cRes.data || []);
       setUsers(uRes.data || []);
       if (mCfg.data?.stages?.length) setMarketingStages(mCfg.data.stages);
@@ -182,6 +191,7 @@ export default function CRMPage() {
           leads={leads}
           customers={customers}
           items={items}
+          ensureItems={ensureItems}
           search={search}
           onRefresh={fetchData}
           canEdit={canMarketingEdit}
@@ -217,6 +227,7 @@ export default function CRMPage() {
           leads={leads}
           customers={customers}
           items={items}
+          ensureItems={ensureItems}
           search={search}
           onRefresh={fetchData}
           canEdit={canMarketingEdit}
@@ -226,7 +237,7 @@ export default function CRMPage() {
       )}
 
       {activeTab === 'support' && !activeSub && (
-        <SupportPanel tickets={tickets} customers={customers} users={users} items={items} stages={supportStages} search={search} onRefresh={fetchData} canEdit={canSupportEdit} />
+        <SupportPanel tickets={tickets} customers={customers} users={users} items={items} ensureItems={ensureItems} stages={supportStages} search={search} onRefresh={fetchData} canEdit={canSupportEdit} />
       )}
       {activeTab === 'support' && activeSub === 'sla' && (
         <SLAPanel tickets={tickets} search={search} stages={supportStages} />
@@ -608,7 +619,7 @@ function MarketingPanel({ leads, users, customers, stages, search, onRefresh, ca
 /* ============================================================================
  *  SUPPORT PANEL — Tickets
  * ========================================================================= */
-function SupportPanel({ tickets, customers, users, items, stages, search, onRefresh, canEdit }) {
+function SupportPanel({ tickets, customers, users, items, ensureItems, stages, search, onRefresh, canEdit }) {
   const TICKET_ST = (stages && stages.length) ? stages : TICKET_STAGES;
   const [dialog, setDialog] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -616,6 +627,7 @@ function SupportPanel({ tickets, customers, users, items, stages, search, onRefr
   const [activityDialog, setActivityDialog] = useState({ open: false, ticket: null, note: '' });
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, ticket: null });
 
+  useEffect(() => { if (ensureItems) ensureItems(); }, [ensureItems]);
   const openDialog = (t) => {
     if (t) {
       setEditing(t);
@@ -1023,7 +1035,7 @@ const QuotationLineRow = function QuotationLineRow({
   );
 };
 
-function QuotationsPanel({ quotations, leads, customers, items, search, onRefresh, canEdit, prefillFromLead, onPrefillConsumed }) {
+function QuotationsPanel({ quotations, leads, customers, items, ensureItems, search, onRefresh, canEdit, prefillFromLead, onPrefillConsumed }) {
   const { user } = useAuth();
   const { companySettings } = useCompanySettings();
   const navigate = useNavigate();
@@ -1069,7 +1081,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
   const [quickPartyOpen, setQuickPartyOpen] = useState(false);
   const [quickPartyEditing, setQuickPartyEditing] = useState(null);
 
-  const openDialog = useCallback((q, fromLead) => {
+  const openDialogWith = useCallback((q, fromLead, itemList) => {
     if (q) {
       setEditing(q);
       // If the quotation is tied to an existing customer, prefer the master record
@@ -1106,7 +1118,7 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
               // saved a line without entering HSN. Without this, opening an
               // older quotation showed a blank HSN cell even though the
               // referenced item HAS an HSN code on file.
-              const it = (items || []).find(i => i.id === l.item_id);
+              const it = (itemList || items || []).find(i => i.id === l.item_id);
               return {
                 ...l,
                 hsn_code: l.hsn_code || it?.hsn_code || '',
@@ -1145,6 +1157,13 @@ function QuotationsPanel({ quotations, leads, customers, items, search, onRefres
     setDialog(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customers]);
+
+  // Item catalogue is lazy-loaded (big payload). Prefetch once the table is on
+  // screen, and make sure it is ready before the dialog opens.
+  useEffect(() => { if (ensureItems) ensureItems(); }, [ensureItems]);
+  const openDialog = useCallback((q, fromLead) => {
+    Promise.resolve(ensureItems ? ensureItems() : null).then(list => openDialogWith(q, fromLead, list));
+  }, [ensureItems, openDialogWith]);
 
   // Auto-open when arriving from "Create Quotation" on a lead
   useEffect(() => {

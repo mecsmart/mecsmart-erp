@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { SearchableSelect } from '../components/SearchableSelect';
 import { toast } from 'sonner';
 import ConfirmDialog from '../components/ConfirmDialog';
 
@@ -784,27 +785,26 @@ export default function ItemsPage() {
                     Item Group <span className="text-[#6B7280] font-normal">(optional — groups items like Motors, Bearings, Valves)</span>
                   </label>
                   <div className="flex items-center gap-2">
-                    <Select
-                      value={formData.group_id || '__none__'}
-                      onValueChange={(v) => setFormData({ ...formData, group_id: v === '__none__' ? '' : v })}
-                    >
-                      <SelectTrigger data-testid="item-group-select" className="flex-1">
-                        <SelectValue placeholder="No group" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">(No group)</SelectItem>
-                        {filteredGroupsForForm.length === 0 ? (
-                          <div className="px-3 py-2 text-xs text-[#6B7280]">No groups defined for this category — create one in Settings → Item Groups</div>
-                        ) : filteredGroupsForForm.map(g => (
-                          <SelectItem key={g.id} value={g.id}>
-                            {g.name}
-                            {g.parent_category ? ` · ${g.parent_category.replace('_', ' ')}` : ''}
-                            {g.default_hsn_code ? ` · HSN ${g.default_hsn_code}` : ''}
-                            {g.default_gst_rate != null ? ` · ${g.default_gst_rate}%` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="flex-1" data-testid="item-group-select">
+                      {filteredGroupsForForm.length === 0 ? (
+                        <div className="px-3 py-2 text-xs text-[#6B7280] border border-[#E5E7EB] rounded-sm bg-[#F9FAFB]">No groups defined — create one in Settings → Item Groups</div>
+                      ) : (
+                        <SearchableSelect
+                          options={filteredGroupsForForm}
+                          value={formData.group_id || ''}
+                          onChange={(id) => setFormData({ ...formData, group_id: id || '' })}
+                          getLabel={(g) => g.name}
+                          getSecondary={(g) => [
+                            g.parent_category ? g.parent_category.replace('_', ' ') : '',
+                            g.default_hsn_code ? `HSN ${g.default_hsn_code}` : '',
+                            g.default_gst_rate != null ? `${g.default_gst_rate}%` : '',
+                          ].filter(Boolean).join(' · ')}
+                          matchFields={['name', 'parent_category', 'default_hsn_code']}
+                          placeholder="Search group (e.g. Motors, Bearings)…"
+                          testId="item-group-search"
+                        />
+                      )}
+                    </div>
                   </div>
                   {groupLocksHsn && (
                     <p className="text-xs text-[#1E429F] mt-1">
