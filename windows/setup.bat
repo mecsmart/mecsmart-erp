@@ -54,9 +54,9 @@ popd
 
 echo.
 echo [4/5] Environment files
+set "SECRET="
+if not exist "%BACKEND%\.env" for /f "delims=" %%S in ('backend\venv\Scripts\python.exe windows\gen_secret.py') do set "SECRET=%%S"
 if not exist "%BACKEND%\.env" (
-  set "SECRET="
-  for /f "usebackq delims=" %%S in (`""%PY%" -c "import secrets;print(secrets.token_hex(32))""`) do set "SECRET=%%S"
   if not defined SECRET (echo [ERROR] could not generate JWT secret. & pause & exit /b 1)
   > "%BACKEND%\.env" (
     echo MONGO_URL=mongodb://127.0.0.1:27017
