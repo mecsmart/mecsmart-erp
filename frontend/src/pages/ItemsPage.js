@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
+import { getItemsCatalog, peekItemsCatalog } from '../hooks/useItemsCatalog';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import useResizableColumns from '../hooks/useResizableColumns';
@@ -194,6 +195,18 @@ export default function ItemsPage() {
 
   const fetchItems = async () => {
     try {
+      // Unfiltered list → serve from the shared cached catalogue (instant),
+      // then refresh in the background if stale.
+      if (!debouncedSearch && !categoryFilter && !groupFilter) {
+        const cached = peekItemsCatalog();
+        if (cached) setItems(cached);
+        const fresh = await getItemsCatalog();
+        setItems(fresh);
+        if (uoms.length === 0) {
+          try { const { data: u } = await api.get('/api/settings/uoms'); setUoms(u || []); } catch (_e) { /* non-fatal */ }
+        }
+        return;
+      }
       const params = new URLSearchParams();
       if (debouncedSearch) params.append('search', debouncedSearch);
       if (categoryFilter) params.append('category', categoryFilter);

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../context/AuthContext';
+import { useItemsCatalog } from '../hooks/useItemsCatalog';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
@@ -50,7 +51,7 @@ export default function ManufacturingPage() {
   const [routings, setRoutings] = useState([]);
   const [workOrders, setWorkOrders] = useState([]);
   const [productionOrders, setProductionOrders] = useState([]);
-  const [items, setItems] = useState([]);
+  const items = useItemsCatalog();
   // Set of item_ids that have an ACTIVE BOM. Used to restrict the MTS WO
   // item picker to items that can actually be manufactured. Loaded once on
   // mount alongside items.
@@ -283,12 +284,11 @@ export default function ManufacturingPage() {
     // the existing data on screen during the silent refetch.
     if (!preserve) setLoading(true);
     try {
-      const [wcRes, routingsRes, woRes, poRes, itemsRes, supRes, bomsRes] = await Promise.all([
+      const [wcRes, routingsRes, woRes, poRes, supRes, bomsRes] = await Promise.all([
         api.get('/api/work-centers'),
         api.get('/api/routings'),
         api.get('/api/work-orders'),
         api.get('/api/production'),
-        api.get('/api/items'),
         api.get('/api/suppliers'),
         api.get('/api/bom?status=active'),
       ]);
@@ -296,7 +296,6 @@ export default function ManufacturingPage() {
       setRoutings(routingsRes.data);
       setWorkOrders(woRes.data);
       setProductionOrders(poRes.data);
-      setItems(itemsRes.data);
       setSuppliers(supRes.data);
       setItemsWithBom(new Set((bomsRes.data || []).map(b => b.parent_item_id).filter(Boolean)));
     } catch (error) {

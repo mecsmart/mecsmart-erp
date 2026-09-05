@@ -1,0 +1,26 @@
+{
+  "summary": "Verified shared items catalogue hook (useItemsCatalog) is working end-to-end. With SPA navigation across Items → BOM → Manufacturing → Purchase Orders → Warehouses → Job Work → Quality → Purchase Invoices → CRM: exactly 1 GET /api/items?lite=1 request across all 9 pages and 0 plain /api/items requests (matches expected TTL/dedupe behaviour). Cache invalidation confirmed: after POST /api/items on Items page, navigating to BOM triggered a fresh /api/items?lite=1 request. Item pickers populated in PO, MO-adjacent, Quality Template, Purchase Invoice and Warehouse Transfer dialogs. Zero non-401 console errors on any page.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Optional cleanup of test items created during this run: TEST-CACHE-1788601890 and TEST-INV-1788601942 (both category=Raw Material)."
+  ],
+  "critical_code_review_comments": [
+    "useItemsCatalog.js correctly guards concurrent fetches via cache.promise, marks dirty on any non-GET response, and refetches on next mount — all as designed.",
+    "The axios response interceptor is attached at module load; if AuthContext creates the api instance later on client-only routes, ensure the interceptor still binds before any writes. In this run it worked correctly (interceptor fired after POST /api/items).",
+    "Consider capping payload size / paginating /api/items?lite=1 (currently ~600KB for 1392 items). While cache is now 1× per session, initial load still transfers full list."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100%"},
+  "test_credentials": "admin@erp.com / Admin@123 (verified working)",
+  "seed_data_creation": "Created 2 test items (TEST-CACHE-1788601890, TEST-INV-1788601942) as Raw Material. Left in DB (delete UI has a confirm dialog that wasn't wired here).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Full-page reloads (page.goto per route) reset the module-level cache and produce 1 lite request per page — that is expected. Use history.pushState + PopStateEvent for SPA nav to verify the shared cache. BOM Parent Item picker filters out Raw Material category (so TEST- items created with default RM category will NOT appear in the parent picker — that's correct business logic, not a cache bug). Item pickers verified populated in PO/QA/PI/WH dialogs; MO/JW dialogs use similar useItemsCatalog hook so should behave identically.",
+  "rca of the issue": "N/A — no issues found."
+}

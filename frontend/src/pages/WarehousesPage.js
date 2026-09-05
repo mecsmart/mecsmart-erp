@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import useResizableColumns from '../hooks/useResizableColumns';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../context/AuthContext';
+import { useItemsCatalog } from '../hooks/useItemsCatalog';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
@@ -101,7 +102,7 @@ export default function WarehousesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [warehouses, setWarehouses] = useState([]);
   const [transfers, setTransfers] = useState([]);
-  const [items, setItems] = useState([]);
+  const items = useItemsCatalog();
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'stock');
@@ -226,10 +227,9 @@ export default function WarehousesPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [warehousesRes, transfersRes, itemsRes, grnRes, pendingRes, inventoryRes, jwRes, suppliersRes, groupsRes] = await Promise.all([
+      const [warehousesRes, transfersRes, grnRes, pendingRes, inventoryRes, jwRes, suppliersRes, groupsRes] = await Promise.all([
         api.get('/api/warehouses'),
         api.get('/api/warehouses/transfers/history'),
-        api.get('/api/items'),
         api.get('/api/grn'),
         api.get('/api/grn/pending-pos'),
         api.get('/api/inventory'),
@@ -239,7 +239,6 @@ export default function WarehousesPage() {
       ]);
       setWarehouses(warehousesRes.data);
       setTransfers(transfersRes.data);
-      setItems(itemsRes.data);
       setGrnList(grnRes.data);
       setPendingPOs(pendingRes.data);
       setInventory(inventoryRes.data);

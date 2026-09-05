@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
+import { useItemsCatalog } from '../hooks/useItemsCatalog';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { 
@@ -40,7 +41,7 @@ export default function PurchaseOrdersPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [suppliers, setSuppliers] = useState([]);
-  const [items, setItems] = useState([]);
+  const items = useItemsCatalog();
   const [warehouses, setWarehouses] = useState([]);
   const [chargeTypes, setChargeTypes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -65,16 +66,14 @@ export default function PurchaseOrdersPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [ordersRes, suppliersRes, itemsRes, whRes, chargesRes] = await Promise.all([
+      const [ordersRes, suppliersRes, whRes, chargesRes] = await Promise.all([
         api.get('/api/purchase-orders'),
         api.get('/api/suppliers?status=active'),
-        api.get('/api/items'),
         api.get('/api/warehouses?status=active'),
         api.get('/api/settings/po-charges'),
       ]);
       setAllOrders(ordersRes.data);
       setSuppliers(suppliersRes.data);
-      setItems(itemsRes.data);
       setWarehouses(whRes.data);
       setChargeTypes(chargesRes.data);
     } catch (error) {

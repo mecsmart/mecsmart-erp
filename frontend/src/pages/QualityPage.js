@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../context/AuthContext';
+import { useItemsCatalog } from '../hooks/useItemsCatalog';
 import { useAuth } from '../context/AuthContext';
 import { 
   Plus, 
@@ -19,7 +20,7 @@ export default function QualityPage() {
   const { user } = useAuth();
   const [templates, setTemplates] = useState([]);
   const [inspections, setInspections] = useState([]);
-  const [items, setItems] = useState([]);
+  const items = useItemsCatalog();
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('inspections');
   const [resultFilter, setResultFilter] = useState('');
@@ -54,14 +55,12 @@ export default function QualityPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [templatesRes, inspectionsRes, itemsRes] = await Promise.all([
+      const [templatesRes, inspectionsRes] = await Promise.all([
         api.get('/api/quality/templates'),
         api.get(`/api/quality/inspections${resultFilter ? `?result=${resultFilter}` : ''}`),
-        api.get('/api/items'),
       ]);
       setTemplates(templatesRes.data);
       setInspections(inspectionsRes.data);
-      setItems(itemsRes.data);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {

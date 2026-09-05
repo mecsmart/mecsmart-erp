@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { api } from '../context/AuthContext';
+import { useItemsCatalog } from '../hooks/useItemsCatalog';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { Plus, Truck, Package, CheckCircle2, ArrowRight, ArrowLeft, X, XCircle, FileText, Edit2, Printer, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
@@ -22,7 +23,7 @@ export default function JobWorkPage() {
   const [challans, setChallans] = useState([]);
   const [receipts, setReceipts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
-  const [items, setItems] = useState([]);
+  const items = useItemsCatalog();
   const [warehouses, setWarehouses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('orders');
@@ -126,19 +127,17 @@ export default function JobWorkPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [ordRes, dcRes, recRes, supRes, itemRes, whRes] = await Promise.all([
+      const [ordRes, dcRes, recRes, supRes, whRes] = await Promise.all([
         api.get('/api/job-work/orders'),
         api.get('/api/job-work/challans'),
         api.get('/api/job-work/receipts'),
         api.get('/api/suppliers?all=true'),
-        api.get('/api/items'),
         api.get('/api/warehouses'),
       ]);
       setOrders(ordRes.data);
       setChallans(dcRes.data);
       setReceipts(recRes.data);
       setSuppliers(supRes.data);
-      setItems(itemRes.data);
       setWarehouses(whRes.data);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, []);

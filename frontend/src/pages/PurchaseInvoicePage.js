@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../context/AuthContext';
+import { useItemsCatalog } from '../hooks/useItemsCatalog';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import { Plus, FileText, CheckCircle2, DollarSign, X, Search, Download, Edit2 } from 'lucide-react';
@@ -72,7 +73,7 @@ export default function PurchaseInvoicePage() {
   const { formatCurrency } = useCompanySettings();
   const [invoices, setInvoices] = useState([]);
   const [pendingGRNs, setPendingGRNs] = useState([]);
-  const [items, setItems] = useState([]);
+  const items = useItemsCatalog();
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [invoiceSearch, setInvoiceSearch] = useState('');
@@ -105,15 +106,13 @@ export default function PurchaseInvoicePage() {
       if (dateFrom) qs.set('date_from', dateFrom);
       if (dateTo) qs.set('date_to', dateTo);
       const params = qs.toString() ? `?${qs.toString()}` : '';
-      const [invRes, grnRes, itemRes, supRes] = await Promise.all([
+      const [invRes, grnRes, supRes] = await Promise.all([
         api.get(`/api/purchase-invoices${params}`),
         api.get('/api/purchase-invoices/pending-grns'),
-        api.get('/api/items?lite=1'),
         api.get('/api/suppliers'),
       ]);
       setInvoices(invRes.data);
       setPendingGRNs(grnRes.data);
-      setItems(itemRes.data);
       setSuppliers(supRes.data);
     } catch (e) { console.error(e); } finally { setLoading(false); }
   }, [statusFilter, dateFrom, dateTo]);

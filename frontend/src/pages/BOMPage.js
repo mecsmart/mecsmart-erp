@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
+import { useItemsCatalog, getItemsCatalog } from '../hooks/useItemsCatalog';
 import { promptDialog } from '../components/PromptDialog';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
@@ -49,7 +50,7 @@ export default function BOMPage() {
   const canSeeProcessCost = isAdminLike || hasPermission('bom_process_cost', 'view');
   const canSeeRollupCost = isAdminLike || hasPermission('bom_rollup_cost', 'view');
   const [boms, setBoms] = useState([]);
-  const [items, setItems] = useState([]);
+  const items = useItemsCatalog();
   const [uoms, setUoms] = useState([]);
   // Sentinel for auto-scrolling to the bottom of the components list after
   // adding a new row inside the BOM creation/edit dialog.
@@ -271,10 +272,9 @@ export default function BOMPage() {
 
   const fetchItems = async () => {
     try {
-      // `lite=1` returns only picker-relevant fields → 3–5x smaller payload on
-      // large catalogues. Speeds up BOM dialog open from seconds → ms.
-      const { data } = await api.get('/api/items?lite=1');
-      setItems(data);
+      // Shared cached catalogue (lite projection) — instant when already loaded,
+      // auto-refreshed after any write.
+      await getItemsCatalog();
       // UOM master needed to honor decimal places when displaying quantities.
       try {
         const { data: u } = await api.get('/api/settings/uoms');

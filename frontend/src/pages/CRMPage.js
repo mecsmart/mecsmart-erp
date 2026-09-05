@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../context/AuthContext';
+import { useItemsCatalog, getItemsCatalog } from '../hooks/useItemsCatalog';
 import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import {
@@ -73,18 +74,9 @@ export default function CRMPage() {
   const [leads, setLeads] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [quotations, setQuotations] = useState([]);
-  const [items, setItems] = useState([]);
-  // Items (1,000s of SKUs, ~600KB) are only needed inside the Quotation /
-  // Ticket dialogs — load them lazily on first use instead of on page open.
-  const itemsPromiseRef = React.useRef(null);
-  const ensureItems = useCallback(() => {
-    if (!itemsPromiseRef.current) {
-      itemsPromiseRef.current = api.get('/api/items?lite=1')
-        .then(r => { const list = r.data || []; setItems(list); return list; })
-        .catch(() => { itemsPromiseRef.current = null; return []; });
-    }
-    return itemsPromiseRef.current;
-  }, []);
+  // Shared item catalogue: renders from cache instantly, refreshes in background.
+  const items = useItemsCatalog();
+  const ensureItems = useCallback(() => getItemsCatalog().catch(() => []), []);
   const [customers, setCustomers] = useState([]);
   const [users, setUsers] = useState([]);
   const [marketingStages, setMarketingStages] = useState(LEAD_STAGES);
@@ -3210,13 +3202,13 @@ function TaxInvoicesPanel({ customers, search, onRefresh, canEdit }) {
   // Fetch sales orders + items + warehouses when dialog opens
   const openDialog = async (ti) => {
     try {
-      const [soRes, itRes, whRes] = await Promise.all([
+      const [soRes, itList, whRes] = await Promise.all([
         api.get('/api/production').catch(() => ({ data: [] })),
-        api.get('/api/items').catch(() => ({ data: [] })),
+        getItemsCatalog().catch(() => []),
         api.get('/api/warehouses').catch(() => ({ data: [] })),
       ]);
       setSalesOrders((soRes.data || []).filter(o => ['confirmed', 'in_progress', 'completed', 'partially_cancelled'].includes(o.status)));
-      setItems(itRes.data || []);
+      setItems(itList || []);
       setWarehouses((whRes.data || []).filter(w => (w.status || 'active') === 'active'));
     } catch (e) { console.error(e); }
     if (ti) {
