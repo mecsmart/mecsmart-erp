@@ -15776,6 +15776,38 @@ async def revise_quotation(qid: str, request: Request):
     await db.crm_quotations.update_one({"id": qid}, {"$set": update_original})
     return await _enrich_quotation(clone)
 
+@crm_router.post("/quotations/{qid}/clone", status_code=201)
+async def clone_quotation(qid: str, request: Request):
+    """Duplicate a quotation as a brand-new draft with its own number.
+    Unlike /revise, the original is left untouched and no revision link is kept."""
+    user = await get_current_user(request)
+    original = await db.crm_quotations.find_one({"id": qid}, {"_id": 0})
+    if not original:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+    now = datetime.now(timezone.utc)
+    clone = dict(original)
+    for k in ("root_quotation_no", "revision", "previous_revision_id", "superseded_by_id", "superseded_by_no",
+              "converted_so_id", "converted_so_no", "proforma_id", "proforma_no", "sent_at", "accepted_at", "rejected_at", "updated_at"):
+        clone.pop(k, None)
+    clone.update({
+        "id": str(uuid.uuid4()),
+        "quotation_no": await _get_next_number("quotation"),
+        "status": "draft",
+        "quotation_date": now,
+        "cloned_from_id": qid,
+        "cloned_from_no": original.get("quotation_no"),
+        "created_at": now,
+        "created_by": user["id"],
+    })
+    if original.get("quotation_date") and original.get("valid_until"):
+        try:
+            clone["valid_until"] = now + (original["valid_until"] - original["quotation_date"])
+        except Exception:
+            clone["valid_until"] = original.get("valid_until")
+    await db.crm_quotations.insert_one(clone)
+    clone.pop("_id", None)
+    return await _enrich_quotation(clone)
+
 @crm_router.post("/quotations/{qid}/convert-to-so")
 async def convert_quotation_to_so(qid: str, payload: dict = Body(default={}), request: Request = None):
     """Convert a quotation into a multi-line Sales Order (Production Order).

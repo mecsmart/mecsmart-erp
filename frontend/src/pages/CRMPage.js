@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useCompanySettings } from '../context/CompanySettingsContext';
 import {
   Plus, Edit2, Trash2, MessageSquare, UserCheck, AlertTriangle, Clock,
-  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload, GitBranch, Share2, Package2, Download, Eye, Pencil
+  Megaphone, Headphones, X, Search, CheckCircle2, XCircle, FileText, Send, RefreshCw, Printer, Upload, GitBranch, Share2, Package2, Download, Eye, Pencil, Copy
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -1362,12 +1362,28 @@ function QuotationsPanel({ quotations, leads, customers, items, ensureItems, sea
   // <thead> letterhead on every page.
   const printQuotation = (q) => printInvoiceDoc(q, { kind: 'quotation', title: 'QUOTATION', numberKey: 'quotation_no', company: companySettings, user, includeCover: !!(companySettings?.quotation_cover_intro || '').trim(), preview: true });
 
+  const [reviseConfirm, setReviseConfirm] = useState({ open: false, quotation: null });
+  const [cloneConfirm, setCloneConfirm] = useState({ open: false, quotation: null });
+
   const reviseQuotation = async (q) => {
+    if (!q) return;
     try {
       const res = await api.post(`/api/crm/quotations/${q.id}/revise`);
-      onRefresh();
-      alert(`New revision ${res.data.quotation_no} created as draft. Edit the new revision and send it to the customer.`);
-    } catch (e) { alert(e.response?.data?.detail || 'Failed to create revision'); }
+      setReviseConfirm({ open: false, quotation: null });
+      await onRefresh();
+      toast.success(`Revision ${res.data.quotation_no} created as draft`, { description: `${q.quotation_no} is now marked Superseded. Edit the new revision and send it to the customer.` });
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to create revision'); }
+  };
+
+  const cloneQuotation = async (q) => {
+    if (!q) return;
+    try {
+      const res = await api.post(`/api/crm/quotations/${q.id}/clone`);
+      setCloneConfirm({ open: false, quotation: null });
+      await onRefresh();
+      toast.success(`Quotation cloned as ${res.data.quotation_no}`, { description: `Copied from ${q.quotation_no}. The copy is a new draft — ${q.quotation_no} is unchanged.` });
+      openDialog(res.data, null);
+    } catch (e) { toast.error(e.response?.data?.detail || 'Failed to clone quotation'); }
   };
 
   const convertToSO = async () => {
@@ -1463,7 +1479,10 @@ function QuotationsPanel({ quotations, leads, customers, items, ensureItems, sea
                         <button onClick={() => setProformaConfirm({ open: true, quotation: q })} className="p-1.5 text-[#1E429F] hover:bg-[#E1EFFE] rounded" title={q.proforma_id ? 'Create another Proforma Invoice' : 'Convert to Proforma Invoice'} data-testid={`quotation-to-proforma-${q.id}`}><FileText className="w-4 h-4" /></button>
                       )}
                       {canEdit && ['sent', 'rejected', 'superseded'].includes(q.status) && (
-                        <button onClick={() => reviseQuotation(q)} className="p-1.5 text-[#92400E] hover:bg-[#FEF3C7] rounded" title="Create Revision (clones this quotation as a new editable draft)" data-testid={`quotation-revise-${q.id}`}><GitBranch className="w-4 h-4" /></button>
+                        <button onClick={() => setReviseConfirm({ open: true, quotation: q })} className="p-1.5 text-[#92400E] hover:bg-[#FEF3C7] rounded" title="Create Revision (original becomes Superseded, new editable draft)" data-testid={`quotation-revise-${q.id}`}><GitBranch className="w-4 h-4" /></button>
+                      )}
+                      {canEdit && (
+                        <button onClick={() => setCloneConfirm({ open: true, quotation: q })} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Clone as new quotation (original unchanged)" data-testid={`quotation-clone-${q.id}`}><Copy className="w-4 h-4" /></button>
                       )}
                       {canEdit && !isLocked && <button onClick={() => openDialog(q, null)} className="p-1.5 text-[#4B5563] hover:text-[#1D3557] hover:bg-[#F3F4F6] rounded" title="Edit" data-testid={`quotation-edit-${q.id}`}><Edit2 className="w-4 h-4" /></button>}
                       {canEdit && !isLocked && <button onClick={() => setDeleteConfirm({ open: true, quotation: q })} className="p-1.5 text-[#4B5563] hover:text-[#9B1C1C] hover:bg-[#FDE8E8] rounded" title="Delete" data-testid={`quotation-delete-${q.id}`}><Trash2 className="w-4 h-4" /></button>}
@@ -2001,6 +2020,30 @@ function QuotationsPanel({ quotations, leads, customers, items, ensureItems, sea
             }));
           }
         }}
+      />
+
+      {/* Revision confirm */}
+      <ConfirmDialog
+        open={reviseConfirm.open}
+        onOpenChange={(o) => !o && setReviseConfirm({ open: false, quotation: null })}
+        title="Create Revision?"
+        message={<>A new editable draft <strong>{reviseConfirm.quotation?.quotation_no}-R{(Number(reviseConfirm.quotation?.revision) || 0) + 1}</strong> will be created with the same lines and terms.<br /><br />The current <strong>{reviseConfirm.quotation?.quotation_no}</strong> becomes <em>Superseded</em> (read-only). Close this dialog to keep it as is.</>}
+        confirmLabel="Create Revision"
+        variant="primary"
+        onConfirm={() => reviseQuotation(reviseConfirm.quotation)}
+        testidPrefix="quotation-revise-confirm"
+      />
+
+      {/* Clone confirm */}
+      <ConfirmDialog
+        open={cloneConfirm.open}
+        onOpenChange={(o) => !o && setCloneConfirm({ open: false, quotation: null })}
+        title="Clone Quotation?"
+        message={<>Creates a brand-new draft quotation with a fresh number, copying customer, lines, discounts, charges and terms from <strong>{cloneConfirm.quotation?.quotation_no}</strong>.<br /><br />The original stays unchanged — useful for a repeat enquiry or a similar customer. The copy opens for editing.</>}
+        confirmLabel="Clone"
+        variant="primary"
+        onConfirm={() => cloneQuotation(cloneConfirm.quotation)}
+        testidPrefix="quotation-clone-confirm"
       />
 
       {/* Convert-to-Proforma Dialog */}

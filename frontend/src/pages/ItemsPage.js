@@ -12,7 +12,6 @@ import {
   Package, 
   Edit2, 
   Trash2,
-  Filter,
   X,
   AlertTriangle,
   Download,
@@ -553,46 +552,31 @@ export default function ItemsPage() {
               data-testid="items-search-input"
             />
           </div>
-          <Select value={categoryFilter || 'all'} onValueChange={(v) => setCategoryFilter(v === 'all' ? '' : v)}>
-            <SelectTrigger className="w-36 h-8 text-xs" data-testid="items-category-filter">
-              <Filter className="w-3 h-3 mr-1" />
-              <SelectValue placeholder="All Categories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              {categories.map((cat) => (
-                <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="relative w-44">
-            <Select value={groupFilter || 'all'} onValueChange={(v) => setGroupFilter(v === 'all' ? '' : v)}>
-              <SelectTrigger className="h-8 text-xs" data-testid="items-group-filter">
-                <Filter className="w-3 h-3 mr-1" />
-                <SelectValue placeholder="All Groups" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Groups</SelectItem>
-                {itemGroups
-                  .filter(g => !categoryFilter || !g.parent_category || g.parent_category === categoryFilter)
-                  .map(g => (
-                    <SelectItem key={g.id} value={g.id}>
-                      {g.name} {g.parent_category ? `(${g.parent_category.replace('_', ' ')})` : ''} · {g.item_count ?? 0}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            {groupFilter && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setGroupFilter(''); }}
-                className="absolute right-7 top-1/2 -translate-y-1/2 p-0.5 text-[#9CA3AF] hover:text-[#9B1C1C] z-10"
-                title="Clear group filter"
-                data-testid="items-group-filter-clear"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            )}
+          <div className="w-44" data-testid="items-category-filter">
+            <SearchableSelect
+              options={categories.map(c => ({ id: c.value, name: c.label }))}
+              value={categoryFilter}
+              onChange={(v) => { setCategoryFilter(v || ''); if (v) setGroupFilter(''); }}
+              getSecondary={() => ''}
+              matchFields={['name']}
+              placeholder="Category…"
+              testId="items-category-search"
+              size="sm"
+            />
+          </div>
+          <div className="relative w-52">
+            <div data-testid="items-group-filter">
+              <SearchableSelect
+                options={itemGroups.filter(g => !categoryFilter || !g.parent_category || g.parent_category === categoryFilter)}
+                value={groupFilter}
+                onChange={(v) => setGroupFilter(v || '')}
+                getSecondary={() => ''}
+                matchFields={['name']}
+                placeholder="Group…"
+                testId="items-group-search-filter"
+                size="sm"
+              />
+            </div>
           </div>
           {(categoryFilter || groupFilter) && (
             <button onClick={() => { setCategoryFilter(''); setGroupFilter(''); }} className="text-[10px] text-[#9B1C1C] hover:underline">Clear</button>
@@ -807,12 +791,8 @@ export default function ItemsPage() {
                           value={formData.group_id || ''}
                           onChange={(id) => setFormData({ ...formData, group_id: id || '' })}
                           getLabel={(g) => g.name}
-                          getSecondary={(g) => [
-                            g.parent_category ? g.parent_category.replace('_', ' ') : '',
-                            g.default_hsn_code ? `HSN ${g.default_hsn_code}` : '',
-                            g.default_gst_rate != null ? `${g.default_gst_rate}%` : '',
-                          ].filter(Boolean).join(' · ')}
-                          matchFields={['name', 'parent_category', 'default_hsn_code']}
+                          getSecondary={() => ''}
+                          matchFields={['name']}
                           placeholder="Search group (e.g. Motors, Bearings)…"
                           testId="item-group-search"
                         />

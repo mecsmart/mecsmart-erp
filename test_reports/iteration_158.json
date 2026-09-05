@@ -1,0 +1,22 @@
+{
+  "summary": "Iteration 158: Verified CRM Quotation Clone (backend + frontend), Revise ConfirmDialog flow, and Items page Category/Group SearchableSelect filters. All 4 backend tests for /api/crm/quotations/{id}/clone passed (201 on success, 404 unknown, 401 unauthenticated, draft status + cloned_from_no + no revision/SO/proforma links + original untouched, works even for converted/superseded status). Frontend: Category filter shows chip/clear correctly, selecting a category clears+narrows group filter. Add Item dialog Item Group SearchableSelect renders (options list not populated at this scope but present). CRM Quotation Clone button opens ConfirmDialog 'Clone Quotation?', Cancel does not create; Confirm creates new draft (fresh QUO number, no -R suffix) and opens edit dialog with clone. Revise button opens ConfirmDialog 'Create Revision?'; Cancel does nothing; Confirm creates QUO...-R1 draft and marks the original Superseded with a toast.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_158_clone.py",
+    "/app/test_reports/pytest/iteration_158.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py: clone_quotation copies 'quotation_no_lock' / any other future fields implicitly via dict(original); safe today but consider an allowlist to prevent leaking new sensitive fields into clones later.",
+    "clone endpoint does not require any specific permission; anyone authenticated can clone. Consider gating behind CRM edit permission for consistency with Revise."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration_158_clone.py"],
+  "success_rate": {"backend": "100% (4/4)", "frontend": "100% for critical flows"},
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "During run: created a clone of QUO000119 (produced QUO000125) and a revision QUO000076-R1; original QUO000076 now Superseded.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend clone tests live in /app/backend/tests/test_iteration_158_clone.py (uses session cookie auth via /api/auth/login). Frontend testids in use: quotation-clone-<id>, quotation-revise-<id>, quotation-clone-confirm-{dialog,confirm-btn,cancel-btn}, quotation-revise-confirm-{...}, items-category-filter, items-category-search, items-group-filter, items-group-search-filter. QUO000076 is already Superseded now — pick a different 'sent' quotation for future revise tests, or set one via the status select.",
+  "rca of the issue": "N/A - no bugs detected."
+}

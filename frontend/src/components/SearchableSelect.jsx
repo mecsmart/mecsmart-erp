@@ -27,7 +27,9 @@ export const SearchableSelect = ({
   placeholder = 'Type to search…',
   testId,
   disabled = false,
+  size = 'md',
 }) => {
+  const sm = size === 'sm';
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
   // When `editing` is true, the search input is shown even though a value is
@@ -92,7 +94,7 @@ export const SearchableSelect = ({
     <div ref={wrapRef} className="relative">
       {!showSearchInput ? (
         <div
-          className="flex items-center justify-between h-10 w-full rounded-sm border border-[#D1D5DB] bg-[#F0F9FF] px-3 py-2 text-sm"
+          className={`flex items-center justify-between ${sm ? 'h-8 px-2 py-1 text-xs' : 'h-10 px-3 py-2 text-sm'} w-full rounded-sm border border-[#D1D5DB] bg-[#F0F9FF]`}
           data-testid={testId}
         >
           <button
@@ -130,7 +132,7 @@ export const SearchableSelect = ({
             onFocus={() => setFocused(true)}
             placeholder={selected ? `Current: ${getLabel(selected)} — search to change…` : placeholder}
             disabled={disabled}
-            className="h-10 w-full rounded-sm border border-[#D1D5DB] bg-white pl-8 pr-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#1D3557] disabled:opacity-50"
+            className={`${sm ? 'h-8 py-1 text-xs' : 'h-10 py-2 text-sm'} w-full rounded-sm border border-[#D1D5DB] bg-white pl-8 pr-3 focus:outline-none focus:ring-1 focus:ring-[#1D3557] disabled:opacity-50`}
             data-testid={testId}
             autoComplete="off"
           />
@@ -165,8 +167,8 @@ export const SearchableSelect = ({
                 className="block w-full text-left px-3 py-1.5 text-sm hover:bg-[#F3F4F6] border-b border-[#F9FAFB] last:border-0"
                 data-testid={`${testId || 'ss'}-option-${o.id}`}
               >
-                {getSecondary(o) && <span className="mono font-semibold text-xs">{getSecondary(o)}</span>}
-                <span className="ml-2">{getLabel(o)}</span>
+                {getSecondary(o) && <span className="mono font-semibold text-xs mr-2">{getSecondary(o)}</span>}
+                <span>{getLabel(o)}</span>
               </button>
             ))
           )}
