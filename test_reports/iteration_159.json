@@ -1,0 +1,38 @@
+{
+  "summary": "Variant 5-char + special-char feature tested end-to-end. Backend: 13/13 pytest tests pass (POST/PUT /api/items normalize variant_attributes, 4-char and 6-char values rejected with 'exactly 5 characters' error, '01.00' and '⌀10.0' accepted and normalized to {value,short_code}, generate-variants creates children with unicode-preserved part numbers 'TEST-VAR5-XXXXX-01.00' and 'TEST-VAR5-XXXXX-⌀10.0', idempotent, pruning on removal works, legacy items list and inherited/effective variant endpoints return non-500). Frontend: ItemsPage Add Item flow verified — maxlength=5 on values input, Enter adds chips with short-code chip input, invalid 4-char 'variant value' triggers sonner toast 'Variant value must be exactly 5 characters (e.g. 01.00, ⌀10.0) — \"1HP1\" has 4', 6-char typing is truncated to 5 by maxLength, chip short-code editable (01.00 -> D10.0), save succeeds, reopen edit preserves chips, variant SKUs auto-displayed (TEST-VAR5-38531-⌀10.0, TEST-VAR5-38531-D10.0). BOM page loads without console errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/items", "issue": "variant_attributes with explicit short_code of 6 chars (e.g. '1.5HPX') is silently truncated to 5 via sc[:VARIANT_VALUE_LEN] and accepted as 201 instead of being rejected (spec said 'short_code with 6 chars rejected'). Minor — final persisted value is still exactly 5 chars."},
+      {"endpoint": "POST /api/items", "issue": "variant_attributes with short_code containing an internal whitespace of total length 5 (e.g. '1 5HP') is accepted (201). _variant_short_code strips whitespace only when deriving, but user-provided short_code is only .strip()-ed on the ends. Low priority — practically unreachable via UI since chip input blocks whitespace keypress."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_159_variant_5char.py",
+    "/app/test_reports/pytest/iter159.xml"
+  ],
+  "action_items": [
+    "(Optional, minor) Tighten _normalize_variant_attributes to reject raw short_code whose stripped length != 5 instead of truncating via slice, so 'short_code 6 chars' is a 400 as spec intended.",
+    "(Optional) Reject short_code with internal whitespace to match the 'whitespace rejected' spec wording."
+  ],
+  "critical_code_review_comments": [
+    "server.py L1341 uses `sc[:VARIANT_VALUE_LEN]` which silently truncates oversize short codes rather than returning a 400 — spec said reject.",
+    "server.py file is 17k+ lines; splitting into domain modules is overdue (not caused by this iteration).",
+    "ItemsPage.js variant block (~1016-1125) correctly uses Array.from for unicode-safe length and has data-testid coverage; good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_159_variant_5char.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin@erp.com / Admin@123",
+  "seed_data_creation": "Created TEST-VAR5-XXXXX components during tests; test fixtures clean them up. One residual UI-created item TEST-VAR5-38531 (and its 2 variant children D10.0, ⌀10.0) left for inspection.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend variant 5-char feature is solid. If spec is strict about short_code 6-char + whitespace rejection (currently truncates/accepts), add explicit validation before slice at server.py ~L1341.",
+  "rca of the issue": "N/A — no bugs."
+}
