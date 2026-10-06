@@ -24,6 +24,12 @@ import { SearchableSelect } from '../components/SearchableSelect';
 import { toast } from 'sonner';
 import ConfirmDialog from '../components/ConfirmDialog';
 
+// Variant values / SKU short codes: exactly VARIANT_LEN characters, any symbol
+// allowed (e.g. "01.00", "⌀10.0"); whitespace dropped, "-" (SKU separator) → "_".
+const VARIANT_LEN = 5;
+const charLen = (str) => Array.from(str || '').length;
+const variantShortCode = (val) => Array.from((val || '').toUpperCase()).filter(ch => !/\s/.test(ch)).map(ch => ch === '-' ? '_' : ch).slice(0, VARIANT_LEN).join('');
+
 const categories = [
   { value: 'raw_material', label: 'Raw Material' },
   { value: 'component', label: 'Component' },
@@ -241,8 +247,8 @@ export default function ItemsPage() {
         name: (a.name || '').trim(),
         values: (a.values || []).map(v => {
           const value = (typeof v === 'string' ? v : (v?.value || '')).trim();
-          const sc = (typeof v === 'object' && v?.short_code) ? String(v.short_code) : value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
-          return { value, short_code: sc.slice(0, 4) };
+          const sc = (typeof v === 'object' && v?.short_code) ? String(v.short_code) : variantShortCode(value);
+          return { value, short_code: Array.from(sc).slice(0, VARIANT_LEN).join('') };
         }).filter(v => v.value),
       }))
       .filter(a => a.name && a.values.length > 0);
@@ -265,8 +271,8 @@ export default function ItemsPage() {
         name: (a.name || '').trim(),
         values: (a.values || []).map(v => {
           const value = (typeof v === 'string' ? v : (v?.value || '')).trim();
-          const sc = (typeof v === 'object' && v?.short_code) ? String(v.short_code) : value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
-          return { value, short_code: sc.slice(0, 4) };
+          const sc = (typeof v === 'object' && v?.short_code) ? String(v.short_code) : variantShortCode(value);
+          return { value, short_code: Array.from(sc).slice(0, VARIANT_LEN).join('') };
         }).filter(v => v.value),
       }))
       .filter(a => a.name && a.values.length > 0);
@@ -362,8 +368,8 @@ export default function ItemsPage() {
       variant_attributes: (item.variant_attributes || []).map(a => ({
         name: a.name || '',
         values: (a.values || []).map(v => typeof v === 'string'
-          ? { value: v, short_code: (v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) }
-          : { value: v.value || '', short_code: (v.short_code || (v.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)) }
+          ? { value: v, short_code: variantShortCode(v || '') }
+          : { value: v.value || '', short_code: (v.short_code || variantShortCode(v.value || '')) }
         ),
       })),
     });
@@ -1046,18 +1052,18 @@ export default function ItemsPage() {
                                     {v.value}
                                     <input
                                       type="text"
-                                      maxLength={4}
-                                      minLength={4}
+                                      maxLength={VARIANT_LEN}
+                                      minLength={VARIANT_LEN}
                                       value={v.short_code || ''}
                                       onChange={(e) => {
-                                        const sc = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+                                        const sc = variantShortCode(e.target.value);
                                         const newVals = (attr.values || []).map((x, j) => j === vi ? { ...x, short_code: sc } : x);
                                         updateVals(newVals);
                                       }}
                                       onClick={(e) => e.stopPropagation()}
-                                      className={`w-12 text-[9px] bg-white/20 text-white border ${(v.short_code || '').length === 4 ? 'border-transparent' : 'border-[#FECDD3]'} px-1 py-0 rounded outline-none placeholder-white/60 text-center`}
-                                      title="Short code for SKU suffix (must be exactly 4 characters)"
-                                      placeholder="CODE"
+                                      className={`w-12 text-[9px] bg-white/20 text-white border ${charLen(v.short_code) === VARIANT_LEN ? 'border-transparent' : 'border-[#FECDD3]'} px-1 py-0 rounded outline-none placeholder-white/60 text-center`}
+                                      title={`Short code for SKU suffix (exactly ${VARIANT_LEN} characters, special characters allowed)`}
+                                      placeholder="CODE."
                                       data-testid={`item-variant-attr-shortcode-${ai}-${vi}`}
                                     />
                                     <button
@@ -1069,27 +1075,24 @@ export default function ItemsPage() {
                                 ))}
                                 <input
                                   type="text"
-                                  maxLength={4}
-                                  placeholder={(attr.values || []).length === 0 ? '4-char value + Enter (e.g. 1HP1, 30GT)' : ''}
+                                  maxLength={VARIANT_LEN}
+                                  placeholder={(attr.values || []).length === 0 ? `${VARIANT_LEN}-char value + Enter (e.g. 01.00, ⌀10.0, 1.5HP)` : ''}
                                   onKeyDown={(e) => {
                                     if (e.key === ',' || e.key === 'Enter' || e.key === 'Tab') {
-                                      // Enforce EXACTLY 4 characters — value AND short_code share
-                                      // the same length so SKU suffixes are consistent.
-                                      const raw = (e.currentTarget.value || '').trim().slice(0, 4);
-                                      if (raw.length < 4) {
+                                      // Enforce EXACTLY VARIANT_LEN characters — value AND short_code share
+                                      // the same length so SKU suffixes are consistent. Special chars allowed.
+                                      const raw = Array.from((e.currentTarget.value || '').trim()).slice(0, VARIANT_LEN).join('');
+                                      if (charLen(raw) < VARIANT_LEN) {
                                         if (raw.length > 0 && (e.key === ',' || e.key === 'Enter')) {
                                           e.preventDefault();
-                                          // Show a brief title-tooltip via the title attribute on the parent
-                                          // (toast feels heavy here). For now just refuse silently — the
-                                          // maxLength + title hints already nudge the user.
+                                          toast.error(`Variant value must be exactly ${VARIANT_LEN} characters (e.g. 01.00, ⌀10.0) — "${raw}" has ${charLen(raw)}`);
                                         }
                                         return;
                                       }
                                       e.preventDefault();
                                       const cur = attr.values || [];
                                       if (!cur.find(x => x.value === raw)) {
-                                        const sc = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
-                                        updateVals([...cur, { value: raw, short_code: sc }]);
+                                        updateVals([...cur, { value: raw, short_code: variantShortCode(raw) }]);
                                       }
                                       e.currentTarget.value = '';
                                     } else if (e.key === 'Backspace' && !e.currentTarget.value) {
@@ -1098,12 +1101,11 @@ export default function ItemsPage() {
                                     }
                                   }}
                                   onBlur={(e) => {
-                                    const raw = (e.currentTarget.value || '').trim().slice(0, 4);
+                                    const raw = Array.from((e.currentTarget.value || '').trim()).slice(0, VARIANT_LEN).join('');
                                     const cur = attr.values || [];
-                                    // Only commit when the value is the full 4 chars.
-                                    if (raw.length === 4 && !cur.find(x => x.value === raw)) {
-                                      const sc = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
-                                      updateVals([...cur, { value: raw, short_code: sc }]);
+                                    // Only commit when the value is the full VARIANT_LEN chars.
+                                    if (charLen(raw) === VARIANT_LEN && !cur.find(x => x.value === raw)) {
+                                      updateVals([...cur, { value: raw, short_code: variantShortCode(raw) }]);
                                     }
                                     e.currentTarget.value = '';
                                   }}

@@ -1210,6 +1210,8 @@ async def create_item(item_data: ItemCreate, request: Request):
         item_doc["unit_cost"] = item_doc["purchase_price"]
     # Apply group-level HSN/GST overrides
     item_doc = await _apply_item_group_overrides(item_doc)
+    if item_doc.get("variant_attributes"):
+        item_doc["variant_attributes"] = _normalize_variant_attributes(item_doc["variant_attributes"])
     await db.items.insert_one(item_doc)
     item_doc.pop("_id", None)
     return item_doc
@@ -1297,18 +1299,28 @@ async def delete_item(item_id: str, request: Request):
 
 
 
+VARIANT_VALUE_LEN = 5
+
+
+def _variant_short_code(val: str) -> str:
+    """Default SKU suffix for a variant value: whitespace removed, upper-cased,
+    special characters kept (e.g. '01.00', '⌀10.0'), '-' avoided (SKU separator)."""
+    return "".join(ch for ch in val.upper() if not ch.isspace()).replace("-", "_")[:VARIANT_VALUE_LEN]
+
+
 def _normalize_variant_attributes(raw: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """Normalize variant_attributes from frontend to the canonical shape:
-       [{name: str, values: [{value: str, short_code: str(<=4)}]}, ...]
+       [{name: str, values: [{value: str, short_code: str(len==5)}]}, ...]
 
-    Accepts legacy formats:
-      • values as List[str] → coerce to [{value:'x', short_code:'X'}].
-      • short_code missing → default to first 4 alnum-upper chars of value.
+    Values and short codes must be exactly VARIANT_VALUE_LEN characters; any
+    character is allowed (letters, digits, '.', '⌀', '/', …) except whitespace
+    inside the short code.
+    Accepts legacy formats: values as List[str]; short_code missing → derived.
     """
     if not raw:
         return []
     out = []
-    invalid_lengths: List[str] = []  # collect violations to raise a single, helpful error
+    invalid_lengths: List[str] = []
     for attr in raw:
         if not isinstance(attr, dict):
             continue
@@ -1319,34 +1331,24 @@ def _normalize_variant_attributes(raw: Optional[List[Dict[str, Any]]]) -> List[D
         norm_vals = []
         for v in raw_vals:
             if isinstance(v, str):
-                val = v.strip()
-                if not val:
-                    continue
-                sc = "".join(ch for ch in val.upper() if ch.isalnum())[:4]
-                # Enforce exactly-4-character rule (matches frontend).
-                if len(val) != 4:
-                    invalid_lengths.append(f"{name}={val!r}")
-                    continue
-                norm_vals.append({"value": val, "short_code": sc or val[:4]})
+                val, sc = v.strip(), ""
             elif isinstance(v, dict):
-                val = (v.get("value") or "").strip()
-                if not val:
-                    continue
-                sc = (v.get("short_code") or "").strip()
-                if not sc:
-                    sc = "".join(ch for ch in val.upper() if ch.isalnum())[:4]
-                sc = sc[:4]
-                # Enforce exactly-4-character rule on the value AND the short_code.
-                if len(val) != 4 or len(sc) != 4:
-                    invalid_lengths.append(f"{name}={val!r}/{sc!r}")
-                    continue
-                norm_vals.append({"value": val, "short_code": sc})
+                val, sc = (v.get("value") or "").strip(), (v.get("short_code") or "").strip()
+            else:
+                continue
+            if not val:
+                continue
+            sc = (sc or _variant_short_code(val))[:VARIANT_VALUE_LEN]
+            if len(val) != VARIANT_VALUE_LEN or len(sc) != VARIANT_VALUE_LEN:
+                invalid_lengths.append(f"{name}={val!r}" + (f"/{sc!r}" if sc != val else ""))
+                continue
+            norm_vals.append({"value": val, "short_code": sc})
         if norm_vals:
             out.append({"name": name, "values": norm_vals})
     if invalid_lengths:
         raise HTTPException(
             status_code=400,
-            detail=f"Variant value(s) must be exactly 4 characters: {', '.join(invalid_lengths)}",
+            detail=f"Variant value(s) must be exactly {VARIANT_VALUE_LEN} characters: {', '.join(invalid_lengths)}",
         )
     return out
 
