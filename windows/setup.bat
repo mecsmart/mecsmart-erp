@@ -10,13 +10,28 @@ echo   Root: %ROOT%
 echo ==========================================================
 echo.
 
-python -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
-if errorlevel 1 (
-  echo [ERROR] Python 3.10+ not found on PATH.
-  echo         Install from https://www.python.org/downloads/windows/ and tick "Add python.exe to PATH".
+rem ---- Pick a Python interpreter: prefer stable 3.12 / 3.13 via the "py" launcher,
+rem      then 3.11, 3.14, 3.15; finally whatever "python" is on PATH.
+set "PYEXE="
+set "PYVER="
+for %%V in (3.12 3.13 3.11 3.14 3.15) do (
+  if not defined PYEXE for /f "tokens=1,2 delims=|" %%P in ('py -%%V windows\pyinfo.py 2^>nul') do (set "PYEXE=%%P" & set "PYVER=%%Q")
+)
+if not defined PYEXE for /f "tokens=1,2 delims=|" %%P in ('python windows\pyinfo.py 2^>nul') do (set "PYEXE=%%P" & set "PYVER=%%Q")
+if not defined PYEXE (
+  echo [ERROR] Python not found on PATH.
+  echo         Install Python 3.12 64-bit from https://www.python.org/downloads/windows/ and tick "Add python.exe to PATH".
   echo         If you see the Microsoft Store opening, disable the "python.exe" App execution alias in Windows Settings.
   pause & exit /b 1
 )
+echo   Python !PYVER! detected: !PYEXE!
+if "!PYVER!"=="3.15" echo   [WARN] Python 3.15 is a pre-release. If "pip install" fails below, install Python 3.12 alongside it and re-run setup.bat - it will be picked automatically.
+if "!PYVER!"=="3.14" echo   [WARN] Python 3.14 is very new. If "pip install" fails below, install Python 3.12 alongside it and re-run setup.bat.
+if "!PYVER:~0,2!"=="3." if !PYVER:~2! lss 10 (
+  echo [ERROR] Python !PYVER! is too old. Install Python 3.12 from https://www.python.org/downloads/windows/
+  pause & exit /b 1
+)
+
 node -v >nul 2>&1
 if errorlevel 1 if exist "%ProgramFiles%\nodejs\node.exe" set "PATH=%ProgramFiles%\nodejs;%APPDATA%\npm;%PATH%"
 node -v >nul 2>&1
@@ -34,11 +49,24 @@ if errorlevel 1 (echo [ERROR] yarn still not available. Run "npm install -g yarn
 
 echo.
 echo [1/5] Python virtual environment + backend dependencies
-if not exist "%BACKEND%\venv\Scripts\python.exe" python -m venv "%BACKEND%\venv"
 set "PY=%BACKEND%\venv\Scripts\python.exe"
+set "VENVVER="
+if exist "%PY%" for /f "tokens=1,2 delims=|" %%P in ('backend\venv\Scripts\python.exe windows\pyinfo.py 2^>nul') do set "VENVVER=%%Q"
+if exist "%PY%" if not "!VENVVER!"=="!PYVER!" (
+  echo   Existing venv uses Python !VENVVER! - recreating it with Python !PYVER!...
+  rmdir /s /q "%BACKEND%\venv"
+)
+if not exist "%PY%" "!PYEXE!" -m venv "%BACKEND%\venv"
+if not exist "%PY%" (echo [ERROR] could not create the virtual environment. & pause & exit /b 1)
 "%PY%" -m pip install --upgrade pip >nul
-"%PY%" -m pip install -r "%BACKEND%\requirements-windows.txt"
-if errorlevel 1 (echo [ERROR] pip install failed. & pause & exit /b 1)
+"%PY%" -m pip install --only-binary=:all: -r "%BACKEND%\requirements-windows.txt"
+if errorlevel 1 (
+  echo.
+  echo [ERROR] pip install failed. Usually this means no pre-built wheel exists for Python !PYVER!.
+  echo         Fix: install Python 3.12 64-bit from https://www.python.org/downloads/windows/ - it can coexist -
+  echo         then re-run setup.bat - it prefers 3.12 automatically.
+  pause & exit /b 1
+)
 
 echo.
 echo [2/5] Chromium for PDF printing (playwright)
