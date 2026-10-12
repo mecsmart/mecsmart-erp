@@ -13,7 +13,7 @@ Works from **cmd**, **PowerShell**, double-click, or a Desktop shortcut.
 | `create-desktop-shortcuts.bat` | Puts **MecSmart ERP Server**, **MecSmart ERP (Dev)** and **Stop MecSmart ERP** icons on the Desktop |
 
 ## Prerequisites (install once)
-1. **Python 3.11+** — https://www.python.org/downloads/windows/ (tick *Add python.exe to PATH*)
+1. **Python 3.12 (64-bit, recommended; 3.11–3.15 also work)** — https://www.python.org/downloads/windows/ (tick *Add python.exe to PATH*). If several Pythons are installed, `setup.bat` picks 3.12 automatically. Pre-release Pythons (3.15) only work when all packages ship wheels for them — if `pip install` fails, install 3.12 alongside and re-run.
 2. **Node.js 20 LTS** — https://nodejs.org/
 3. **MongoDB Community Server** — https://www.mongodb.com/try/download/community
    *Installed as a service?* → the scripts start the service. *Zip/portable?* → scripts find `mongod.exe` in `Program Files\MongoDB` or on `PATH`, otherwise create `windows\config.bat` containing
