@@ -41,6 +41,10 @@ Opens the Electron window pointed at whatever URL you saved last
 
 ## Build the Windows installer (.exe)
 
+> Easiest: run `windows\build-desktop.bat` — it installs dependencies, verifies Electron is present and builds the installer.
+> Electron is pinned to an exact version (`31.7.7`) and `desktop/.yarnrc.yml` forces `nodeLinker: node-modules`, which fixes
+> electron-builder's *"Cannot compute electron version from installed node modules"* error (happens when `yarn install` was skipped/failed or Yarn 2+ used PnP).
+
 > **v1.0.5 — "can't type after dialogs" fix.** Chromium's JS `alert()`/`confirm()`
 > break keyboard input in Electron on Windows after they close. The wrapper now
 > replaces them with OS message boxes owned by the app window, removes all

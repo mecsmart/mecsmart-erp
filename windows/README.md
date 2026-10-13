@@ -10,6 +10,7 @@ Works from **cmd**, **PowerShell**, double-click, or a Desktop shortcut.
 | `start-dev.bat` | Starts MongoDB → uvicorn `--reload` on :8001 → `yarn start` on :3000 (hot reload). Opens `http://localhost:3000` |
 | `build-frontend.bat` | Rebuilds the production frontend (run after pulling new code, then restart `start-prod.bat`) |
 | `stop-erp.bat` | Kills everything on ports 8001/3000. Add `--with-mongo` to also stop MongoDB |
+| `build-desktop.bat` | Builds the Windows desktop installer (`desktop\dist\MecSmart ERP Setup x.y.z.exe`) — runs `yarn install` + `electron-builder` with checks |
 | `create-desktop-shortcuts.bat` | Puts **MecSmart ERP Server**, **MecSmart ERP (Dev)** and **Stop MecSmart ERP** icons on the Desktop |
 
 ## Prerequisites (install once)
