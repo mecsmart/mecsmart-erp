@@ -934,7 +934,7 @@ export default function PurchaseOrdersPage() {
         kind="supplier"
         editing={quickPartyEditing}
         onSaved={async (saved) => {
-          await fetchSuppliers();
+          await fetchData();
           if (saved?.id) setFormData(fd => ({ ...fd, supplier_id: saved.id }));
         }}
       />
