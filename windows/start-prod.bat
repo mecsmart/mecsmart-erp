@@ -22,7 +22,12 @@ if not exist "%FRONTEND%\build\index.html" (
 
 netstat -ano -p TCP | findstr /R /C:"^ *TCP *[^ ]*:%BACKEND_PORT%  *[^ ]*:0 " >nul 2>&1
 if %errorlevel%==0 (
-  echo [Server] Port %BACKEND_PORT% is already in use - MecSmart may already be running. Use stop-erp.bat first.
+  curl -s -m 3 http://localhost:%BACKEND_PORT%/api/health 2>nul | findstr /C:"machinery-erp" >nul 2>&1
+  if not errorlevel 1 (
+    echo [Server] MecSmart ERP is already running on port %BACKEND_PORT% - opening it.
+    goto :ready
+  )
+  echo [Server] Port %BACKEND_PORT% is used by another program. Stop it, or run stop-erp.bat if it is an old MecSmart instance.
   pause & exit /b 1
 )
 

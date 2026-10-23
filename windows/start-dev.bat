@@ -18,7 +18,7 @@ call "%~dp0start-mongo.bat" || (pause & exit /b 1)
 
 netstat -ano -p TCP | findstr /R /C:"^ *TCP *[^ ]*:%BACKEND_PORT%  *[^ ]*:0 " >nul 2>&1
 if %errorlevel%==0 (
-  echo [Backend] Port %BACKEND_PORT% already in use - run stop-erp.bat first.
+  echo [Backend] Port %BACKEND_PORT% already in use - MecSmart is probably still running. Run stop-erp.bat first, then start-dev.bat.
   pause & exit /b 1
 )
 
