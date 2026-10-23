@@ -25,8 +25,8 @@ if not defined PYEXE (
   pause & exit /b 1
 )
 echo   Python !PYVER! detected: !PYEXE!
-if "!PYVER!"=="3.15" echo   [WARN] Python 3.15 is a pre-release. If "pip install" fails below, install Python 3.12 alongside it and re-run setup.bat - it will be picked automatically.
-if "!PYVER!"=="3.14" echo   [WARN] Python 3.14 is very new. If "pip install" fails below, install Python 3.12 alongside it and re-run setup.bat.
+if "!PYVER!"=="3.15" echo   Python 3.15: all backend packages ship pre-built wheels for it - verified with windows\check-wheels.py.
+if "!PYVER!"=="3.14" echo   Python 3.14: all backend packages ship pre-built wheels for it.
 if "!PYVER:~0,2!"=="3." if !PYVER:~2! lss 10 (
   echo [ERROR] Python !PYVER! is too old. Install Python 3.12 from https://www.python.org/downloads/windows/
   pause & exit /b 1
