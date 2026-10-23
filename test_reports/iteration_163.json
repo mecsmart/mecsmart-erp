@@ -1,0 +1,23 @@
+{
+  "summary": "Static review of start-prod.bat already-running detection + start-dev.bat message; sanity check of /api/health. No concrete bugs found.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "(a) OK: goto :ready inside parenthesized if-block is valid; it abandons the block and jumps to :ready (line 47) in the same file.",
+    "(b) OK: 'if not errorlevel 1' is evaluated at runtime (not %errorlevel% expansion), so it correctly reflects findstr's exit code from the pipeline (findstr is the last command).",
+    "(c) OK: curl.exe ships in System32 on Win10 1803+/11; _env.bat prepends System32 to PATH. '2>nul' before the pipe is valid and only applies to curl. On older Windows without curl, findstr fails and the script falls back to the 'another program' message - safe degradation.",
+    "(d) OK: no ( or ) in echo text inside the block (lines 25-31).",
+    "(e) OK: CRLF on all lines in start-prod.bat (67/67), start-dev.bat (50/50), _env.bat (24/24).",
+    "(f) OK: :ready section is self-contained (LANIP reset, ipconfig loop, start browser, exit /b 0); works when reached early.",
+    "Optional hardening (not a bug): use 'curl -s -m 3 --noproxy * http://127.0.0.1:%BACKEND_PORT%/api/health' to avoid a system HTTP_PROXY env var or ::1 resolution interfering.",
+    "start-dev.bat line 21 message fine; no parens, CRLF intact."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "N/A"},
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "GET http://localhost:8001/api/health returns {\"status\":\"healthy\",\"service\":\"machinery-erp\"} - matches findstr string. Batch files reviewed statically only (no cmd.exe)."
+}
