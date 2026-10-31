@@ -1,0 +1,17 @@
+{
+  "summary": "Retest of iteration_164 fixes (static review + backend sanity). All requested fixes verified present and syntactically valid. stop-erp.bat: for %%A in (%*) flag parsing correct in any order; `if defined` evaluated at runtime (no delayed expansion needed); `net session >nul 2>&1 || echo ...` inside the if-block is valid (no unescaped parens in echo text). service-run.bat: PYTHONUNBUFFERED set, ping -n 6 delay, start-mongo call each loop iteration, log rotation 50MB/5MB using %%~zF valid. start-mongo.bat: no pause, exits 0 immediately when 27017 listening, wait uses ping. install-service.bat: `call stop-erp.bat quiet --with-mongo` + ping health wait. install-service.ps1: `-Priority 4` correctly placed before the line-continuation backtick. All 5 files CRLF (0 LF-only lines). Backend: /api/health 200 {status:healthy, service:machinery-erp}; server.py AST OK; `import sys` at line 8; line 17630 uses sys.executable -m playwright install chromium.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor/non-blocking: service-run.bat calls start-mongo.bat with `>> service.log`; when start-mongo launches mongod via `start`, mongod may inherit the redirected service.log handle, which can make the 5MB service.log `move` rotation fail silently (log keeps growing). Optional fix: launch mongod with its own redirection, e.g. `start \"MecSmart - MongoDB\" /min cmd /c \"\"%MONGOD%\" ... >nul 2>&1\"`, or prefer the MongoDB Windows service.",
+    "Minor: stop-erp --with-mongo only kills mongod launched with window title 'MecSmart - MongoDB' or the 'MongoDB' Windows service; a manually started mongod is not stopped (acceptable)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "N/A (skipped)"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Windows scripts in /app/windows cannot be executed in Linux container; review is static only. Fixes from iteration_164 all verified."
+}
