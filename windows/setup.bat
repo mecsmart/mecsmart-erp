@@ -69,7 +69,8 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/5] Chromium for PDF printing (playwright)
+echo [2/5] Chromium for PDF printing (playwright) - into %PLAYWRIGHT_BROWSERS_PATH%
+if not exist "%PLAYWRIGHT_BROWSERS_PATH%" mkdir "%PLAYWRIGHT_BROWSERS_PATH%"
 "%PY%" -m playwright install chromium
 if errorlevel 1 echo [WARN] Chromium download failed - PDF export will not work until you run:  "%PY%" -m playwright install chromium
 

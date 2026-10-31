@@ -5,6 +5,13 @@ call "%~dp0_env.bat"
 
 echo [Stop] Stopping MecSmart ERP services...
 
+rem Background service (install-service.bat): end the task first so its restart loop does not revive uvicorn
+schtasks /query /tn "MecSmart ERP Server" >nul 2>&1
+if not errorlevel 1 (
+  echo   ending background service task - it will start again at next boot, or run:  schtasks /run /tn "MecSmart ERP Server"
+  schtasks /end /tn "MecSmart ERP Server" >nul 2>&1
+)
+
 rem Close launcher windows first (kills the uvicorn reloader parent so it cannot respawn)
 taskkill /FI "WINDOWTITLE eq MecSmart - Backend*"  /T /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq MecSmart - Frontend*" /T /F >nul 2>&1
@@ -26,5 +33,5 @@ if /i "%~1"=="--with-mongo" (
 )
 
 echo [Stop] Done.
-timeout /t 3 >nul
+if /i not "%~1"=="quiet" timeout /t 3 >nul
 endlocal

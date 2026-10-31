@@ -19,6 +19,9 @@ rem Some PCs have a broken PATH without System32 - make sure netstat/findstr/tas
 set "PATH=%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0;%PATH%"
 if exist "%ProgramFiles%\nodejs\node.exe" set "PATH=%PATH%;%ProgramFiles%\nodejs;%APPDATA%\npm"
 
+rem Playwright Chromium (PDF export) lives inside the project so the background service (SYSTEM) finds it too
+set "PLAYWRIGHT_BROWSERS_PATH=%ROOT%\data\pw-browsers"
+
 rem Optional overrides (e.g. custom mongod.exe path) — create windows\config.bat with `set MONGOD=...`
 if exist "%~dp0config.bat" call "%~dp0config.bat"
 exit /b 0

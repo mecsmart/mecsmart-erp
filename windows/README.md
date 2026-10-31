@@ -11,6 +11,8 @@ Works from **cmd**, **PowerShell**, double-click, or a Desktop shortcut.
 | `build-frontend.bat` | Rebuilds the production frontend (run after pulling new code, then restart `start-prod.bat`) |
 | `stop-erp.bat` | Kills everything on ports 8001/3000. Add `--with-mongo` to also stop MongoDB |
 | `build-desktop.bat` | Builds the Windows desktop installer (`desktop\dist\MecSmart ERP Setup x.y.z.exe`) — runs `yarn install` + `electron-builder` with checks |
+| `install-service.bat` *(Run as administrator)* | Registers MecSmart as a **background service** (Task Scheduler, SYSTEM account): starts at boot, no login needed, keeps running after logoff / idle session timeout, auto-restarts on crash. Logs in `data\logs\` |
+| `uninstall-service.bat` *(Run as administrator)* | Removes the background service |
 | `create-desktop-shortcuts.bat` | Puts **MecSmart ERP Server**, **MecSmart ERP (Dev)** and **Stop MecSmart ERP** icons on the Desktop |
 
 ## Prerequisites (install once)
@@ -45,5 +47,17 @@ netsh advfirewall firewall add rule name="MecSmart ERP" dir=in action=allow prot
 For **dev mode** over LAN add your IP to `CORS_ORIGINS` in `backend\.env`
 (e.g. `,http://192.168.1.50:3000`) and set `REACT_APP_BACKEND_URL=http://192.168.1.50:8001` in `frontend\.env`.
 
-## Auto-start with Windows
-Press `Win+R` → `shell:startup` → copy the **MecSmart ERP Server** shortcut into that folder.
+## Run as a background service (recommended for the office server)
+`start-prod.bat` runs inside your login session, so Windows ends it when the session is logged off or times out.
+For an always-on server use the service instead:
+```cmd
+cd c:\mecsmart-erp\windows
+install-service.bat      ← right-click → Run as administrator
+```
+- Starts automatically with Windows, before anyone logs in; survives logoff and idle-session termination
+- Auto-restarts if the backend crashes; logs in `data\logs\service.log` and `data\logs\backend.log`
+- Stop temporarily: `stop-erp.bat` (it starts again at next boot, or run `schtasks /run /tn "MecSmart ERP Server"`)
+- Remove: `uninstall-service.bat`
+- After pulling new code: `build-frontend.bat`, then `stop-erp.bat` and `schtasks /run /tn "MecSmart ERP Server"`
+
+Windows Task Scheduler → Task Scheduler Library → **MecSmart ERP Server** shows status/history.
