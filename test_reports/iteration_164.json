@@ -1,0 +1,33 @@
+{
+  "summary": "STATIC review of the Windows background-service launcher files (I could not run anything on Windows) plus a live check of /api/health, which returned {status: healthy, service: machinery-erp}. All new and changed .bat/.ps1 files have CRLF on every line. install-service.ps1 is valid for PowerShell 5.1 and I found no syntax bugs in the .bat files. I found one functional bug (MongoDB stops on logoff) and several medium or minor risks.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/generate-pdf (server.py:17629)", "issue": "The auto-install fallback runs subprocess.run(['playwright','install','chromium']) using the bare 'playwright' command. Under SYSTEM, venv\\Scripts is not on PATH, so this raises FileNotFoundError. Use [sys.executable,'-m','playwright','install','chromium']. PLAYWRIGHT_BROWSERS_PATH itself works: the Playwright driver reads that env var natively and the child process inherits it."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [],
+  "action_items": [
+    "BUG install-service.bat:19 + service-run.bat:11: if MongoDB was started from the user session (portable mongod via start-mongo.bat:35 'start \"MecSmart - MongoDB\" ...'), 'stop-erp.bat quiet' leaves it running. start-mongo.bat:5 then sees port 27017 in use and returns 'already running', so the SYSTEM service reuses the user-session mongod. When the user logs off, that mongod is killed. uvicorn does not exit, so the loop never re-runs start-mongo and the ERP stays down without its database until reboot. Fix: stop the user-session mongod before Start-ScheduledTask. Note that stop-erp.bat only reads %~1, so 'quiet' and '--with-mongo' cannot be combined today. Also consider calling start-mongo.bat inside :loop or adding a periodic mongo check.",
+    "MEDIUM install-service.ps1:15-19: no -Priority, so Task Scheduler uses its default priority 7 (below-normal CPU and low I/O priority) for cmd/uvicorn and their children. Add '-Priority 4' (normal) to New-ScheduledTaskSettingsSet.",
+    "MEDIUM service-run.bat:24 and start-mongo.bat:39: 'timeout /t N /nobreak' aborts at once with 'Input redirection is not supported' when the process has no usable console stdin, which can happen in some non-interactive/session-0 hosts. If uvicorn then crashes straight away (port in use, bad .env), the loop spins at 100% CPU and floods the log. A safer delay is 'ping -n 6 127.0.0.1 >nul'.",
+    "MINOR service-run.bat:20: backend.log is only rotated when the loop restarts (boot or crash). The size check never runs while uvicorn is up, so the log grows without limit over months. Also, service.log is never rotated.",
+    "MINOR service-run.bat:22: when stdout is redirected Python buffers it, so access-log lines in backend.log are delayed. Add 'set PYTHONUNBUFFERED=1' before uvicorn.",
+    "MINOR stop-erp.bat:9-13,24: from a non-elevated prompt, 'schtasks /end' on the SYSTEM task and 'taskkill' on the SYSTEM-owned python are denied without any message (output goes to nul), yet the script still prints '[Stop] Done.'. Add a 'net session' check and warn that admin rights are needed when the service task exists.",
+    "MINOR install-service.bat:31: curl.exe is not on Windows Server 2016 or older Windows 10 builds, so the health wait would always time out with the WARN even though the service is fine. start-prod.bat:25 has the same limitation. A fallback could be powershell Invoke-WebRequest.",
+    "INFO service-run.bat:10: %USERNAME% under SYSTEM logs as 'COMPUTERNAME$'. Cosmetic only."
+  ],
+  "critical_code_review_comments": [
+    "install-service.ps1 OK: -Argument ('/c \"\"'+path+'\"\"') gives cmd /c \"\"C:\\path with spaces\\service-run.bat\"\", which cmd's quote-stripping rule handles. -UserId SYSTEM -LogonType ServiceAccount -RunLevel Highest is valid. [TimeSpan]::Zero gives PT0S, meaning no execution limit. RestartCount 999 is the allowed maximum and a 1-minute RestartInterval is the allowed minimum. MultipleInstances IgnoreNew, -StartWhenAvailable, -AllowStartIfOnBatteries and -DontStopIfGoingOnBatteries are valid switches. Register-ScheduledTask -Force makes it idempotent. Backticks are at line ends. With ErrorActionPreference Stop under -File, failures exit with code 1, which install-service.bat:24 catches.",
+    "service-run.bat OK: the for/%%~zF rotation syntax is valid; %errorlevel% on line 23 is outside any block, so it shows the uvicorn exit code. 'start /min' for mongod and 'net start MongoDB' both work as SYSTEM in session 0.",
+    "install-service.bat / uninstall-service.bat / stop-erp.bat OK: 'net session' admin check, quoted call paths, 'if /i not \"%~1\"==\"quiet\"', schtasks /query -> /end before the port kills (so the loop cannot revive uvicorn), full powershell path, health loop logic. No unescaped parentheses in echo text inside blocks.",
+    "Restart-on-failure (RestartCount) almost never applies, because the cmd loop never exits by itself. Self-healing depends on the bat loop."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (health ok; static review: 1 functional bug, 2 medium risks, 5 minor/info notes)", "frontend": "N/A"},
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Windows files are static-review only. /api/health is fine. Main open items: user-session mongod reused by the SYSTEM service, plus task priority 7."
+}

@@ -3,11 +3,18 @@ setlocal
 title MecSmart ERP - Stop
 call "%~dp0_env.bat"
 
+set "QUIET="
+set "WITHMONGO="
+for %%A in (%*) do (
+  if /i "%%~A"=="quiet" set "QUIET=1"
+  if /i "%%~A"=="--with-mongo" set "WITHMONGO=1"
+)
 echo [Stop] Stopping MecSmart ERP services...
 
 rem Background service (install-service.bat): end the task first so its restart loop does not revive uvicorn
 schtasks /query /tn "MecSmart ERP Server" >nul 2>&1
 if not errorlevel 1 (
+  net session >nul 2>&1 || echo   [WARN] background service is installed - run this as administrator, otherwise it cannot be stopped.
   echo   ending background service task - it will start again at next boot, or run:  schtasks /run /tn "MecSmart ERP Server"
   schtasks /end /tn "MecSmart ERP Server" >nul 2>&1
 )
@@ -26,12 +33,12 @@ for %%P in (%BACKEND_PORT% %FRONTEND_PORT%) do (
   )
 )
 
-if /i "%~1"=="--with-mongo" (
+if defined WITHMONGO (
   echo   stopping MongoDB...
   taskkill /FI "WINDOWTITLE eq MecSmart - MongoDB*" /T /F >nul 2>&1
   net stop MongoDB >nul 2>&1
 )
 
 echo [Stop] Done.
-if /i not "%~1"=="quiet" timeout /t 3 >nul
+if not defined QUIET timeout /t 3 >nul
 endlocal

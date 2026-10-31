@@ -15,8 +15,8 @@ if not exist "%FRONTEND%\build\index.html" (
   call "%~dp0build-frontend.bat" quiet || (pause & exit /b 1)
 )
 
-echo [Service] stopping any MecSmart started from a user session...
-call "%~dp0stop-erp.bat" quiet
+echo [Service] stopping any MecSmart started from a user session - including its MongoDB, so the service owns it...
+call "%~dp0stop-erp.bat" quiet --with-mongo
 
 set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if not exist "%PS%" set "PS=powershell"
@@ -27,7 +27,7 @@ echo.
 echo   Waiting for the server to come up...
 set /a tries=0
 :wait
-timeout /t 2 /nobreak >nul
+ping -n 3 127.0.0.1 >nul
 curl -s -m 3 http://localhost:%BACKEND_PORT%/api/health 2>nul | findstr /C:"machinery-erp" >nul 2>&1
 if not errorlevel 1 goto :ok
 set /a tries+=1

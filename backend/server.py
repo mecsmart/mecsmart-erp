@@ -5,6 +5,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depend
 from fastapi.responses import StreamingResponse, JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 import os
+import sys
 import asyncio
 import logging
 import io
@@ -17626,7 +17627,7 @@ async def print_html_to_pdf(payload: dict = Body(...), user: dict = Depends(get_
             # Try (1) playwright install, (2) system chrome, in that order.
             import subprocess
             try:
-                subprocess.run(["playwright", "install", "chromium"], check=True, timeout=300)
+                subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True, timeout=300)
                 pdf_bytes = await _try_pdf()
             except Exception as e2:
                 if system_chrome:

@@ -37,7 +37,7 @@ start "MecSmart - MongoDB" /min "%MONGOD%" --dbpath "%MONGO_DATA%" --port 27017 
 :wait
 set /a tries=0
 :loop
-timeout /t 1 /nobreak >nul
+ping -n 2 127.0.0.1 >nul
 netstat -ano -p TCP | findstr /R /C:"^ *TCP *[^ ]*:27017  *[^ ]*:0 " >nul 2>&1
 if %errorlevel%==0 (
   echo [Mongo] ready.
